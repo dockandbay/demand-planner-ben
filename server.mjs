@@ -13,7 +13,7 @@ import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
-import { wssiLoad, wssiBuild } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI
+import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -25255,50 +25255,76 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
-// v28.487 (Ben 26-Oct-26): DEMAND ▸ Inputs ▸ Open to buy (migration 388). Planned OTB £ at cost per month × market × channel.
-// GET ?fy=<start year> (open to all) → {rows:[{month:'YYYY-MM',market,channel,otb_cost}], updated}; POST {fy, rows:[...]} replaces
-// that FY's figures for the market × channel pairs sent (0 / blank deletes). Needs demand_edit (or admin).
+// v28.487 (Ben 26-Oct-26): DEMAND ▸ Inputs ▸ Open to buy. v28.547 (Ben 28-Oct-26, WSSI phase 2 from Kathryn's template): "Proposed" buys =
+// planned but not yet on a PO, by month (arrival) × market × channel × category group, entered as UNITS or £ RETAIL (planner.wssi_otb_buy,
+// migration 396; replaces wssi_otb). Each buy shrinks by the units of matching POs (same market, channel, category group and arrival month) that
+// reached Production after the buy was first entered: GET returns them as on_po. Channel of a PO = FBA for FBA / AWD branches, B2B for B2B /
+// Direct to Client branches, else DTC (ZAL / TIK share the 3PL stock, so nothing is matched to them). GET open to all; POST needs demand edit.
 const WSSI_OTB_MKTS = ['UK', 'US', 'EU', 'AU', 'CA'], WSSI_OTB_CHS = ['DTC', 'B2B', 'FBA', 'ZAL', 'TIK'];
-const _otbMissing = e => /wssi_otb/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+const _otbMissing = e => /wssi_otb_buy/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
 const _otbFy = (v) => { const n = parseInt(v, 10); return n >= 2024 && n <= 2040 ? n : null; };
+const _otbMonths = (fy) => { const o = []; for (let i = 0; i < 12; i++) { const m = 3 + i, y = fy + (m > 12 ? 1 : 0); o.push(y + '-' + String(m > 12 ? m - 12 : m).padStart(2, '0')); } return o; };
+const _otbCg = (v) => { const t = String(v || '').trim().toLowerCase(); return WSSI_CGROUPS.find(g => g.toLowerCase() === t) || null; };
+async function _otbOnPo(fy, rows) {
+  if (!rows.length) return [];
+  const lines = (await pool.query(`SELECT coalesce(pr.category,'') category, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) mkt, coalesce(po.branch,'') branch,
+        to_char(coalesce(s.arrival_date, s.delivery_date, s.landing_date, po.delivery_date_overide, po.landing_date_overide,
+          (coalesce(po.end_production_overide, CASE WHEN po.start_production IS NOT NULL AND su.production_days IS NOT NULL THEN (po.start_production + (su.production_days||' days')::interval)::date END)
+           + interval '7 days' + (coalesce(b.sea_lead_time_days,0)||' days')::interval)::date), 'YYYY-MM') m,
+        coalesce((SELECT min(c.changed_at) FROM planner.po_change_log c WHERE c.po=po.po AND c.event='Status' AND c.detail LIKE '%→ PRODUCTION'), po.created_at) prod_at,
+        sum(l.qty)::float8 u
+      FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po AND l.qty > 0 LEFT JOIN planner.products pr ON pr.sku=l.sku
+      LEFT JOIN planner.shipments s ON s.shipment_ref=po.shipment_ref LEFT JOIN planner.branches b ON b.name=po.branch LEFT JOIN planner.suppliers su ON su.id=po.supplier_id
+      WHERE upper(coalesce(po.status,'')) NOT IN ('FUTURE','') AND coalesce(po.status,'') !~* 'cancel'
+      GROUP BY 1,2,3,4,5`)).rows;
+  const ix = {}; rows.forEach(r => { ix[r.month + '|' + r.market + '|' + r.channel + '|' + r.cgroup] = { r, u: 0 }; });
+  for (const l of lines) {
+    if (!l.m || wssiExcludedCategory(l.category)) continue;
+    const ch = /(fba|awd)/i.test(l.branch) ? 'FBA' : /(b2b|direct to client)/i.test(l.branch) ? 'B2B' : 'DTC';
+    const x = ix[l.m + '|' + l.mkt + '|' + ch + '|' + catGroup(l.category)]; if (!x) continue;
+    if (l.prod_at && x.r.created_at && new Date(l.prod_at) < new Date(x.r.created_at)) continue;   // already placed before the buy was planned
+    x.u += Number(l.u) || 0;
+  }
+  return Object.values(ix).filter(x => x.u > 0).map(x => ({ month: x.r.month, market: x.r.market, channel: x.r.channel, cgroup: x.r.cgroup, units: Math.round(x.u) }));
+}
 app.get('/api/demand/wssi-otb', async (req, res) => {
   try {
     const fy = _otbFy(req.query.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
-    const rows = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, otb_cost::float8 AS otb_cost FROM planner.wssi_otb
-      WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY month, market, channel`, [fy])).rows;
-    const up = (await pool.query(`SELECT coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_otb
+    const rows = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, entered_as, value::float8 AS value, created_at FROM planner.wssi_otb_buy
+      WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY month, market, channel, cgroup`, [fy])).rows;
+    const up = (await pool.query(`SELECT coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_otb_buy
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY updated_at DESC LIMIT 1`, [fy])).rows[0] || null;
-    res.set('Cache-Control', 'no-store').json({ fy, rows, updated: up });
-  } catch (e) { if (_otbMissing(e)) return res.json({ fy: _otbFy(req.query.fy), rows: [], updated: null, missing: 'migration 388' }); log500(e); res.status(500).json({ error: 'Could not load open to buy' }); }
+    const on_po = await _otbOnPo(fy, rows);
+    res.set('Cache-Control', 'no-store').json({ fy, rows: rows.map(r => ({ month: r.month, market: r.market, channel: r.channel, cgroup: r.cgroup, entered_as: r.entered_as, value: r.value })), on_po, cgroups: WSSI_CGROUPS, updated: up });
+  } catch (e) { if (_otbMissing(e)) return res.json({ fy: _otbFy(req.query.fy), rows: [], on_po: [], cgroups: WSSI_CGROUPS, updated: null, missing: 'migration 396' }); log500(e); res.status(500).json({ error: 'Could not load open to buy' }); }
 });
 app.post('/api/demand/wssi-otb', async (req, res) => {
   const client = await pool.connect();
   try {
     const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save open to buy' });
     const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
-    const months = []; for (let i = 0; i < 12; i++) { const m = 3 + i, y = fy + (m > 12 ? 1 : 0); months.push(y + '-' + String(m > 12 ? m - 12 : m).padStart(2, '0')); }
-    const rows = Array.isArray(b.rows) ? b.rows : [];
-    if (rows.length > 2000) return res.status(413).json({ error: 'Too many rows' });
+    const months = _otbMonths(fy), rows = Array.isArray(b.rows) ? b.rows : [];
+    if (rows.length > 5000) return res.status(413).json({ error: 'Too many rows' });
     const clean = [];
     for (const r of rows) {
-      const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7);
-      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !months.includes(m)) return res.status(400).json({ error: 'Bad row: ' + [m, mk, ch].join(' ') });
-      const v = r.otb_cost === '' || r.otb_cost == null ? 0 : Number(r.otb_cost);
-      if (!isFinite(v) || v < 0 || v > 1e9) return res.status(400).json({ error: 'Amount must be a positive number: ' + [m, mk, ch].join(' ') });
-      clean.push({ m, mk, ch, v: Math.round(v * 100) / 100 });
+      const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7), cg = _otbCg(r.cgroup), as = r.entered_as === 'retail' ? 'retail' : 'units';
+      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !months.includes(m) || !cg) return res.status(400).json({ error: 'Bad row: ' + [m, mk, ch, r.cgroup].join(' ') });
+      const v = r.value === '' || r.value == null ? 0 : Number(r.value);
+      if (!isFinite(v) || v < 0 || v > 1e9) return res.status(400).json({ error: 'Must be a positive number: ' + [m, mk, ch, cg].join(' ') });
+      clean.push({ m, mk, ch, cg, as, v: Math.round(v * 100) / 100 });
     }
     await client.query('BEGIN');
     let saved = 0, removed = 0;
     for (const r of clean) {
-      if (!r.v) { removed += (await client.query(`DELETE FROM planner.wssi_otb WHERE month=($1||'-01')::date AND market=$2 AND channel=$3`, [r.m, r.mk, r.ch])).rowCount; continue; }
-      await client.query(`INSERT INTO planner.wssi_otb (month, market, channel, otb_cost, updated_by) VALUES (($1||'-01')::date,$2,$3,$4,$5)
-        ON CONFLICT (month, market, channel) DO UPDATE SET otb_cost=EXCLUDED.otb_cost, updated_by=EXCLUDED.updated_by, updated_at=now()
-        WHERE planner.wssi_otb.otb_cost IS DISTINCT FROM EXCLUDED.otb_cost`, [r.m, r.mk, r.ch, r.v, me.email || null]);
+      if (!r.v) { removed += (await client.query(`DELETE FROM planner.wssi_otb_buy WHERE month=($1||'-01')::date AND market=$2 AND channel=$3 AND cgroup=$4`, [r.m, r.mk, r.ch, r.cg])).rowCount; continue; }
+      await client.query(`INSERT INTO planner.wssi_otb_buy (month, market, channel, cgroup, entered_as, value, created_by, updated_by) VALUES (($1||'-01')::date,$2,$3,$4,$5,$6,$7,$7)
+        ON CONFLICT (month, market, channel, cgroup) DO UPDATE SET entered_as=EXCLUDED.entered_as, value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=now()
+        WHERE planner.wssi_otb_buy.value IS DISTINCT FROM EXCLUDED.value OR planner.wssi_otb_buy.entered_as IS DISTINCT FROM EXCLUDED.entered_as`, [r.m, r.mk, r.ch, r.cg, r.as, r.v, me.email || null]);
       saved++;
     }
     await client.query('COMMIT');
     res.json({ ok: true, saved, removed });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_otbMissing(e)) return res.status(503).json({ error: 'Open to buy needs migration 388' }); log500(e); res.status(500).json({ error: 'Could not save open to buy' }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_otbMissing(e)) return res.status(503).json({ error: 'Open to buy needs migration 396' }); log500(e); res.status(500).json({ error: 'Could not save open to buy' }); }
   finally { client.release(); }
 });
 
@@ -25324,13 +25350,14 @@ app.post('/api/demand/wssi-otb/upload', async (req, res) => {
     const ws = wb.worksheets[0]; if (!ws) return res.status(400).json({ error: 'The file has no sheet' });
     const months = []; for (let i = 0; i < 12; i++) { const m = 3 + i, y = fy + (m > 12 ? 1 : 0); months.push(y + '-' + String(m > 12 ? m - 12 : m).padStart(2, '0')); }
     const cellV = (c) => { const v = c && c.value; if (v == null) return null; if (typeof v === 'object' && !(v instanceof Date)) { if (v.result != null) return v.result; if (v.richText) return v.richText.map(x => x.text).join(''); if (v.text != null) return v.text; } return v; };
-    let head = null, mkCol = 0, chCol = 0; const monCol = {};
+    let head = null, mkCol = 0, chCol = 0, cgCol = 0, asCol = 0; const monCol = {};   // v28.547: + Category group, Enter as (Units / £ retail)
     for (let r = 1; r <= Math.min(ws.rowCount, 15) && !head; r++) {
       const row = ws.getRow(r); const cols = {};
-      row.eachCell({ includeEmpty: false }, (c, ci) => { const t = String(cellV(c) == null ? '' : cellV(c)).trim().toLowerCase(); if (t === 'market') cols.mk = ci; if (t === 'channel') cols.ch = ci; const hm = _otbHeadMonth(c.value); if (hm) monCol[ci] = hm; });
-      if (cols.mk && cols.ch) { head = r; mkCol = cols.mk; chCol = cols.ch; } else { for (const k in monCol) delete monCol[k]; }
+      row.eachCell({ includeEmpty: false }, (c, ci) => { const t = String(cellV(c) == null ? '' : cellV(c)).trim().toLowerCase(); if (t === 'market') cols.mk = ci; if (t === 'channel') cols.ch = ci; if (t === 'category group' || t === 'category') cols.cg = ci; if (t === 'enter as' || t === 'entered as') cols.as = ci; const hm = _otbHeadMonth(c.value); if (hm) monCol[ci] = hm; });
+      if (cols.mk && cols.ch) { head = r; mkCol = cols.mk; chCol = cols.ch; cgCol = cols.cg || 0; asCol = cols.as || 0; } else { for (const k in monCol) delete monCol[k]; }
     }
-    if (!head) return res.status(400).json({ error: 'Could not find the header row (it needs Market and Channel columns). Start from the Download template.' });
+    if (!head) return res.status(400).json({ error: 'Could not find the header row (it needs Market, Channel and Category group columns). Start from the Download template.' });
+    if (!cgCol) return res.status(400).json({ error: 'The header row has no Category group column. Open to buy is entered by category group now: start from the Download template.' });
     const inFy = Object.entries(monCol).filter(([, m]) => months.includes(m));
     if (!inFy.length) return res.status(400).json({ error: 'No month columns for FY' + String(fy + 1).slice(2) + ' in the header row' });
     const cells = [], bad = [], unknown = [];
@@ -25338,13 +25365,14 @@ app.post('/api/demand/wssi-otb/upload', async (req, res) => {
       const row = ws.getRow(r); const mk = String(cellV(row.getCell(mkCol)) || '').trim().toUpperCase(); let ch = String(cellV(row.getCell(chCol)) || '').trim().toUpperCase();
       if (!mk && !ch) continue; if (/TOTAL/.test(mk) || /TOTAL/.test(ch)) continue;
       ch = ({ 'B2B (WHOLESALE)': 'B2B', WHOLESALE: 'B2B', 'AMAZON FBA': 'FBA', AMAZON: 'FBA', ZALANDO: 'ZAL', TIKTOK: 'TIK' })[ch] || ch;
-      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch)) { unknown.push('row ' + r + ': ' + (mk || '?') + ' ' + (ch || '?')); continue; }
+      const cg = _otbCg(cellV(row.getCell(cgCol))), asT = asCol ? String(cellV(row.getCell(asCol)) || '').trim().toLowerCase() : '', as = /retail|£/.test(asT) ? 'retail' : /unit/.test(asT) ? 'units' : null;
+      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !cg) { unknown.push('row ' + r + ': ' + (mk || '?') + ' ' + (ch || '?') + ' ' + (String(cellV(row.getCell(cgCol)) || '?'))); continue; }
       for (const [ci, m] of inFy) {
         const v = cellV(row.getCell(+ci));
-        if (v == null || String(v).trim() === '') { cells.push({ month: m, market: mk, channel: ch, otb_cost: null }); continue; }
+        if (v == null || String(v).trim() === '') { cells.push({ month: m, market: mk, channel: ch, cgroup: cg, entered_as: as, value: null }); continue; }
         const n = typeof v === 'number' ? v : Number(String(v).replace(/[£,\s]/g, ''));
-        if (!isFinite(n) || n < 0) { bad.push(mk + ' ' + ch + ' ' + m + ': "' + String(v).slice(0, 20) + '"'); continue; }
-        cells.push({ month: m, market: mk, channel: ch, otb_cost: Math.round(n * 100) / 100 });
+        if (!isFinite(n) || n < 0) { bad.push(mk + ' ' + ch + ' ' + cg + ' ' + m + ': "' + String(v).slice(0, 20) + '"'); continue; }
+        cells.push({ month: m, market: mk, channel: ch, cgroup: cg, entered_as: as, value: Math.round(n * 100) / 100 });
       }
     }
     res.json({ ok: true, fy, months: inFy.map(([, m]) => m), cells, bad: bad.slice(0, 50), n_bad: bad.length, unknown: unknown.slice(0, 50), n_unknown: unknown.length });

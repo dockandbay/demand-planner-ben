@@ -14203,8 +14203,22 @@ function wssiLoad(fy,fresh){
   fetch('/api/demand/wssi?fy='+fy+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(d){
     WSSI.loading=false; if(d.error){ WSSI.err=d.error; } else { WSSI.data[d.fy]=d; WSSI.fy=d.fy; }
     if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); }
+    if(VIEW_MODE==='planning'&&DEMAND_VIEW==='otbinput'){ var b2=document.getElementById('demand-body'); if(b2)renderOtbInputView(b2); }   // v28.547: the OTB page converts with it
   }).catch(function(e){ WSSI.loading=false; WSSI.err=String(e&&e.message||e); if(DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } });
 }
+// v28.547 (WSSI phase 2): selling price and cost per unit for month × market × channel × category group, from the WSSI facts: closing stock
+// (£ retail / units, £ cost / units) of the channel's pool, else that month's sales (£ / units, cost of sales / units), else the FY average for
+// market × pool × group, else the market's FY average. Converts open to buy between units and £ retail / £ cost.
+var _WPX={};
+function wssiPx(D){ var key=D.fy+'|'+(D.built_at||''); if(_WPX.k===key)return _WPX.f;
+  var dict=D.dict, sc=D.sales_cols, kc=D.stock_cols, SI={}, KI={}; sc.forEach(function(c,x){ SI[c]=x; }); kc.forEach(function(c,x){ KI[c]=x; });
+  var st={}, sa={}, fyP={}, fyM={}, add=function(o,k,a){ var t=o[k]||(o[k]=[0,0,0]); t[0]+=a[0]; t[1]+=a[1]; t[2]+=a[2]; };
+  D.stock.forEach(function(r){ var m=D.months[r[0]], mk=dict.mkt[r[1]], pl=dict.pool[r[2]], cg=dict.cat[r[3]], a=[r[6+KI.clU],r[6+KI.clR],r[6+KI.clC]]; if(!a[0])return;
+    add(st,m+'|'+mk+'|'+pl+'|'+cg,a); add(fyP,mk+'|'+pl+'|'+cg,a); add(fyM,mk,a); });
+  D.sales.forEach(function(r){ var m=D.months[r[0]], mk=dict.mkt[r[1]], ch=dict.ch[r[2]], cg=dict.cat[r[3]], a=[r[6+SI.u],r[6+SI.r],r[6+SI.cos]]; if(!a[0])return; add(sa,m+'|'+mk+'|'+ch+'|'+cg,a); });
+  var f=function(m,mk,ch,cg){ var pl=WSSI_CH_POOL[ch]||'3PL', t=st[m+'|'+mk+'|'+pl+'|'+cg]||sa[m+'|'+mk+'|'+ch+'|'+cg]||fyP[mk+'|'+pl+'|'+cg]||fyM[mk];
+    return t&&t[0]?{p:t[1]/t[0],c:t[2]/t[0]}:{p:0,c:0}; };
+  _WPX={k:key,f:f}; return f; }
 // Sum the filtered facts into one column object per month (24: last year then this year).
 function wssiCompute(D){
   var S=WSSI.sel, dict=D.dict, n=D.months.length;
@@ -14221,14 +14235,19 @@ function wssiCompute(D){
     kc.forEach(function(c){ o[c]=k[KI[c]]; }); o.fullMul=onlyB2B?0.5:1; return o; });
   // v28.487: OTB planned (DEMAND ▸ Inputs ▸ Open to buy, £ at cost by month × market × channel) fills the OTB rows in forecast
   // months and adds to projected closing stock: units = £ ÷ that month's cost per unit sold; retail = units × current selling price.
-  var otbRows=(WSSI.otb[D.fy]&&WSSI.otb[D.fy].rows)||[], cumU=0, cumC=0;
+  // v28.547: open to buy = the buys still to place (DEMAND ▸ Inputs ▸ Open to buy, units or £ retail by market × channel × category group,
+  // less matching POs that reached Production after the buy was entered); market, channel and category group filters all apply.
+  var OB=WSSI.otb[D.fy]||{}, otbRows=OB.rows||[], onpo={}, px=wssiPx(D), cumU=0, cumC=0, cumR=0, cumF=0;
+  (OB.on_po||[]).forEach(function(x){ onpo[x.month+'|'+x.market+'|'+x.channel+'|'+x.cgroup]=Number(x.units)||0; });
   cols.forEach(function(o){ o.otbC=o.otbU=o.otbR=null; if(o.act)return;
-    var c=0; otbRows.forEach(function(r){ if(r.month!==o.m)return; if(S.mkt.length&&S.mkt.indexOf(r.market)<0)return; if(S.ch.length&&S.ch.indexOf(r.channel)<0)return; c+=Number(r.otb_cost)||0; });
-    var cpu=o.u?o.cos/o.u:(o.clU?o.clC/o.clU:0), ppu=o.clU?o.clR/o.clU:(o.u?o.r/o.u:0), fpu=o.clU?o.clF/o.clU:ppu, u=cpu>0?c/cpu:0;
-    o.opU+=cumU; o.opC+=cumC; o.opR+=cumU*ppu; o.opF+=cumU*fpu;
-    if(c>0){ o.otbC=c; o.otbU=u; o.otbR=u*ppu; }
-    cumU+=u; cumC+=c; o.clU+=cumU; o.clC+=cumC; o.clR+=cumU*ppu; o.clF+=cumU*fpu; });
-  return {cols:cols, otbSplitOnly:otbRows.length>0&&(S.cat.length||S.sea.length||S.st.length), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
+    var u=0, c=0, rr=0; otbRows.forEach(function(r){ if(r.month!==o.m)return; if(S.mkt.length&&S.mkt.indexOf(r.market)<0)return; if(S.ch.length&&S.ch.indexOf(r.channel)<0)return; if(S.cat.length&&S.cat.indexOf(r.cgroup)<0)return;
+      var q=px(r.month,r.market,r.channel,r.cgroup), eu=r.entered_as==='retail'?(q.p>0?(Number(r.value)||0)/q.p:0):(Number(r.value)||0);
+      var left=Math.max(0,eu-(onpo[r.month+'|'+r.market+'|'+r.channel+'|'+r.cgroup]||0)); u+=left; c+=left*q.c; rr+=left*q.p; });
+    var fpu=o.clU?o.clF/o.clU:(o.clR&&o.clU?o.clR/o.clU:0);
+    o.opU+=cumU; o.opC+=cumC; o.opR+=cumR; o.opF+=cumF;
+    if(u>0){ o.otbC=c; o.otbU=u; o.otbR=rr; }
+    cumU+=u; cumC+=c; cumR+=rr; cumF+=u*(fpu||(u?rr/u:0)); o.clU+=cumU; o.clC+=cumC; o.clR+=cumR; o.clF+=cumF; });
+  return {cols:cols, otbSplitOnly:otbRows.length>0&&(S.sea.length||S.st.length), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
 }
 function wssiDerive(o,ly){
   var d=function(a,b){ return b?a/b:null; };
@@ -14274,9 +14293,9 @@ var WSSI_ROWS=[
  {k:'inC',l:'Intake £ cost: received / confirmed PO',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Intake units × product cost.'},
  {k:'inU',l:'Intake units: received / confirmed PO',s:'System',f:'int',c:'sys',t:'u',tip:'Actual months: stock received, measured from stock movement per SKU (closing − opening + units sold; sets sold count against their components). Forecast months: open POs (Production, Ready to ship, Shipping) by expected arrival; overdue ones land in the first forecast month.'},
  {gap:1},
- {k:'otbR',l:'OTB planned £ retail',s:'Calc',f:'gbp',c:'otb',t:'r',tip:'OTB planned units × current selling price.'},
- {k:'otbC',l:'OTB planned £ cost',s:'Plan input',f:'gbp',c:'otbin',t:'c',key:1,tip:'Your open-to-buy budget at cost for buys not yet on a confirmed PO, entered in DEMAND ▸ Inputs ▸ Open to buy by month, market and channel (use the "Enter open to buy" button). Adds to projected closing stock.'},
- {k:'otbU',l:'OTB planned units',s:'Calc',f:'int',c:'otb',t:'u',tip:'OTB planned £ cost ÷ that month\'s cost per unit sold.'},
+ {k:'otbR',l:'Proposed £ retail (open to buy)',s:'Plan input',f:'gbp',c:'otbin',t:'r',key:1,tip:'Buys planned but not yet placed as a PO (DEMAND ▸ Inputs ▸ Open to buy, units or £ retail by month, market, channel and category group), less matching POs that reached Production after the buy was entered. £ retail = units × that month\'s selling price.'},
+ {k:'otbC',l:'Proposed £ cost',s:'Calc',f:'gbp',c:'otb',t:'c',tip:'Proposed units × cost per unit (landed).'},
+ {k:'otbU',l:'Proposed units',s:'Plan input',f:'int',c:'otbin',t:'u',tip:'Open to buy still to place, in units (entered as units, or £ retail ÷ selling price), less matching POs placed since.'},
  {gap:1},
  {k:'trR',l:'Transfers £ retail (3PL / FBA)',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Transfer units × current selling price.'},
  {k:'trC',l:'Transfers £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Transfer units × product cost.'},
@@ -14386,7 +14405,7 @@ function renderWssiView(body){
   if(WSSI.fy==null)WSSI.fy=curFy;
   var D=WSSI.data[WSSI.fy];
   if(!D){ body.innerHTML='<div id="wssi-root"><div style="padding:18px;color:'+(WSSI.err?'var(--neg)':'var(--muted)')+'">'+(WSSI.err?'Could not load WSSI: '+wssiH(WSSI.err):'Loading WSSI for FY'+String(WSSI.fy+1).slice(2)+'…')+'</div></div>'; if(!WSSI.loading&&!WSSI.err)wssiLoad(WSSI.fy); return; }
-  if(!WSSI.otb[D.fy]){ WSSI.otb[D.fy]={rows:[]}; otbiLoad(D.fy,function(d){ if(!d.error)WSSI.otb[D.fy]={rows:d.rows||[]}; if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
+  if(!WSSI.otb[D.fy]){ WSSI.otb[D.fy]={rows:[]}; otbiLoad(D.fy,function(d){ if(!d.error)WSSI.otb[D.fy]={rows:d.rows||[],on_po:d.on_po||[]}; if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
   var C=wssiCompute(D), M=C.cols, ly=D.ly_months, ty=M.slice(ly);
   ty.forEach(function(o,x){ wssiDerive(o,M[x]); });
   var tyIdx=ty.map(function(_,x){ return x; }), act=tyIdx.filter(function(x){ return ty[x].act; }), fc=tyIdx.filter(function(x){ return !ty[x].act; });
@@ -14405,7 +14424,7 @@ function renderWssiView(body){
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Show</span>'
     +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span>'
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Numbers</span><button class="w-pill'+(WSSI.show.sum?'':' on')+'" data-num="0" title="Every number in full">Full</button><button class="w-pill'+(WSSI.show.sum?' on':'')+'" data-num="1" title="£ and units in k / m, 3 significant figures (93.1k, 537k, 1.25m)">Summary</button></span></div>';
-  if(C.otbSplitOnly)h+='<div class="w-note">OTB planned is entered by market and channel, so the category, seasonality and product status filters do not split it: the OTB rows show the full amount for the markets and channels picked.</div>';
+  if(C.otbSplitOnly)h+='<div class="w-note">Open to buy is entered by market, channel and category group, so the seasonality and product status filters do not split it: the Proposed rows show the full amount for the markets, channels and category groups picked.</div>';
   if(C.partialPool)h+='<div class="w-note">Stock is held by pool (3PL for DTC, B2B and Zalando; FBA for Amazon), not by channel. With this channel filter the stock rows show the whole 3PL pool, while the sales rows show only the channels picked.</div>';
   var fyT=tots[tots.length-1], last=ty[ty.length-1], ytg=tots.filter(function(t){ return t.name==='YTG'; })[0];
   var vp=fyT.vSalesP, over=last.vsT>0;
@@ -14458,14 +14477,16 @@ function renderWssiView(body){
     g.appendChild(p); }; });
   if(!WSSI._docClose){ WSSI._docClose=true; document.addEventListener('click',function(){ var r=document.getElementById('wssi-root'); if(r)r.querySelectorAll('.w-pop').forEach(function(p){ p.remove(); }); }); }
 }
-// v28.487 (Ben 26-Oct-26): DEMAND ▸ Inputs ▸ Open to buy (#/demand/inputs/otbinput). Planned OTB budget at cost (£) per month ×
-// market × channel, shared by everyone (planner.wssi_otb, migration 388). Feeds the OTB planned rows of DEMAND ▸ WSSI, which add
-// to projected closing stock. v28.488: spreadsheet grid like DEMAND ▸ Inputs ▸ Key accounts (select / drag / Shift / Ctrl, arrows,
-// Tab, Enter / F2 / a digit edits, Delete clears, Ctrl/Cmd+C / V / Z / A, status bar Sum / Count / Avg), every change saved at once
-// (optimistic, reverted on failure, undoable), and an .xlsx template: Download (current figures) and Upload (preview, then apply).
-// Past months are shown but locked.
-var OTBI={fy:null,rows:{},updated:null,loading:false,err:'',missing:'',undo:[],saving:0,q:Promise.resolve()};
+// v28.547 (Ben 28-Oct-26, WSSI phase 2 from Kathryn's template, layout picked from a mockup): DEMAND ▸ Inputs ▸ Open to buy = "Proposed" buys,
+// planned but not yet placed as a PO, by month (arrival) × market × channel × category group (planner.wssi_otb_buy, migration 396). Enter UNITS or
+// £ RETAIL (switch at the top; the other is worked out from that month's selling price in WSSI). Under each cell: units already on matching POs
+// placed since the buy was entered, and what is left (the server matches POs by market, channel, category group and arrival month). Rows are
+// grouped Market · channel ▸ category group, collapsible. Spreadsheet behaviour as v28.488 (select / drag / Shift / Ctrl, arrows, Tab, Enter / F2 /
+// a digit edits, Delete clears, copy / paste / fill, undo, status bar), every change saved at once (reverted on failure), .xlsx Download / Upload.
+var OTBI={fy:null,rows:{},onpo:{},updated:null,loading:false,err:'',missing:'',undo:[],saving:0,q:Promise.resolve(),mode:'units',col:{}};
+try{ OTBI.mode=localStorage.getItem('hz_otbi_mode')==='retail'?'retail':'units'; OTBI.col=JSON.parse(localStorage.getItem('hz_otbi_col')||'{}')||{}; }catch(e){}
 var OTBI_ROWS=[['UK','DTC'],['UK','B2B'],['UK','FBA'],['US','DTC'],['US','B2B'],['US','FBA'],['EU','DTC'],['EU','B2B'],['EU','FBA'],['EU','ZAL'],['AU','DTC'],['AU','B2B'],['AU','FBA'],['CA','FBA']];
+var OTBI_CG=['Beach Towels','Beauty','Ponchos','Picnic & Outdoor','Bags','Home','Other'];
 var OTBI_CH={DTC:'DTC',B2B:'B2B (wholesale)',FBA:'Amazon FBA',ZAL:'Zalando',TIK:'TikTok'};
 function otbiMonths(fy){ var o=[]; for(var i=0;i<12;i++){ var m=3+i, y=fy+(m>12?1:0); o.push(y+'-'+String(m>12?m-12:m).padStart(2,'0')); } return o; }
 function otbiGo(view){ VIEW_MODE='planning'; DEMAND_VIEW=view; if(window.writeHash)window.writeHash(view==='wssi'?['demand','wssi']:['demand','inputs',view]); render(); }
@@ -14473,62 +14494,82 @@ function otbiLoad(fy,cb){ fetch('/api/demand/wssi-otb?fy='+fy).then(function(r){
 function renderOtbInputView(body){
   var now=new Date(), curFy=now.getMonth()+1>=3?now.getFullYear():now.getFullYear()-1, curM=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
   if(OTBI.fy==null)OTBI.fy=(typeof WSSI!=='undefined'&&WSSI.fy)||curFy;
-  var fy=OTBI.fy, months=otbiMonths(fy), H=wssiH, fyLbl='FY'+String(fy+1).slice(2);
-  var key=function(m,mk,ch){ return m+'|'+mk+'|'+ch; };
+  var fy=OTBI.fy, months=otbiMonths(fy), H=wssiH, fyLbl='FY'+String(fy+1).slice(2), MODE=OTBI.mode, RET=MODE==='retail';
+  var key=function(m,mk,ch,cg){ return m+'|'+mk+'|'+ch+'|'+cg; };
   if(OTBI.loadedFy!==fy){
-    if(!OTBI.loading){ OTBI.loading=true; OTBI.err=''; otbiLoad(fy,function(d){ OTBI.loading=false; if(d.error){ OTBI.err=d.error; } else { OTBI.rows={}; (d.rows||[]).forEach(function(r){ OTBI.rows[key(r.month,r.market,r.channel)]=r.otb_cost; }); OTBI.updated=d.updated; OTBI.missing=d.missing||''; OTBI.loadedFy=fy; OTBI.undo=[]; }
+    if(!OTBI.loading){ OTBI.loading=true; OTBI.err=''; otbiLoad(fy,function(d){ OTBI.loading=false; if(d.error){ OTBI.err=d.error; } else { OTBI.rows={}; OTBI.onpo={};
+        (d.rows||[]).forEach(function(r){ OTBI.rows[key(r.month,r.market,r.channel,r.cgroup)]={as:r.entered_as==='retail'?'retail':'units',v:Number(r.value)||0}; });
+        (d.on_po||[]).forEach(function(x){ OTBI.onpo[key(x.month,x.market,x.channel,x.cgroup)]=Number(x.units)||0; });
+        OTBI.updated=d.updated; OTBI.missing=d.missing||''; OTBI.loadedFy=fy; OTBI.undo=[]; }
       if(DEMAND_VIEW==='otbinput'){ var b=document.getElementById('demand-body'); if(b)renderOtbInputView(b); } }); }
     body.innerHTML='<div style="padding:18px;color:'+(OTBI.err?'var(--neg)':'var(--muted)')+'">'+(OTBI.err?'Could not load open to buy: '+H(OTBI.err):'Loading open to buy…')+'</div>'; return;
   }
+  // selling price per unit (from WSSI) converts units <-> £ retail
+  var D=(typeof WSSI!=='undefined'&&WSSI.data)?WSSI.data[fy]:null; if(!D&&typeof WSSI!=='undefined'&&!WSSI.loading)wssiLoad(fy);
+  var px=D?wssiPx(D):null, priceOf=function(m,mk,ch,cg){ return px?px(m,mk,ch,cg).p:0; };
   wssiCss();
-  var NR=OTBI_ROWS.length, NC=12, locked=function(c){ return months[c]<curM; };
-  var val=function(r,c){ var v=OTBI.rows[key(months[c],OTBI_ROWS[r][0],OTBI_ROWS[r][1])]; return v>0?v:null; };
-  var fmt=function(v){ return v>0?Math.round(v).toLocaleString('en-GB'):''; };
-  var fmtE=function(v){ return v>0?String(Math.round(v*100)/100):''; };
+  var R=[]; OTBI_ROWS.forEach(function(p){ OTBI_CG.forEach(function(cg){ R.push({mk:p[0],ch:p[1],cg:cg,g:p[0]+'|'+p[1]}); }); });
+  var NR=R.length, NC=12, locked=function(c){ return months[c]<curM; }, hid=function(r){ return !!OTBI.col[R[r].g]; };
+  var cellObj=function(r,c){ return OTBI.rows[key(months[c],R[r].mk,R[r].ch,R[r].cg)]||null; };
+  var conv=function(v,from,m,rw){ if(from===MODE)return v; var p=priceOf(m,rw.mk,rw.ch,rw.cg); if(!(p>0))return null; return MODE==='retail'?v*p:v/p; };
+  var val=function(r,c){ var o=cellObj(r,c); if(!o||!(o.v>0))return null; return conv(o.v,o.as,months[c],R[r]); };
+  var poU=function(r,c){ return OTBI.onpo[key(months[c],R[r].mk,R[r].ch,R[r].cg)]||0; };
+  var fmt=function(v){ return v>0?(RET?'£':'')+Math.round(v).toLocaleString('en-GB'):''; };
+  var fmtE=function(v){ return v>0?String(RET?Math.round(v*100)/100:Math.round(v)):''; };
+  var same=function(a,b){ return (!a&&!b)||(!!a&&!!b&&a.as===b.as&&a.v===b.v); };
+  var subTxt=function(r,c){ var o=cellObj(r,c), pu=poU(r,c); if(!o||!pu)return ''; var pd=conv(pu,'units',months[c],R[r]), en=val(r,c);
+    return '↳ '+(pd==null?pu.toLocaleString('en-GB')+' u':fmt(pd))+' on PO'+(en!=null&&pd!=null?' · '+fmt(Math.max(0,en-pd))+' left':''); };
   var MKS=[]; OTBI_ROWS.forEach(function(r){ if(MKS.indexOf(r[0])<0)MKS.push(r[0]); });
-  var css='<style>#otbi-grid{outline:none}#otbi-grid td.oc{cursor:cell;user-select:none;-webkit-user-select:none;padding:0 2px}#otbi-grid.drag,#otbi-grid.drag *{user-select:none;-webkit-user-select:none;cursor:cell}'
-    +'#otbi-grid .ov,#otbi-grid .oe{display:block;min-width:74px;line-height:18px;text-align:right;padding:3px 6px;border:1px solid transparent;border-radius:4px;font:inherit;font-size:12px;background:transparent;color:inherit;box-sizing:border-box}'
-    +'#otbi-grid .oe{border-color:#93c5fd;background:var(--card);outline:none;width:90px}#otbi-grid td.oc.sel{background:var(--blue-soft)!important}#otbi-grid td.oc.act{box-shadow:inset 0 0 0 2px var(--blue)}#otbi-grid:not(:focus-within) td.oc.act{box-shadow:inset 0 0 0 2px var(--line)}'
-    +'#otbi-grid td.oc.lk{color:var(--faint)}#otbi-sb{position:sticky;bottom:0;z-index:4;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding:6px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--ink-soft);box-shadow:0 -2px 4px -2px rgba(15,23,42,.12)}'
+  var css='<style>#otbi-grid{outline:none}#otbi-grid td.oc{cursor:cell;user-select:none;-webkit-user-select:none;padding:0 2px;vertical-align:top}#otbi-grid.drag,#otbi-grid.drag *{user-select:none;-webkit-user-select:none;cursor:cell}'
+    +'#otbi-grid .ov,#otbi-grid .oe{display:block;min-width:78px;line-height:18px;text-align:right;padding:3px 6px;border:1px solid transparent;border-radius:4px;font:inherit;font-size:12px;background:transparent;color:inherit;box-sizing:border-box}'
+    +'#otbi-grid .os{display:block;text-align:right;padding:0 6px 3px;font-size:10.5px;line-height:13px;color:var(--muted);white-space:nowrap}#otbi-grid .os:empty{display:none}'
+    +'#otbi-grid .oe{border-color:#93c5fd;background:var(--card);outline:none;width:94px}#otbi-grid td.oc.sel{background:var(--blue-soft)!important}#otbi-grid td.oc.act{box-shadow:inset 0 0 0 2px var(--blue)}#otbi-grid:not(:focus-within) td.oc.act{box-shadow:inset 0 0 0 2px var(--line)}'
+    +'#otbi-grid td.oc.lk{color:var(--faint)}#otbi-grid tr.og td{background:var(--hover);font-weight:700}#otbi-grid tr.og td.lab{cursor:pointer}#otbi-grid tr.oh{display:none}#otbi-grid td.lab.cg{padding-left:22px}'
+    +'#otbi-sb{position:sticky;bottom:0;z-index:4;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding:6px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--ink-soft);box-shadow:0 -2px 4px -2px rgba(15,23,42,.12)}'
     +'#otbi-sb b{color:var(--ink)}#otbi-sb .sp{flex:1}#otbi-sb button{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:3px 10px;border-radius:6px;font-size:12px;cursor:pointer}#otbi-sb button:disabled{opacity:.45;cursor:default}#otbi-toast.bad{color:var(--neg)}#otbi-toast.ok{color:var(--pos)}#otbi-toast{color:var(--amber)}'
-    +'#otbi-imp{border:1px solid #93c5fd;background:var(--hover);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px}#otbi-imp table td{padding:2px 8px;font-size:12px}</style>';
-  var h=css+'<div id="wssi-root"><div class="w-head"><div><h2>Open to buy</h2><div class="w-sub">Planned open-to-buy budget at cost (£, ex VAT) for buys not yet on a confirmed PO, by month, market and channel. Shared by everyone; every change saves at once. It fills the OTB planned rows in WSSI and adds to projected closing stock there. Past months are locked.</div></div>'
+    +'#otbi-imp{border:1px solid #93c5fd;background:var(--hover);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px}.otbi-mode button{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:3px 10px;font-size:12px;cursor:pointer}.otbi-mode button.on{background:var(--blue);border-color:var(--blue);color:#fff}.otbi-mode button:first-child{border-radius:6px 0 0 6px}.otbi-mode button:last-child{border-radius:0 6px 6px 0}</style>';
+  var h=css+'<div id="wssi-root"><div class="w-head"><div><h2>Open to buy</h2><div class="w-sub">Buys planned but not yet placed as a PO, by arrival month, market, channel and category group (ex VAT). Enter units or £ retail; the other is worked out from that month\'s selling price. Each buy shrinks by matching POs (same market, channel, category group and arrival month) that reach Production after it was entered: shown under the cell. Feeds the Proposed rows of WSSI. Shared by everyone; every change saves at once. Past months are locked.</div></div>'
     +'<div class="w-acts"><span class="w-meta" id="otbi-upd"></span>'
     +'<button class="w-btn" id="otbi-dl" title="Download the grid as an .xlsx template with the current figures">⬇ Download template</button>'
     +'<button class="w-btn" id="otbi-ul" title="Upload a filled-in template: you see a preview first">⬆ Upload template</button><input type="file" id="otbi-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">'
     +'<button class="w-btn" id="otbi-wssi">Open WSSI ↗</button></div></div>'
     +'<div class="w-filters"><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="otbi-fy">'+[curFy-1,curFy,curFy+1].map(function(y){ return '<option value="'+y+'"'+(y===fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
+    +'<span class="w-fg"><span class="w-fl">Enter as</span><span class="otbi-mode"><button data-m="units"'+(RET?'':' class="on"')+'>Units</button><button data-m="retail"'+(RET?' class="on"':'')+'>£ retail</button></span></span>'
+    +'<span class="w-fg"><button class="w-btn" id="otbi-exp">Expand all</button><button class="w-btn" id="otbi-colall">Collapse all</button></span>'
     +'<span class="w-meta">Click a cell and type. Drag or Shift-click to select a block; paste from Excel or Sheets with Ctrl/Cmd+V; Delete clears; Ctrl/Cmd+Z undoes.</span></div>'
-    +(OTBI.missing?'<div class="w-note">Saving needs migration 388 on this database.</div>':'')+'<div id="otbi-imp" hidden></div>';
-  h+='<div class="w-card"><div class="w-scroll" id="otbi-scroll"><table id="otbi-grid" role="grid" aria-multiselectable="true" aria-label="Open to buy" tabindex="0"><thead><tr class="h1"><th class="lab">Market · channel</th>'
+    +(OTBI.missing?'<div class="w-note">Saving needs migration 396 on this database.</div>':'')+(!px?'<div class="w-note">Loading selling prices from WSSI'+(RET?' (needed to show units entered in £ retail and vice versa)':'')+'…</div>':'')+'<div id="otbi-imp" hidden></div>';
+  h+='<div class="w-card"><div class="w-scroll" id="otbi-scroll"><table id="otbi-grid" role="grid" aria-multiselectable="true" aria-label="Open to buy" tabindex="0"><thead><tr class="h1"><th class="lab">Market · channel ▸ category group</th>'
     +months.map(function(m,c){ return '<th'+(locked(c)?' style="color:var(--faint)"':'')+'>'+wssiMon(m)+'</th>'; }).join('')+'<th class="ptot p0">'+fyLbl+'</th></tr></thead><tbody>';
-  var lastMk='';
-  var subRow=function(mk){ return '<tr class="key"><td class="lab">'+mk+' total</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="otbi-t-'+mk+'-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-t-'+mk+'-fy"></td></tr>'; };
-  OTBI_ROWS.forEach(function(rw,r){
-    if(lastMk&&rw[0]!==lastMk)h+=subRow(lastMk); lastMk=rw[0];
-    h+='<tr><td class="lab">'+rw[0]+' · '+H(OTBI_CH[rw[1]]||rw[1])+'</td>'+months.map(function(m,c){ return '<td class="num oc '+(locked(c)?'wc-na lk':'wc-inp')+'" role="gridcell" id="otbi-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'"><span class="ov">'+fmt(val(r,c))+'</span></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-r-'+r+'"></td></tr>';
+  var lastMk='', lastG='';
+  var mkRow=function(mk){ return '<tr class="key"><td class="lab">'+mk+' total</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="otbi-t-'+mk+'-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-t-'+mk+'-fy"></td></tr>'; };
+  R.forEach(function(rw,r){
+    if(lastMk&&rw.mk!==lastMk)h+=mkRow(lastMk); lastMk=rw.mk;
+    if(rw.g!==lastG){ lastG=rw.g; var gi=OTBI_ROWS.findIndex(function(p){ return p[0]+'|'+p[1]===rw.g; });
+      h+='<tr class="og"><td class="lab" data-tg="'+H(rw.g)+'">'+(OTBI.col[rw.g]?'▸ ':'▾ ')+rw.mk+' · '+H(OTBI_CH[rw.ch]||rw.ch)+'</td>'+months.map(function(m,c){ return '<td class="num" id="otbi-g'+gi+'-'+c+'"></td>'; }).join('')+'<td class="num ptot p0" id="otbi-g'+gi+'-fy"></td></tr>'; }
+    h+='<tr'+(hid(r)?' class="oh"':'')+'><td class="lab cg">'+H(rw.cg)+'</td>'+months.map(function(m,c){ return '<td class="num oc '+(locked(c)?'wc-na lk':'wc-inp')+'" role="gridcell" id="otbi-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'"><span class="ov">'+fmt(val(r,c))+'</span><span class="os">'+H(subTxt(r,c))+'</span></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-r-'+r+'"></td></tr>';
   });
-  h+=subRow(lastMk)+'<tr class="key"><td class="lab">All markets</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="otbi-t-all-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-t-all-fy"></td></tr></tbody></table></div></div>'
+  h+=mkRow(lastMk)+'<tr class="key"><td class="lab">All markets</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="otbi-t-all-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="otbi-t-all-fy"></td></tr></tbody></table></div></div>'
     +'<div id="otbi-sb"><span id="otbi-sbt" role="status" aria-live="polite"></span><span class="sp"></span><span id="otbi-saving"></span><span id="otbi-toast" role="alert"></span>'
     +'<button id="otbi-copy">Copy</button><button id="otbi-clear">Clear</button><button id="otbi-undo">Undo</button></div>'
     +'<textarea id="otbi-clip" aria-hidden="true" tabindex="-1" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea>'
-    +'<div class="w-key"><span><i class="wc-inp"></i>Editable month</span><span><i class="wc-na"></i>Past month (locked)</span><span><i class="wc-tot"></i>Totals</span></div></div>';
+    +'<div class="w-key"><span><i class="wc-inp"></i>Editable month</span><span><i class="wc-na"></i>Past month (locked)</span><span><i class="wc-tot"></i>Totals</span><span>↳ on PO = units on POs placed since the buy was entered</span></div></div>';
   body.innerHTML=h;
-  var root=body.querySelector('#wssi-root'), T=root.querySelector('#otbi-grid'), SC=root.querySelector('#otbi-scroll');
+  var root=body.querySelector('#wssi-root'), T=root.querySelector('#otbi-grid');
   var TD=function(r,c){ return root.querySelector('#otbi-c'+r+'-'+c); };
   var SS={sel:{},base:{},anchor:null,ext:null,drag:false}, ED=null;
   function upd(){ var u=OTBI.updated, el=root.querySelector('#otbi-upd'); if(!el)return;
     el.textContent=u&&u.updated_at?'Last saved '+u.updated_at.replace(/^(\d{4})-(\d{2})-(\d{2})/,function(_,y,mo,d){ return d+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+mo-1]+'-'+y.slice(2); })+' by '+String(u.updated_by||'').split('@')[0]+'@':'Nothing saved for '+fyLbl+' yet'; }
-  function totals(){ var all=months.map(function(){ return 0; });
-    MKS.forEach(function(mk){ var t=months.map(function(){ return 0; });
-      OTBI_ROWS.forEach(function(rw,r){ if(rw[0]!==mk)return; var rt=0; months.forEach(function(m,c){ var v=val(r,c)||0; t[c]+=v; all[c]+=v; rt+=v; }); var e=root.querySelector('#otbi-r-'+r); if(e)e.textContent=fmt(rt); });
-      t.forEach(function(v,c){ var e=root.querySelector('#otbi-t-'+mk+'-'+c); if(e)e.textContent=fmt(v); }); var e2=root.querySelector('#otbi-t-'+mk+'-fy'); if(e2)e2.textContent=fmt(t.reduce(function(a,b){ return a+b; },0)); });
-    all.forEach(function(v,c){ var e=root.querySelector('#otbi-t-all-'+c); if(e)e.textContent=fmt(v); }); var e3=root.querySelector('#otbi-t-all-fy'); if(e3)e3.textContent=fmt(all.reduce(function(a,b){ return a+b; },0)); }
+  function totals(){ var all=months.map(function(){ return 0; }), mk={}, gr={};
+    R.forEach(function(rw,r){ var rt=0, gi=OTBI_ROWS.findIndex(function(p){ return p[0]+'|'+p[1]===rw.g; }), g=gr[gi]||(gr[gi]=months.map(function(){ return 0; })), t=mk[rw.mk]||(mk[rw.mk]=months.map(function(){ return 0; }));
+      months.forEach(function(m,c){ var v=val(r,c)||0; rt+=v; g[c]+=v; t[c]+=v; all[c]+=v; }); var e=root.querySelector('#otbi-r-'+r); if(e)e.textContent=fmt(rt); });
+    var put=function(pre,arr){ var s=0; arr.forEach(function(v,c){ s+=v; var e=root.querySelector('#'+pre+'-'+c); if(e)e.textContent=fmt(v); }); var e2=root.querySelector('#'+pre+'-fy'); if(e2)e2.textContent=fmt(s); };
+    Object.keys(gr).forEach(function(gi){ put('otbi-g'+gi,gr[gi]); }); Object.keys(mk).forEach(function(m){ put('otbi-t-'+m,mk[m]); }); put('otbi-t-all',all); }
   function keys(){ return Object.keys(SS.sel); }
   function rc(k){ var p=k.split(','); return {r:+p[0],c:+p[1]}; }
   function cp(o){ var x={}; for(var k in o)x[k]=1; return x; }
-  function rect(o,a,b){ for(var r=Math.min(a.r,b.r);r<=Math.max(a.r,b.r);r++)for(var c=Math.min(a.c,b.c);c<=Math.max(a.c,b.c);c++)o[r+','+c]=1; return o; }
-  var clR=function(r){ return Math.max(0,Math.min(NR-1,r)); }, clC=function(c){ return Math.max(0,Math.min(NC-1,c)); };
+  function rect(o,a,b){ for(var r=Math.min(a.r,b.r);r<=Math.max(a.r,b.r);r++){ if(hid(r))continue; for(var c=Math.min(a.c,b.c);c<=Math.max(a.c,b.c);c++)o[r+','+c]=1; } return o; }
+  var clC=function(c){ return Math.max(0,Math.min(NC-1,c)); };
+  var stepR=function(r,d){ var x=r; do{ x+=d; }while(x>=0&&x<NR&&hid(x)); return (x<0||x>=NR)?r:x; };   // next visible row
   function focusGrid(){ if(document.activeElement!==T){ try{ T.focus({preventScroll:true}); }catch(e){ T.focus(); } } }
   function setActive(r,c){ SS.sel={}; SS.sel[r+','+c]=1; SS.base={}; SS.anchor={r:r,c:c}; SS.ext={r:r,c:c}; paint(true); }
   function extendTo(r,c){ if(!SS.anchor)return setActive(r,c); SS.ext={r:r,c:c}; SS.sel=rect(cp(SS.base),SS.anchor,SS.ext); paint(true,true); }
@@ -14537,7 +14578,7 @@ function renderOtbInputView(body){
     if(scroll){ var p=toExt?SS.ext:a, td2=p&&TD(p.r,p.c); if(td2&&td2.scrollIntoView){ try{ td2.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } }
     sb(); }
   function sb(){ var ks=keys(), n=ks.length, cnt=0, sum=0; ks.forEach(function(k){ var x=rc(k), v=val(x.r,x.c); if(v!=null){ cnt++; sum+=v; } });
-    var el=root.querySelector('#otbi-sbt'); if(el)el.innerHTML=n?('Selected <b>'+n+'</b> cell'+(n===1?'':'s')+' &nbsp; Sum <b>£'+fmt(sum||0)+'</b> &nbsp; Count <b>'+cnt+'</b> &nbsp; Avg <b>'+(cnt?'£'+fmt(sum/cnt):'')+'</b>'):'Click a cell to select. Drag, Shift or Ctrl/Cmd+click to select more.';
+    var el=root.querySelector('#otbi-sbt'); if(el)el.innerHTML=n?('Selected <b>'+n+'</b> cell'+(n===1?'':'s')+' &nbsp; Sum <b>'+(fmt(sum)||'0')+'</b> &nbsp; Count <b>'+cnt+'</b> &nbsp; Avg <b>'+(cnt?fmt(sum/cnt):'')+'</b>'):'Click a cell to select. Drag, Shift or Ctrl/Cmd+click to select more.';
     var cb=root.querySelector('#otbi-clear'); if(cb){ cb.textContent='Clear '+n+' cell'+(n===1?'':'s'); cb.disabled=!cnt; }
     var cpb=root.querySelector('#otbi-copy'); if(cpb)cpb.disabled=!n;
     var ub=root.querySelector('#otbi-undo'), u=OTBI.undo[OTBI.undo.length-1]; if(ub){ ub.disabled=!u; ub.title=u?'Undo '+u.label.toLowerCase()+' ('+u.ops.length+' cell'+(u.ops.length===1?'':'s')+'), Ctrl/Cmd+Z':'Nothing to undo'; }
@@ -14546,42 +14587,43 @@ function renderOtbInputView(body){
   function parseAmt(s){ var t=String(s==null?'':s).replace(/^\s*"([\s\S]*)"\s*$/,'$1').replace(/[£,\s ]/g,''); if(t===''||t==='-')return {v:null}; if(/^\d+(\.\d+)?$/.test(t)){ var n=Math.round(parseFloat(t)*100)/100; return {v:n>0?n:null}; } return {bad:true}; }
   function parseClip(t){ t=String(t==null?'':t).replace(/\r\n?/g,'\n'); if(t.slice(-1)==='\n')t=t.slice(0,-1); var tab=t.indexOf('\t')>=0;
     return t.split('\n').map(function(l){ return tab?l.split('\t'):(/^\s*\d{1,3}(,\d{3})+(\.\d+)?\s*$/.test(l)?[l]:l.split(',')); }); }
-  function setVal(r,c,v){ var k=key(months[c],OTBI_ROWS[r][0],OTBI_ROWS[r][1]); if(v>0)OTBI.rows[k]=v; else delete OTBI.rows[k]; var td=TD(r,c); if(td){ var sp=td.querySelector('.ov'); if(sp)sp.textContent=fmt(v); } }
-  // ops = [{r,c,prev,next}]: shown at once, saved in order (one request per action), reverted on failure; undo entries are not re-pushed
-  function apply(ops,label,undoOf,note){ ops=ops.filter(function(o){ return o.prev!==o.next; }); if(!ops.length){ toast(note||'No changes'); return Promise.resolve(); }
-    ops.forEach(function(o){ setVal(o.r,o.c,o.next); }); totals(); OTBI.saving++; sb();
-    var p=OTBI.q.then(function(){ return fetch('/api/demand/wssi-otb',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,rows:ops.map(function(o){ return {month:months[o.c],market:OTBI_ROWS[o.r][0],channel:OTBI_ROWS[o.r][1],otb_cost:o.next||0}; })})}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }); })
+  function setCell(r,c,o){ var k=key(months[c],R[r].mk,R[r].ch,R[r].cg); if(o&&o.v>0)OTBI.rows[k]=o; else delete OTBI.rows[k]; var td=TD(r,c); if(td){ var sp=td.querySelector('.ov'); if(sp)sp.textContent=fmt(val(r,c)); var ss=td.querySelector('.os'); if(ss)ss.textContent=subTxt(r,c); } }
+  // ops = [{r,c,prev,next}] with cell objects {as,v} (null = empty): shown at once, saved in order, reverted on failure; undo entries are not re-pushed
+  function apply(ops,label,undoOf,note){ ops=ops.filter(function(o){ return !same(o.prev,o.next); }); if(!ops.length){ toast(note||'No changes'); return Promise.resolve(); }
+    ops.forEach(function(o){ setCell(o.r,o.c,o.next); }); totals(); OTBI.saving++; sb();
+    var p=OTBI.q.then(function(){ return fetch('/api/demand/wssi-otb',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,rows:ops.map(function(o){ var rw=R[o.r]; return {month:months[o.c],market:rw.mk,channel:rw.ch,cgroup:rw.cg,entered_as:o.next?o.next.as:MODE,value:o.next?o.next.v:0}; })})}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }); })
       .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'save failed'); return j; })
       .then(function(){
         if(!undoOf){ OTBI.undo.push({label:label,ops:ops}); if(OTBI.undo.length>50)OTBI.undo.shift(); }
         OTBI.updated={updated_by:(typeof ME!=='undefined'&&ME&&ME.email)||'you',updated_at:new Date().toISOString().slice(0,16).replace('T',' ')}; upd();
         if(typeof WSSI!=='undefined')delete WSSI.otb[fy];
         var s=ops.length+' cell'+(ops.length===1?'':'s'); toast((undoOf?'Undone: '+undoOf.label.toLowerCase()+', '+s:'Saved '+s)+(note?'. '+note:''),note?'':'ok'); },
-      function(e){ ops.forEach(function(o){ setVal(o.r,o.c,o.prev); }); totals(); if(undoOf)OTBI.undo.push(undoOf); toast('Not saved, '+ops.length+' cell'+(ops.length===1?'':'s')+' reverted: '+(e&&e.message||e),'bad'); })
+      function(e){ ops.forEach(function(o){ setCell(o.r,o.c,o.prev); }); totals(); if(undoOf)OTBI.undo.push(undoOf); toast('Not saved, '+ops.length+' cell'+(ops.length===1?'':'s')+' reverted: '+(e&&e.message||e),'bad'); })
       .then(function(){ OTBI.saving=Math.max(0,OTBI.saving-1); sb(); });
     OTBI.q=p; return p; }
-  function op(ops,r,c,next,lk){ if(locked(c)){ lk.n++; return; } var prev=val(r,c); if(prev!==next)ops.push({r:r,c:c,prev:prev,next:next}); }
+  var nextOf=function(v){ return v>0?{as:MODE,v:RET?Math.round(v*100)/100:Math.round(v)}:null; };
+  function op(ops,r,c,v,lk){ if(locked(c)){ lk.n++; return; } if(hid(r))return; var prev=cellObj(r,c), next=nextOf(v); if(!same(prev,next))ops.push({r:r,c:c,prev:prev,next:next}); }
   function lkNote(lk){ return lk.n?lk.n+' past-month cell'+(lk.n===1?'':'s')+' skipped (locked)':''; }
   function undo(){ if(OTBI.saving){ OTBI.q.then(function(){ undo(); }); return; } var u=OTBI.undo.pop(); if(!u){ toast('Nothing to undo'); sb(); return; }
     var f=u.ops[0]; SS.sel={}; u.ops.forEach(function(o){ SS.sel[o.r+','+o.c]=1; }); SS.base={}; SS.anchor={r:f.r,c:f.c}; SS.ext={r:f.r,c:f.c}; paint(true);
     apply(u.ops.map(function(o){ return {r:o.r,c:o.c,prev:o.next,next:o.prev}; }),'Undo',u); }
-  function clearSel(){ var ops=[], lk={n:0}; keys().forEach(function(k){ var x=rc(k); if(val(x.r,x.c)!=null)op(ops,x.r,x.c,null,lk); }); if(!ops.length){ toast(lkNote(lk)||'Nothing to clear'); return; } apply(ops,'Clear',null,lkNote(lk)); }
+  function clearSel(){ var ops=[], lk={n:0}; keys().forEach(function(k){ var x=rc(k); if(cellObj(x.r,x.c))op(ops,x.r,x.c,null,lk); }); if(!ops.length){ toast(lkNote(lk)||'Nothing to clear'); return; } apply(ops,'Clear',null,lkNote(lk)); }
   function copyText(){ var ks=keys(); if(!ks.length)return ''; var rs={}, cs={}; ks.forEach(function(k){ var p=rc(k); rs[p.r]=1; cs[p.c]=1; });
-    var R=Object.keys(rs).map(Number).sort(function(a,b){ return a-b; }), C=Object.keys(cs).map(Number).sort(function(a,b){ return a-b; });
-    return R.map(function(r){ return C.map(function(c){ return SS.sel[r+','+c]?fmtE(val(r,c)):''; }).join('\t'); }).join('\n'); }
+    var Rr=Object.keys(rs).map(Number).sort(function(a,b){ return a-b; }), C=Object.keys(cs).map(Number).sort(function(a,b){ return a-b; });
+    return Rr.map(function(r){ return C.map(function(c){ return SS.sel[r+','+c]?fmtE(val(r,c)):''; }).join('\t'); }).join('\n'); }
   function copySel(){ var n=keys().length; if(!n)return; var txt=copyText(), done=function(){ toast('Copied '+n+' cell'+(n===1?'':'s'),'ok'); };
     var viaTa=function(){ var ta=root.querySelector('#otbi-clip'); ta.value=txt; ta.focus(); ta.select(); var ok=false; try{ ok=document.execCommand('copy'); }catch(e){} ta.value=''; focusGrid(); return ok; };
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,function(){ if(viaTa())done(); else toast('The browser blocked the copy','bad'); }); else if(viaTa())done(); else toast('The browser blocked the copy','bad'); }
   function pasteText(txt){ var a=SS.anchor; if(!a)return; var B=parseClip(txt), ks=keys(), ops=[], bad=0, out=0, w=0, lk={n:0}, fill=(B.length===1&&B[0].length===1&&ks.length>1);
     if(fill){ var p=parseAmt(B[0][0]); if(p.bad){ toast('Not a number: "'+String(B[0][0]).slice(0,20)+'"','bad'); return; } ks.forEach(function(k){ var x=rc(k); op(ops,x.r,x.c,p.v,lk); }); }
-    else { B.forEach(function(row,i){ if(row.length>w)w=row.length; row.forEach(function(cell,j){ var r=a.r+i, c=a.c+j; if(r>=NR||c>=NC){ out++; return; } var q=parseAmt(cell); if(q.bad){ bad++; return; } op(ops,r,c,q.v,lk); }); });
-      var end={r:Math.min(NR-1,a.r+B.length-1), c:Math.min(NC-1,a.c+Math.max(1,w)-1)}; SS.sel=rect({},a,end); SS.base={}; SS.ext=end; paint(); }
+    else { var r0=a.r; B.forEach(function(row,i){ if(row.length>w)w=row.length; var r=i?stepR(r0,1):r0; if(i&&r===r0){ out+=row.length; return; } r0=r; row.forEach(function(cell,j){ var c=a.c+j; if(c>=NC){ out++; return; } var q=parseAmt(cell); if(q.bad){ bad++; return; } op(ops,r,c,q.v,lk); }); });
+      var end={r:r0, c:Math.min(NC-1,a.c+Math.max(1,w)-1)}; SS.sel=rect({},a,end); SS.base={}; SS.ext=end; paint(); }
     var msg=[]; if(bad)msg.push(bad+' cell'+(bad===1?'':'s')+' skipped: not a number'); if(out)msg.push(out+' outside the grid ignored'); if(lk.n)msg.push(lkNote(lk));
     apply(ops,fill?'Fill':'Paste',null,msg.join('; ')); }
   function startEdit(r,c,mode,ch){ if(ED)commit(true); if(locked(c)){ toast('Past months are locked'); return; } var td=TD(r,c); if(!td)return;
     if(!(SS.anchor&&SS.anchor.r===r&&SS.anchor.c===c))setActive(r,c);
-    var sp=td.querySelector('.ov'), inp=document.createElement('input'); inp.className='oe'; inp.setAttribute('inputmode','decimal'); inp.setAttribute('aria-label',OTBI_ROWS[r].join(' ')+' '+months[c]);
-    inp.value=ch!=null?ch:fmtE(val(r,c)); sp.style.display='none'; td.appendChild(inp); ED={r:r,c:c,td:td,inp:inp,mode:mode};
+    var sp=td.querySelector('.ov'), inp=document.createElement('input'); inp.className='oe'; inp.setAttribute('inputmode','decimal'); inp.setAttribute('aria-label',R[r].mk+' '+R[r].ch+' '+R[r].cg+' '+months[c]+(RET?' £ retail':' units'));
+    inp.value=ch!=null?ch:fmtE(val(r,c)); sp.style.display='none'; td.insertBefore(inp,sp.nextSibling); ED={r:r,c:c,td:td,inp:inp,mode:mode};
     inp.focus(); try{ if(ch!=null)inp.setSelectionRange(inp.value.length,inp.value.length); else inp.select(); }catch(e){}
     inp.onkeydown=function(ev){ var k=ev.key; ev.stopPropagation();
       if(k==='Enter'){ ev.preventDefault(); commit(); moveBy(ev.shiftKey?-1:1,0); } else if(k==='Tab'){ ev.preventDefault(); commit(); moveBy(0,ev.shiftKey?-1:1); }
@@ -14590,15 +14632,18 @@ function renderOtbInputView(body){
     inp.onblur=function(){ if(ED&&ED.inp===inp)commit(true); }; }
   function endEdit(){ var E=ED; ED=null; if(!E)return null; var sp=E.td.querySelector('.ov'); if(sp)sp.style.display=''; if(E.inp.parentNode)E.inp.parentNode.removeChild(E.inp); return E; }
   function commit(fromBlur){ var E=ED; if(!E)return; var raw=E.inp.value; endEdit(); if(!fromBlur)focusGrid();
-    var p=parseAmt(raw); if(p.bad){ toast('Not saved: "'+String(raw).slice(0,20)+'" is not an amount','bad'); return; }
-    apply([{r:E.r,c:E.c,prev:val(E.r,E.c),next:p.v}],'Edit'); }
-  function moveBy(dr,dc){ var a=SS.anchor||{r:0,c:0}; setActive(clR(a.r+dr),clC(a.c+dc)); }
+    var p=parseAmt(raw); if(p.bad){ toast('Not saved: "'+String(raw).slice(0,20)+'" is not a number','bad'); return; }
+    if(raw.trim()===fmtE(val(E.r,E.c)))return;   // unchanged (a converted value is not re-saved in the other unit)
+    apply([{r:E.r,c:E.c,prev:cellObj(E.r,E.c),next:nextOf(p.v)}],'Edit'); }
+  function moveBy(dr,dc){ var a=SS.anchor||{r:stepR(-1,1),c:0}; setActive(dr?stepR(a.r,dr):a.r,clC(a.c+dc)); }
   function cellOf(t){ var td=t&&t.closest?t.closest('td.oc'):null; return td?{r:+td.dataset.r,c:+td.dataset.c,td:td}:null; }
   function cellAt(ev){ var x=cellOf(ev.target); if(x)return x; try{ if(document.elementFromPoint&&ev.clientX!=null)return cellOf(document.elementFromPoint(ev.clientX,ev.clientY)); }catch(e){} return null; }
   var UP=null;
   function dragEnd(){ SS.drag=false; if(UP){ UP.forEach(function(h){ (h[0]==='blur'?window:document).removeEventListener(h[0],h[1]); }); UP=null; } T.classList.remove('drag'); }
   function dragMove(ev){ if(!SS.drag)return; if(ev.buttons===0){ dragEnd(); return; } var x=cellAt(ev); if(!x||(SS.ext&&SS.ext.r===x.r&&SS.ext.c===x.c))return; extendTo(x.r,x.c); }
   function dragStart(){ SS.drag=true; dragEnd(); SS.drag=true; UP=[['mousemove',dragMove],['mouseup',dragEnd],['blur',dragEnd]]; UP.forEach(function(h){ (h[0]==='blur'?window:document).addEventListener(h[0],h[1]); }); T.classList.add('drag'); }
+  function saveCol(){ try{ localStorage.setItem('hz_otbi_col',JSON.stringify(OTBI.col)); }catch(e){} }
+  T.addEventListener('click',function(ev){ var g=ev.target.closest&&ev.target.closest('td[data-tg]'); if(!g)return; var k=g.getAttribute('data-tg'); if(OTBI.col[k])delete OTBI.col[k]; else OTBI.col[k]=1; saveCol(); renderOtbInputView(body); });
   T.addEventListener('mousedown',function(ev){ if(ev.button!==0)return; var x=cellOf(ev.target); if(!x)return; if(ED&&ED.td===x.td)return; if(ED)commit(true); ev.preventDefault(); var k=x.r+','+x.c;
     if(ev.shiftKey&&SS.anchor){ extendTo(x.r,x.c); dragStart(); }
     else if((ev.ctrlKey||ev.metaKey)&&SS.anchor){ if(SS.sel[k]&&keys().length>1){ delete SS.sel[k]; SS.base=cp(SS.sel); paint(); } else { SS.base=cp(SS.sel); SS.sel[k]=1; SS.anchor={r:x.r,c:x.c}; SS.ext={r:x.r,c:x.c}; dragStart(); paint(); } }
@@ -14607,17 +14652,17 @@ function renderOtbInputView(body){
   T.addEventListener('mouseover',dragMove);
   T.addEventListener('dblclick',function(ev){ var x=cellOf(ev.target); if(x&&!(ED&&ED.td===x.td))startEdit(x.r,x.c,'edit'); });
   T.addEventListener('dragstart',function(ev){ ev.preventDefault(); });
-  T.addEventListener('focus',function(){ if(!SS.anchor){ var c0=0; while(c0<NC-1&&locked(c0))c0++; setActive(0,c0); } });
+  T.addEventListener('focus',function(){ if(!SS.anchor){ var c0=0; while(c0<NC-1&&locked(c0))c0++; var r0=stepR(-1,1); if(r0>=0&&!hid(r0))setActive(r0,c0); } });
   T.addEventListener('keydown',function(ev){ if(ED)return; var k=ev.key, mod=(ev.ctrlKey||ev.metaKey)&&!ev.altKey;
     if(mod){ var kl=String(k||'').toLowerCase();
       if(kl==='c'){ ev.preventDefault(); copySel(); return; }
       if(kl==='v'){ var ta=root.querySelector('#otbi-clip'); ta.value=''; ta.focus(); setTimeout(function(){ if(document.activeElement===ta)focusGrid(); },60); return; }
       if(kl==='z'&&!ev.shiftKey){ ev.preventDefault(); undo(); return; }
-      if(kl==='a'){ ev.preventDefault(); SS.anchor=SS.anchor||{r:0,c:0}; SS.base={}; SS.ext={r:NR-1,c:NC-1}; SS.sel=rect({},{r:0,c:0},SS.ext); paint(); }
+      if(kl==='a'){ ev.preventDefault(); var f0=stepR(-1,1); SS.anchor=SS.anchor||{r:f0,c:0}; SS.base={}; SS.ext={r:NR-1,c:NC-1}; SS.sel=rect({},{r:0,c:0},SS.ext); paint(); }
       return; }
-    if(!SS.anchor){ if(/^(Arrow|Enter|F2)/.test(k)){ ev.preventDefault(); setActive(0,0); } return; }
+    if(!SS.anchor){ if(/^(Arrow|Enter|F2)/.test(k)){ ev.preventDefault(); setActive(stepR(-1,1),0); } return; }
     var a=SS.anchor, dr=k==='ArrowUp'?-1:k==='ArrowDown'?1:0, dc=k==='ArrowLeft'?-1:k==='ArrowRight'?1:0;
-    if(dr||dc){ ev.preventDefault(); if(ev.shiftKey){ var x=SS.ext||a; extendTo(clR(x.r+dr),clC(x.c+dc)); } else setActive(clR(a.r+dr),clC(a.c+dc)); return; }
+    if(dr||dc){ ev.preventDefault(); if(ev.shiftKey){ var x=SS.ext||a; extendTo(dr?stepR(x.r,dr):x.r,clC(x.c+dc)); } else setActive(dr?stepR(a.r,dr):a.r,clC(a.c+dc)); return; }
     if(k==='Tab'){ var nc=a.c+(ev.shiftKey?-1:1); if(nc<0||nc>=NC)return; ev.preventDefault(); setActive(a.r,nc); return; }
     if(k==='Enter'||k==='F2'){ ev.preventDefault(); startEdit(a.r,a.c,'edit'); return; }
     if(k==='Delete'||k==='Backspace'){ ev.preventDefault(); clearSel(); return; }
@@ -14628,11 +14673,14 @@ function renderOtbInputView(body){
   ta.addEventListener('input',function(){ var v=ta.value; ta.value=''; focusGrid(); if(v)pasteText(v); });
   root.querySelector('#otbi-copy').onclick=function(){ copySel(); }; root.querySelector('#otbi-clear').onclick=function(){ clearSel(); focusGrid(); }; root.querySelector('#otbi-undo').onclick=function(){ undo(); focusGrid(); };
   root.querySelector('#otbi-fy').onchange=function(){ OTBI.fy=+this.value; OTBI.loadedFy=null; renderOtbInputView(body); };
+  root.querySelectorAll('.otbi-mode button').forEach(function(b){ b.onclick=function(){ OTBI.mode=b.getAttribute('data-m'); try{ localStorage.setItem('hz_otbi_mode',OTBI.mode); }catch(e){} renderOtbInputView(body); }; });
+  root.querySelector('#otbi-exp').onclick=function(){ OTBI.col={}; saveCol(); renderOtbInputView(body); };
+  root.querySelector('#otbi-colall').onclick=function(){ OTBI.col={}; OTBI_ROWS.forEach(function(p){ OTBI.col[p[0]+'|'+p[1]]=1; }); saveCol(); renderOtbInputView(body); };
   root.querySelector('#otbi-wssi').onclick=function(){ if(typeof WSSI!=='undefined')WSSI.fy=fy; otbiGo('wssi'); };
-  // ── xlsx template: Download = current figures; Upload = server reads it, preview here, Apply saves (one undoable action) ──
+  // ── xlsx template: Download = current figures (in the current unit); Upload = server reads it, preview here, Apply saves (one undoable action) ──
   root.querySelector('#otbi-dl').onclick=function(){
-    var g=[['Open to buy '+fyLbl+': planned OTB at cost (£, ex VAT). Fill in amounts and upload. Past months are ignored on upload. Channel codes: DTC, B2B, FBA, ZAL.'],['Market','Channel'].concat(months.map(wssiMon))];
-    OTBI_ROWS.forEach(function(rw,r){ g.push([rw[0],rw[1]].concat(months.map(function(m,c){ var v=val(r,c); return v==null?'':v; }))); });
+    var g=[['Open to buy '+fyLbl+': buys not yet on a PO, by arrival month. Enter as = Units or £ retail (ex VAT). Fill in and upload; past months are ignored. Channel codes: DTC, B2B, FBA, ZAL. Category groups: '+OTBI_CG.join(', ')+'.'],['Market','Channel','Category group','Enter as'].concat(months.map(wssiMon))];
+    R.forEach(function(rw,r){ g.push([rw.mk,rw.ch,rw.cg,RET?'£ retail':'Units'].concat(months.map(function(m,c){ var v=val(r,c); return v==null?'':(RET?Math.round(v*100)/100:Math.round(v)); }))); });
     var bytes=buildXlsx('Open to buy',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download='open_to_buy_'+fyLbl+'.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); };
   var fi=root.querySelector('#otbi-file'); root.querySelector('#otbi-ul').onclick=function(){ fi.value=''; fi.click(); };
@@ -14640,17 +14688,18 @@ function renderOtbInputView(body){
     var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||'';
       fetch('/api/demand/wssi-otb/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,file_b64:b64})}).then(function(r){ return r.json(); }).then(function(d){
         if(d.error){ box.innerHTML='<b style="color:var(--neg)">'+H(d.error)+'</b> <button class="w-btn" id="otbi-ix">Close</button>'; box.querySelector('#otbi-ix').onclick=function(){ box.hidden=true; }; return; }
-        var ops=[], lk={n:0}, add=0, chg=0, clr=0, ri={}; OTBI_ROWS.forEach(function(rw,r){ ri[rw[0]+'|'+rw[1]]=r; });
-        (d.cells||[]).forEach(function(x){ var r=ri[x.market+'|'+x.channel], c=months.indexOf(x.month); if(r==null||c<0)return; var nv=x.otb_cost>0?x.otb_cost:null, pv=val(r,c); if(nv===pv)return; if(locked(c)){ lk.n++; return; } ops.push({r:r,c:c,prev:pv,next:nv}); if(pv==null)add++; else if(nv==null)clr++; else chg++; });
-        var sumNew=ops.reduce(function(s,o){ return s+(o.next||0)-(o.prev||0); },0);
-        box.innerHTML='<b>'+H(f.name)+'</b>: '+(ops.length?ops.length+' cell'+(ops.length===1?'':'s')+' to change ('+add+' new, '+chg+' changed, '+clr+' cleared), net '+(sumNew<0?'-':'+')+'£'+fmt(Math.abs(sumNew)||0)+'.':'nothing to change: the file matches the grid.')
+        var ops=[], lk={n:0}, add=0, chg=0, clr=0, ri={}; R.forEach(function(rw,r){ ri[rw.mk+'|'+rw.ch+'|'+rw.cg]=r; });
+        if(Object.keys(OTBI.col).length){ OTBI.col={}; saveCol(); }   // an upload may touch any row: show them all
+        (d.cells||[]).forEach(function(x){ var r=ri[x.market+'|'+x.channel+'|'+x.cgroup], c=months.indexOf(x.month); if(r==null||c<0)return; var nx=x.value>0?{as:x.entered_as||MODE,v:x.value}:null, pv=cellObj(r,c); if(same(nx,pv))return; if(locked(c)){ lk.n++; return; } ops.push({r:r,c:c,prev:pv,next:nx}); if(!pv)add++; else if(!nx)clr++; else chg++; });
+        box.innerHTML='<b>'+H(f.name)+'</b>: '+(ops.length?ops.length+' cell'+(ops.length===1?'':'s')+' to change ('+add+' new, '+chg+' changed, '+clr+' cleared).':'nothing to change: the file matches the grid.')
           +(lk.n?' '+lk.n+' past-month cell'+(lk.n===1?'':'s')+' ignored (locked).':'')+(d.n_bad?' <span style="color:var(--neg)">'+d.n_bad+' cell'+(d.n_bad===1?'':'s')+' not a number, skipped: '+H(d.bad.slice(0,5).join('; '))+(d.n_bad>5?'…':'')+'</span>':'')
-          +(d.n_unknown?' <span style="color:var(--neg)">'+d.n_unknown+' row'+(d.n_unknown===1?'':'s')+' with an unknown market or channel skipped: '+H(d.unknown.slice(0,5).join('; '))+'</span>':'')
+          +(d.n_unknown?' <span style="color:var(--neg)">'+d.n_unknown+' row'+(d.n_unknown===1?'':'s')+' with an unknown market, channel or category group skipped: '+H(d.unknown.slice(0,5).join('; '))+'</span>':'')
           +' &nbsp;'+(ops.length?'<button class="w-btn" id="otbi-iok" style="background:var(--blue);border-color:var(--blue);color:#fff">Apply '+ops.length+' change'+(ops.length===1?'':'s')+'</button> ':'')+'<button class="w-btn" id="otbi-ix">'+(ops.length?'Cancel':'Close')+'</button>';
         box.querySelector('#otbi-ix').onclick=function(){ box.hidden=true; };
-        var ok=box.querySelector('#otbi-iok'); if(ok)ok.onclick=function(){ box.hidden=true; SS.sel={}; ops.forEach(function(o){ SS.sel[o.r+','+o.c]=1; }); SS.base={}; SS.anchor={r:ops[0].r,c:ops[0].c}; SS.ext=SS.anchor; paint(true); apply(ops,'Upload'); };
+        var ok=box.querySelector('#otbi-iok'); if(ok)ok.onclick=function(){ box.hidden=true; renderOtbInputView(body); setTimeout(function(){ var b2=document.getElementById('demand-body'); if(!b2)return; var g2=b2.querySelector('#otbi-grid'); if(g2&&g2.__otbiApply)g2.__otbiApply(ops); },0); };
       }).catch(function(e){ box.innerHTML='<b style="color:var(--neg)">Could not upload: '+H(e&&e.message||e)+'</b>'; }); };
     rd.readAsDataURL(f); };
+  T.__otbiApply=function(ops){ SS.sel={}; ops.forEach(function(o){ SS.sel[o.r+','+o.c]=1; }); SS.base={}; SS.anchor={r:ops[0].r,c:ops[0].c}; SS.ext=SS.anchor; paint(true); apply(ops,'Upload'); };
   upd(); totals(); paint();
 }
 var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)

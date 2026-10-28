@@ -8,22 +8,24 @@ sources:
   - artifact_v16.7.html :: renderWssiView, wssiCompute, wssiDerive, wssiPeriod
   - artifact_v16.7.html :: renderOtbInputView
   - server.mjs :: /api/demand/wssi-otb, /api/demand/wssi-otb/upload
-  - migrations/388_wssi_otb.sql :: planner.wssi_otb
-verified_version: v28.546
+  - migrations/396_wssi_otb_buy.sql :: planner.wssi_otb_buy
+  - artifact_v16.7.html :: wssiPx
+verified_version: v28.547
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: f531c8688d97
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
   server.mjs::/api/demand/wssi: ad274546ff25
-  artifact_v16.7.html::renderWssiView: ebd40ca676e0
-  artifact_v16.7.html::wssiCompute: 3776d2116f1e
+  artifact_v16.7.html::renderWssiView: fa8edbddb0bf
+  artifact_v16.7.html::wssiCompute: 2b7e654d9dc4
   artifact_v16.7.html::wssiDerive: 14c5ea25b702
   artifact_v16.7.html::wssiPeriod: 0b109896c92c
-  artifact_v16.7.html::renderOtbInputView: 1a57dc9a3eb4
-  server.mjs::/api/demand/wssi-otb: 0e498c81c438
-  server.mjs::/api/demand/wssi-otb/upload: 099ea374341f
-  migrations/388_wssi_otb.sql::planner.wssi_otb: 44eb8321b554
+  artifact_v16.7.html::renderOtbInputView: 6cc3ee000029
+  server.mjs::/api/demand/wssi-otb: e188dc52da51
+  server.mjs::/api/demand/wssi-otb/upload: 0386384c225c
+  migrations/396_wssi_otb_buy.sql::planner.wssi_otb_buy: a1fe75d1c479
+  artifact_v16.7.html::wssiPx: 4ff354639245
 ---
 
 # WSSI (DEMAND > WSSI)
@@ -84,11 +86,12 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Target closing units per SKU, market and pool = cover-weeks target x average weekly units of the next 3 months (actual where known, else forecast). Cover-weeks target = products.target_cover_weeks_<market>_<pool>_from_category, default 8 weeks.
 - Closing stock vs target £ cost = closing - target. Red when over target.
 - Open to buy remaining (forecast months) = target - projected closing, in £ retail, £ cost and units (v28.546: retail and units rows added). Positive = room to buy, negative = over-bought.
-- OTB planned (v28.487) comes from DEMAND ▸ Inputs ▸ Open to buy (planner.wssi_otb): £ at cost per month × market × channel, entered by planners (demand edit rights), past months locked. WSSI sums the inputs for the markets and channels picked (category, seasonality and status filters do not split them; a note says so).
-  - OTB planned £ cost = the inputs; units = £ / that month's cost per unit sold (cost of sales / units, else closing cost / closing units); £ retail = units x current selling price.
-  - The input page is a spreadsheet grid (v28.488): select / drag / Shift / Ctrl, arrows, Tab, Enter / F2 / digit edits, Delete clears, copy / paste blocks, fill, undo, status bar Sum / Count / Avg. Each change saves at once and is reverted if the save fails. Past months are locked.
-  - .xlsx template: Download = the grid with current figures; Upload = the server reads it (read only), the page previews the changes, Apply saves them as one undoable action. Past months and total rows are ignored; non-numbers and unknown market / channel rows are listed, never guessed.
-  - OTB adds to projected stock cumulatively: each forecast month's opening and closing include all OTB planned up to then, so closing vs target and OTB remaining move with it. Actual months ignore OTB.
+- Proposed / open to buy (v28.547, Ben 28-Oct-26, WSSI phase 2 from Kathryn's template; replaced the v28.487 £-at-cost inputs) comes from DEMAND ▸ Inputs ▸ Open to buy (planner.wssi_otb_buy, migration 396): buys planned but not yet placed as a PO, by arrival month × market × channel × category group, entered as units OR £ retail (planners with demand edit rights; past months locked).
+  - Conversion: selling price and cost per unit for that month × market × channel × category group from the WSSI facts (closing stock £ retail / units and £ cost / units of the channel's pool, else that month's sales, else the FY average for market × pool × group, else the market's FY average). £ retail entries become units = £ ÷ selling price.
+  - Drop-out (Ben: shrink by PO value): each buy is reduced by the units of matching POs that reached Production after the buy was first entered (created_at): same market, channel, category group and arrival month (WSSI's expected-arrival rule). PO channel = FBA for FBA / AWD branches, B2B for B2B / Direct to Client branches, else DTC; ZAL / TIK buys are never matched (they share the 3PL stock). The time the PO reached Production = its first "Status … → PRODUCTION" change, else the PO's creation. FUTURE and cancelled POs never count.
+  - WSSI rows: Proposed units = what is left (entered units − on PO, not below zero), £ retail = units × selling price, £ cost = units × cost per unit. Market, channel and category group filters split it; seasonality and product status do not (a note says so).
+  - The input page: rows Market · channel ▸ category group (collapsible, remembered per browser), Enter as Units / £ retail (remembered); under each cell "↳ n on PO · n left". Spreadsheet behaviour as v28.488; the .xlsx template has Market, Channel, Category group, Enter as and month columns; upload previews then applies as one undoable change.
+  - Proposed adds to projected stock cumulatively: each forecast month's opening and closing include all proposed units up to then, so closing vs target and OTB remaining move with it. Actual months ignore it.
 (source: artifact_v16.7.html :: wssiCompute, renderOtbInputView; server.mjs :: /api/demand/wssi-otb)
 (source: lib/wssi.mjs :: wssiBuild; artifact_v16.7.html :: wssiDerive)
 
@@ -115,5 +118,5 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 ## Q&A
 **Q:** Why is intake in a past month different from the POs received? **A:** Past intake is measured from stock movement (closing - opening + units sold), because PO receipt history is incomplete before Dec-25. It also catches stock arriving by other routes.
 **Q:** Why does DTC alone show the same stock as DTC + B2B? **A:** Stock is held by pool, not channel. DTC, B2B, Zalando and TikTok share the 3PL pool.
-**Q:** Where do I enter open to buy? **A:** DEMAND > Inputs > Open to buy, or the "Enter open to buy" button on WSSI. Amounts are £ at cost by month, market and channel.
+**Q:** Where do I enter open to buy? **A:** DEMAND > Inputs > Open to buy, or the "Enter open to buy" button on WSSI: units or £ retail by arrival month, market, channel and category group. It shrinks as matching POs reach Production.
 **Q:** Why are the margins so high? **A:** Since v28.546 cost is landed cost from the COGS feed where it has one; SKUs it does not cover still use FOB cost.
