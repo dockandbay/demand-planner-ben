@@ -1,6 +1,6 @@
 # Deploy package v28.545 to v28.552 (28-Oct-26)
 
-**STATUS 28-Oct-26: PR OPEN https://github.com/dockandbayteam/dock-bay-demand-planner/pull/32 (branch port/v28.552, from Ben e88dd0d0). Ben merges.**
+**STATUS 28-Oct-26: MERGED 05:08Z (0fcf8d62) by Ben; deploy run 40636198737 success; LIVE v28.552 (read back: /api/version v28.552).** Was: PR https://github.com/dockandbayteam/dock-bay-demand-planner/pull/32 (branch port/v28.552, from Ben e88dd0d0).
 
 ## What changed
 - v28.545 Payments: copy payment email link on the "Paid this session" popup.
