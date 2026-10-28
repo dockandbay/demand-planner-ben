@@ -14,6 +14,7 @@ import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
 import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
+import { ILG_POOLS, ILG_FILE_RE, ILG_GMAIL_Q, ilgReportAt, parseIlgReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -1309,6 +1310,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
+      || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
       || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
@@ -19736,6 +19738,121 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, label: cfg.label || mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.553 (Ben 28-Oct-26): ILG "DOCKBAY Daily Stock Report" → Manage 3PL ▸ UK (UK ILG / UK Non GRS / UK Vendor), compared with Fulfil,
+// and a ticked rebaseline: HORIZON queues one Fulfil stock count per ILG warehouse ('pending'); the n8n flow "Fulfil | ILG stocktake" writes
+// it through the guarded write sub-workflow (on the user's click via webhook, plus a 15-minute sweep), confirms it, reads it back and posts
+// the result here. HORIZON itself never writes stock to Fulfil. Reports come from ops@ (Gmail connector slot 2), hourly via n8n, or an upload.
+// Tables: planner.ilg_stock_reports / planner.ilg_rebaseline_batches (migration 399).
+const ILG_POOL_KEYS = Object.keys(ILG_POOLS);
+const _ilgCmp = new Map();   // pool|report_id -> { at, v }  (Fulfil reads, 90 s)
+async function ilgStore(meta, rows, by) {
+  const r = await pool.query(`INSERT INTO planner.ilg_stock_reports (message_id, filename, report_at, received_at, source, rows, imported_by)
+    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING RETURNING id`,
+    [meta.message_id || null, meta.filename, meta.report_at, meta.received_at || null, meta.source, JSON.stringify(rows), by || null]);
+  _ilgCmp.clear(); return r.rows[0] ? r.rows[0].id : null;
+}
+// newest ILG report in ops@ (last 4 days) → stored once per Gmail message. Returns { imported, skipped, report_id, filename, report_at }
+async function ilgImportFromGmail(by) {
+  const list = await gmailGetPaced('messages?' + new URLSearchParams({ q: ILG_GMAIL_Q, maxResults: '10' }).toString(), null, 'ops');
+  const found = [];
+  for (const m of (list.messages || [])) {
+    const full = await gmailGetPaced('messages/' + m.id + '?format=full', null, 'ops'); const parts = [];
+    const walk = (p) => { if (!p) return; if (p.filename && ILG_FILE_RE.test(p.filename) && p.body && p.body.attachmentId) parts.push(p); (p.parts || []).forEach(walk); }; walk(full.payload);
+    parts.forEach(p => found.push({ message_id: m.id, filename: p.filename, att: p.body.attachmentId, report_at: ilgReportAt(p.filename), received_at: full.internalDate ? new Date(Number(full.internalDate)).toISOString() : null }));
+  }
+  if (!found.length) return { imported: false, reason: 'no DOCKBAY_DAILYSTOCKREPORT attachment in ops@ in the last 4 days' };
+  found.sort((a, b) => String(b.report_at).localeCompare(String(a.report_at)));
+  const f = found[0];
+  const have = (await pool.query(`SELECT id FROM planner.ilg_stock_reports WHERE message_id=$1 OR (filename=$2 AND report_at=$3) LIMIT 1`, [f.message_id, f.filename, f.report_at])).rows[0];
+  if (have) return { imported: false, skipped: true, report_id: have.id, filename: f.filename, report_at: f.report_at };
+  const a = await gmailGetPaced('messages/' + f.message_id + '/attachments/' + f.att, null, 'ops');
+  const rows = parseIlgReport(Buffer.from(String(a.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
+  const id = await ilgStore({ ...f, source: 'gmail' }, rows, by);
+  return { imported: !!id, report_id: id, filename: f.filename, report_at: f.report_at, rows: rows.length };
+}
+async function ilgLatest(id) {
+  return (await pool.query(`SELECT id, filename, report_at, received_at, source, imported_at, imported_by, rows FROM planner.ilg_stock_reports
+    ${id ? 'WHERE id=$1' : ''} ORDER BY report_at DESC, id DESC LIMIT 1`, id ? [id] : [])).rows[0] || null;
+}
+async function ilgPoolCompare(rep, poolKey, fresh) {
+  const k = poolKey + '|' + rep.id, c = _ilgCmp.get(k); if (!fresh && c && Date.now() - c.at < 90000) return c.v;
+  const pr = ilgPoolReport(rep.rows, poolKey), snap = await ilgFulfilSnapshot(fulfilFetch, poolKey, Object.keys(pr), new Date(rep.report_at).toISOString());
+  const v = { warehouse_id: snap.warehouse_id, storage_id: snap.storage_id, rows: ilgCompare(pr, snap), fulfil_at: new Date().toISOString() }; _ilgCmp.set(k, { at: Date.now(), v }); return v;
+}
+app.get('/api/supply/ilg/status', async (req, res) => {
+  const poolKey = String(req.query.pool || 'UK').toUpperCase(); if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool ' + poolKey });
+  try { const rep = await ilgLatest(req.query.report_id ? Number(req.query.report_id) : null);
+    const counts = {}; if (rep) ILG_POOL_KEYS.forEach(k => { counts[k] = Object.keys(ilgPoolReport(rep.rows, k)).length; });
+    const batches = (await pool.query(`SELECT id, pool, status, created_at, created_by, sent_at, done_at, fulfil_count_id, fulfil_number, error, jsonb_array_length(lines) n_lines,
+      (SELECT coalesce(sum((l->>'set_to')::numeric - (l->>'storage_now')::numeric),0) FROM jsonb_array_elements(lines) l) net FROM planner.ilg_rebaseline_batches ORDER BY id DESC LIMIT 15`)).rows;
+    if (!rep) return res.set('Cache-Control', 'no-store').json({ pools: ILG_POOLS, pool: poolKey, report: null, batches });
+    let cmp = null, fulfil_error = null; try { cmp = await ilgPoolCompare(rep, poolKey, req.query.fresh === '1'); } catch (e) { fulfil_error = e.message; }
+    res.set('Cache-Control', 'no-store').json({ pools: ILG_POOLS, pool: poolKey, counts, batches, fulfil_error,
+      report: { id: rep.id, filename: rep.filename, report_at: rep.report_at, received_at: rep.received_at, source: rep.source, imported_at: rep.imported_at, imported_by: rep.imported_by },
+      ...(cmp || {}) });
+  } catch (e) { if (/ilg_stock_reports" does not exist/.test(e.message)) return res.json({ pools: ILG_POOLS, missing: 'migration 399' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/ilg/import', async (req, res) => {   // "Check ops@ now"
+  try { res.json(await ilgImportFromGmail(authUser(req))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/ilg/upload', async (req, res) => {   // manual fallback: upload the .xls
+  try { const b = req.body || {}, fn = String(b.filename || ''); const at = ilgReportAt(fn) || b.report_at;
+    if (!at) return res.status(400).json({ error: 'The file name must look like DOCKBAY_DAILYSTOCKREPORT_yyyymmdd_hhmm.xls (that is where the report time comes from)' });
+    const rows = parseIlgReport(Buffer.from(String(b.file_b64 || ''), 'base64'));
+    const id = await ilgStore({ filename: fn, report_at: at, source: 'upload' }, rows, authUser(req));
+    res.json({ imported: true, report_id: id, rows: rows.length, report_at: at });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/cron/ilg-stock-import', async (req, res) => {   // n8n "Ops | ILG stock report import (hourly)"
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await ilgImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Rebaseline: recompute the ticked SKUs against Fulfil now, queue one batch (count) for the pool's warehouse, nudge n8n.
+app.post('/api/supply/ilg/rebaseline', async (req, res) => {
+  const b = req.body || {}, poolKey = String(b.pool || '').toUpperCase(), skus = Array.from(new Set((Array.isArray(b.skus) ? b.skus : []).map(String)));
+  if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool' }); if (!skus.length) return res.status(400).json({ error: 'Tick at least one SKU' });
+  if (skus.length > 1000) return res.status(400).json({ error: 'At most 1000 SKUs per rebaseline' });
+  try { const rep = await ilgLatest(b.report_id ? Number(b.report_id) : null); if (!rep) return res.status(400).json({ error: 'No ILG report imported yet' });
+    const open = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND status IN ('pending','sent') LIMIT 1`, [poolKey])).rows[0];
+    if (open) return res.status(409).json({ error: 'Rebaseline #' + open.id + ' for this warehouse is still being written to Fulfil. Wait for it to finish (or cancel it if it is still pending).' });
+    const cmp = await ilgPoolCompare(rep, poolKey, true), by = {}; cmp.rows.forEach(r => { by[r.sku] = r; });
+    const lines = [], skipped = [];
+    skus.forEach(s => { const r = by[s]; if (!r || r.product_id == null) return skipped.push(s + ' (not in Fulfil)'); if (!r.diff) return skipped.push(s + ' (no difference now)');
+      lines.push({ sku: s, product_id: r.product_id, report_qty: r.report, fulfil_at_report: r.fulfil_at_report, moved_since: r.moved_since, storage_now: r.storage_now, set_to: Math.max(0, r.set_to) }); });
+    if (!lines.length) return res.status(400).json({ error: 'Nothing to rebaseline: ' + skipped.join('; ') });
+    const ins = (await pool.query(`INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
+      [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), authUser(req) || null])).rows[0];
+    let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK;   // optional: without it the n8n 15-minute sweep picks it up
+    if (hook && process.env.N8N_WEBHOOK_SECRET) { try { const r = await _fetchT(hook, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET }, body: JSON.stringify({ batch_id: ins.id }) }, 8000); nudged = r.ok; } catch (_) {} }
+    res.json({ ok: true, batch_id: ins.id, lines: lines.length, skipped, nudged });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/ilg/rebaseline/:id/cancel', async (req, res) => {
+  try { const r = await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status='cancelled', error=coalesce(error,'')||'cancelled by '||$2 WHERE id=$1 AND status='pending' RETURNING id`, [Number(req.params.id), authUser(req) || 'user']);
+    if (!r.rows[0]) return res.status(409).json({ error: 'Only a pending rebaseline can be cancelled (n8n may already be writing it)' }); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// n8n: claim pending batches (pending → sent) with what the count needs; the flow resolves Fulfil ids by name / SKU in its own tenant.
+app.post('/api/cron/ilg-rebaseline/claim', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const only = req.body && req.body.batch_id ? Number(req.body.batch_id) : null;
+    // a batch 'sent' for over 30 minutes with no result is treated as lost and offered again (n8n crashed mid-run)
+    const rows = (await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status='sent', sent_at=now() WHERE id IN (
+        SELECT id FROM planner.ilg_rebaseline_batches WHERE (status='pending' OR (status='sent' AND sent_at < now() - interval '30 minutes')) ${only ? 'AND id=$1' : ''} ORDER BY id LIMIT 5 FOR UPDATE SKIP LOCKED)
+      RETURNING id, pool, lines, created_by, to_char(created_at,'YYYY-MM-DD') date`, only ? [only] : [])).rows;
+    res.json({ batches: rows.map(r => ({ id: r.id, pool: r.pool, warehouse: ILG_POOLS[r.pool].warehouse, date: r.date, created_by: r.created_by,
+      reason: 'HORIZON ILG rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')', lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const b = req.body || {}, id = Number(b.batch_id); if (!id) return res.status(400).json({ error: 'batch_id required' });
+  try { const ok = b.ok === true;
+    const r = await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status=$2, done_at=now(), fulfil_count_id=$3, fulfil_number=$4, result=$5::jsonb, error=$6 WHERE id=$1 AND status='sent' RETURNING id`,
+      [id, ok ? 'done' : 'error', b.count_id || null, b.number != null ? String(b.number) : null, JSON.stringify(b.readback || null), ok ? null : String(b.error || 'failed').slice(0, 2000)]);
+    _ilgCmp.clear(); res.json({ ok: !!r.rows[0] });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)

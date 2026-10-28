@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::fbaIbAdvance: cd651007ffb8
   server.mjs::fbaIbCall: f3bb7a0ac121
   server.mjs::/api/supply/fba-inbound/ship-from: 9df48c98555e
-verified_version: v28.551
+verified_version: v28.553
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -168,6 +168,13 @@ verified_version: v28.551
 - **Send-to-Zalando tab**: suggested send = Zalando forecast over the current month plus the next (cover - 1) months, minus uploaded Zalando stock, rounded, floored at 0, NO minimum and no carton rounding. Cover defaults to 2 months (toggle 1 to 6). Months after the SKU's EU discontinue month are excluded. (source: _zalRender)
 - The tab hides the analysis if no stock file is uploaded or the upload is over 7 days old. The buy-plan feed does not apply the 7-day expiry. Download = ticked rows with an EAN, format EAN, Quantity. (source: _zalRender, buildZalStock)
 - The tab's header text says the forecast is "hard-coded (baked)"; it is now read from forecast_outputs (channel ZAL). (source: /api/supply/zalando/data)
+
+## Manage 3PL ▸ UK: ILG daily stock report and rebaseline (v28.553, Ben 28-Oct-26)
+- Source: ILG's "DOCKBAY Daily Stock Report" (DOCKBAY_DAILYSTOCKREPORT_yyyymmdd_hhmm.xls, ~19:30 UK) in ops@. The n8n flow "Ops | ILG stock report import (hourly)" asks HORIZON at :07 every hour to read the newest one from ops@ (Gmail connector, read only); it is stored once. "Check ops@ now" and "Upload .xls" do the same by hand. The report time comes from the file name (UK time).
+- Split by the report's Owner column: DOCKBAY = UK ILG (Fulfil warehouse "UK ILG"), DOCKFBA = UK Non GRS ("ILG - FBA"), DOCKVENDOR = UK Vendor, John Lewis ("ILG - VENDOR"). Physical Stock is summed across statuses (Good, Damaged, QA Hold, Client Reserve); non-Good statuses show under the SKU.
+- Compare per SKU with the Fulfil warehouse (all its zones): Fulfil at report = on hand now minus the net done stock moves into / out of the warehouse finished after the report time. Diff = report minus that. SKUs Fulfil holds that the report does not list count as report 0. Default view: discrepancies of 2 units or more.
+- Rebaseline: tick SKUs (filters, select all shown), review, Send to Fulfil. HORIZON recalculates against Fulfil, queues one batch for that warehouse and calls the n8n flow "Fulfil | ILG stocktake" (a 15-minute sweep is the backstop). n8n creates one Fulfil stock count in the warehouse's Storage Zone with each SKU set to Storage Zone now plus the difference (never below 0), completes and confirms it (Fulfil books the change to Lost and Found), reads it back and posts the result. All Fulfil writes go through the guarded write sub-workflow; HORIZON never writes stock itself. One open batch per warehouse at a time; a pending batch can be cancelled.
+(source: lib/ilg-stock.mjs :: ilgFulfilSnapshot, ilgCompare, parseIlgReport; server.mjs :: /api/supply/ilg/rebaseline)
 
 ## Common questions
 **Q:** Why is Transfer FBA 0 when FBA is clearly low?

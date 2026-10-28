@@ -15213,7 +15213,8 @@ function renderInventory(){
   try{ if(window.writeHash){ var _mk=(INV_SUB==='manage3pl'?INV_3PL:((INV_SUB==='managefba'||INV_SUB==='fba-aged')?INV_FBA:'')); writeHash(['buy-move','inventory',INV_SUB].concat(_mk?[_mk]:[])); } }catch(e){}
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
-  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU',['US_NG','US Non GRS'],['UK_NG','UK Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  if(INV_SUB==='manage3pl'&&INV_3PL==='UK_NG')INV_3PL='UK';   // v28.553: UK Non GRS now lives inside UK (ILG report, ILG - FBA tab)
+  if(INV_SUB==='manage3pl') body=pillbar(['US',['UK','UK (ILG)'],'AU','EU',['US_NG','US Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='cogs') body='<div id="cogs-panel"></div>';
@@ -15224,7 +15225,7 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
-  if(INV_SUB==='manage3pl')inv3plLoad();
+  if(INV_SUB==='manage3pl'){ if(INV_3PL==='UK')ilgLoad(); else inv3plLoad(); }   // v28.553: UK = the ILG daily report
   else if(INV_SUB==='managefba'){ if(INV_FBA==='AWD')invAwdLoad(); else invFbaLoad('manage'); }
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
@@ -15847,6 +15848,99 @@ function fbaListTbl(head, rows, cap){ if(!rows.length)return '<div class="mut" s
     +head.map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:4px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--hover)">'+tHesc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
     +rows.slice(0,500).map(function(r){ return '<tr>'+r.map(function(v,i){return '<td style="padding:3px 10px;text-align:'+(i===0?'left':'right')+(i===0?';font-family:ui-monospace,Menlo,monospace;font-size:11px':'')+'">'+tHesc(v)+'</td>';}).join('')+'</tr>'; }).join('')
     +'</tbody></table></div>'+(rows.length>500?'<div class="mut" style="font-size:11px;margin-top:3px">Showing first 500 of '+rows.length+'</div>':''); }
+// v28.553 (Ben 28-Oct-26, mockup "3 tabs + tick grid"): Manage 3PL ▸ UK = the ILG "DOCKBAY Daily Stock Report" (ops@, picked up hourly by n8n,
+// or uploaded), one tab per owner (UK ILG / UK Non GRS = ILG - FBA / UK Vendor = John Lewis), compared with Fulfil at the report time (on hand
+// now less the moves finished since). Tick SKUs (filters + select all shown), review, then "Send to Fulfil": HORIZON queues a stock count for
+// that ILG warehouse and the n8n stocktake flow writes it (Storage Zone set to now + difference; the change is booked to Lost and Found).
+var ILG={pool:'UK',d:null,loading:false,sel:{},review:false,msg:'',busy:false,poll:null,f:{show:'disc',q:'',status:'',dir:'',min:2}};
+try{ var _ilf=JSON.parse(localStorage.getItem('hz_ilg_f')||'null'); if(_ilf)ILG.f=Object.assign(ILG.f,_ilf); }catch(e){}
+function ilgSaveF(){ try{ localStorage.setItem('hz_ilg_f',JSON.stringify(ILG.f)); }catch(e){} }
+function ilgLoad(fresh){ var p=ILG.pool; ILG.loading=true; ilgRender();
+  fetch('/api/supply/ilg/status?pool='+p+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(j){ if(ILG.pool!==p)return; ILG.loading=false; ILG.d=j; ilgRender(); ilgPollMaybe(); })
+    .catch(function(e){ ILG.loading=false; ILG.d={error:String(e&&e.message||e)}; ilgRender(); }); }
+function ilgPollMaybe(){ clearTimeout(ILG.poll); var d=ILG.d; if(!d||!d.batches)return; if(!d.batches.some(function(b){ return b.status==='pending'||b.status==='sent'; }))return;
+  ILG.poll=setTimeout(function(){ if(document.getElementById('ilg-root'))fetch('/api/supply/ilg/status?pool='+ILG.pool).then(function(r){return r.json();}).then(function(j){ if(!document.getElementById('ilg-root'))return; var was=(ILG.d.batches||[]).filter(function(b){return b.status==='sent'||b.status==='pending';}).length; ILG.d.batches=j.batches; if(was&&!(j.batches||[]).some(function(b){return b.status==='sent'||b.status==='pending';})){ ILG.d=j; } ilgRender(); ilgPollMaybe(); }).catch(function(){}); },8000); }
+function ilgRows(){ var d=ILG.d||{}, f=ILG.f, q=String(f.q||'').trim().toUpperCase(), min=Number(f.min)||0;
+  return (d.rows||[]).filter(function(r){
+    if(f.show==='disc'&&!(r.diff&&Math.abs(r.diff)>=Math.max(1,min)))return false;
+    if(f.show==='notff'&&r.in_fulfil)return false; if(f.show==='notrep'&&r.in_report)return false;
+    if(f.show==='all'&&min&&r.diff&&Math.abs(r.diff)<min&&false)return false;
+    if(q&&String(r.sku).toUpperCase().indexOf(q)<0&&String(r.description||'').toUpperCase().indexOf(q)<0)return false;
+    if(f.status&&!(r.statuses&&r.statuses[f.status]))return false;
+    if(f.dir==='ilg'&&!(r.diff>0))return false; if(f.dir==='ff'&&!(r.diff<0))return false;
+    return true; }); }
+function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!panel)return; var d=ILG.d, E=tHesc, P=(d&&d.pools)||{UK:{label:'UK ILG'},UK_NG:{label:'UK Non GRS (ILG - FBA)'},UK_VD:{label:'UK Vendor (John Lewis)'}};
+  var n=function(v){ return v==null?'<span class="mut">—</span>':Math.round(v).toLocaleString('en-GB'); }, sg=function(v){ return v==null?'<span class="mut">—</span>':(v>0?'+':'')+Math.round(v).toLocaleString('en-GB'); };
+  var dt=function(iso){ if(!iso)return ''; var a=inv3plAge(iso); return a.stamp; };
+  var uk=function(iso){ try{ var p={}; new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(iso)).forEach(function(x){ p[x.type]=x.value; }); return p.day+'-'+p.month+'-'+p.year+' '+p.hour+':'+p.minute+' UK'; }catch(e){ return dt(iso); } };   // the report time is UK time whatever the viewer's zone
+  var h='<div id="ilg-root" style="font-size:12px">';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px">'+Object.keys(P).map(function(k){ var on=k===ILG.pool, c=d&&d.counts?d.counts[k]:null;
+    return '<button class="ilg-pool" data-p="'+k+'" style="padding:5px 14px;border-radius:8px;border:1px solid '+(on?'var(--blue)':'var(--line)')+';background:'+(on?'var(--blue-soft)':'var(--card)')+';color:'+(on?'var(--blue-ink)':'var(--muted)')+';font-weight:700;cursor:pointer">'+E(P[k].label)+(c!=null?' <span class="mut" style="font-weight:500">'+c+'</span>':'')+'</button>'; }).join('')+'</div>';
+  if(!d||ILG.loading&&!d){ panel.innerHTML=h+'<div class="mut">Loading the ILG report and Fulfil…</div></div>'; ilgWire(panel); return; }
+  if(d.missing){ panel.innerHTML=h+'<div style="color:var(--amber)">Needs migration 399 on this database.</div></div>'; return; }
+  if(d.error){ panel.innerHTML=h+'<div style="color:var(--neg)">'+E(d.error)+'</div></div>'; ilgWire(panel); return; }
+  var rep=d.report;
+  h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)">'
+    +(rep?'<span><b>'+E(rep.filename)+'</b> · report '+E(uk(rep.report_at))+' · '+(rep.source==='upload'?'uploaded':'from ops@')+' '+E(dt(rep.imported_at))+(rep.imported_by?' by '+E(inv3plUser(rep.imported_by)):'')+'</span>':'<span style="color:var(--amber)">No ILG report yet.</span>')
+    +(d.fulfil_at?'<span class="mut">Fulfil read '+E(dt(d.fulfil_at))+'</span>':'')
+    +'<span style="flex:1"></span><button class="save-btn light" id="ilg-check">Check ops@ now</button><button class="save-btn light" id="ilg-up">Upload .xls</button><input type="file" id="ilg-file" accept=".xls" style="display:none"><button class="save-btn light" id="ilg-fresh">Refresh Fulfil</button>'
+    +(ILG.msg?'<span id="ilg-msg" style="color:var(--amber)">'+E(ILG.msg)+'</span>':'')+'</div>';
+  if(d.fulfil_error)h+='<div style="color:var(--neg);margin-bottom:8px">Fulfil could not be read: '+E(d.fulfil_error)+'</div>';
+  if(rep&&d.rows){ var f=ILG.f, rows=ilgRows(), stats={}; (d.rows||[]).forEach(function(r){ Object.keys(r.statuses||{}).forEach(function(s){ stats[s]=1; }); });
+    var selRows=(d.rows||[]).filter(function(r){ return ILG.sel[r.sku]; }), net=selRows.reduce(function(a,r){ return a+(r.diff||0); },0), allOn=rows.length&&rows.every(function(r){ return ILG.sel[r.sku]||!r.diff||r.product_id==null; });
+    var sel=function(id,v,opts){ return '<select id="'+id+'" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'+opts.map(function(o){ return '<option value="'+E(o[0])+'"'+(String(v)===String(o[0])?' selected':'')+'>'+E(o[1])+'</option>'; }).join('')+'</select>'; };
+    h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+      +'<span class="mut">Show</span>'+sel('ilg-show',f.show,[['disc','Discrepancies'],['all','All SKUs'],['notff','Not in Fulfil'],['notrep','In Fulfil, not in the report']])
+      +'<input id="ilg-q" value="'+E(f.q)+'" placeholder="Search SKU / description" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;min-width:180px;background:var(--card);color:var(--ink)">'
+      +'<span class="mut">Status</span>'+sel('ilg-status',f.status,[['','All']].concat(Object.keys(stats).sort().map(function(s){ return [s,s]; })))
+      +'<span class="mut">Diff</span>'+sel('ilg-dir',f.dir,[['','± any'],['ilg','ILG higher (+)'],['ff','Fulfil higher (−)']])
+      +'<span class="mut">Ignore under</span><input id="ilg-min" type="number" min="0" value="'+E(f.min)+'" style="width:56px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><span class="mut">units</span></div>';
+    h+='<div style="display:flex;gap:12px;align-items:center;margin-bottom:6px"><label style="cursor:pointer"><input type="checkbox" id="ilg-all"'+(allOn?' checked':'')+'> Select all '+rows.filter(function(r){ return r.diff&&r.product_id!=null; }).length+' shown</label>'
+      +'<span>Selected <b>'+selRows.length+'</b> · net <b>'+sg(net)+'</b> units</span>'+(selRows.length?' <a href="javascript:void 0" id="ilg-clear" style="color:var(--blue)">clear</a>':'')+'</div>';
+    h+='<div style="overflow:auto;max-height:calc(100vh - 330px);border:1px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums"><thead><tr style="position:sticky;top:0;background:var(--hdr-tint);z-index:1">'
+      +['','SKU','Description','Report '+(rep?uk(rep.report_at).slice(10,15):''),'Fulfil at report','Moved since','Diff','Storage now','Set to'].map(function(t,i){ return '<th style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:'+(i>=3?'right':'left')+'">'+E(t)+'</th>'; }).join('')+'</tr></thead><tbody>';
+    rows.slice(0,1500).forEach(function(r){ var can=r.diff&&r.product_id!=null, st=Object.keys(r.statuses||{}).filter(function(s){ return s!=='Good'; });
+      h+='<tr style="border-top:1px solid var(--line2)"><td style="padding:4px 8px">'+(can?'<input type="checkbox" class="ilg-ck" data-s="'+E(r.sku)+'"'+(ILG.sel[r.sku]?' checked':'')+'>':'')+'</td>'
+        +'<td style="padding:4px 8px;font-weight:600;white-space:nowrap;text-align:left">'+E(r.sku)+(!r.in_fulfil?' <span style="color:var(--neg);font-weight:500">not in Fulfil</span>':'')+(!r.in_report?' <span class="mut" style="font-weight:500">not in report</span>':'')+'</td>'
+        +'<td style="padding:4px 8px;text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+E(r.description||'')+'">'+E(r.description||'')+(st.length?'<div class="mut" style="font-size:11px">↳ '+st.map(function(s){ return E(s)+' '+n(r.statuses[s]); }).join(' · ')+'</div>':'')+'</td>'
+        +'<td style="padding:4px 8px;text-align:right">'+n(r.report)+'</td><td style="padding:4px 8px;text-align:right">'+n(r.fulfil_at_report)+'</td><td style="padding:4px 8px;text-align:right">'+(r.moved_since?sg(r.moved_since):'<span class="mut">0</span>')+'</td>'
+        +'<td style="padding:4px 8px;text-align:right;font-weight:700;color:'+(r.diff>0?'var(--pos)':r.diff<0?'var(--neg)':'var(--muted)')+'">'+sg(r.diff)+'</td><td style="padding:4px 8px;text-align:right">'+n(r.storage_now)+'</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+(r.diff?n(Math.max(0,r.set_to)):'<span class="mut">—</span>')+'</td></tr>'; });
+    if(!rows.length)h+='<tr><td colspan="9" class="mut" style="padding:10px">Nothing matches these filters.</td></tr>';
+    h+='</tbody></table></div>';
+    if(rows.length>1500)h+='<div class="mut">Showing the first 1,500 rows.</div>';
+    h+='<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+(ILG.review?''
+        :'<button class="save-btn" id="ilg-rb"'+(selRows.length?'':' disabled')+' style="background:var(--nav);color:#fff">Rebaseline '+selRows.length+' SKU'+(selRows.length===1?'':'s')+' in Fulfil</button><span class="mut">Review first; nothing is sent until you press Send.</span>')+'</div>';
+    if(ILG.review&&selRows.length){ var up=selRows.filter(function(r){ return r.diff>0; }), dn=selRows.filter(function(r){ return r.diff<0; });
+      h+='<div style="margin-top:10px;padding:12px 14px;border:1px solid var(--amber);border-radius:10px;background:var(--amber-bg)"><div style="font-weight:800;margin-bottom:6px">Review: one stock count in Fulfil warehouse "'+E(P[ILG.pool].warehouse||P[ILG.pool].label)+'" (Storage Zone)</div>'
+        +'<div>'+selRows.length+' SKU lines · '+up.length+' up ('+sg(up.reduce(function(a,r){return a+r.diff;},0))+') · '+dn.length+' down ('+sg(dn.reduce(function(a,r){return a+r.diff;},0))+') · net <b>'+sg(net)+'</b> units. Each SKU is set to its Storage Zone quantity now plus the difference; Fulfil books the change to Lost and Found. The quantities are recalculated against Fulfil when you press Send.</div>'
+        +'<div style="margin-top:8px;display:flex;gap:8px"><button class="save-btn" id="ilg-send" style="background:var(--neg);color:#fff"'+(ILG.busy?' disabled':'')+'>'+(ILG.busy?'Sending…':'Send to Fulfil')+'</button><button class="save-btn light" id="ilg-cancel">Back</button></div></div>'; } }
+  var B=(d.batches||[]).filter(function(b){ return b.pool===ILG.pool; });
+  if(B.length){ h+='<div class="sect-h" style="margin-top:18px">Rebaseline history</div><table style="border-collapse:collapse;text-align:left"><tbody>'+B.map(function(b){ var c={pending:'var(--amber)',sent:'var(--blue)',done:'var(--pos)',error:'var(--neg)',cancelled:'var(--muted)'}[b.status]||'var(--muted)';
+      return '<tr><td style="padding:3px 10px 3px 0">#'+b.id+'</td><td style="padding:3px 10px 3px 0">'+E(dt(b.created_at))+' '+E(inv3plUser(b.created_by))+'</td><td style="padding:3px 10px 3px 0">'+b.n_lines+' lines · net '+sg(Number(b.net))+'</td>'
+        +'<td style="padding:3px 10px 3px 0;color:'+c+';font-weight:700">'+E(b.status==='sent'?'writing in Fulfil…':b.status==='pending'?'waiting for n8n':b.status)+(b.fulfil_number?' · count '+E(b.fulfil_number):'')+'</td><td style="padding:3px 0;color:var(--neg)">'+E(b.error||'')+(b.status==='pending'?' <a href="javascript:void 0" class="ilg-bc" data-id="'+b.id+'" style="color:var(--blue)">cancel</a>':'')+'</td></tr>'; }).join('')+'</tbody></table>'; }
+  h+='</div>'; panel.innerHTML=h; ilgWire(panel); }
+function ilgWire(panel){ var $=function(id){ return panel.querySelector('#'+id); };
+  panel.querySelectorAll('.ilg-pool').forEach(function(b){ b.onclick=function(){ if(ILG.pool===b.dataset.p)return; ILG.pool=b.dataset.p; ILG.sel={}; ILG.review=false; ILG.d=null; ilgLoad(); }; });
+  var setF=function(k,v){ ILG.f[k]=v; ilgSaveF(); ILG.review=false; ilgRender(); };
+  if($('ilg-show'))$('ilg-show').onchange=function(){ setF('show',this.value); }; if($('ilg-status'))$('ilg-status').onchange=function(){ setF('status',this.value); }; if($('ilg-dir'))$('ilg-dir').onchange=function(){ setF('dir',this.value); };
+  if($('ilg-min'))$('ilg-min').onchange=function(){ setF('min',Math.max(0,parseInt(this.value,10)||0)); };
+  if($('ilg-q')){ var qi=$('ilg-q'); qi.oninput=function(){ clearTimeout(qi._t); var v=qi.value; qi._t=setTimeout(function(){ ILG.f.q=v; ilgSaveF(); ilgRender(); var n2=document.getElementById('ilg-q'); if(n2){ n2.focus(); try{ n2.setSelectionRange(v.length,v.length); }catch(e){} } },250); }; }
+  if($('ilg-all'))$('ilg-all').onchange=function(){ var on=this.checked; ilgRows().forEach(function(r){ if(r.diff&&r.product_id!=null){ if(on)ILG.sel[r.sku]=1; else delete ILG.sel[r.sku]; } }); ILG.review=false; ilgRender(); };
+  if($('ilg-clear'))$('ilg-clear').onclick=function(){ ILG.sel={}; ILG.review=false; ilgRender(); };
+  panel.querySelectorAll('.ilg-ck').forEach(function(c){ c.onchange=function(){ if(c.checked)ILG.sel[c.dataset.s]=1; else delete ILG.sel[c.dataset.s]; ILG.review=false; ilgRender(); }; });
+  if($('ilg-rb'))$('ilg-rb').onclick=function(){ ILG.review=true; ilgRender(); };
+  if($('ilg-cancel'))$('ilg-cancel').onclick=function(){ ILG.review=false; ilgRender(); };
+  if($('ilg-send'))$('ilg-send').onclick=function(){ if(ILG.busy)return; ILG.busy=true; ilgRender();
+    fetch('/api/supply/ilg/rebaseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pool:ILG.pool,report_id:ILG.d.report&&ILG.d.report.id,skus:Object.keys(ILG.sel)})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ ILG.busy=false; ILG.review=false; ILG.sel={}; ILG.msg='Rebaseline #'+j.batch_id+' queued ('+j.lines+' lines'+(j.skipped&&j.skipped.length?'; skipped '+j.skipped.length:'')+'). '+(j.nudged?'n8n is writing it now.':'n8n picks it up within 15 minutes.'); ilgLoad(true); })
+      .catch(function(e){ ILG.busy=false; ILG.msg='Not sent: '+(e.message||e); ilgRender(); }); };
+  panel.querySelectorAll('.ilg-bc').forEach(function(a){ a.onclick=function(){ fetch('/api/supply/ilg/rebaseline/'+a.dataset.id+'/cancel',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ ILG.msg=j.error||('Rebaseline #'+a.dataset.id+' cancelled'); ilgLoad(); }); }; });
+  if($('ilg-fresh'))$('ilg-fresh').onclick=function(){ ILG.msg=''; ilgLoad(true); };
+  if($('ilg-check'))$('ilg-check').onclick=function(){ ILG.msg='Checking ops@…'; ilgRender(); fetch('/api/supply/ilg/import',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ ILG.msg=j.error?('ops@: '+j.error):j.imported?('Imported '+j.filename):j.skipped?('Latest report already imported ('+j.filename+')'):(j.reason||'Nothing new'); ilgLoad(true); }).catch(function(e){ ILG.msg=String(e.message||e); ilgRender(); }); };
+  var fi=$('ilg-file'); if($('ilg-up'))$('ilg-up').onclick=function(){ fi.value=''; fi.click(); };
+  if(fi)fi.onchange=function(){ var file=fi.files&&fi.files[0]; if(!file)return; var rd=new FileReader(); ILG.msg='Uploading '+file.name+'…'; ilgRender();
+    rd.onload=function(){ fetch('/api/supply/ilg/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:file.name,file_b64:String(rd.result).split(',')[1]||''})}).then(function(r){ return r.json(); })
+      .then(function(j){ ILG.msg=j.error?('Not imported: '+j.error):('Imported '+file.name+' ('+j.rows+' rows)'); ilgLoad(true); }).catch(function(e){ ILG.msg=String(e.message||e); ilgRender(); }); }; rd.readAsDataURL(file); }; }
 function inv3plUser(e){ e=String(e||''); var i=e.indexOf('@'); return i>0?e.slice(0,i+1):(e||'—'); }   // ben@dockandbay.com → ben@
 function inv3plAge(iso){ var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var d=new Date(String(iso||'').replace(' ','T')); if(isNaN(d.getTime()))return {age:'',stamp:String(iso||'')};

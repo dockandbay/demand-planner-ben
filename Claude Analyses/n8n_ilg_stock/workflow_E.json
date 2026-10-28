@@ -1,0 +1,965 @@
+{
+ "name": "Fulfil | ILG stocktake [SANDBOX]",
+ "nodes": [
+  {
+   "id": "d5e084cf-191b-5446-99af-714910feab42",
+   "name": "About",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -420,
+    -380
+   ],
+   "parameters": {
+    "content": "## Fulfil | ILG stocktake\nHORIZON \u25b8 Manage 3PL \u25b8 UK (ILG): a user ticks SKUs and presses **Send to Fulfil**. HORIZON queues the rebaseline and calls this webhook; a 15-minute sweep also picks up anything queued.\nPer batch: one **stock count** in the ILG warehouse's **Storage Zone** (UK ILG / ILG - FBA / ILG - VENDOR, found by name), each SKU set to HORIZON's 'set to' (Storage Zone now + report difference). Complete + confirm, so Fulfil books the change to **Lost and Found**. All writes go through the guarded **Fulfil | Request (sub-workflow)** (PROD writes need allowProdWrite). Read back, result posted to HORIZON.\nTest (SANDBOX only): POST the webhook with {\"test_batch\": {id, warehouse, date, reason, lines:[{sku, set_to}]}}.\nBuilt by Claude for Ben, 28-Oct-26.",
+    "width": 640,
+    "height": 300
+   }
+  },
+  {
+   "id": "19f68416-0c23-5649-a60a-ac3931cdb78e",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    -120
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "ilg-stocktake",
+    "responseMode": "onReceived",
+    "options": {}
+   }
+  },
+  {
+   "id": "b188fbce-6f69-56f5-b49e-d6686ba9d314",
+   "name": "Every 15 min",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    100
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "*/15 * * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "65ab4a81-bc9a-5186-835a-bfc00df695ac",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"allowProdWrite\": false,\n  \"horizonUrl\": \"https://horizon.dockandbay.com\",\n  \"secret\": \"__HZ_SECRET__\",\n  \"lostFoundId\": 10,\n  \"allowTestBatch\": true,\n  \"horizonEnabled\": false\n}",
+    "options": {}
+   }
+  },
+  {
+   "id": "d46d520e-2c6a-5032-8ba4-6e09f49be135",
+   "name": "Claim batches",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst fromHook = $('Webhook').isExecuted;\nlet batchId = null;\nif (fromHook) {\n  const h = $('Webhook').first().json;\n  if (String((h.headers || {})['x-webhook-secret'] || '') !== String(S.secret)) throw new Error('webhook: bad secret');\n  const b = h.body || {};\n  // test mode (SANDBOX only): run one synthetic batch without touching HORIZON\n  if (b.test_batch) { if (S.tenant !== 'SANDBOX' || S.allowTestBatch !== true) throw new Error('test_batch is only allowed on SANDBOX');\n    return [{ json: Object.assign({ test: true }, b.test_batch) }]; }\n  batchId = b.batch_id || null;\n}\nif (S.horizonEnabled !== true) return [];\nconst r = await this.helpers.httpRequest({ method: 'POST', url: S.horizonUrl + '/api/cron/ilg-rebaseline/claim', headers: { 'x-webhook-secret': S.secret }, body: batchId ? { batch_id: batchId } : {}, json: true, timeout: 60000 });\nreturn (r.batches || []).map(b => ({ json: b }));\n"
+   }
+  },
+  {
+   "id": "bca3ea33-6e46-5796-88be-65a231b960a4",
+   "name": "Read warehouse",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.location/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[['type','=','warehouse'],['name','=',$json.warehouse]],0,2,null,['id','name','storage_location']]) }}",
+    "options": {
+     "timeout": 60000,
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   }
+  },
+  {
+   "id": "ee53ed5e-11d9-5c2a-b022-9250ab700ad9",
+   "name": "Read products",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/product.product/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[['code','in',$('Claim batches').item.json.lines.map(l => l.sku)]],0,1000,null,['id','code']]) }}",
+    "options": {
+     "timeout": 60000,
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   }
+  },
+  {
+   "id": "3c15fce4-551b-5dc9-9242-40d989868c5e",
+   "name": "Build count",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json, B = $('Claim batches').item.json;\nconst wh = (($('Read warehouse').item.json.body) || [])[0];\nconst prods = ($('Read products').item.json.body) || [];\nconst id = {}; prods.forEach(p => { id[String(p.code)] = p.id; });\nconst missing = B.lines.filter(l => id[l.sku] == null).map(l => l.sku);\nif (!wh || !wh.storage_location) return { json: { ok: false, batch: B, error: 'Fulfil warehouse \"' + B.warehouse + '\" not found in ' + S.tenant } };\nif (missing.length) return { json: { ok: false, batch: B, error: 'SKUs not in Fulfil ' + S.tenant + ': ' + missing.join(', ') } };\nconst lines = B.lines.map(l => ({ product: id[l.sku], quantity: Math.max(0, Number(l.set_to) || 0) }));\nreturn { json: { ok: true, batch: B, storage: wh.storage_location,\n  tenant: S.tenant, method: 'POST', path: '/model/stock.inventory', allow_prod_write: S.allowProdWrite === true, tag: { batch: B },\n  body: [{ location: wh.storage_location, lost_found: S.lostFoundId, date: B.date, type: 'cycle', reason: B.reason, lines: [['create', lines]] }] } };\n",
+    "mode": "runOnceForEachItem"
+   }
+  },
+  {
+   "id": "bbacd0e8-fbc7-5336-9885-9643118a9a8e",
+   "name": "Ready?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "513b741c-a297-54ab-b32e-fb60fe138a18",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "d8f68cae-87f0-5f81-af8c-e7dbeb3083a0",
+   "name": "Create count (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    1540,
+    -80
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "52c79acf-73f3-57a6-8a3a-af8b4d0d57f5",
+   "name": "Prep complete",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1760,
+    -80
+   ],
+   "parameters": {
+    "jsCode": "\n// state rides in tag (the sub-workflow echoes it); on an error item fall back to the paired input\nconst S = $('Settings').first().json, res = $json; let t = res.tag; if (!t) { try { t = { batch: $('Build count').item.json.batch }; } catch (e) { t = {}; } }\nconst cid = res && res.data && res.data[0] ? (res.data[0].id || res.data[0]) : null;\nif (!res.ok || !cid) return { json: { ok: false, batch: t.batch, error: 'create failed: ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: t.batch, count_id: cid, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + cid + '/complete', body: [[cid]], allow_prod_write: S.allowProdWrite === true, tag: { batch: t.batch, count_id: cid } } };\n",
+    "mode": "runOnceForEachItem"
+   }
+  },
+  {
+   "id": "27e9f0f3-7948-58df-93c6-9ff93ad4f064",
+   "name": "Created?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1980,
+    -80
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "dda90674-5ecc-578e-8a0f-60db49d30e20",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "a6134ddf-3c90-590a-a887-74fc18c353ed",
+   "name": "Complete (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    2200,
+    -160
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "e4d43847-6d7e-59d9-9106-3cd6155ed802",
+   "name": "Prep confirm",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2420,
+    -160
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json, res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep complete').item.json; } catch (e) { prev = {}; } }\nif (!res.ok) return { json: { ok: false, batch: prev.batch, count_id: prev.count_id, error: 'complete failed (count ' + prev.count_id + ' left in draft): ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: prev.batch, count_id: prev.count_id, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + prev.count_id + '/confirm', body: [[prev.count_id]], allow_prod_write: S.allowProdWrite === true, tag: { batch: prev.batch, count_id: prev.count_id } } };\n",
+    "mode": "runOnceForEachItem"
+   }
+  },
+  {
+   "id": "bc11f799-f296-51ca-ab2b-8e717afedc81",
+   "name": "Completed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2640,
+    -160
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "a0f71b00-fc26-5e88-b77c-bb51d3c3211b",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "e8956ea7-28a2-5c13-afbd-2bc120fab5b7",
+   "name": "Confirm (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    2860,
+    -240
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "a2dd9dc6-f937-5dad-b32d-177db378d14a",
+   "name": "After confirm",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3080,
+    -240
+   ],
+   "parameters": {
+    "jsCode": "\nconst res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep confirm').item.json; } catch (e) { prev = {}; } }\nif (!res.ok) return { json: { ok: false, batch: prev.batch, count_id: prev.count_id, error: 'confirm failed (count ' + prev.count_id + ' completed, not done): ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: prev.batch, count_id: prev.count_id } };\n",
+    "mode": "runOnceForEachItem"
+   }
+  },
+  {
+   "id": "a0f81d5a-fc72-5227-8233-7091d75ac0f7",
+   "name": "Confirmed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3300,
+    -240
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "6d569179-f759-515d-8c04-832384f2875e",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "753faabd-e5cc-5727-bf03-bd922f24af88",
+   "name": "Read count",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    3520,
+    -320
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.inventory/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[['id','=',$json.count_id]],0,1,null,['id','number','state']]) }}",
+    "options": {
+     "timeout": 60000,
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   }
+  },
+  {
+   "id": "c37891f1-b47a-5bc7-8ec8-44c6d9d2cbe0",
+   "name": "Read count lines",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    3740,
+    -320
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.inventory.line/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[['inventory','=',$('After confirm').item.json.count_id]],0,1000,null,['product','expected_quantity','quantity']]) }}",
+    "options": {
+     "timeout": 60000,
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   }
+  },
+  {
+   "id": "93cbf83c-5d50-5eec-b6b6-b7d5fd893f56",
+   "name": "Join read-back",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3960,
+    -320
+   ],
+   "parameters": {
+    "jsCode": "\nconst prev = $('After confirm').item.json;\nreturn { json: Object.assign({}, prev, { readback: { header: $('Read count').item.json.body, lines: $json.body } }) };\n",
+    "mode": "runOnceForEachItem"
+   }
+  },
+  {
+   "id": "8f67a74f-7b82-548a-89ae-0928878c4104",
+   "name": "Report to HORIZON",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4180,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\n// one result per batch back to HORIZON (skipped for a SANDBOX test batch)\nconst S = $('Settings').first().json, out = [];\nfor (const it of $input.all()) {\n  const j = it.json; let result = { batch_id: j.batch && j.batch.id, ok: false, error: j.error || 'failed', count_id: j.count_id || null };\n  if (j.ok && j.readback) {\n    const hd = (j.readback.header || [])[0] || {}, ln = j.readback.lines || [];\n    const done = hd.state === 'done';\n    result = { batch_id: j.batch.id, ok: done, count_id: j.count_id, number: hd.number || String(j.count_id), readback: { state: hd.state, lines: ln.map(l => ({ product: l.product, expected: l.expected_quantity, counted: l.quantity })) },\n      error: done ? null : 'count ' + j.count_id + ' is \"' + hd.state + '\" after confirm' };\n  }\n  if (!(j.batch && j.batch.test)) await this.helpers.httpRequest({ method: 'POST', url: S.horizonUrl + '/api/cron/ilg-rebaseline/result', headers: { 'x-webhook-secret': S.secret }, body: result, json: true, timeout: 60000 });\n  out.push({ json: Object.assign({ tenant: S.tenant, test: !!(j.batch && j.batch.test) }, result) });\n}\nreturn out;\n"
+   }
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Every 15 min": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "Claim batches",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Claim batches": {
+   "main": [
+    [
+     {
+      "node": "Read warehouse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read warehouse": {
+   "main": [
+    [
+     {
+      "node": "Read products",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read products": {
+   "main": [
+    [
+     {
+      "node": "Build count",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build count": {
+   "main": [
+    [
+     {
+      "node": "Ready?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ready?": {
+   "main": [
+    [
+     {
+      "node": "Create count (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Report to HORIZON",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Create count (guarded)": {
+   "main": [
+    [
+     {
+      "node": "Prep complete",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Prep complete": {
+   "main": [
+    [
+     {
+      "node": "Created?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Created?": {
+   "main": [
+    [
+     {
+      "node": "Complete (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Report to HORIZON",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Complete (guarded)": {
+   "main": [
+    [
+     {
+      "node": "Prep confirm",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Prep confirm": {
+   "main": [
+    [
+     {
+      "node": "Completed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Completed?": {
+   "main": [
+    [
+     {
+      "node": "Confirm (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Report to HORIZON",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Confirm (guarded)": {
+   "main": [
+    [
+     {
+      "node": "After confirm",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "After confirm": {
+   "main": [
+    [
+     {
+      "node": "Confirmed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Confirmed?": {
+   "main": [
+    [
+     {
+      "node": "Read count",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Report to HORIZON",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read count": {
+   "main": [
+    [
+     {
+      "node": "Read count lines",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read count lines": {
+   "main": [
+    [
+     {
+      "node": "Join read-back",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Join read-back": {
+   "main": [
+    [
+     {
+      "node": "Report to HORIZON",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ }
+}

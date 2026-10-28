@@ -1,0 +1,96 @@
+{
+ "name": "Ops | ILG stock report import (hourly)",
+ "nodes": [
+  {
+   "id": "d5e084cf-191b-5446-99af-714910feab42",
+   "name": "About",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -380,
+    -260
+   ],
+   "parameters": {
+    "content": "## Ops | ILG stock report import (hourly)\nHORIZON reads the newest **DOCKBAY Daily Stock Report** from **ops@** (Gmail connector, read only) and stores it once. ILG sends it once a day (~19:30 UK); this checks every hour at :07.\nHORIZON \u25b8 Buy & Move \u25b8 Inventory \u25b8 Manage 3PL \u25b8 UK (ILG). Built by Claude for Ben, 28-Oct-26.",
+    "width": 520,
+    "height": 220
+   }
+  },
+  {
+   "id": "e20e2b48-4a8d-5f81-8def-9fdeb7067ca2",
+   "name": "Every hour :07",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "7 * * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "65ab4a81-bc9a-5186-835a-bfc00df695ac",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"horizonUrl\": \"https://horizon.dockandbay.com\",\n  \"secret\": \"__HZ_SECRET__\"\n}",
+    "options": {}
+   }
+  },
+  {
+   "id": "fdf5f5c4-3ae8-5526-9e14-ea4d9fddedc0",
+   "name": "Import latest report",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst r = await this.helpers.httpRequest({ method: 'POST', url: S.horizonUrl + '/api/cron/ilg-stock-import', headers: { 'x-webhook-secret': S.secret }, body: {}, json: true, timeout: 120000 });\n// imported: a new report was stored; skipped: the newest one is already in; reason: nothing found in ops@ (normal until ~19:40 UK)\nreturn [{ json: r }];\n"
+   }
+  }
+ ],
+ "connections": {
+  "Every hour :07": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "Import latest report",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ }
+}
