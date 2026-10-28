@@ -17693,8 +17693,12 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       // supersede any earlier still-pending submission of the same kind for this PO so only the latest is actionable
       await client.query(`UPDATE planner.supplier_submissions SET status='superseded'
         WHERE po=$1 AND kind=$2 AND status='pending'`, [b.po, kind]);
-      await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by)
-        VALUES ($1,$2,$3,$4,$5,'pending',$6)`, [sid, b.po, kind, String(value), attId || null, by]);
+      // v28.532 (Ben: "if the date is already the same no action required to update anything or do anything"): a completion date equal to the PO's
+      // entered production end is stored as already applied, so nothing waits for approval
+      let _st = 'pending';
+      if (kind === 'completion_date') { try { const ce = (await client.query(`SELECT to_char(end_production_overide,'YYYY-MM-DD') e FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0]; /* the ENTERED end only: a date matching an estimate still needs approving (that sets it) */ if (ce && ce.e && String(value).slice(0, 10) === ce.e) _st = 'applied'; } catch (_) {} }
+      await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by${_st === 'applied' ? ', applied_by, applied_at' : ''})
+        VALUES ($1,$2,$3,$4,$5,$6,$7${_st === 'applied' ? `,'auto: already the production end',now()` : ''})`, [sid, b.po, kind, String(value), attId || null, _st, by]);
       out.staged.push(kind);
       // invoice / completion info → visible unread timeline note (+ email for invoices)
       if (kind === 'invoice_value' || kind === 'completion_date') await postSupplierSubmitNote(client, b.po, kind, value, by);
@@ -23240,6 +23244,9 @@ app.post('/api/supply/po/:po', async (req, res) => {
   if (_trackKeys.length) { try { _trackOld = (await pool.query(
     `SELECT ${_trackKeys.map(k => `${k}::text AS ${k}`).join(',')} FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0] || {}; } catch (e) {} }
   const _trackBy = authUser(req) || null;
+  if (body.end_production_overide && /^\d{4}-\d{2}-\d{2}/.test(String(body.end_production_overide))) {   // v28.532: setting the end date to the supplier's pending date = done
+    try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$3, applied_at=now() WHERE po=$1 AND kind='completion_date' AND status='pending' AND left(coalesce(value,''),10)=$2`,
+      [req.params.po, String(body.end_production_overide).slice(0, 10), (_trackBy || 'internal') + ' (end date set to the same date)']); } catch (_) {} }
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)

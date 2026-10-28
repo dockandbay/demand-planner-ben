@@ -1,3 +1,10 @@
+## v28.532 (28-Oct-26) A supplier completion date that equals the entered production end needs nothing
+- Ben (PO-1891958 ▸ Dates: production end 21-Oct-26, supplier completion date 21-Oct-26 "awaiting approval"): "if the date is already the same no action required to update anything or do anything".
+- Dates tab: a pending supplier completion date equal to the PO's ENTERED production end shows "same as the entered production end · nothing to approve" (no Approve / Reject); the timeline no longer lists it under "Awaiting your approval" (no Apply button).
+- Server: a completion date the supplier submits that equals the entered production end is stored as already applied ("auto: already the production end"); and setting the production end to the date a supplier submitted closes that pending submission (applied by the person who set it). The grid and SUPPLY ▸ Actions already ignored matching dates (v28.187).
+- A date that only matches HORIZON's ESTIMATE (start + supplier production days, no entered end) still offers Approve, because approving it records the supplier's date as the production end. On live today that is PO362, PO382 and PO-59USLX1-DILLARDS; PO-1891958 is the only exact match with an entered end.
+- Sandbox check: a pending submission matching TRF-1631831A's end (25-Apr-26) closed when the end date was saved again; test row removed.
+
 ## v28.531 (28-Oct-26) Mark read on the PO timeline clears the unread action at once
 - Ben (PO drawer ▸ Timeline): '"mark read" an item but the actions didnt hide immediately and they should silently'.
 - Cause: Mark read saves to /api/supply/note-read/<id>, which does not name the PO, so the v28.523 silent PO refresh never ran; and that refresh left out the TIMELINE tab badge and its Open actions strip.
