@@ -41,7 +41,7 @@ sources:
   - server.mjs :: biConsolidations
 fingerprints:
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
-  artifact_v16.7.html::renderExceptionsView: bca129e0a8d4
+  artifact_v16.7.html::renderExceptionsView: ba470f4fee51
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
   artifact_v16.7.html::daClientDetectors: 57025c59e925
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.561
+verified_version: v28.562
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -111,6 +111,7 @@ verified_version: v28.561
 - Fires if recent >= 10 and the forward forecast (next 4 months including current) <= 10% of recent.
 - RED if recent >= 60 at SKU grain, or >= 200 at category grain. Otherwise AMBER.
 - Columns (v28.560): last full month, month to date, LY sales for the next 4 months, stock 3PL / FBA, then the next 4 months' forecast with an entry box each.
+- "Hide SKUs without inventory" (v28.562, Ben; ticked by default, remembered per browser): a DTC or B2B row is hidden when the SKU has no 3PL stock in that market, an FBA row when it has no FBA stock (the SOH 3PL / SOH FBA columns). A SKU edited on the page stays shown.
 
 ## Exceptions: Forecast anomalies
 - Looks at the forward 6 months and keeps the worst month per SKU.

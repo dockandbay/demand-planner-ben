@@ -1,3 +1,8 @@
+## v28.562 (28-Oct-26) Selling no forecast: hide SKUs without inventory
+- Ben: "have a tick box defaulted to true which is 'hide skus without inventory' so if 3pl has no inventory this hide on dtc and b2b, if fba has no inventory hide with no stock in fba".
+- DEMAND ▸ Exceptions ▸ Selling no forecast: "Hide SKUs without inventory" tick box, on by default (remembered per browser). DTC and B2B rows need 3PL stock in that market, FBA rows need FBA stock (the SOH columns). Sandbox: 195 SKUs → 116.
+- No new env vars, migrations or cron routes.
+
 ## v28.561 (28-Oct-26) DEMAND Exceptions: full SKUs, Apply per row
 - Ben: "skus are a bit cut off in exception report, they should never cut off, and a little apply button on each row next to proposal column".
 - The SKU column no longer clips: the page-wide table rules (fixed layout, hidden overflow) squeezed it to about 180px; the Exceptions table now sizes to the longest SKU (checked: 0 clipped on Forecast < Actual, Forecast > Run-rate, Selling no forecast).
