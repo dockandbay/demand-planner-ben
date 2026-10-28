@@ -6061,6 +6061,16 @@ async function fulfilPushLines(po, completion) {
       await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
     } catch (e) {
       console.error('[fulfil push] update of ' + po + ' (Fulfil id ' + fulfilId + ') failed:', e && e.message);
+      // v28.540 (Ben, PO-58AULX1: "The shipment must be in draft, inbound or shipped state to edit lines"): name the supplier shipments that block it
+      if (/shipment must be in draft, inbound or shipped/i.test(String(e && e.message))) { try {
+        const pl = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', '=', fulfilId]], ['moves']);
+        const mids = [...new Set(pl.flatMap(l => l.moves || []))];
+        const mv = mids.length ? await fulfilSearchAll('stock.move', [['id', 'in', mids]], ['shipment', 'state']) : [];
+        const sids = [...new Set(mv.map(m => String(m.shipment || '').split(',')[1]).filter(Boolean).map(Number))];
+        const sh = sids.length ? await fulfilSearchAll('stock.shipment.in', [['id', 'in', sids]], ['id', 'number', 'state']) : [];
+        const bad = sh.filter(x => !/^(draft|inbound|shipped)$/.test(String(x.state || '')));
+        if (bad.length) e.message = 'its lines sit on supplier shipment' + (bad.length > 1 ? 's ' : ' ') + bad.map(x => (x.number || x.id) + ' (' + x.state + ')').join(', ') + ' in Fulfil, and Fulfil only lets lines change while their shipment is draft, inbound or shipped. In Fulfil, set ' + (bad.length > 1 ? 'those shipments' : 'that shipment') + ' back to Draft (or remove the lines from ' + (bad.length > 1 ? 'them' : 'it') + '), then push again. Nothing was changed: the Fulfil PO is as it was.';
+      } catch (_) { /* keep Fulfil's own message */ } }
       e.message = 'Fulfil update failed: ' + e.message; _upErr = e; throw e;
     } finally {
       if (_reconfirm) {   // v27.840 (Ben): restore the PO to confirmed after the edit · v28.151 (review D1): also after a failed edit

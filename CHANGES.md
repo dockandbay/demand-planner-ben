@@ -1,3 +1,8 @@
+## v28.540 (28-Oct-26) Push to Fulfil: clear message when cancelled supplier shipments block it
+- Ben (PO-58AULX1, Update / Create Fulfil PO): 'Fulfil 400: "The shipment must be in draft, inbound or shipped state to edit lines"'.
+- Cause (Fulfil): PO168 (id 418, AU, Lixin) is confirmed, but every line's incoming moves sit on supplier shipments SS126 (cancelled 24-Sep) and SS140 (cancelled 28-Oct 00:43 UTC). Fulfil does not let a PO's lines change while they are on a cancelled shipment. The push had already put PO168 back to confirmed, so nothing was left half done.
+- Now, on that Fulfil error, HORIZON reads which supplier shipments hold the lines and says so: "its lines sit on supplier shipments SS126 (cancel), SS140 (cancel) in Fulfil ... set those shipments back to Draft (or remove the lines from them), then push again. Nothing was changed".
+
 ## v28.539 (28-Oct-26) ERP deviations box: HORIZON | Fulfil | Difference
 - Ben (PO ▸ Order plan): "i find this very confusing way to show erp drift" ("PICNIC-DES-LG-SPRCLUB 80 → 0", "TOWLB-SUM-LG-OCEAN 280 → 80"). Chose columns + difference.
 - The box now has separate HORIZON and Fulfil columns, and a Difference column in words: "not in Fulfil" (Fulfil has no such line), "Fulfil short 200" or "Fulfil over 40"; plus a Total row when more than one line differs. The title names the linked Fulfil PO when known ("differ from Fulfil (PO483)"). The Fulfil column includes extra Fulfil POs (v28.537).
