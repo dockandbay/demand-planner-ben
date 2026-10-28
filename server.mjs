@@ -1443,6 +1443,8 @@ function requiredCap(method, p) {
       || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/demand/worksheets')   // v28.216 Cross Market saved worksheets
       || p.startsWith('/api/demand/wssi-otb')   // v28.487 DEMAND ▸ Inputs ▸ Open to buy (handler re-checks demand_edit)
+      || p.startsWith('/api/demand/wssi-plan') || p.startsWith('/api/demand/wssi-overrides')   // v28.559: were unlisted, so admin only; handlers re-check (lock = admin)
+      || p.startsWith('/api/demand/wssi-notes')   // v28.559 WSSI cell notes (handler re-checks demand_edit; delete = own or admin)
       || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
       || p.startsWith('/api/demand/preorders')   // v28.245 Sync from Fulfil writes preorders + preorder_lines (Diviyaj review)
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
@@ -25570,6 +25572,42 @@ app.post('/api/demand/wssi-overrides', async (req, res) => {
     res.json({ ok: true, saved, removed });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'Overrides need migration 397' }); log500(e); res.status(500).json({ error: 'Could not save overrides' }); }
   finally { client.release(); }
+});
+// v28.559 (Ben 28-Oct-26, layout picked from a mockup): notes on WSSI cells (migration 400). A note = row × column (month, period or '' = row)
+// × the filter view it was written in; the page decides where it shows. GET ?fy → {notes}; POST {fy,row_key,col,view,body} (demand edit);
+// DELETE /:id (the author, or an admin).
+const _notesMissing = e => /wssi_notes/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+const WSSI_NOTE_DIMS = ['mkt', 'ch', 'cat', 'sea', 'st'];
+app.get('/api/demand/wssi-notes', async (req, res) => {
+  const fy = _otbFy(req.query.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
+  try {
+    const notes = (await pool.query(`SELECT id::int id, row_key, col, mkt, ch, cat, sea, st, body, coalesce(created_by,'') created_by,
+        to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at FROM planner.wssi_notes WHERE fy=$1 ORDER BY created_at, id`, [fy])).rows;
+    res.set('Cache-Control', 'no-store').json({ fy, notes });
+  } catch (e) { if (_notesMissing(e)) return res.json({ fy, notes: [], missing: 'migration 400' }); log500(e); res.status(500).json({ error: 'Could not load WSSI notes' }); }
+});
+app.post('/api/demand/wssi-notes', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to add notes' });
+    const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
+    const rowKey = String(b.row_key || ''), col = String(b.col || ''), body = String(b.body || '').trim(), view = b.view || {};
+    if (!/^[A-Za-z]{1,24}$/.test(rowKey)) return res.status(400).json({ error: 'Bad row' });
+    if (!/^(\d{4}-\d{2}|H1|H2|YTD|YTG|FY)?$/.test(col)) return res.status(400).json({ error: 'Bad column' });
+    if (!body || body.length > 2000) return res.status(400).json({ error: 'A note is 1 to 2,000 characters' });
+    const dims = WSSI_NOTE_DIMS.map(d => { const a = Array.isArray(view[d]) ? view[d] : []; return [...new Set(a.map(x => String(x).slice(0, 80)))].slice(0, 60).sort(); });
+    const note = (await pool.query(`INSERT INTO planner.wssi_notes (fy, row_key, col, mkt, ch, cat, sea, st, body, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        RETURNING id::int id, row_key, col, mkt, ch, cat, sea, st, body, coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at`,
+      [fy, rowKey, col, ...dims, body, me.email || null])).rows[0];
+    res.json({ ok: true, note });
+  } catch (e) { if (_notesMissing(e)) return res.status(503).json({ error: 'WSSI notes need migration 400' }); log500(e); res.status(500).json({ error: 'Could not save the note' }); }
+});
+app.delete('/api/demand/wssi-notes/:id', async (req, res) => {
+  try {
+    const me = await permsFor(req), id = parseInt(req.params.id, 10); if (!(id > 0)) return res.status(400).json({ error: 'Bad id' });
+    const row = (await pool.query(`SELECT coalesce(created_by,'') created_by FROM planner.wssi_notes WHERE id=$1`, [id])).rows[0]; if (!row) return res.status(404).json({ error: 'Note not found' });
+    if (me.live && !me.is_admin && row.created_by.toLowerCase() !== String(me.email || '').toLowerCase()) return res.status(403).json({ error: 'Only the author or an admin can delete this note' });
+    await pool.query(`DELETE FROM planner.wssi_notes WHERE id=$1`, [id]); res.json({ ok: true });
+  } catch (e) { if (_notesMissing(e)) return res.status(503).json({ error: 'WSSI notes need migration 400' }); log500(e); res.status(500).json({ error: 'Could not delete the note' }); }
 });
 // Plan template upload, READ ONLY: Market, Channel, Category group and month columns (one measure per file, the page's current one).
 app.post('/api/demand/wssi-plan/upload', async (req, res) => {

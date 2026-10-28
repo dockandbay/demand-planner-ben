@@ -1,3 +1,10 @@
+## v28.559 (28-Oct-26) WSSI cell notes; demand editors can save plan and overrides on live
+- Ben: "in wssi can user add notes to each cell. a little bar showing when notes are added or can be added on left of the spreadsheet like cell". Picked from mockups: left bar + cell marker; a note belongs to the exact filter view and shows (tagged) in the views above; demand edit users add, the author or an admin deletes.
+- DEMAND ▸ WSSI: a bar left of each row name (note count, amber; + on hover to add a note to the row or one of its months); an amber corner marker on cells with notes (hover to read, click to open); right-click any cell to add a note. Notes show who and when (ben@, dd-mmm-yy).
+- NEW migration 400_wssi_notes.sql (planner.wssi_notes). New routes GET / POST /api/demand/wssi-notes, DELETE /api/demand/wssi-notes/:id (no cron).
+- Fix (live since v28.548): /api/demand/wssi-plan/* and /api/demand/wssi-overrides were missing from the DEMAND write list, so the route gate treated them as admin only and users with demand edit rights could not save plan cells or overrides (now in the worksheet). Added, with /api/demand/wssi-notes. Locking the plan stays admin only (handler check).
+- No new env vars.
+
 ## v28.558 (28-Oct-26) WSSI: transfers £ cost nets to zero
 - Katherine (via Ben): at all markets and all channels the transfers should net to zero. On live, transfer units and £ retail already did, but £ cost did not (FY27 to date -£35.4k), because the 3PL side was valued at the 3PL landed cost and the FBA side at the FBA landed cost.
 - lib/wssi.mjs: both sides of a 3PL / FBA transfer are now valued at the sending pool's landed cost per unit, so they cancel. Each pool's opening and closing stock £ cost still use that pool's own landed cost. Checked on a synthetic transfer (30 units, 3PL £4.00, FBA £5.50): before -£120 / +£165, after -£120 / +£120.

@@ -11,14 +11,17 @@ sources:
   - migrations/396_wssi_otb_buy.sql :: planner.wssi_otb_buy
   - artifact_v16.7.html :: wssiPx
   - artifact_v16.7.html :: wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut
-verified_version: v28.558
+  - artifact_v16.7.html :: wssiNotePop, wssiNoteVis, wssiNoteRefresh
+  - server.mjs :: /api/demand/wssi-notes
+  - migrations/400_wssi_notes.sql :: planner.wssi_notes
+verified_version: v28.559
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: 49dc2f86d9c0
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
   server.mjs::/api/demand/wssi: 5f8825a8e6cb
-  artifact_v16.7.html::renderWssiView: f65f45a2da18
+  artifact_v16.7.html::renderWssiView: 8572e750a5fb
   artifact_v16.7.html::wssiCompute: 1aa040d9e745
   artifact_v16.7.html::wssiDerive: db209ab5e2b2
   artifact_v16.7.html::wssiPeriod: a36ce8d838b8
@@ -31,6 +34,11 @@ fingerprints:
   artifact_v16.7.html::wssiWsCombo: 843e7bc631ca
   artifact_v16.7.html::wssiWsGet: 6f3766d93d44
   artifact_v16.7.html::wssiWsPut: 24040f9ef50e
+  artifact_v16.7.html::wssiNotePop: c105ead1824c
+  artifact_v16.7.html::wssiNoteVis: 7edc5224a1ae
+  artifact_v16.7.html::wssiNoteRefresh: f2ea429b2c13
+  server.mjs::/api/demand/wssi-notes: 85ce6d73d7f0
+  migrations/400_wssi_notes.sql::planner.wssi_notes: a38013199504
 ---
 
 # WSSI (DEMAND > WSSI)
@@ -134,6 +142,13 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Saving: each change shows at once and the whole WSSI recalculates; it saves through the same endpoints as before (/api/demand/wssi-otb, /wssi-overrides, /wssi-plan/cells, demand edit rights) and is reverted with a message if the save fails. Enter moves down to the next editable row, Tab across months; a pasted block fills months across and the rows below as shown (read-only cells skipped); Undo / Ctrl+Z undoes the last 50 changes.
 - DEMAND ▸ Inputs ▸ Open to buy and WSSI plan are no longer in the menu; their links open the WSSI worksheet. The all-markets grids (for .xlsx upload or pasting many rows) are reached from "Bulk grid" on the worksheet bar.
 (source: artifact_v16.7.html :: renderWssiView, wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut)
+
+## Cell notes (v28.559)
+- Ben 28-Oct-26: anyone viewing the WSSI reads notes; users with demand edit rights add them; the author or an admin deletes one. Each note shows who (ben@) and when (dd-mmm-yy).
+- A note sits on a row and a column (a month, a period H1 / H2 / YTD / YTG / FY, or the whole row) in the filter view it was written in (market, channel, category group, seasonality, product status; planner.wssi_notes, migration 400).
+- It shows in that view and in every view above it: for each filter either All is picked, or the picked values include all of the note's. A note from a narrower view carries a tag naming that view; a note written at a higher level does not show in the narrower views below it, and a note from another market never shows.
+- On the grid: a bar left of each row name shows the row's note count (amber; a faint + on hover to add); a cell with notes has an amber corner marker (hover shows them, click opens them); right-click any cell to add a note to that cell.
+(source: artifact_v16.7.html :: wssiNotePop, wssiNoteVis, wssiNoteRefresh; server.mjs :: /api/demand/wssi-notes)
 
 ## Data and speed
 - GET /api/demand/wssi?fy=<start year> builds one year in about 6 s on live and caches it for 10 minutes. Refresh rebuilds (?fresh=1). Reads only.

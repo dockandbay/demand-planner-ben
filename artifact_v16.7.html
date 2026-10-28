@@ -14203,7 +14203,7 @@ function renderShipBagView(body){
 // "WSSI OTB Format" sheet. Replaces REPORTS ▸ Open-to-Buy. Read only for now (a worksheet version with editable OTB and target
 // inputs may follow). Data: GET /api/demand/wssi (lib/wssi.mjs): month × market × channel (sales) / stock pool (stock) ×
 // category × seasonality × product status. This view filters, sums and derives the ratios. Logic: lib/ai-logic/wssi.md.
-var WSSI={fy:null,data:{},otb:{},plan:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{},ws:false,wq:Promise.resolve(),wundo:[],wsaving:0,wmsg:null,bulkOk:false};
+var WSSI={fy:null,data:{},otb:{},plan:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{},ws:false,wq:Promise.resolve(),wundo:[],wsaving:0,wmsg:null,bulkOk:false,notes:{}};
 try{ WSSI.show.sum=localStorage.getItem('hz_wssi_sum')==='1'; WSSI.ws=localStorage.getItem('hz_wssi_ws')==='1'; }catch(e){}
 // v28.557 worksheet mode: inputs are stored per market × channel × category group, so editing needs exactly one of each (and no seasonality / status filter)
 function wssiWsCombo(){ var S=WSSI.sel; if(S.mkt.length!==1||S.ch.length!==1||S.cat.length!==1||S.sea.length||S.st.length)return null; return {mk:S.mkt[0],ch:S.ch[0],cg:S.cat[0]}; }   // v28.486 Summary numbers (k / m), remembered per browser
@@ -14491,6 +14491,14 @@ function wssiCss(){
    +'#wssi-root .w-pill:disabled{opacity:.45;cursor:not-allowed}#wssi-root td.wc-ed{cursor:text;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 40%,transparent)}#wssi-root td.wc-ed:hover{box-shadow:inset 0 0 0 1px var(--blue)}#wssi-root td.wc-ed.editing{padding:1px 2px}'
    +'#wssi-root .w-ein{width:92px;text-align:right;font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--blue);border-radius:4px;background:var(--card);color:var(--ink);outline:none;box-sizing:border-box}'
    +'#wssi-root .w-ws{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;background:var(--card);border:1px solid #93c5fd;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--ink-soft)}#wssi-root .w-ws b{color:var(--ink)}#wssi-root .w-ws .sp{flex:1}#wssi-root #wssi-wsst.ok{color:var(--pos)}#wssi-root #wssi-wsst.bad{color:var(--neg)}#wssi-root #wssi-wsst{color:var(--amber)}'
+   +'#wssi-root td.w-nlab{padding-left:30px;position:sticky}#wssi-root .w-nbar{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:20px;height:16px;border-radius:4px;font-size:10px;font-weight:700;line-height:16px;text-align:center;color:transparent;cursor:pointer;border-left:3px solid transparent}'
+   +'#wssi-root tr:hover .w-nbar,#wssi-root .w-nbar:focus{color:var(--faint);background:var(--hover)}#wssi-root .w-nbar.has{color:#fff;background:var(--amber);border-left-color:color-mix(in srgb,var(--amber) 60%,#000)}#wssi-root td.num{position:relative}'
+   +'#wssi-root .w-nmk{position:absolute;top:0;right:0;width:0;height:0;border-style:solid;border-width:0 7px 7px 0;border-color:transparent var(--amber) transparent transparent;cursor:pointer}'
+   +'.w-npop{position:fixed;z-index:200;width:340px;max-width:calc(100vw - 16px);max-height:min(460px,calc(100vh - 16px));overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 36px rgba(15,23,42,.22);padding:10px 12px;font-size:12px}'
+   +'.w-npop .w-nh{display:flex;align-items:center;gap:8px}.w-npop .w-nh b{flex:1;font-size:13px}.w-npop .w-nx{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--muted)}.w-npop .w-nv{color:var(--faint);font-size:11px;margin:2px 0 8px}'
+   +'.w-npop .w-ni{padding:7px 0;border-top:1px solid var(--line2)}.w-npop .w-nb2{white-space:normal;word-wrap:break-word}.w-npop .w-nm2{color:var(--muted);font-size:11px;margin-top:3px}.w-npop .w-nm2 a{color:var(--neg);cursor:pointer}.w-npop .w-ntag{background:var(--amber-bg);color:var(--amber);border-radius:8px;padding:0 6px}.w-npop .w-ne{color:var(--faint);padding:4px 0 8px}'
+   +'.w-npop .w-na{border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}.w-npop textarea{width:100%;box-sizing:border-box;font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--card);color:var(--ink);resize:vertical}.w-npop .w-nbtn{display:flex;align-items:center;gap:8px}.w-npop .w-nbtn span{flex:1;color:var(--neg);font-size:11px}'
+   +'.w-npop .w-btn{border:1px solid var(--blue);background:var(--blue);color:#fff;font:inherit;font-size:12px;font-weight:600;padding:5px 12px;border-radius:7px;cursor:pointer}.w-npop .w-btn:disabled{opacity:.5;cursor:default}.w-npop select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--card);color:var(--ink)}'
    +'#wssi-root .w-key{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:11.5px;color:var(--muted);margin-top:10px}#wssi-root .w-key i{display:inline-block;width:14px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid var(--line)}';
   document.head.appendChild(st);
 }
@@ -14573,6 +14581,61 @@ function wssiWsBind(body,root,D,cols,ROWK,edCfg,WS){
   if(!WSSI._keyUndo){ WSSI._keyUndo=true; document.addEventListener('keydown',function(ev){ if(DEMAND_VIEW!=='wssi'||!WSSI.ws||!WSSI._undoFn||!document.getElementById('wssi-wundo'))return; var t=ev.target, tag=t&&t.tagName; if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;
     if((ev.ctrlKey||ev.metaKey)&&!ev.altKey&&!ev.shiftKey&&String(ev.key).toLowerCase()==='z'){ ev.preventDefault(); WSSI._undoFn(); } }); }
 }
+// v28.559 (Ben 28-Oct-26, layout picked from a mockup): notes on WSSI cells (planner.wssi_notes, migration 400). A note sits on a row and a column
+// (month, period, or '' = the whole row) in the filter view it was written in. It shows in that view and in every view above it (each dimension
+// either All, or containing all the note's values); notes from a narrower view carry a tag saying where they came from. A bar left of each row
+// name shows the row's note count (+ on hover to add); a cell with notes gets a corner marker; right-click any cell to add one.
+var WSSI_NDIMS=['mkt','ch','cat','sea','st'];
+function wssiNotesLoad(fy){ WSSI.notes[fy]={list:[],loading:true};
+  fetch('/api/demand/wssi-notes?fy='+fy).then(function(r){ return r.json(); }).then(function(d){ WSSI.notes[fy]={list:d.notes||[],missing:d.missing||''}; }).catch(function(e){ WSSI.notes[fy]={list:[],err:String(e&&e.message||e)}; })
+    .then(function(){ if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'&&!WSSI._ed){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
+function wssiNoteVis(n){ return WSSI_NDIMS.every(function(d){ var cur=WSSI.sel[d], nv=n[d]||[]; return !cur.length||(nv.length>0&&nv.every(function(v){ return cur.indexOf(v)>=0; })); }); }
+function wssiNoteExact(n){ return WSSI_NDIMS.every(function(d){ var a=(n[d]||[]).slice().sort(), b=WSSI.sel[d].slice().sort(); return a.join('\u0001')===b.join('\u0001'); }); }
+function wssiNoteView(n){ var p=WSSI_NDIMS.map(function(d){ return (n[d]||[]).join(', '); }).filter(Boolean); return p.length?p.join(' · '):'All'; }
+function wssiNoteDate(s){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||'')); return m?m[3]+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1]+'-'+m[1].slice(2):''; }
+function wssiNotePop(anchor,fy,rk,col,cols){
+  var old=document.getElementById('wssi-npop'); if(old)old.remove();
+  var r=WSSI_ROWS.filter(function(x){ return x.k===rk; })[0]; if(!r)return;
+  var colLbl=function(c){ if(!c)return 'Whole row'; return /^\d{4}-\d{2}$/.test(c)?wssiMon(c):c; };
+  var me=window.ME||{}, mine=function(n){ return !me.live||me.is_admin||(n.created_by&&me.email&&n.created_by.toLowerCase()===String(me.email).toLowerCase()); };
+  var cur=WSSI_NDIMS.map(function(d){ return WSSI.sel[d].join(', '); }).filter(Boolean).join(' · ')||'All markets and channels';
+  var p=document.createElement('div'); p.id='wssi-npop'; p.className='w-npop'; p.setAttribute('role','dialog'); p.setAttribute('aria-label','Notes: '+r.l);
+  var draw=function(focusAdd){
+    var all=((WSSI.notes[fy]||{}).list||[]).filter(function(n){ return n.row_key===rk&&wssiNoteVis(n)&&(col==null||n.col===col); });
+    var h='<div class="w-nh"><b>'+wssiH(r.l)+(col!=null?' · '+wssiH(colLbl(col)):'')+'</b><button class="w-nx" aria-label="Close">×</button></div><div class="w-nv">View: '+wssiH(cur)+'</div><div class="w-nl">';
+    if(!all.length)h+='<div class="w-ne">No notes yet.</div>';
+    all.forEach(function(n){ h+='<div class="w-ni"><div class="w-nb2">'+wssiH(n.body).replace(/\n/g,'<br>')+'</div><div class="w-nm2">'+wssiH(shortEml(n.created_by)||'sandbox')+' · '+wssiNoteDate(n.created_at)
+      +(col==null?' · '+wssiH(colLbl(n.col)):'')+(wssiNoteExact(n)?'':' · <span class="w-ntag">'+wssiH(wssiNoteView(n))+'</span>')+(mine(n)?' · <a data-del="'+n.id+'">Delete</a>':'')+'</div></div>'; });
+    h+='</div><div class="w-na">'+(col==null?'<select id="wssi-ncol" class="w-pick"><option value="">Whole row</option>'+cols.map(function(o){ var k=o.tot?o.name:o.m; return '<option value="'+k+'">'+wssiH(colLbl(k))+'</option>'; }).join('')+'</select>':'')
+      +'<textarea id="wssi-ntx" rows="2" maxlength="2000" placeholder="Add a note for this view…"></textarea><div class="w-nbtn"><span id="wssi-nst"></span><button class="w-btn" id="wssi-nadd">Add note</button></div></div>';
+    p.innerHTML=h;
+    p.querySelector('.w-nx').onclick=function(){ p.remove(); };
+    p.querySelectorAll('[data-del]').forEach(function(a){ a.onclick=function(){ var id=+a.getAttribute('data-del'); a.textContent='Deleting…';
+      fetch('/api/demand/wssi-notes/'+id,{method:'DELETE'}).then(function(x){ return x.json(); }).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed'); var N=WSSI.notes[fy]; N.list=N.list.filter(function(n){ return n.id!==id; }); draw(); wssiNoteRefresh(); })
+        .catch(function(e){ a.textContent='Not deleted: '+(e&&e.message||e); }); }; });
+    var tx=p.querySelector('#wssi-ntx'), st=p.querySelector('#wssi-nst');
+    var add=function(){ var body=tx.value.trim(); if(!body)return; var c=col!=null?col:p.querySelector('#wssi-ncol').value, view={}; WSSI_NDIMS.forEach(function(d){ view[d]=WSSI.sel[d].slice(); });
+      var b=p.querySelector('#wssi-nadd'); b.disabled=true; st.textContent='Saving…';
+      fetch('/api/demand/wssi-notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,row_key:rk,col:c,view:view,body:body})}).then(function(x){ return x.json(); })
+        .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed'); (WSSI.notes[fy]||(WSSI.notes[fy]={list:[]})).list.push(j.note); draw(true); wssiNoteRefresh(); })
+        .catch(function(e){ b.disabled=false; st.textContent='Not saved: '+(e&&e.message||e); }); };
+    p.querySelector('#wssi-nadd').onclick=add;
+    tx.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter'&&(ev.metaKey||ev.ctrlKey)){ ev.preventDefault(); add(); } if(ev.key==='Escape')p.remove(); };
+    if(focusAdd!==false)setTimeout(function(){ try{ tx.focus(); }catch(e){} },0); };
+  document.body.appendChild(p); draw();
+  var b=anchor.getBoundingClientRect(), w=p.offsetWidth, hh=p.offsetHeight, vw=window.innerWidth, vh=window.innerHeight;
+  var left=Math.max(8,Math.min(vw-w-8,b.left)), top=b.bottom+6; if(top+hh>vh-8)top=Math.max(8,b.top-hh-6);
+  p.style.left=left+'px'; p.style.top=top+'px';
+  p.addEventListener('mousedown',function(ev){ ev.stopPropagation(); });
+  setTimeout(function(){ var off=function(ev){ if(!document.getElementById('wssi-npop')){ document.removeEventListener('mousedown',off); return; } if(!p.contains(ev.target)){ p.remove(); document.removeEventListener('mousedown',off); } }; document.addEventListener('mousedown',off); },0); }
+// repaint the row bars and cell markers in place (keeps the popover and any open edit)
+function wssiNoteRefresh(){ var root=document.getElementById('wssi-root'); if(!root||!WSSI._nfy)return; var list=((WSSI.notes[WSSI._nfy]||{}).list||[]).filter(wssiNoteVis), byR={}, byC={};
+  list.forEach(function(n){ byR[n.row_key]=(byR[n.row_key]||[]).concat(n); if(n.col)(byC[n.row_key+'|'+n.col]=byC[n.row_key+'|'+n.col]||[]).push(n); });
+  root.querySelectorAll('tbody tr[data-rk]').forEach(function(tr){ var rk=tr.dataset.rk, bar=tr.querySelector('.w-nbar'), n=(byR[rk]||[]).length;
+    if(bar){ bar.classList.toggle('has',n>0); bar.textContent=n?String(n):'+'; bar.title=n?n+' note'+(n===1?'':'s')+' on this row: click to read or add':'Add a note to this row'; }
+    tr.querySelectorAll('td.num[data-ck]').forEach(function(td){ var a=byC[rk+'|'+td.dataset.ck]||[], mk=td.querySelector('.w-nmk');
+      if(a.length&&!mk){ mk=document.createElement('i'); mk.className='w-nmk'; td.appendChild(mk); } if(!a.length&&mk)mk.remove();
+      if(mk)mk.title=a.map(function(n){ return shortEml(n.created_by||'')+' '+wssiNoteDate(n.created_at)+': '+n.body; }).join('\n'); }); }); }
 function renderWssiView(body){
   wssiCss();
   var now=new Date(), curFy=now.getMonth()+1>=3?now.getFullYear():now.getFullYear()-1;
@@ -14580,6 +14643,7 @@ function renderWssiView(body){
   var D=WSSI.data[WSSI.fy];
   if(!D){ body.innerHTML='<div id="wssi-root"><div style="padding:18px;color:'+(WSSI.err?'var(--neg)':'var(--muted)')+'">'+(WSSI.err?'Could not load WSSI: '+wssiH(WSSI.err):'Loading WSSI for FY'+String(WSSI.fy+1).slice(2)+'…')+'</div></div>'; if(!WSSI.loading&&!WSSI.err)wssiLoad(WSSI.fy); return; }
   if(!WSSI.plan[D.fy]){ WSSI.plan[D.fy]={}; plnLoad(D.fy,null,function(d){ if(!d.error){ var lv=(d.versions||[]).filter(function(v){ return v.id===d.locked_id; })[0]; WSSI.plan[D.fy]={locked_cells:d.locked_cells||[],overrides:d.overrides||[],snapshot:d.snapshot||[],locked_version:lv?lv.version:null,cells:d.cells||[],versions:d.versions||[],draft:(d.versions||[]).filter(function(v){ return v.status==='draft'; })[0]||null}; } if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }   // v28.548
+  if(!WSSI.notes[D.fy])wssiNotesLoad(D.fy); WSSI._nfy=D.fy;   // v28.559 cell notes
   if(!WSSI.otb[D.fy]){ WSSI.otb[D.fy]={rows:[]}; otbiLoad(D.fy,function(d){ if(!d.error)WSSI.otb[D.fy]={rows:d.rows||[],on_po:d.on_po||[]}; if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
   var C=wssiCompute(D), M=C.cols, ly=D.ly_months, ty=M.slice(ly);
   ty.forEach(function(o,x){ wssiDerive(o,M[x]); });
@@ -14640,15 +14704,23 @@ function renderWssiView(body){
     if(r.t&&!WSSI.show[r.t])return;
     if(gapPending){ h+='<tr class="gap"><td class="lab"></td><td class="src"></td><td colspan="'+cols.length+'"></td></tr>'; gapPending=false; }
     rowsOut++;
-    h+='<tr class="'+(r.key?'key':'')+'" data-rk="'+r.k+'"><td class="lab"'+(r.tip?' title="'+wssiH(r.l+': '+r.tip)+'"':'')+'>'+wssiH(r.l)+'</td><td class="src">'+wssiH(r.s)+'</td>';
-    cols.forEach(function(o,j){ var v=o[r.k], ed=edCfg(r,o); h+='<td class="num '+(ed?'wc-inp wc-ed':wssiCellCls(r,o))+(r.ov&&o[r.ov]?' wc-ovr':'')+' '+colCls(j)+' '+wssiTone(r,v)+'"'+(ed?' data-ek="'+r.k+'" data-ci="'+j+'"':'')+'>'+wssiFmt(v,r.f)+'</td>'; });
+    h+='<tr class="'+(r.key?'key':'')+'" data-rk="'+r.k+'"><td class="lab w-nlab"'+(r.tip?' title="'+wssiH(r.l+': '+r.tip)+'"':'')+'><span class="w-nbar" role="button" tabindex="0" data-nr="'+r.k+'">+</span>'+wssiH(r.l)+'</td><td class="src">'+wssiH(r.s)+'</td>';
+    cols.forEach(function(o,j){ var v=o[r.k], ed=edCfg(r,o); h+='<td class="num '+(ed?'wc-inp wc-ed':wssiCellCls(r,o))+(r.ov&&o[r.ov]?' wc-ovr':'')+' '+colCls(j)+' '+wssiTone(r,v)+'"'+' data-ck="'+(o.tot?o.name:o.m)+'"'+(ed?' data-ek="'+r.k+'" data-ci="'+j+'"':'')+'>'+wssiFmt(v,r.f)+'</td>'; });
     h+='</tr>';
   });
   h+='</tbody></table></div></div>'
-    +'<div class="w-key"><span><i class="wc-sys"></i>System actual (stock snapshots, sales, last year)</span><span><i class="wc-inp"></i>Forecast or price input</span><span><i class="wc-ca"></i>Calculated, actual month</span><span><i class="wc-cf"></i>Calculated, forecast month</span><span><i class="wc-na"></i>Not used</span><span><i class="wc-tot"></i>Period total</span><span><i class="wc-lock"></i>Locked plan'+(C.planV?' (v'+C.planV+')':' (none locked yet)')+'</span><span style="color:var(--blue);font-weight:700">Blue underline = overridden forecast or target</span>'+(WS?'<span style="box-shadow:inset 0 0 0 1px var(--blue);padding:0 6px;border-radius:3px">Bordered = editable</span>':'')+'<span>Hover a row name for how it is worked out.</span></div></div>';
+    +'<div class="w-key"><span><i class="wc-sys"></i>System actual (stock snapshots, sales, last year)</span><span><i class="wc-inp"></i>Forecast or price input</span><span><i class="wc-ca"></i>Calculated, actual month</span><span><i class="wc-cf"></i>Calculated, forecast month</span><span><i class="wc-na"></i>Not used</span><span><i class="wc-tot"></i>Period total</span><span><i class="wc-lock"></i>Locked plan'+(C.planV?' (v'+C.planV+')':' (none locked yet)')+'</span><span style="color:var(--blue);font-weight:700">Blue underline = overridden forecast or target</span>'+(WS?'<span style="box-shadow:inset 0 0 0 1px var(--blue);padding:0 6px;border-radius:3px">Bordered = editable</span>':'')+'<span><i style="background:var(--amber);border-color:var(--amber)"></i>Notes: click the bar left of a row, or right-click a cell</span><span>Hover a row name for how it is worked out.</span></div></div>';
   body.innerHTML=h;
   var root=body.querySelector('#wssi-root');
   root.querySelectorAll('tr.sec').forEach(function(tr){ tr.onclick=function(){ WSSI.closed[tr.dataset.sec]=!WSSI.closed[tr.dataset.sec]; renderWssiView(body); }; });
+  var nfy=D.fy, ntab=root.querySelector('.w-scroll table');   // v28.559 notes: row bar, cell marker, right-click a cell
+  wssiNoteRefresh();
+  ntab.addEventListener('click',function(ev){ var t=ev.target; if(!t.closest)return; var bar=t.closest('.w-nbar'), mk=t.closest('.w-nmk');
+    if(bar){ ev.stopPropagation(); wssiNotePop(bar,nfy,bar.getAttribute('data-nr'),null,cols); return; }
+    if(mk){ ev.stopPropagation(); var td=mk.closest('td'); wssiNotePop(td,nfy,td.parentNode.dataset.rk,td.dataset.ck,cols); } },true);
+  ntab.addEventListener('mousedown',function(ev){ if(ev.target.closest&&ev.target.closest('.w-nmk'))ev.stopPropagation(); },true);
+  ntab.addEventListener('keydown',function(ev){ var bar=ev.target.closest&&ev.target.closest('.w-nbar'); if(bar&&(ev.key==='Enter'||ev.key===' ')){ ev.preventDefault(); wssiNotePop(bar,nfy,bar.getAttribute('data-nr'),null,cols); } });
+  ntab.addEventListener('contextmenu',function(ev){ var td=ev.target.closest&&ev.target.closest('td.num[data-ck]'); if(!td||!td.parentNode.dataset.rk)return; ev.preventDefault(); wssiNotePop(td,nfy,td.parentNode.dataset.rk,td.dataset.ck,cols); });
   root.querySelectorAll('[data-show]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.show; WSSI.show[k]=!WSSI.show[k]; renderWssiView(body); }; });
   root.querySelectorAll('[data-num]').forEach(function(b){ b.onclick=function(){ WSSI.show.sum=b.dataset.num==='1'; try{ localStorage.setItem('hz_wssi_sum',WSSI.show.sum?'1':'0'); }catch(e){} renderWssiView(body); }; });
   root.querySelector('#wssi-fy').onchange=function(){ WSSI.fy=+this.value; if(!WSSI.data[WSSI.fy])wssiLoad(WSSI.fy); renderWssiView(body); };
