@@ -9,7 +9,7 @@ Every write is ledgered (../pp_bom_flip/ledger_<env>.jsonl). Rollback: cancel th
 usage: python3 -I awd_fba_backfill.py --env sandbox|live [--apply] [--confirm-live] [--only FBA...]
 Without --apply it is a dry run (prints what it would create).
 """
-import json, os, re, sys
+import datetime, json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "../pp_bom_flip"))
 from pp_bom_flip import Fulfil
@@ -18,6 +18,9 @@ a = sys.argv[1:]
 ENV = a[a.index("--env") + 1]
 APPLY = "--apply" in a
 ONLY = a[a.index("--only") + 1].split(",") if "--only" in a else None
+REPAIR = "--repair" in a  # 28-Oct-26: first run created empty shells (lines sent as `moves`, which is read-only)
+NOTE = ("Created by the AWD to FBA automation in n8n from Amazon shipment {ref} (shipped from Amazon AWD). "
+        "Talk to Diviyaj or Ben for any questions or feedback.")
 GOLIVE = "2026-09-22"
 f = Fulfil(ENV, APPLY, "--confirm-live" in a); f.run_id = "awd-fba-backfill"
 
@@ -39,32 +42,44 @@ for s in json.load(open(os.path.join(HERE, "awd_fba_discovery.json")))["shipment
         continue
     if not c or c < GOLIVE:
         continue
-    if f.search_read("stock.shipment.internal", [["reference", "=", s["shipment"]]], ["number"]):
+    existing = f.search_read("stock.shipment.internal", [["reference", "=", s["shipment"]]], ["number", "moves", "state"])
+    shells = [e for e in existing if not e["moves"]]
+    if [e for e in existing if e["moves"]]:
         print(s["shipment"], "already in Fulfil, skipped"); continue
+    if shells and not REPAIR:
+        print(s["shipment"], "only an EMPTY shell in Fulfil", [e["number"] for e in shells], "(use --repair)"); continue
     lines = []
     for i in s["items"]:
         p = f.search_read("product.product", [["code", "=", i["sku"]]], ["default_uom"])
         assert p, f"{s['shipment']}: SKU {i['sku']} not in Fulfil"
         lines.append({"product": p[0]["id"], "uom": p[0]["default_uom"], "sku": i["sku"], "qty": i["shipped"], "received": i["received"] or 0})
     full = all(l["received"] >= l["qty"] for l in lines)
-    plan.append({"ref": s["shipment"], "created": c, "status": s["status"], "lines": lines, "target": "done" if full else "shipped"})
+    plan.append({"ref": s["shipment"], "created": c, "status": s["status"], "lines": lines, "target": "done" if full else "shipped",
+                 "shells": shells})
 
 print(f"{ENV} {'APPLY' if APPLY else 'DRY RUN'}: {len(plan)} internal shipment(s) US AWD ({SRC}) -> Amazon FBA - US ({DST}) via Transit ({TRANSIT})")
 for p in plan:
-    print(f"  {p['ref']} created {p['created']} Amazon {p['status']:10} -> Fulfil {p['target']:7} | " +
+    print(f"  {p['ref']} created {p['created']} Amazon {p['status']:10} -> Fulfil {p['target']:7} "
+          f"{'(replaces empty ' + ','.join(x['number'] for x in p['shells']) + ') ' if p['shells'] else ''}| " +
           ", ".join(f"{l['sku']} x{l['qty']} (rcvd {l['received']})" for l in p["lines"]))
 if not APPLY:
     sys.exit()
 
 for p in plan:
+    start = datetime.date.fromisoformat(p["created"])
     sid = f.create("stock.shipment.internal", {
         "reference": p["ref"], "from_warehouse": wh["USAWD"]["id"], "to_warehouse": wh["AMZ_FBA_US"]["id"],
         "from_location": SRC, "to_location": DST, "transit_location": TRANSIT,
-        "planned_date": p["created"], "planned_start_date": p["created"],
-        "moves": [["create", [{"product": l["product"], "uom": l["uom"], "quantity": l["qty"],
-                               "from_location": SRC, "to_location": DST} for l in p["lines"]]]]},
+        "planned_start_date": p["created"], "planned_date": str(start + datetime.timedelta(days=7)),  # receive = start + 7 (Ben)
+        "lines": [["create", [{"product": l["product"], "uom": l["uom"], "quantity": l["qty"]} for l in p["lines"]]]]},
         note=f"AWD->FBA backfill {p['ref']} (Amazon {p['status']})")
-    # tested in sandbox 28-Oct-26 (IS176/IS177): draft -> wait -> assign_force -> pack -> ship (-> receive -> done)
+    chk = f.search_read("stock.shipment.internal", [["id", "=", sid]], ["number", "lines", "moves"])[0]
+    assert chk["lines"] and chk["moves"], f"{p['ref']}: {chk['number']} has no lines, stopping before any status change"
+    f._req("PUT", "/model/stock.shipment.internal/add_comment", {"id": sid, "message": NOTE.format(ref=p["ref"])})
+    for sh in p["shells"]:  # empty shell from the first run: can't be cancelled once shipped/done, so mark it void
+        f.write("stock.shipment.internal", [sh["id"]], {"reference": "VOID " + p["ref"]}, note="empty shell, replaced")
+        f._req("PUT", "/model/stock.shipment.internal/add_comment", {"id": sh["id"], "message":
+               f"VOID: created empty in error on 28-Oct-26 (no lines, no stock moved). Replaced by {chk['number']}. Ignore this transfer."})
     steps = ["wait", "assign_force", "pack", "ship"] + (["receive", "done"] if p["target"] == "done" else [])
     for step in steps:
         f._log({"op": "action", "model": "stock.shipment.internal", "id": sid, "action": step, "note": p["ref"]})
