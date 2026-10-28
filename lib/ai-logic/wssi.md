@@ -10,17 +10,17 @@ sources:
   - server.mjs :: /api/demand/wssi-otb, /api/demand/wssi-otb/upload
   - migrations/396_wssi_otb_buy.sql :: planner.wssi_otb_buy
   - artifact_v16.7.html :: wssiPx
-verified_version: v28.547
+verified_version: v28.548
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: f531c8688d97
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
-  server.mjs::/api/demand/wssi: ad274546ff25
-  artifact_v16.7.html::renderWssiView: fa8edbddb0bf
-  artifact_v16.7.html::wssiCompute: 2b7e654d9dc4
-  artifact_v16.7.html::wssiDerive: 14c5ea25b702
-  artifact_v16.7.html::wssiPeriod: 0b109896c92c
+  server.mjs::/api/demand/wssi: 5f8825a8e6cb
+  artifact_v16.7.html::renderWssiView: c5deb5c6a425
+  artifact_v16.7.html::wssiCompute: 01239b344d37
+  artifact_v16.7.html::wssiDerive: db209ab5e2b2
+  artifact_v16.7.html::wssiPeriod: a36ce8d838b8
   artifact_v16.7.html::renderOtbInputView: 6cc3ee000029
   server.mjs::/api/demand/wssi-otb: e188dc52da51
   server.mjs::/api/demand/wssi-otb/upload: 0386384c225c
@@ -110,6 +110,14 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Last year rows use the same sources for the year before (all actual). LY closing £ retail uses the selling price at the time.
 - Variance = this year (actual or forecast) - last year, and % of last year. Exit margin variance is in % points; cover variance in weeks.
 (source: artifact_v16.7.html :: wssiDerive)
+
+## Plan, forecast snapshot and overrides (v28.548)
+- DEMAND ▸ Inputs ▸ WSSI plan holds the signed-off plan at market × channel × category group × month: sales £ (ex VAT), sales units, closing stock units. It is edited as a draft and locked by an admin as version n; versions are kept and WSSI uses the latest locked one. A locked version is read only; the next edit copies it into a new draft.
+- Planned ASP = planned sales £ ÷ units. Planned closing £ retail / £ cost = planned closing units × that month's selling price / landed cost for the market, channel and group. Planned intake units = planned closing − planned opening (last month's planned closing; the first month opens on actual stock) + planned sales units.
+- Forecast rows: closed months = the forecast snapshot taken by WSSI builds while that month was open (from Oct-26); open months = the live forecast.
+- Forecast override (sales units, open months, market × channel × group) replaces the system forecast: sales £ moves at that cell's ASP, cost of sales at landed cost, and the unit difference runs through projected closing stock of the channel's pool from that month on. Target closing override (units, per pool: DTC row = 3PL, FBA row = FBA) replaces the calculated target. Overrides are not versioned, and are not applied while a seasonality or product status filter is on.
+- Variances: this year vs forecast (closed months with a snapshot), this year (actual / forecast) vs plan (incl. intake + proposed vs planned intake; closing stock vs plan, red = above), forecast vs plan. Period totals only count months that have a plan value.
+(source: artifact_v16.7.html :: wssiCompute, wssiDerive, wssiPeriod, renderWssiPlanView; server.mjs :: /api/demand/wssi-plan, wssiSnapshotCurrent)
 
 ## Data and speed
 - GET /api/demand/wssi?fy=<start year> builds one year in about 6 s on live and caches it for 10 minutes. Refresh rebuilds (?fresh=1). Reads only.

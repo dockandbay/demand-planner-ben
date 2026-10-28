@@ -10844,6 +10844,7 @@ function render(){
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);
     else if(DEMAND_VIEW==='wssi') renderWssiView(body);
+    else if(DEMAND_VIEW==='wssiplan') renderWssiPlanView(body);   // v28.548 DEMAND ▸ Inputs ▸ WSSI plan
     else if(DEMAND_VIEW==='otbinput') renderOtbInputView(body);   // v28.487 DEMAND ▸ Inputs ▸ Open to buy (#/demand/inputs/otbinput)   // v28.485 DEMAND ▸ WSSI (#/demand/wssi); replaces REPORTS ▸ Open-to-Buy
     else if(DEMAND_VIEW==='intake') renderIntakeView(body);   // v28.224 DEMAND ▸ Analysis ▸ Intake deadlines (#/demand/analysis/intake)   // v28.216 DEMAND ▸ Cross Market view (#/demand/crossmarket)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
@@ -14193,7 +14194,7 @@ function renderShipBagView(body){
 // "WSSI OTB Format" sheet. Replaces REPORTS ▸ Open-to-Buy. Read only for now (a worksheet version with editable OTB and target
 // inputs may follow). Data: GET /api/demand/wssi (lib/wssi.mjs): month × market × channel (sales) / stock pool (stock) ×
 // category × seasonality × product status. This view filters, sums and derives the ratios. Logic: lib/ai-logic/wssi.md.
-var WSSI={fy:null,data:{},otb:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{}};
+var WSSI={fy:null,data:{},otb:{},plan:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{}};
 try{ WSSI.show.sum=localStorage.getItem('hz_wssi_sum')==='1'; }catch(e){}   // v28.486 Summary numbers (k / m), remembered per browser
 var WSSI_CH_POOL={DTC:'3PL',B2B:'3PL',ZAL:'3PL',TIK:'3PL',FBA:'FBA'};
 function wssiH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -14203,7 +14204,8 @@ function wssiLoad(fy,fresh){
   fetch('/api/demand/wssi?fy='+fy+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(d){
     WSSI.loading=false; if(d.error){ WSSI.err=d.error; } else { WSSI.data[d.fy]=d; WSSI.fy=d.fy; }
     if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); }
-    if(VIEW_MODE==='planning'&&DEMAND_VIEW==='otbinput'){ var b2=document.getElementById('demand-body'); if(b2)renderOtbInputView(b2); }   // v28.547: the OTB page converts with it
+    if(VIEW_MODE==='planning'&&DEMAND_VIEW==='otbinput'){ var b2=document.getElementById('demand-body'); if(b2)renderOtbInputView(b2); }
+    if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssiplan'){ var b3=document.getElementById('demand-body'); if(b3)renderWssiPlanView(b3); }   // v28.548: system values for overrides   // v28.547: the OTB page converts with it
   }).catch(function(e){ WSSI.loading=false; WSSI.err=String(e&&e.message||e); if(DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } });
 }
 // v28.547 (WSSI phase 2): selling price and cost per unit for month × market × channel × category group, from the WSSI facts: closing stock
@@ -14247,7 +14249,28 @@ function wssiCompute(D){
     o.opU+=cumU; o.opC+=cumC; o.opR+=cumR; o.opF+=cumF;
     if(u>0){ o.otbC=c; o.otbU=u; o.otbR=rr; }
     cumU+=u; cumC+=c; cumR+=rr; cumF+=u*(fpu||(u?rr/u:0)); o.clU+=cumU; o.clC+=cumC; o.clR+=cumR; o.clF+=cumF; });
-  return {cols:cols, otbSplitOnly:otbRows.length>0&&(S.sea.length||S.st.length), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
+  // v28.548 (WSSI phases 3 + 4): the latest locked plan (DEMAND ▸ Inputs ▸ WSSI plan), the month-start forecast snapshot for closed months, and
+  // the live overrides. Forecast override (sales units, open months) replaces the system forecast for that market × channel × group: sales £ moves
+  // at the cell's ASP and the difference runs through projected closing stock. Target closing override replaces the pool's target units.
+  // Plan intake units = plan closing − plan opening (last month's plan closing; the first month opens on actual stock) + plan sales units.
+  var PL=WSSI.plan[D.fy]||{}, sys=wssiSys(D), cut=!!(S.sea.length||S.st.length), inF=function(mk,ch,cg){ return !(S.mkt.length&&S.mkt.indexOf(mk)<0)&&!(S.ch.length&&S.ch.indexOf(ch)<0)&&!(S.cat.length&&S.cat.indexOf(cg)<0); };
+  var byM={}; cols.forEach(function(o){ byM[o.m]=o; o.pnR=o.pnU=o.pnClU=o.pnClR=o.pnClC=o.fsR=o.fsU=null; o.ovF=o.ovT=false; });
+  var addTo=function(o,k,v){ o[k]=(o[k]||0)+v; };
+  (PL.locked_cells||[]).forEach(function(x){ var o=byM[x.month]; if(!o||!inF(x.market,x.channel,x.cgroup))return; var v=Number(x.value)||0, q=px(x.month,x.market,x.channel,x.cgroup);
+    if(x.measure==='sales')addTo(o,'pnR',v); else if(x.measure==='units')addTo(o,'pnU',v); else if(x.measure==='close'){ addTo(o,'pnClU',v); addTo(o,'pnClR',v*q.p); addTo(o,'pnClC',v*q.c); } });
+  var pnPrevU=null, pnPrevR=0, pnPrevC=0; cols.forEach(function(o){ if(o.m<D.months[D.ly_months]){ return; } o.pnInU=o.pnInR=o.pnInC=null;
+    if(o.pnClU!=null){ var oU=pnPrevU!=null?pnPrevU:o.opU, oR=pnPrevU!=null?pnPrevR:o.opR, oC=pnPrevU!=null?pnPrevC:o.opC, u=o.pnU||0, aspU=o.pnU?(o.pnR||0)/o.pnU:0;
+      o.pnInU=o.pnClU-oU+u; o.pnInR=o.pnClR-oR+u*(o.pnClU?o.pnClR/o.pnClU:aspU); o.pnInC=o.pnClC-oC+u*(o.pnClU?o.pnClC/o.pnClU:0); pnPrevU=o.pnClU; pnPrevR=o.pnClR; pnPrevC=o.pnClC; } });
+  (PL.snapshot||[]).forEach(function(x){ var o=byM[x.month]; if(!o||!o.act||!inF(x.market,x.channel,x.cgroup))return; addTo(o,'fsU',Number(x.units)||0); addTo(o,'fsR',Number(x.sales)||0); });
+  var cumDU=0, cumDR=0, cumDC=0, ovr=PL.overrides||[];
+  if(!cut)cols.forEach(function(o){ if(o.act)return; var du=0, dr=0, dc=0;
+    ovr.forEach(function(x){ if(x.month!==o.m)return;
+      if(x.measure==='fc_units'){ if(!inF(x.market,x.channel,x.cgroup))return; var k=x.month+'|'+x.market+'|'+x.channel+'|'+x.cgroup, su=sys.fu[k]||0, sr=sys.fs[k]||0, q=px(x.month,x.market,x.channel,x.cgroup), asp=su?sr/su:q.p, d=(Number(x.value)||0)-su;
+        o.u+=d; o.r+=d*asp; o.cos+=d*q.c; if(pools[WSSI_CH_POOL[x.channel]||'3PL']){ du+=d; dr+=d*q.p; dc+=d*q.c; } o.ovF=true; }
+      else if(x.measure==='target_units'){ var pl=x.channel==='FBA'?'FBA':'3PL'; if(!pools[pl]||(S.mkt.length&&S.mkt.indexOf(x.market)<0)||(S.cat.length&&S.cat.indexOf(x.cgroup)<0))return;
+        var q2=px(x.month,x.market,x.channel,x.cgroup), dt=(Number(x.value)||0)-(sys.tg[x.month+'|'+x.market+'|'+pl+'|'+x.cgroup]||0); o.tgU+=dt; o.tgR+=dt*q2.p; o.tgC+=dt*q2.c; o.ovT=true; } });
+    o.opU-=cumDU; o.opR-=cumDR; o.opC-=cumDC; o.opF-=cumDR; cumDU+=du; cumDR+=dr; cumDC+=dc; o.clU-=cumDU; o.clR-=cumDR; o.clC-=cumDC; o.clF-=cumDR; });
+  return {cols:cols, planV:PL.locked_version||null, ovrCut:cut&&ovr.length>0, otbSplitOnly:otbRows.length>0&&(S.sea.length||S.st.length), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
 }
 function wssiDerive(o,ly){
   var d=function(a,b){ return b?a/b:null; };
@@ -14256,6 +14279,17 @@ function wssiDerive(o,ly){
   o.vsT=o.clC-o.tgC; o.otbRem=o.act||o.tot?null:o.tgC-o.clC;
   o.otbRemR=o.act||o.tot?null:o.tgR-o.clR; o.otbRemU=o.act||o.tot?null:o.tgU-o.clU;   // v28.546 (Kathryn's template): OTB remaining in £ retail and units too
   o.cover=o.plU?o.clU/(o.plU/o.weeks):null; if(o.fwd===undefined)o.fwd=o.fwdU?o.clU/(o.fwdU/o.fwdW):null;
+  // v28.548 plan, forecast and variances (Kathryn's template): forecast = month-start snapshot for closed months, the live forecast for open ones
+  o.pnSales=o.pnR; o.pnUnits=o.pnU; o.pnAsp=d(o.pnR,o.pnU); o.fcSales=o.tot?o.fcSalesT:(o.act?o.fsR:o.r); o.fcUnits=o.tot?o.fcUnitsT:(o.act?o.fsU:o.u); o.fcAsp=d(o.fcSales,o.fcUnits);
+  var V=function(a,b){ return (a==null||b==null)?null:a-b; }, VP=function(a,b){ return (a==null||!b)?null:(a-b)/b; };
+  var aS=o.tot?o.actR:(o.act?o.r:null), aU=o.tot?o.actU:(o.act?o.u:null), aF=o.tot?o.actFsR:o.fsR, aFU=o.tot?o.actFsU:o.fsU;
+  o.vfSales=V(aS,aF); o.vfSalesP=VP(aS,aF); o.vfUnits=V(aU,aFU); o.vfUnitsP=VP(aU,aFU);
+  var T=!!o.tot, sR=T?o.rPn:o.sales, sU=T?o.uPn:o.units, fR=T?o.fcRPn:o.fcSales, fU=T?o.fcUPn:o.fcUnits;
+  o.vpSales=V(sR,o.pnR); o.vpSalesP=VP(sR,o.pnR); o.vpUnits=V(sU,o.pnU); o.vpUnitsP=VP(sU,o.pnU); o.vpAsp=V(d(sR,sU),o.pnAsp);
+  var inAll=function(a,b){ return a==null?null:a+(b||0); };
+  o.vpInU=V(inAll(T?o.inUPn:o.inU,T?o.otbUPn:o.otbU),o.pnInU); o.vpInR=V(inAll(T?o.inRPn:o.inR,T?o.otbRPn:o.otbR),o.pnInR); o.vpInC=V(inAll(T?o.inCPn:o.inC,T?o.otbCPn:o.otbC),o.pnInC);
+  o.vpClU=V(o.clU,o.pnClU); o.vpClR=V(o.clR,o.pnClR); o.vpClC=V(o.clC,o.pnClC);
+  o.fpSales=V(fR,o.pnR); o.fpSalesP=VP(fR,o.pnR); o.fpUnits=V(fU,o.pnU); o.fpUnitsP=VP(fU,o.pnU);
   if(o.act||o.tot){ /* actual or period: transfers / write-offs as measured */ } else { o.woU=o.woC=o.woR=null; o.trU=o.trC=o.trR=null; }
   if(ly){ o.lySales=ly.r; o.lyUnits=ly.u; o.lyAsp=d(ly.r,ly.u); o.lyInR=ly.inR; o.lyInC=ly.inC; o.lyInU=ly.inU; o.lyClR=ly.clR; o.lyClC=ly.clC; o.lyClU=ly.clU;
     o.lyExit=ly.clR?1-ly.clC/ly.clR:null; o.lyCover=ly.plU?ly.clU/(ly.plU/ly.weeks):null;
@@ -14270,12 +14304,21 @@ function wssiPeriod(cols,name,idx){
   ['weeks','r','u','cos','fullRev','inU','inC','inR','otbU','otbC','otbR','trU','trC','trR','woU','woC','woR','plU','plC'].forEach(function(k){ o[k]=idx.reduce(function(s,i){ return s+(cols[i][k]||0); },0); });
   ['opU','opC','opR','opF'].forEach(function(k){ o[k]=first[k]; });
   ['clU','clC','clR','clF','tgU','tgC','tgR','fwdU','fwdW'].forEach(function(k){ o[k]=last[k]; });
-  o.fwd=last.fwd; return o;
+  o.fwd=last.fwd;
+  var sumN=function(k,f){ var any=false, t=idx.reduce(function(s,i){ var c=cols[i]; if(f&&!f(c))return s; var v=c[k]; if(v==null)return s; any=true; return s+v; },0); return any?t:null; };   // v28.548: blank when no month has a value
+  ['pnR','pnU','pnInU','pnInR','pnInC'].forEach(function(k){ o[k]=sumN(k); }); ['pnClU','pnClR','pnClC'].forEach(function(k){ o[k]=last[k]; });
+  o.actR=sumN('r',function(c){ return c.act&&c.fsR!=null; }); o.actU=sumN('u',function(c){ return c.act&&c.fsU!=null; }); o.actFsR=sumN('fsR'); o.actFsU=sumN('fsU');
+  o.fcSalesT=sumN('r',function(c){ return !c.act; }); var fsr=sumN('fsR'); if(fsr!=null)o.fcSalesT=(o.fcSalesT||0)+fsr; o.fcUnitsT=sumN('u',function(c){ return !c.act; }); var fsu=sumN('fsU'); if(fsu!=null)o.fcUnitsT=(o.fcUnitsT||0)+fsu;
+  // plan comparisons over a period only count the months that have a plan value (a part-filled plan does not show a false gap)
+  var hasR=function(c){ return c.pnR!=null; }, hasU=function(c){ return c.pnU!=null; };
+  o.rPn=sumN('r',hasR); o.uPn=sumN('u',hasU); o.fcRPn=sumN('r',function(c){ return hasR(c)&&!c.act; }); var fr=sumN('fsR',hasR); if(fr!=null)o.fcRPn=(o.fcRPn||0)+fr; o.fcUPn=sumN('u',function(c){ return hasU(c)&&!c.act; }); var fu2=sumN('fsU',hasU); if(fu2!=null)o.fcUPn=(o.fcUPn||0)+fu2;
+  o.inUPn=sumN('inU',function(c){ return c.pnInU!=null; }); o.otbUPn=sumN('otbU',function(c){ return c.pnInU!=null; }); o.inRPn=sumN('inR',function(c){ return c.pnInU!=null; }); o.otbRPn=sumN('otbR',function(c){ return c.pnInU!=null; }); o.inCPn=sumN('inC',function(c){ return c.pnInU!=null; }); o.otbCPn=sumN('otbC',function(c){ return c.pnInU!=null; });
+  o.ovF=idx.some(function(i){ return cols[i].ovF; }); o.ovT=last.ovT; return o;
 }
 var WSSI_ROWS=[
  {sec:'s',name:'This year: sales'},
- {k:'sales',l:'Sales £ (actual / forecast)',s:'System / Forecast',f:'gbp',c:'plan',t:'r',key:1,tip:'Actual months: sales_actuals revenue (GBP, ex VAT). Forecast months: forecast units from DEMAND ▸ Plan × forecast ASP (same month last year, then sub-category, then the last 3 months, then full price; with price changes and ASP reduction).'},
- {k:'units',l:'Sales units (actual / forecast)',s:'System / Forecast',f:'int',c:'plan',t:'u',tip:'Units sold as sold (a set counts as one), or forecast units from DEMAND ▸ Plan.'},
+ {k:'sales',l:'Sales £ (actual / forecast)',s:'System / Forecast',f:'gbp',c:'plan',t:'r',key:1,ov:'ovF',tip:'Actual months: sales_actuals revenue (GBP, ex VAT). Forecast months: forecast units from DEMAND ▸ Plan × forecast ASP (same month last year, then sub-category, then the last 3 months, then full price; with price changes and ASP reduction).'},
+ {k:'units',l:'Sales units (actual / forecast)',s:'System / Forecast',f:'int',c:'plan',t:'u',ov:'ovF',tip:'Units sold as sold (a set counts as one), or forecast units from DEMAND ▸ Plan.'},
  {k:'asp',l:'ASP £ (actual / forecast)',s:'Calc',f:'gbp2',c:'calc',t:'r',tip:'Sales £ ÷ sales units.'},
  {sec:'t',name:'This year: stock and OTB'},
  {k:'price',l:'Avg current selling price per unit £ (ex VAT)',s:'System',f:'gbp2',c:'plan',t:'r',tip:'Closing stock £ retail ÷ closing units. Each SKU is valued at its actual ASP over the last 3 months in that market (consumer channels), else full price × 0.95. Forecast months hold the last actual price.'},
@@ -14310,9 +14353,9 @@ var WSSI_ROWS=[
  {k:'clU',l:'Closing stock units',s:'System / Calc',f:'int',c:'close',t:'u',key:1,tip:'Actual months: stock on the 1st of the next month. Forecast months: opening + confirmed PO intake − forecast units sold from that stock pool, per SKU and never below zero (forecast beyond stock is lost sales).'},
  {k:'exit',l:'Exit margin % (closing stock at current selling)',s:'Calc',f:'pct',c:'calc',t:null,tip:'1 − closing £ cost ÷ closing £ retail.'},
  {gap:1},
- {k:'tgR',l:'Target closing stock £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Target units × current selling price.'},
- {k:'tgC',l:'Target closing stock £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',key:1,tip:'Target units × product cost.'},
- {k:'tgU',l:'Target closing stock units',s:'Calc',f:'int',c:'calc',t:'u',tip:'Per SKU: cover-weeks target (the category\'s target cover for that market and pool, default 8 weeks) × average weekly units of the next 3 months.'},
+ {k:'tgR',ov:'ovT',l:'Target closing stock £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Target units × current selling price.'},
+ {k:'tgC',ov:'ovT',l:'Target closing stock £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',key:1,tip:'Target units × product cost.'},
+ {k:'tgU',ov:'ovT',l:'Target closing stock units',s:'Calc',f:'int',c:'calc',t:'u',tip:'Per SKU: cover-weeks target (the category\'s target cover for that market and pool, default 8 weeks) × average weekly units of the next 3 months.'},
  {k:'vsT',l:'Closing stock vs target £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',sign:'over',tip:'Closing £ cost − target £ cost. Red = over target (too much stock), green = under.'},
  {k:'otbRemR',l:'Open to buy remaining £ retail',s:'Calc',f:'gbp',c:'otb',t:'r',sign:'otb',tip:'Forecast months: target − projected closing £ retail (current selling). Positive = room left to buy; negative = over-bought.'},
  {k:'otbRem',l:'Open to buy remaining £ cost',s:'Calc',f:'gbp',c:'otb',t:'c',sign:'otb',key:1,tip:'Forecast months: target − projected closing £ cost. Positive = room left to buy; negative = over-bought.'},
@@ -14320,6 +14363,43 @@ var WSSI_ROWS=[
  {gap:1},
  {k:'cover',l:'On-hand cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ this period\'s average weekly units sold from that stock.'},
  {k:'fwd',l:'Forward cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ average weekly units of the next 3 months.'},
+ {sec:'p',name:'Plan (locked version) and forecast'},
+ {k:'pnSales',l:'Planned sales £',s:'Plan',f:'gbp',c:'pn',t:'r',key:1,tip:'The latest locked version of DEMAND ▸ Inputs ▸ WSSI plan: sales £ (ex VAT) by month, market, channel and category group.'},
+ {k:'pnUnits',l:'Planned sales units',s:'Plan',f:'int',c:'pn',t:'u',tip:'Locked plan sales units.'},
+ {k:'pnAsp',l:'Planned ASP £',s:'Calc',f:'gbp2',c:'calc',t:'r',tip:'Planned sales £ ÷ planned sales units.'},
+ {k:'fcSales',l:'Forecast sales £',s:'Snapshot / Forecast',f:'gbp',c:'fc',t:'r',tip:'Closed months: the forecast as it stood during the month (snapshot taken by the WSSI build while the month was open). Open months: the live forecast, including any Forecast override.'},
+ {k:'fcUnits',l:'Forecast sales units',s:'Snapshot / Forecast',f:'int',c:'fc',t:'u',tip:'As Forecast sales £, in units.'},
+ {k:'fcAsp',l:'Forecast ASP £',s:'Calc',f:'gbp2',c:'calc',t:'r',tip:'Forecast sales £ ÷ forecast units.'},
+ {gap:1},
+ {k:'pnInR',l:'Planned intake £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Planned closing £ retail − planned opening + planned sales units at the planned closing price per unit.'},
+ {k:'pnInC',l:'Planned intake £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'As planned intake £ retail, at landed cost.'},
+ {k:'pnInU',l:'Planned intake units',s:'Calc',f:'int',c:'calc',t:'u',tip:'Planned closing units − planned opening units (last month\'s planned closing; the first month opens on actual stock) + planned sales units.'},
+ {gap:1},
+ {k:'pnClR',l:'Planned closing stock £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Planned closing units × that month\'s selling price per unit for the market, channel and category group.'},
+ {k:'pnClC',l:'Planned closing stock £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Planned closing units × landed cost per unit.'},
+ {k:'pnClU',l:'Planned closing stock units',s:'Plan',f:'int',c:'pn',t:'u',key:1,tip:'Locked plan closing stock units.'},
+ {sec:'vf',name:'Variance: this year vs forecast (closed months)'},
+ {k:'vfSales',l:'Sales £: actual vs forecast',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Actual sales £ − the forecast snapshot for that month. Only months with a snapshot (from Oct-26 onwards).'},
+ {k:'vfSalesP',l:'Sales £: actual vs forecast %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'vfUnits',l:'Sales units: actual vs forecast',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'vfUnitsP',l:'Sales units: actual vs forecast %',s:'Calc',f:'pct',c:'calc',t:'u'},
+ {sec:'vp',name:'Variance: this year (actual / forecast) vs plan'},
+ {k:'vpSales',l:'Sales £: var',s:'Calc',f:'gbp',c:'calc',t:'r',key:1},
+ {k:'vpSalesP',l:'Sales £: var %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'vpUnits',l:'Sales units: var',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'vpUnitsP',l:'Sales units: var %',s:'Calc',f:'pct',c:'calc',t:'u'},
+ {k:'vpAsp',l:'ASP £: var',s:'Calc',f:'gbp2',c:'calc',t:'r'},
+ {k:'vpInR',l:'Intake + proposed £ retail vs planned intake',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'(Intake received / confirmed PO + proposed open to buy) − planned intake.'},
+ {k:'vpInC',l:'Intake + proposed £ cost vs planned intake',s:'Calc',f:'gbp',c:'calc',t:'c'},
+ {k:'vpInU',l:'Intake + proposed units vs planned intake',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'vpClR',l:'Closing stock £ retail vs plan',s:'Calc',f:'gbp',c:'calc',t:'r',sign:'over'},
+ {k:'vpClC',l:'Closing stock £ cost vs plan',s:'Calc',f:'gbp',c:'calc',t:'c',sign:'over',key:1,tip:'Projected closing £ cost − planned closing £ cost. Red = above plan.'},
+ {k:'vpClU',l:'Closing stock units vs plan',s:'Calc',f:'int',c:'calc',t:'u',sign:'over'},
+ {sec:'fp',name:'Variance: forecast vs plan'},
+ {k:'fpSales',l:'Sales £: forecast vs plan',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Forecast sales £ (snapshot for closed months, live forecast for open ones) − planned sales £.'},
+ {k:'fpSalesP',l:'Sales £: forecast vs plan %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'fpUnits',l:'Sales units: forecast vs plan',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'fpUnitsP',l:'Sales units: forecast vs plan %',s:'Calc',f:'pct',c:'calc',t:'u'},
  {sec:'l',name:'Last year'},
  {k:'lySales',l:'Sales £ LY',s:'System',f:'gbp',c:'sys',t:'r'},
  {k:'lyUnits',l:'Sales units LY',s:'System',f:'int',c:'sys',t:'u'},
@@ -14364,13 +14444,13 @@ function wssiFmt(v,f){
 }
 function wssiCellCls(r,o){
   if(o.tot)return 'wc-tot'; var a=o.act;
-  switch(r.c){ case 'plan': return a?'wc-sys':'wc-inp'; case 'sys': return a?'wc-sys':'wc-cf'; case 'otb': return a?'wc-na':'wc-cf'; case 'otbin': return a?'wc-na':'wc-inp'; case 'close': return a?'wc-sys':'wc-cf'; default: return a?'wc-ca':'wc-cf'; }
+  switch(r.c){ case 'plan': return a?'wc-sys':'wc-inp'; case 'sys': return a?'wc-sys':'wc-cf'; case 'otb': return a?'wc-na':'wc-cf'; case 'otbin': return a?'wc-na':'wc-inp'; case 'pn': return 'wc-lock'; case 'fc': return a?'wc-sys':'wc-inp'; case 'close': return a?'wc-sys':'wc-cf'; default: return a?'wc-ca':'wc-cf'; }
 }
 function wssiTone(r,v){ if(v==null||!isFinite(v)||Math.abs(v)<1e-9)return ''; if(r.sign==='over')return v>0?'wc-bad':'wc-good'; if(r.sign==='otb')return v<0?'wc-bad':'wc-good'; return v<0?'wc-neg':''; }
 function wssiCss(){
   if(document.getElementById('wssi-css'))return;
   var st=document.createElement('style'); st.id='wssi-css';
-  st.textContent='#wssi-root{--w-sys:color-mix(in srgb,var(--pos) 9%,var(--card));--w-inp:color-mix(in srgb,var(--prod) 24%,var(--card));--w-cf:color-mix(in srgb,var(--amber) 8%,var(--card));--w-na:var(--line2);--w-tot:var(--hdr-tint)}'
+  st.textContent='#wssi-root{--w-lock:color-mix(in srgb,var(--blue) 10%,var(--card));--w-sys:color-mix(in srgb,var(--pos) 9%,var(--card));--w-inp:color-mix(in srgb,var(--prod) 24%,var(--card));--w-cf:color-mix(in srgb,var(--amber) 8%,var(--card));--w-na:var(--line2);--w-tot:var(--hdr-tint)}'
    +'#wssi-root .w-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;margin:2px 0 10px}#wssi-root .w-head h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}#wssi-root .w-sub{color:var(--muted);font-size:12px;margin-top:2px}'
    +'#wssi-root .w-acts{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}#wssi-root .w-meta{font-size:11px;color:var(--faint)}'
    +'#wssi-root .w-btn{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font:inherit;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer}#wssi-root .w-btn:hover{background:var(--hover);border-color:var(--faint)}'
@@ -14394,7 +14474,7 @@ function wssiCss(){
    +'#wssi-root .af{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:9px}#wssi-root .af.a{background:var(--pos-bg);color:var(--pos)}#wssi-root .af.f{background:var(--prod-bg);color:var(--amber)}'
    +'#wssi-root tr.sec td{background:var(--l3-bg);color:var(--blue-ink);font-weight:800;font-size:11px;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;border-bottom:1px solid var(--line)}#wssi-root tr.sec .chev{display:inline-block;width:14px}#wssi-root tr.sec.closed .chev{transform:rotate(-90deg)}'
    +'#wssi-root tr.gap td{height:6px;padding:0;background:var(--card)}#wssi-root tr.key td.lab{font-weight:700;color:var(--ink)}#wssi-root tr:hover td.lab{color:var(--blue)}'
-   +'#wssi-root .wc-sys{background:var(--w-sys)}#wssi-root .wc-inp{background:var(--w-inp)}#wssi-root .wc-na{background:var(--w-na);color:var(--faint)}#wssi-root .wc-ca{background:var(--card)}#wssi-root .wc-cf{background:var(--w-cf)}#wssi-root .wc-tot{background:var(--w-tot);font-weight:700}'
+   +'#wssi-root .wc-sys{background:var(--w-sys)}#wssi-root .wc-inp{background:var(--w-inp)}#wssi-root .wc-na{background:var(--w-na);color:var(--faint)}#wssi-root .wc-ca{background:var(--card)}#wssi-root .wc-cf{background:var(--w-cf)}#wssi-root .wc-tot{background:var(--w-tot);font-weight:700}#wssi-root .wc-lock{background:var(--w-lock)}#wssi-root td.wc-ovr{color:var(--blue);font-weight:700;box-shadow:inset 0 -2px 0 var(--blue)}'
    +'#wssi-root .wc-neg{color:var(--neg)}#wssi-root .wc-good{color:var(--pos);font-weight:700}#wssi-root .wc-bad{color:var(--neg);font-weight:700}'
    +'#wssi-root .w-key{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:11.5px;color:var(--muted);margin-top:10px}#wssi-root .w-key i{display:inline-block;width:14px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid var(--line)}';
   document.head.appendChild(st);
@@ -14405,6 +14485,7 @@ function renderWssiView(body){
   if(WSSI.fy==null)WSSI.fy=curFy;
   var D=WSSI.data[WSSI.fy];
   if(!D){ body.innerHTML='<div id="wssi-root"><div style="padding:18px;color:'+(WSSI.err?'var(--neg)':'var(--muted)')+'">'+(WSSI.err?'Could not load WSSI: '+wssiH(WSSI.err):'Loading WSSI for FY'+String(WSSI.fy+1).slice(2)+'…')+'</div></div>'; if(!WSSI.loading&&!WSSI.err)wssiLoad(WSSI.fy); return; }
+  if(!WSSI.plan[D.fy]){ WSSI.plan[D.fy]={}; plnLoad(D.fy,null,function(d){ if(!d.error){ var lv=(d.versions||[]).filter(function(v){ return v.id===d.locked_id; })[0]; WSSI.plan[D.fy]={locked_cells:d.locked_cells||[],overrides:d.overrides||[],snapshot:d.snapshot||[],locked_version:lv?lv.version:null}; } if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }   // v28.548
   if(!WSSI.otb[D.fy]){ WSSI.otb[D.fy]={rows:[]}; otbiLoad(D.fy,function(d){ if(!d.error)WSSI.otb[D.fy]={rows:d.rows||[],on_po:d.on_po||[]}; if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
   var C=wssiCompute(D), M=C.cols, ly=D.ly_months, ty=M.slice(ly);
   ty.forEach(function(o,x){ wssiDerive(o,M[x]); });
@@ -14425,6 +14506,7 @@ function renderWssiView(body){
     +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span>'
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Numbers</span><button class="w-pill'+(WSSI.show.sum?'':' on')+'" data-num="0" title="Every number in full">Full</button><button class="w-pill'+(WSSI.show.sum?' on':'')+'" data-num="1" title="£ and units in k / m, 3 significant figures (93.1k, 537k, 1.25m)">Summary</button></span></div>';
   if(C.otbSplitOnly)h+='<div class="w-note">Open to buy is entered by market, channel and category group, so the seasonality and product status filters do not split it: the Proposed rows show the full amount for the markets, channels and category groups picked.</div>';
+  if(C.ovrCut)h+='<div class="w-note">Forecast and target overrides are set by market, channel and category group, so they are not applied while a seasonality or product status filter is on.</div>';
   if(C.partialPool)h+='<div class="w-note">Stock is held by pool (3PL for DTC, B2B and Zalando; FBA for Amazon), not by channel. With this channel filter the stock rows show the whole 3PL pool, while the sales rows show only the channels picked.</div>';
   var fyT=tots[tots.length-1], last=ty[ty.length-1], ytg=tots.filter(function(t){ return t.name==='YTG'; })[0];
   var vp=fyT.vSalesP, over=last.vsT>0;
@@ -14449,11 +14531,11 @@ function renderWssiView(body){
     if(gapPending){ h+='<tr class="gap"><td class="lab"></td><td class="src"></td><td colspan="'+cols.length+'"></td></tr>'; gapPending=false; }
     rowsOut++;
     h+='<tr class="'+(r.key?'key':'')+'"><td class="lab"'+(r.tip?' title="'+wssiH(r.l+': '+r.tip)+'"':'')+'>'+wssiH(r.l)+'</td><td class="src">'+wssiH(r.s)+'</td>';
-    cols.forEach(function(o,j){ var v=o[r.k]; h+='<td class="num '+wssiCellCls(r,o)+' '+colCls(j)+' '+wssiTone(r,v)+'">'+wssiFmt(v,r.f)+'</td>'; });
+    cols.forEach(function(o,j){ var v=o[r.k]; h+='<td class="num '+wssiCellCls(r,o)+(r.ov&&o[r.ov]?' wc-ovr':'')+' '+colCls(j)+' '+wssiTone(r,v)+'">'+wssiFmt(v,r.f)+'</td>'; });
     h+='</tr>';
   });
   h+='</tbody></table></div></div>'
-    +'<div class="w-key"><span><i class="wc-sys"></i>System actual (stock snapshots, sales, last year)</span><span><i class="wc-inp"></i>Forecast or price input</span><span><i class="wc-ca"></i>Calculated, actual month</span><span><i class="wc-cf"></i>Calculated, forecast month</span><span><i class="wc-na"></i>Not used</span><span><i class="wc-tot"></i>Period total</span><span>Hover a row name for how it is worked out.</span></div></div>';
+    +'<div class="w-key"><span><i class="wc-sys"></i>System actual (stock snapshots, sales, last year)</span><span><i class="wc-inp"></i>Forecast or price input</span><span><i class="wc-ca"></i>Calculated, actual month</span><span><i class="wc-cf"></i>Calculated, forecast month</span><span><i class="wc-na"></i>Not used</span><span><i class="wc-tot"></i>Period total</span><span><i class="wc-lock"></i>Locked plan'+(C.planV?' (v'+C.planV+')':' (none locked yet)')+'</span><span style="color:var(--blue);font-weight:700">Blue underline = overridden forecast or target</span><span>Hover a row name for how it is worked out.</span></div></div>';
   body.innerHTML=h;
   var root=body.querySelector('#wssi-root');
   root.querySelectorAll('tr.sec').forEach(function(tr){ tr.onclick=function(){ WSSI.closed[tr.dataset.sec]=!WSSI.closed[tr.dataset.sec]; renderWssiView(body); }; });
@@ -14461,7 +14543,7 @@ function renderWssiView(body){
   root.querySelectorAll('[data-num]').forEach(function(b){ b.onclick=function(){ WSSI.show.sum=b.dataset.num==='1'; try{ localStorage.setItem('hz_wssi_sum',WSSI.show.sum?'1':'0'); }catch(e){} renderWssiView(body); }; });
   root.querySelector('#wssi-fy').onchange=function(){ WSSI.fy=+this.value; if(!WSSI.data[WSSI.fy])wssiLoad(WSSI.fy); renderWssiView(body); };
   root.querySelector('#wssi-otb').onclick=function(){ if(typeof OTBI!=='undefined'){ OTBI.fy=WSSI.fy; OTBI.loadedFy=null; } otbiGo('otbinput'); };
-  root.querySelector('#wssi-refresh').onclick=function(){ delete WSSI.otb[WSSI.fy]; delete WSSI.data[WSSI.fy]; WSSI.err=''; wssiLoad(WSSI.fy,true); renderWssiView(body); };
+  root.querySelector('#wssi-refresh').onclick=function(){ delete WSSI.otb[WSSI.fy]; delete WSSI.plan[WSSI.fy]; delete WSSI.data[WSSI.fy]; WSSI.err=''; wssiLoad(WSSI.fy,true); renderWssiView(body); };
   root.querySelector('#wssi-dl').onclick=function(){
     var g=[['WSSI '+fyLbl+(WSSI.sel.mkt.length?' · '+WSSI.sel.mkt.join(', '):'')+(WSSI.sel.ch.length?' · '+WSSI.sel.ch.join(', '):'')+(WSSI.sel.cat.length?' · '+WSSI.sel.cat.join(', '):'')+' · actuals to '+wssiMon(D.actual_to)],['Month','Source'].concat(cols.map(function(o){ return o.tot?o.name:wssiMon(o.m); })),['Actual / Forecast',''].concat(cols.map(function(o){ return o.tot?'':(o.act?'Actual':'Forecast'); }))];
     WSSI_ROWS.forEach(function(r){ if(r.sec){ g.push([r.name.toUpperCase()]); return; } if(r.gap)return; g.push([r.l,r.s].concat(cols.map(function(o){ var v=o[r.k]; return (v==null||!isFinite(v))?'':(r.f==='pct'||r.f==='pts'?Math.round(v*10000)/10000:Math.round(v*100)/100); }))); });
@@ -14702,7 +14784,184 @@ function renderOtbInputView(body){
   T.__otbiApply=function(ops){ SS.sel={}; ops.forEach(function(o){ SS.sel[o.r+','+o.c]=1; }); SS.base={}; SS.anchor={r:ops[0].r,c:ops[0].c}; SS.ext=SS.anchor; paint(true); apply(ops,'Upload'); };
   upd(); totals(); paint();
 }
-var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+// v28.548 (Ben 28-Oct-26, WSSI phases 3 + 4 from Kathryn's template; layout picked from a mockup): DEMAND ▸ Inputs ▸ WSSI plan. Same grid as Open
+// to buy (Market · channel ▸ category group × month). Measure: Sales £ / Sales units / Closing units = Abi's plan (edited as a draft; an admin
+// locks it as version n; a locked version is read only and the next edit starts a new draft from the latest locked one), Forecast override
+// (sales units, open months) and Target closing (units, open months; set per stock pool: the DTC row = the 3PL pool, the FBA row = FBA) = live
+// overrides; blank = the system value, shown in grey. planner.wssi_plan_versions / wssi_plan_cells / wssi_overrides (migration 397).
+var PLN={fy:null,data:null,loading:false,err:'',ver:null,measure:'sales',undo:[],saving:0,q:Promise.resolve(),col:{}};
+try{ PLN.measure=localStorage.getItem('hz_pln_measure')||'sales'; PLN.col=JSON.parse(localStorage.getItem('hz_pln_col')||'{}')||{}; }catch(e){}
+var PLN_MEAS=[['sales','Sales £','plan'],['units','Sales units','plan'],['close','Closing units','plan'],['fc_units','Forecast override','ovr'],['target_units','Target closing','ovr']];
+function plnLoad(fy,v,cb){ fetch('/api/demand/wssi-plan?fy='+fy+(v?'&v='+v:'')).then(function(r){ return r.json(); }).then(cb).catch(function(e){ cb({error:String(e&&e.message||e)}); }); }
+// system forecast units per month × market × channel × group, and system target units per month × market × pool × group, from the WSSI facts
+var _WSYS={};
+function wssiSys(D){ var k=D.fy+'|'+(D.built_at||''); if(_WSYS.k===k)return _WSYS; var d=D.dict, SI={}, KI={}; D.sales_cols.forEach(function(c,x){ SI[c]=x; }); D.stock_cols.forEach(function(c,x){ KI[c]=x; });
+  var fu={}, fs={}, tg={}; D.sales.forEach(function(r){ var m=D.months[r[0]], key=m+'|'+d.mkt[r[1]]+'|'+d.ch[r[2]]+'|'+d.cat[r[3]]; fu[key]=(fu[key]||0)+r[6+SI.u]; fs[key]=(fs[key]||0)+r[6+SI.r]; });
+  D.stock.forEach(function(r){ var key=D.months[r[0]]+'|'+d.mkt[r[1]]+'|'+d.pool[r[2]]+'|'+d.cat[r[3]]; tg[key]=(tg[key]||0)+r[6+KI.tgU]; });
+  _WSYS={k:k,fu:fu,fs:fs,tg:tg}; return _WSYS; }
+function renderWssiPlanView(body){
+  var now=new Date(), curFy=now.getMonth()+1>=3?now.getFullYear():now.getFullYear()-1, curM=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  if(PLN.fy==null)PLN.fy=(typeof WSSI!=='undefined'&&WSSI.fy)||curFy;
+  var fy=PLN.fy, months=otbiMonths(fy), H=wssiH, fyLbl='FY'+String(fy+1).slice(2), ME_=PLN.measure, MD=PLN_MEAS.filter(function(x){ return x[0]===ME_; })[0]||PLN_MEAS[0], OVR=MD[2]==='ovr', GBP=ME_==='sales';
+  if(!PLN.data||PLN.data.fy!==fy||PLN.data._v!==PLN.ver){
+    if(!PLN.loading){ PLN.loading=true; PLN.err=''; plnLoad(fy,PLN.ver,function(d){ PLN.loading=false; if(d.error)PLN.err=d.error; else { d._v=PLN.ver; PLN.data=d; PLN.undo=[]; } if(DEMAND_VIEW==='wssiplan'){ var b=document.getElementById('demand-body'); if(b)renderWssiPlanView(b); } }); }
+    body.innerHTML='<div style="padding:18px;color:'+(PLN.err?'var(--neg)':'var(--muted)')+'">'+(PLN.err?'Could not load the WSSI plan: '+H(PLN.err):'Loading the WSSI plan…')+'</div>'; return;
+  }
+  var P=PLN.data, D=(typeof WSSI!=='undefined'&&WSSI.data)?WSSI.data[fy]:null; if(!D&&typeof WSSI!=='undefined'&&!WSSI.loading)wssiLoad(fy);
+  var SYS=D?wssiSys(D):null, isAdmin=(typeof ME!=='undefined'&&ME&&ME.is_admin);
+  var shownV=(P.versions||[]).filter(function(v){ return v.id===P.shown_id; })[0]||null, draft=(P.versions||[]).filter(function(v){ return v.status==='draft'; })[0]||null;
+  var readOnlyPlan=!OVR&&shownV&&shownV.status==='locked';
+  var key=function(m,mk,ch,cg){ return m+'|'+mk+'|'+ch+'|'+cg; };
+  var store={}; (OVR?(P.overrides||[]).filter(function(o){ return o.measure===ME_; }):(P.cells||[]).filter(function(c){ return c.measure===ME_; })).forEach(function(c){ store[key(c.month,c.market,c.channel,c.cgroup)]=Number(c.value)||0; });
+  wssiCss();
+  var R=[]; OTBI_ROWS.forEach(function(p){ OTBI_CG.forEach(function(cg){ R.push({mk:p[0],ch:p[1],cg:cg,g:p[0]+'|'+p[1]}); }); });
+  var NR=R.length, NC=12, hid=function(r){ return !!PLN.col[R[r].g]; };
+  var rowLocked=function(r){ return ME_==='target_units'&&R[r].ch!=='DTC'&&R[r].ch!=='FBA'; };
+  var locked=function(c,r){ if(readOnlyPlan)return true; if(OVR&&months[c]<curM)return true; if(r!=null&&rowLocked(r))return true; return false; };
+  var val=function(r,c){ var v=store[key(months[c],R[r].mk,R[r].ch,R[r].cg)]; return v>0?v:null; };
+  var sysVal=function(r,c){ if(!SYS||!OVR)return null; var rw=R[r], m=months[c];
+    if(ME_==='fc_units')return SYS.fu[key(m,rw.mk,rw.ch,rw.cg)]||null;
+    if(rowLocked(r))return null; return SYS.tg[m+'|'+rw.mk+'|'+(rw.ch==='FBA'?'FBA':'3PL')+'|'+rw.cg]||null; };
+  var fmt=function(v){ return v>0?(GBP?'£':'')+Math.round(v).toLocaleString('en-GB'):''; };
+  var fmtE=function(v){ return v>0?String(GBP?Math.round(v*100)/100:Math.round(v)):''; };
+  var cellHtml=function(r,c){ var v=val(r,c); if(v!=null)return '<span class="ov'+(OVR?' ovd':'')+'">'+fmt(v)+'</span>'; var sv=sysVal(r,c); return '<span class="ov sysv">'+(sv?fmt(sv):'')+'</span>'; };
+  var css='<style>#pln-grid{outline:none}#pln-grid td.oc{cursor:cell;user-select:none;-webkit-user-select:none;padding:0 2px}#pln-grid.drag,#pln-grid.drag *{user-select:none;-webkit-user-select:none;cursor:cell}'
+    +'#pln-grid .ov,#pln-grid .oe{display:block;min-width:78px;line-height:18px;text-align:right;padding:3px 6px;border:1px solid transparent;border-radius:4px;font:inherit;font-size:12px;background:transparent;color:inherit;box-sizing:border-box}'
+    +'#pln-grid .ov.sysv{color:var(--faint);font-style:italic}#pln-grid .ov.ovd{font-weight:700;color:var(--blue)}'
+    +'#pln-grid .oe{border-color:#93c5fd;background:var(--card);outline:none;width:94px}#pln-grid td.oc.sel{background:var(--blue-soft)!important}#pln-grid td.oc.act{box-shadow:inset 0 0 0 2px var(--blue)}#pln-grid:not(:focus-within) td.oc.act{box-shadow:inset 0 0 0 2px var(--line)}'
+    +'#pln-grid td.oc.lk{color:var(--faint)}#pln-grid tr.og td{background:var(--hover);font-weight:700}#pln-grid tr.og td.lab{cursor:pointer}#pln-grid tr.oh{display:none}#pln-grid td.lab.cg{padding-left:22px}#pln-grid td.wc-lock{background:var(--w-lock)}'
+    +'#pln-sb{position:sticky;bottom:0;z-index:4;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding:6px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--ink-soft)}#pln-sb b{color:var(--ink)}#pln-sb .sp{flex:1}#pln-sb button{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:3px 10px;border-radius:6px;font-size:12px;cursor:pointer}#pln-sb button:disabled{opacity:.45;cursor:default}#pln-toast.bad{color:var(--neg)}#pln-toast.ok{color:var(--pos)}#pln-toast{color:var(--amber)}'
+    +'#pln-imp{border:1px solid #93c5fd;background:var(--hover);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px}.pln-meas button{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:3px 10px;font-size:12px;cursor:pointer;margin-right:-1px}.pln-meas button.on{background:var(--blue);border-color:var(--blue);color:#fff}.pln-meas button:first-child{border-radius:6px 0 0 6px}.pln-meas button:last-child{border-radius:0 6px 6px 0}</style>';
+  var verOpts=(P.versions||[]).map(function(v){ return '<option value="'+v.id+'"'+(v.id===P.shown_id?' selected':'')+'>'+(v.status==='draft'?'Draft (editing)':'v'+v.version+' locked '+fmtDate(String(v.locked_at||'').slice(0,10))+' by '+H(String(v.locked_by||'').split('@')[0])+'@')+'</option>'; }).join('');
+  var lockedV=(P.versions||[]).filter(function(v){ return v.status==='locked'; }), nextV=(lockedV.length?Math.max.apply(null,lockedV.map(function(v){ return v.version||0; })):0)+1;
+  var h=css+'<div id="wssi-root"><div class="w-head"><div><h2>WSSI plan</h2><div class="w-sub">The signed-off plan by month, market, channel and category group (sales £ ex VAT, sales units, closing stock units), plus live overrides for the forecast and the target closing stock. The plan is edited as a draft and locked by an admin as a numbered version; WSSI compares against the latest locked version. Overrides are not versioned: blank = the system value (grey).</div></div>'
+    +'<div class="w-acts"><button class="w-btn" id="pln-dl">⬇ Download template</button><button class="w-btn" id="pln-ul"'+(readOnlyPlan?' disabled':'')+'>⬆ Upload template</button><input type="file" id="pln-file" accept=".xlsx" style="display:none"><button class="w-btn" id="pln-wssi">Open WSSI ↗</button></div></div>'
+    +'<div class="w-filters"><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="pln-fy">'+[curFy-1,curFy,curFy+1].map(function(y){ return '<option value="'+y+'"'+(y===fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
+    +'<span class="w-fg"><span class="w-fl">Measure</span><span class="pln-meas">'+PLN_MEAS.map(function(x){ return '<button data-m="'+x[0]+'"'+(x[0]===ME_?' class="on"':'')+'>'+x[1]+'</button>'; }).join('')+'</span></span>'
+    +(OVR?'<span class="w-meta">'+(ME_==='fc_units'?'Forecast sales units for open months; blank = DEMAND ▸ Plan forecast (grey). Overridden cells show blue here and in WSSI.':'Target closing units per stock pool for open months: the DTC row sets the 3PL pool (DTC, B2B, Zalando, TikTok), the FBA row sets FBA; blank = calculated from cover weeks (grey).')+'</span>'
+      :'<span class="w-fg"><span class="w-fl">Version</span><select class="w-pick" id="pln-ver">'+(verOpts||'<option>No plan yet</option>')+'</select></span>'+(!draft&&lockedV.length?'<button class="w-btn" id="pln-newdraft">Edit (new draft from v'+(nextV-1)+')</button>':'')
+       +(draft&&P.shown_id===draft.id?'<button class="w-btn" id="pln-lock" style="background:var(--blue);border-color:var(--blue);color:#fff"'+(isAdmin?'':' disabled title="Only an admin can lock the plan"')+'>🔒 Lock as v'+nextV+'</button>':''))
+    +'<span class="w-fg"><button class="w-btn" id="pln-exp">Expand all</button><button class="w-btn" id="pln-colall">Collapse all</button></span></div>'
+    +(P.missing?'<div class="w-note">Saving needs migration 397 on this database.</div>':'')+(readOnlyPlan?'<div class="w-note">Viewing locked version v'+shownV.version+' (read only).'+(draft?' Pick the draft to edit.':' Press Edit to start a new draft from the latest locked version.')+'</div>':'')+(OVR&&!SYS?'<div class="w-note">Loading system values from WSSI…</div>':'')+'<div id="pln-imp" hidden></div>';
+  h+='<div class="w-card"><div class="w-scroll"><table id="pln-grid" role="grid" aria-multiselectable="true" aria-label="WSSI plan" tabindex="0"><thead><tr class="h1"><th class="lab">Market · channel ▸ category group</th>'+months.map(function(m,c){ return '<th'+(locked(c)?' style="color:var(--faint)"':'')+'>'+wssiMon(m)+'</th>'; }).join('')+'<th class="ptot p0">'+(ME_==='close'||ME_==='target_units'?'Feb':fyLbl)+'</th></tr></thead><tbody>';
+  var lastMk='', lastG='';
+  var mkRow=function(mk){ return '<tr class="key"><td class="lab">'+mk+' total</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="pln-t-'+mk+'-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="pln-t-'+mk+'-fy"></td></tr>'; };
+  R.forEach(function(rw,r){ if(lastMk&&rw.mk!==lastMk)h+=mkRow(lastMk); lastMk=rw.mk;
+    if(rw.g!==lastG){ lastG=rw.g; var gi=OTBI_ROWS.findIndex(function(p){ return p[0]+'|'+p[1]===rw.g; });
+      h+='<tr class="og"><td class="lab" data-tg="'+H(rw.g)+'">'+(PLN.col[rw.g]?'▸ ':'▾ ')+rw.mk+' · '+H(OTBI_CH[rw.ch]||rw.ch)+(ME_==='target_units'?(rw.ch==='DTC'?' (3PL pool)':rw.ch==='FBA'?'':' (in the 3PL pool: set on DTC)'):'')+'</td>'+months.map(function(m,c){ return '<td class="num" id="pln-g'+gi+'-'+c+'"></td>'; }).join('')+'<td class="num ptot p0" id="pln-g'+gi+'-fy"></td></tr>'; }
+    h+='<tr'+(hid(r)?' class="oh"':'')+'><td class="lab cg">'+H(rw.cg)+'</td>'+months.map(function(m,c){ return '<td class="num oc '+(locked(c,r)?'wc-na lk':(OVR?'wc-inp':'wc-lock'))+'" role="gridcell" id="pln-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'">'+cellHtml(r,c)+'</td>'; }).join('')+'<td class="num wc-tot ptot p0" id="pln-r-'+r+'"></td></tr>'; });
+  h+=mkRow(lastMk)+'<tr class="key"><td class="lab">All markets</td>'+months.map(function(m,c){ return '<td class="num wc-tot" id="pln-t-all-'+c+'"></td>'; }).join('')+'<td class="num wc-tot ptot p0" id="pln-t-all-fy"></td></tr></tbody></table></div></div>'
+    +'<div id="pln-sb"><span id="pln-sbt"></span><span class="sp"></span><span id="pln-saving"></span><span id="pln-toast" role="alert"></span><button id="pln-copy">Copy</button><button id="pln-clear">Clear</button><button id="pln-undo">Undo</button></div>'
+    +'<textarea id="pln-clip" aria-hidden="true" tabindex="-1" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea>'
+    +'<div class="w-key">'+(OVR?'<span><i class="wc-inp"></i>Editable month</span><span style="color:var(--blue);font-weight:700">Blue = override</span><span style="color:var(--faint);font-style:italic">Grey = system value</span>':'<span><i class="wc-lock"></i>Plan (locked once an admin locks the version)</span>')+'<span><i class="wc-na"></i>Locked</span><span><i class="wc-tot"></i>Totals</span></div></div>';
+  body.innerHTML=h;
+  var root=body.querySelector('#wssi-root'), T=root.querySelector('#pln-grid'), TD=function(r,c){ return root.querySelector('#pln-c'+r+'-'+c); };
+  var SS={sel:{},base:{},anchor:null,ext:null,drag:false}, ED=null;
+  var shown=function(r,c){ var v=val(r,c); return v!=null?v:(sysVal(r,c)||0); };
+  var stockLike=(ME_==='close'||ME_==='target_units');
+  function totals(){ var all=months.map(function(){ return 0; }), mk={}, gr={};
+    R.forEach(function(rw,r){ var rt=0, gi=OTBI_ROWS.findIndex(function(p){ return p[0]+'|'+p[1]===rw.g; }), g=gr[gi]||(gr[gi]=months.map(function(){ return 0; })), t=mk[rw.mk]||(mk[rw.mk]=months.map(function(){ return 0; }));
+      months.forEach(function(m,c){ var v=shown(r,c); rt=stockLike?v:rt+v; g[c]+=v; t[c]+=v; all[c]+=v; }); var e=root.querySelector('#pln-r-'+r); if(e)e.textContent=fmt(rt); });
+    var put=function(pre,arr){ var s=0; arr.forEach(function(v,c){ s=stockLike?v:s+v; var e=root.querySelector('#'+pre+'-'+c); if(e)e.textContent=fmt(v); }); var e2=root.querySelector('#'+pre+'-fy'); if(e2)e2.textContent=fmt(s); };
+    Object.keys(gr).forEach(function(gi){ put('pln-g'+gi,gr[gi]); }); Object.keys(mk).forEach(function(m){ put('pln-t-'+m,mk[m]); }); put('pln-t-all',all); }
+  function keys(){ return Object.keys(SS.sel); } function rc(k){ var p=k.split(','); return {r:+p[0],c:+p[1]}; } function cp(o){ var x={}; for(var k in o)x[k]=1; return x; }
+  function rect(o,a,b){ for(var r=Math.min(a.r,b.r);r<=Math.max(a.r,b.r);r++){ if(hid(r))continue; for(var c=Math.min(a.c,b.c);c<=Math.max(a.c,b.c);c++)o[r+','+c]=1; } return o; }
+  var clC=function(c){ return Math.max(0,Math.min(NC-1,c)); }, stepR=function(r,d){ var x=r; do{ x+=d; }while(x>=0&&x<NR&&hid(x)); return (x<0||x>=NR)?r:x; };
+  function focusGrid(){ if(document.activeElement!==T){ try{ T.focus({preventScroll:true}); }catch(e){ T.focus(); } } }
+  function setActive(r,c){ SS.sel={}; SS.sel[r+','+c]=1; SS.base={}; SS.anchor={r:r,c:c}; SS.ext={r:r,c:c}; paint(true); }
+  function extendTo(r,c){ if(!SS.anchor)return setActive(r,c); SS.ext={r:r,c:c}; SS.sel=rect(cp(SS.base),SS.anchor,SS.ext); paint(true,true); }
+  function paint(scroll,toExt){ var a=SS.anchor; for(var r=0;r<NR;r++)for(var c=0;c<NC;c++){ var td=TD(r,c); if(!td)continue; td.classList.toggle('sel',!!SS.sel[r+','+c]); td.classList.toggle('act',!!(a&&a.r===r&&a.c===c)); }
+    if(scroll){ var p=toExt?SS.ext:a, td2=p&&TD(p.r,p.c); if(td2&&td2.scrollIntoView){ try{ td2.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } } sb(); }
+  function sb(){ var ks=keys(), n=ks.length, cnt=0, sum=0; ks.forEach(function(k){ var x=rc(k), v=val(x.r,x.c); if(v!=null){ cnt++; sum+=v; } });
+    var el=root.querySelector('#pln-sbt'); if(el)el.innerHTML=n?('Selected <b>'+n+'</b> &nbsp; Sum <b>'+(fmt(sum)||'0')+'</b> &nbsp; Count <b>'+cnt+'</b>'):'Click a cell to select. Drag, Shift or Ctrl/Cmd+click to select more.';
+    var cb=root.querySelector('#pln-clear'); if(cb){ cb.textContent='Clear '+n+' cell'+(n===1?'':'s'); cb.disabled=!cnt; } var cpb=root.querySelector('#pln-copy'); if(cpb)cpb.disabled=!n;
+    var ub=root.querySelector('#pln-undo'), u=PLN.undo[PLN.undo.length-1]; if(ub)ub.disabled=!u; var sv=root.querySelector('#pln-saving'); if(sv)sv.textContent=PLN.saving?'Saving…':''; }
+  function toast(msg,kind){ var el=root.querySelector('#pln-toast'); if(!el)return; el.className=kind||''; el.textContent=msg; clearTimeout(el._t); el._t=setTimeout(function(){ el.textContent=''; },kind==='bad'?9000:4500); }
+  function parseAmt(s){ var t=String(s==null?'':s).replace(/^\s*"([\s\S]*)"\s*$/,'$1').replace(/[£,\s ]/g,''); if(t===''||t==='-')return {v:null}; if(/^\d+(\.\d+)?$/.test(t)){ var n=Math.round(parseFloat(t)*100)/100; return {v:n>0?n:null}; } return {bad:true}; }
+  function parseClip(t){ t=String(t==null?'':t).replace(/\r\n?/g,'\n'); if(t.slice(-1)==='\n')t=t.slice(0,-1); var tab=t.indexOf('\t')>=0; return t.split('\n').map(function(l){ return tab?l.split('\t'):(/^\s*\d{1,3}(,\d{3})+(\.\d+)?\s*$/.test(l)?[l]:l.split(',')); }); }
+  function setVal(r,c,v){ var k=key(months[c],R[r].mk,R[r].ch,R[r].cg); if(v>0)store[k]=v; else delete store[k]; var td=TD(r,c); if(td){ var o=td.querySelector('.ov'); var t=document.createElement('span'); t.innerHTML=cellHtml(r,c); if(o)o.replaceWith(t.firstChild); } }
+  function syncData(){ var list=[]; Object.keys(store).forEach(function(k){ var p=k.split('|'); list.push({month:p[0],market:p[1],channel:p[2],cgroup:p[3],measure:ME_,value:store[k]}); });   // keep PLN.data in step (other measures untouched)
+    if(OVR)P.overrides=(P.overrides||[]).filter(function(o){ return o.measure!==ME_; }).concat(list); else P.cells=(P.cells||[]).filter(function(c){ return c.measure!==ME_; }).concat(list); }
+  function apply(ops,label,undoOf,note){ ops=ops.filter(function(o){ return o.prev!==o.next; }); if(!ops.length){ toast(note||'No changes'); return Promise.resolve(); }
+    ops.forEach(function(o){ setVal(o.r,o.c,o.next); }); totals(); syncData(); PLN.saving++; sb();
+    var url=OVR?'/api/demand/wssi-overrides':'/api/demand/wssi-plan/cells';
+    var p=PLN.q.then(function(){ return fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,rows:ops.map(function(o){ var rw=R[o.r]; return {month:months[o.c],market:rw.mk,channel:rw.ch,cgroup:rw.cg,measure:ME_,value:o.next||(OVR?'':0)}; })})}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }); })
+      .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'save failed'); return j; })
+      .then(function(j){ if(!undoOf){ PLN.undo.push({label:label,ops:ops,m:ME_}); if(PLN.undo.length>50)PLN.undo.shift(); }
+        if(typeof WSSI!=='undefined'&&WSSI.plan)delete WSSI.plan[fy];
+        var s=ops.length+' cell'+(ops.length===1?'':'s'); toast((undoOf?'Undone: '+s:'Saved '+s)+(note?'. '+note:''),note?'':'ok');
+        if(j.draft_created){ PLN.ver=null; PLN.data=null; renderWssiPlanView(body); } },
+      function(e){ ops.forEach(function(o){ setVal(o.r,o.c,o.prev); }); totals(); syncData(); if(undoOf)PLN.undo.push(undoOf); toast('Not saved, '+ops.length+' cell'+(ops.length===1?'':'s')+' reverted: '+(e&&e.message||e),'bad'); })
+      .then(function(){ PLN.saving=Math.max(0,PLN.saving-1); sb(); });
+    PLN.q=p; return p; }
+  function op(ops,r,c,next,lk){ if(locked(c,r)){ lk.n++; return; } if(hid(r))return; var prev=val(r,c); if(prev!==next)ops.push({r:r,c:c,prev:prev,next:next}); }
+  function lkNote(lk){ return lk.n?lk.n+' locked cell'+(lk.n===1?'':'s')+' skipped':''; }
+  function undo(){ if(PLN.saving){ PLN.q.then(function(){ undo(); }); return; } var u=PLN.undo[PLN.undo.length-1]; if(!u||u.m!==ME_){ toast(u?'Switch back to that measure to undo':'Nothing to undo'); sb(); return; } PLN.undo.pop();
+    apply(u.ops.map(function(o){ return {r:o.r,c:o.c,prev:o.next,next:o.prev}; }),'Undo',u); }
+  function clearSel(){ var ops=[], lk={n:0}; keys().forEach(function(k){ var x=rc(k); if(val(x.r,x.c)!=null)op(ops,x.r,x.c,null,lk); }); if(!ops.length){ toast(lkNote(lk)||'Nothing to clear'); return; } apply(ops,'Clear',null,lkNote(lk)); }
+  function copySel(){ var ks=keys(); if(!ks.length)return; var rs={}, cs={}; ks.forEach(function(k){ var p=rc(k); rs[p.r]=1; cs[p.c]=1; }); var Rr=Object.keys(rs).map(Number).sort(function(a,b){ return a-b; }), C=Object.keys(cs).map(Number).sort(function(a,b){ return a-b; });
+    var txt=Rr.map(function(r){ return C.map(function(c){ return SS.sel[r+','+c]?fmtE(val(r,c)):''; }).join('\t'); }).join('\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){ toast('Copied '+ks.length+' cells','ok'); },function(){ toast('The browser blocked the copy','bad'); }); }
+  function pasteText(txt){ var a=SS.anchor; if(!a)return; var B=parseClip(txt), ks=keys(), ops=[], bad=0, w=0, lk={n:0}, fill=(B.length===1&&B[0].length===1&&ks.length>1);
+    if(fill){ var p=parseAmt(B[0][0]); if(p.bad){ toast('Not a number','bad'); return; } ks.forEach(function(k){ var x=rc(k); op(ops,x.r,x.c,p.v,lk); }); }
+    else { var r0=a.r; B.forEach(function(row,i){ if(row.length>w)w=row.length; var r=i?stepR(r0,1):r0; if(i&&r===r0)return; r0=r; row.forEach(function(cell,j){ var c=a.c+j; if(c>=NC)return; var q=parseAmt(cell); if(q.bad){ bad++; return; } op(ops,r,c,q.v,lk); }); }); }
+    apply(ops,fill?'Fill':'Paste',null,[bad?bad+' not a number':'',lkNote(lk)].filter(Boolean).join('; ')); }
+  function startEdit(r,c,mode,ch){ if(ED)commit(true); if(locked(c,r)){ toast(readOnlyPlan?'This version is locked':'Locked cell'); return; } var td=TD(r,c); if(!td)return; if(!(SS.anchor&&SS.anchor.r===r&&SS.anchor.c===c))setActive(r,c);
+    var sp=td.querySelector('.ov'), inp=document.createElement('input'); inp.className='oe'; inp.setAttribute('inputmode','decimal'); inp.value=ch!=null?ch:fmtE(val(r,c)); sp.style.display='none'; td.appendChild(inp); ED={r:r,c:c,td:td,inp:inp,mode:mode};
+    inp.focus(); try{ if(ch!=null)inp.setSelectionRange(inp.value.length,inp.value.length); else inp.select(); }catch(e){}
+    inp.onkeydown=function(ev){ var k=ev.key; ev.stopPropagation(); if(k==='Enter'){ ev.preventDefault(); commit(); moveBy(ev.shiftKey?-1:1,0); } else if(k==='Tab'){ ev.preventDefault(); commit(); moveBy(0,ev.shiftKey?-1:1); } else if(k==='Escape'){ ev.preventDefault(); endEdit(); focusGrid(); }
+      else if(ED&&ED.mode==='enter'&&/^Arrow(Up|Down|Left|Right)$/.test(k)){ ev.preventDefault(); commit(); moveBy(k==='ArrowUp'?-1:k==='ArrowDown'?1:0,k==='ArrowLeft'?-1:k==='ArrowRight'?1:0); } };
+    inp.onblur=function(){ if(ED&&ED.inp===inp)commit(true); }; }
+  function endEdit(){ var E=ED; ED=null; if(!E)return null; var sp=E.td.querySelector('.ov'); if(sp)sp.style.display=''; if(E.inp.parentNode)E.inp.parentNode.removeChild(E.inp); return E; }
+  function commit(fromBlur){ var E=ED; if(!E)return; var raw=E.inp.value; endEdit(); if(!fromBlur)focusGrid(); var p=parseAmt(raw); if(p.bad){ toast('Not saved: not a number','bad'); return; } apply([{r:E.r,c:E.c,prev:val(E.r,E.c),next:p.v}],'Edit'); }
+  function moveBy(dr,dc){ var a=SS.anchor||{r:stepR(-1,1),c:0}; setActive(dr?stepR(a.r,dr):a.r,clC(a.c+dc)); }
+  function cellOf(t){ var td=t&&t.closest?t.closest('td.oc'):null; return td?{r:+td.dataset.r,c:+td.dataset.c,td:td}:null; }
+  var UP=null; function dragEnd(){ SS.drag=false; if(UP){ UP.forEach(function(h2){ (h2[0]==='blur'?window:document).removeEventListener(h2[0],h2[1]); }); UP=null; } T.classList.remove('drag'); }
+  function dragMove(ev){ if(!SS.drag)return; if(ev.buttons===0){ dragEnd(); return; } var x=cellOf(ev.target)||(document.elementFromPoint&&cellOf(document.elementFromPoint(ev.clientX,ev.clientY))); if(!x||(SS.ext&&SS.ext.r===x.r&&SS.ext.c===x.c))return; extendTo(x.r,x.c); }
+  function dragStart(){ dragEnd(); SS.drag=true; UP=[['mousemove',dragMove],['mouseup',dragEnd],['blur',dragEnd]]; UP.forEach(function(h2){ (h2[0]==='blur'?window:document).addEventListener(h2[0],h2[1]); }); T.classList.add('drag'); }
+  function saveCol(){ try{ localStorage.setItem('hz_pln_col',JSON.stringify(PLN.col)); }catch(e){} }
+  T.addEventListener('click',function(ev){ var g=ev.target.closest&&ev.target.closest('td[data-tg]'); if(!g)return; var k=g.getAttribute('data-tg'); if(PLN.col[k])delete PLN.col[k]; else PLN.col[k]=1; saveCol(); renderWssiPlanView(body); });
+  T.addEventListener('mousedown',function(ev){ if(ev.button!==0)return; var x=cellOf(ev.target); if(!x)return; if(ED&&ED.td===x.td)return; if(ED)commit(true); ev.preventDefault();
+    if(ev.shiftKey&&SS.anchor){ extendTo(x.r,x.c); dragStart(); } else { setActive(x.r,x.c); dragStart(); } focusGrid(); });
+  T.addEventListener('mouseover',dragMove); T.addEventListener('dblclick',function(ev){ var x=cellOf(ev.target); if(x&&!(ED&&ED.td===x.td))startEdit(x.r,x.c,'edit'); }); T.addEventListener('dragstart',function(ev){ ev.preventDefault(); });
+  T.addEventListener('keydown',function(ev){ if(ED)return; var k=ev.key, mod=(ev.ctrlKey||ev.metaKey)&&!ev.altKey;
+    if(mod){ var kl=String(k||'').toLowerCase(); if(kl==='c'){ ev.preventDefault(); copySel(); return; } if(kl==='v'){ var ta=root.querySelector('#pln-clip'); ta.value=''; ta.focus(); setTimeout(function(){ if(document.activeElement===ta)focusGrid(); },60); return; } if(kl==='z'&&!ev.shiftKey){ ev.preventDefault(); undo(); return; } return; }
+    if(!SS.anchor){ if(/^(Arrow|Enter|F2)/.test(k)){ ev.preventDefault(); setActive(stepR(-1,1),0); } return; }
+    var a=SS.anchor, dr=k==='ArrowUp'?-1:k==='ArrowDown'?1:0, dc=k==='ArrowLeft'?-1:k==='ArrowRight'?1:0;
+    if(dr||dc){ ev.preventDefault(); if(ev.shiftKey){ var x=SS.ext||a; extendTo(dr?stepR(x.r,dr):x.r,clC(x.c+dc)); } else setActive(dr?stepR(a.r,dr):a.r,clC(a.c+dc)); return; }
+    if(k==='Tab'){ var nc=a.c+(ev.shiftKey?-1:1); if(nc<0||nc>=NC)return; ev.preventDefault(); setActive(a.r,nc); return; }
+    if(k==='Enter'||k==='F2'){ ev.preventDefault(); startEdit(a.r,a.c,'edit'); return; } if(k==='Delete'||k==='Backspace'){ ev.preventDefault(); clearSel(); return; }
+    if(!ev.altKey&&k&&k.length===1&&/[0-9.]/.test(k)){ ev.preventDefault(); startEdit(a.r,a.c,'enter',k); } });
+  var ta=root.querySelector('#pln-clip'); ta.addEventListener('paste',function(ev){ var cd=ev.clipboardData, txt=cd?cd.getData('text/plain'):null; if(txt==null)return; ev.preventDefault(); ta.value=''; focusGrid(); pasteText(txt); });
+  root.querySelector('#pln-copy').onclick=copySel; root.querySelector('#pln-clear').onclick=function(){ clearSel(); focusGrid(); }; root.querySelector('#pln-undo').onclick=function(){ undo(); focusGrid(); };
+  root.querySelector('#pln-fy').onchange=function(){ PLN.fy=+this.value; PLN.ver=null; PLN.data=null; renderWssiPlanView(body); };
+  root.querySelectorAll('.pln-meas button').forEach(function(b){ b.onclick=function(){ PLN.measure=b.getAttribute('data-m'); try{ localStorage.setItem('hz_pln_measure',PLN.measure); }catch(e){} PLN.undo=[]; renderWssiPlanView(body); }; });
+  var vs=root.querySelector('#pln-ver'); if(vs)vs.onchange=function(){ PLN.ver=+this.value||null; PLN.data=null; renderWssiPlanView(body); };
+  var nd=root.querySelector('#pln-newdraft'); if(nd)nd.onclick=function(){ toast('Type in any cell: the first change creates the draft from v'+(nextV-1)); var lv=lockedV[0]; PLN.ver=null; PLN.data=null;
+    fetch('/api/demand/wssi-plan/cells',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,rows:[]})}).then(function(r){ return r.json(); }).then(function(){ renderWssiPlanView(body); }); };
+  var lb=root.querySelector('#pln-lock'); if(lb)lb.onclick=function(){ if(!confirm('Lock the draft as v'+nextV+'? WSSI will compare against it, and it becomes read only.'))return; lb.disabled=true;
+    fetch('/api/demand/wssi-plan/lock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy})}).then(function(r){ return r.json(); }).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed'); PLN.ver=null; PLN.data=null; if(typeof WSSI!=='undefined'&&WSSI.plan)delete WSSI.plan[fy]; renderWssiPlanView(body); })
+      .catch(function(e){ lb.disabled=false; toast('Not locked: '+(e&&e.message||e),'bad'); }); };
+  root.querySelector('#pln-exp').onclick=function(){ PLN.col={}; saveCol(); renderWssiPlanView(body); };
+  root.querySelector('#pln-colall').onclick=function(){ PLN.col={}; OTBI_ROWS.forEach(function(p){ PLN.col[p[0]+'|'+p[1]]=1; }); saveCol(); renderWssiPlanView(body); };
+  root.querySelector('#pln-wssi').onclick=function(){ if(typeof WSSI!=='undefined')WSSI.fy=fy; otbiGo('wssi'); };
+  root.querySelector('#pln-dl').onclick=function(){ var g=[['WSSI plan '+fyLbl+': '+MD[1]+(OVR?' (override; blank = system value)':'')+'. Fill in and upload. Channel codes: DTC, B2B, FBA, ZAL. Category groups: '+OTBI_CG.join(', ')+'.'],['Market','Channel','Category group'].concat(months.map(wssiMon))];
+    R.forEach(function(rw,r){ g.push([rw.mk,rw.ch,rw.cg].concat(months.map(function(m,c){ var v=val(r,c); return v==null?'':v; }))); });
+    var bytes=buildXlsx('WSSI plan',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='wssi_plan_'+ME_+'_'+fyLbl+'.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); };
+  var fi=root.querySelector('#pln-file'); root.querySelector('#pln-ul').onclick=function(){ fi.value=''; fi.click(); };
+  fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f)return; var box=root.querySelector('#pln-imp'); box.hidden=false; box.textContent='Reading '+f.name+'…'; var rd=new FileReader();
+    rd.onload=function(){ fetch('/api/demand/wssi-plan/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fy:fy,file_b64:String(rd.result).split(',')[1]||''})}).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error){ box.innerHTML='<b style="color:var(--neg)">'+H(d.error)+'</b> <button class="w-btn" id="pln-ix">Close</button>'; box.querySelector('#pln-ix').onclick=function(){ box.hidden=true; }; return; }
+      var ri={}, ops=[], lk={n:0}; R.forEach(function(rw,r){ ri[rw.mk+'|'+rw.ch+'|'+rw.cg]=r; });
+      if(Object.keys(PLN.col).length){ PLN.col={}; saveCol(); }
+      (d.cells||[]).forEach(function(x){ var r=ri[x.market+'|'+x.channel+'|'+x.cgroup], c=months.indexOf(x.month); if(r==null||c<0)return; var nv=x.value>0?x.value:null, pv=val(r,c); if(nv===pv)return; if(locked(c,r)){ lk.n++; return; } ops.push({r:r,c:c,prev:pv,next:nv}); });
+      box.innerHTML='<b>'+H(f.name)+'</b> ('+H(MD[1])+'): '+(ops.length?ops.length+' cell'+(ops.length===1?'':'s')+' to change.':'nothing to change.')+(lk.n?' '+lk.n+' locked cell'+(lk.n===1?'':'s')+' ignored.':'')+(d.n_bad?' <span style="color:var(--neg)">'+d.n_bad+' not a number: '+H(d.bad.slice(0,5).join('; '))+'</span>':'')+(d.n_unknown?' <span style="color:var(--neg)">'+d.n_unknown+' unknown rows: '+H(d.unknown.slice(0,5).join('; '))+'</span>':'')
+        +' &nbsp;'+(ops.length?'<button class="w-btn" id="pln-iok" style="background:var(--blue);border-color:var(--blue);color:#fff">Apply '+ops.length+'</button> ':'')+'<button class="w-btn" id="pln-ix">'+(ops.length?'Cancel':'Close')+'</button>';
+      box.querySelector('#pln-ix').onclick=function(){ box.hidden=true; }; var ok=box.querySelector('#pln-iok'); if(ok)ok.onclick=function(){ box.hidden=true; apply(ops,'Upload'); };
+    }).catch(function(e){ box.innerHTML='<b style="color:var(--neg)">Could not upload: '+H(e&&e.message||e)+'</b>'; }); }; rd.readAsDataURL(f); };
+  totals(); paint();
+}
+var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['wssiplan','WSSI plan'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -14719,7 +14978,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','otbinput','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','otbinput','wssiplan','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
