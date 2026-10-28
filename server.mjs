@@ -29184,11 +29184,14 @@ const PO_ROWS_SQL = `
           -- top: a PO on a shipment inherits the master PO's effective dates (m_* below). Landed-cost / ERP /
           -- action-flag columns are added by the final SELECT off the view's base fields.
           WITH mastered AS (
-            SELECT v.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
+            -- v28.555 (Ben 28-Oct-26 "go with recommendations": a PO on a shipment takes ALL its dates from that shipment): sd = the shipment
+            -- grid's own effective dates (same rules as the Shipments grid query: override ▸ Flexport by carrier_ref / name ▸ master-PO calc;
+            -- completion = delivery override ▸ arrival + 7, + 0 for FOB or a Direct to Client market). POs with no shipment row keep the view's dates.
+            SELECT v.*, coalesce(sd.arr, m.eff_delivery) m_delivery, m.eff_checkin m_checkin, coalesce(sd.dep, m.eff_ship) m_ship,
                    -- v28.549 (Ben 28-Oct-26: completion MUST come from the linked shipment; FOB = + 0 days): the shipment grid's rule. An FOB
                    -- shipment with no completion override completes on its arrival (the view's eff_checkin only knew the Direct to Client + 0).
-                   CASE WHEN lower(coalesce(v.sh_mode,''))='fob' AND v.sh_delivery IS NULL AND coalesce(m.eff_delivery, v.eff_delivery) IS NOT NULL   -- the view's own shipment join (shipment_ref, else the PO's own ref)
-                        THEN coalesce(m.eff_delivery, v.eff_delivery) ELSE coalesce(m.eff_checkin, v.eff_checkin) END chk_eff,
+                   coalesce(sd.comp, CASE WHEN lower(coalesce(v.sh_mode,''))='fob' AND v.sh_delivery IS NULL AND coalesce(m.eff_delivery, v.eff_delivery) IS NOT NULL   -- the view's own shipment join (shipment_ref, else the PO's own ref)
+                        THEN coalesce(m.eff_delivery, v.eff_delivery) ELSE coalesce(m.eff_checkin, v.eff_checkin) END) chk_eff,
                    coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po,
                    -- v27.903 (Ben): the ERP date the drift banner compares against. When the PO exists in the Fulfil mirror,
                    -- Fulfil's header date (requested_delivery_date, else delivery_date) wins; only POs unknown to Fulfil fall
@@ -29196,8 +29199,21 @@ const PO_ROWS_SQL = `
                    coalesce(fm.requested_delivery_date, fm.delivery_date, v.erp_final_delivery_date) erp_final_delivery_eff,
                    (fm.po IS NOT NULL) erp_is_fulfil
             FROM planner.v_po_finance v
-            LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = v.shipment_ref
+            LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = coalesce(nullif(v.shipment_ref,''), v.po)   -- v28.555: also a shipment named after the PO (as the grid's own-ref shipments)
             LEFT JOIN planner.v_po_finance m ON m.po = coalesce(nullif(sh2.master_po,''), v.shipment_ref) AND m.po <> v.po
+            LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments_effective f WHERE sh2.shipment_ref IS NOT NULL AND (f.flex_id=sh2.carrier_ref OR f.shipment_name=sh2.shipment_ref)
+              ORDER BY (f.flex_id=sh2.carrier_ref) DESC NULLS LAST LIMIT 1) sfx ON true
+            LEFT JOIN LATERAL (SELECT CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days')::date END ship_calc,
+                   (CASE WHEN coalesce(lower(sh2.mode), CASE WHEN sfx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air' THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END) transit_days,
+                   upper(coalesce(nullif(mm.country_code,''), mb.country_code, '')) mp_country
+              FROM planner.purchase_orders mm LEFT JOIN planner.suppliers ms ON ms.id=mm.supplier_id LEFT JOIN planner.branches mb ON mb.name=mm.branch
+              CROSS JOIN LATERAL (SELECT coalesce(mm.end_production_overide, (mm.start_production + (coalesce(ms.production_days,0)||' days')::interval)::date) pe) pec
+              WHERE sh2.shipment_ref IS NOT NULL AND mm.po = coalesce(nullif(sh2.master_po,''), sh2.shipment_ref) LIMIT 1) smp ON true
+            LEFT JOIN LATERAL (SELECT d.dep, a.arr,
+                   coalesce(sh2.delivery_date, (a.arr + ((CASE WHEN lower(coalesce(sh2.mode,''))='fob' OR coalesce(nullif(upper(sh2.country_code),''), nullif(smp.mp_country,''), '')='DIRECT' THEN 0 ELSE 7 END)||' days')::interval)::date) comp
+              FROM (SELECT coalesce(sh2.departure_date, sfx.departure_date, smp.ship_calc) dep) d
+              CROSS JOIN LATERAL (SELECT coalesce(sh2.arrival_date, sfx.arrival_date, sh2.landing_date, sfx.landing_date, (d.dep + (coalesce(smp.transit_days,0)||' days')::interval)::date) arr) a
+              WHERE sh2.shipment_ref IS NOT NULL) sd ON true
             LEFT JOIN planner.fulfil_purchase_orders fm ON fm.po = v.po
           )
                     SELECT po, supplier_name, status,
@@ -29219,7 +29235,7 @@ const PO_ROWS_SQL = `
             to_char(coalesce(m_ship, eff_ship),'YYYY-MM-DD') ship, CASE WHEN m_ship IS NOT NULL THEN 'S' ELSE ship_src END ship_src,
             to_char(coalesce(m_delivery, eff_delivery),'YYYY-MM-DD') delivery, CASE WHEN m_delivery IS NOT NULL THEN 'S' ELSE delivery_src END delivery_src,
             to_char(chk_eff,'YYYY-MM-DD') checkin,
-            CASE WHEN m_delivery IS NOT NULL THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
+            CASE WHEN m_delivery IS NOT NULL AND ship_master_po <> po THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
             -- raw overrides for the PLAN date editors (blank = use the calculated value)
             to_char(end_production_overide,'YYYY-MM-DD') end_override,
             to_char(supplier_ship_date,'YYYY-MM-DD') ship_override,

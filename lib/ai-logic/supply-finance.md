@@ -102,7 +102,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: 5527db7b91c3
+  server.mjs::PO_ROWS_SQL: 5800b60a8931
   server.mjs::_tplFulfilShipLookup: a90edcb58d76
   server.mjs::_tplRefOverride: 292f4d59386e
   server.mjs::/api/hz-search: f0ac31208a4d
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.552
+verified_version: v28.555
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -348,7 +348,7 @@ verified_version: v28.552
 - Transit lead comes from the PO's branch: branches.air_lead_time_days when the shipment mode is air (or the Flexport mode starts with "air"), else branches.sea_lead_time_days. With no shipment, sea is assumed. (source: v_po_finance :: transit_lead)
 - Completion ("check-in", received at the warehouse): the shipment delivery_date if set, else delivery + 7 days. Delivery + 0 days instead for an FOB shipment (v28.549, Ben 28-Oct-26) and for a DIRECT country PO that is its own shipment group. A PO's completion must match its linked shipment's. (source: v_po_finance :: eff_checkin; server.mjs :: PO_ROWS_SQL chk_eff)
 - Freshness of the supply lists (v28.550, Ben 28-Oct-26 "fix stale screens"): the PO grid, shipments and the other cached supply lists are rebuilt after any edit, but the first reader after someone else's edit may be handed the previous copy while the rebuild runs. That copy is now flagged stale; the page then fetches a fresh copy in the background (waits for the rebuild) and quietly updates the changed PO rows, the shipments list and any open PO or shipment window. The person who made the edit always sees it at once. (source: server.mjs :: supplySectionHandler; supply/inject.html :: staleFollow)
-- Shipment dates always win over PO dates. On the admin grid a PO on a shipment also inherits the shipment master PO's ship, delivery and completion dates; the badge then shows S. (source: server.mjs :: PO_ROWS_SQL mastered CTE)
+- Shipment dates always win over PO dates. On the admin grid (and Cash Flow) a PO on a shipment takes its ship, delivery and completion dates from that shipment, computed with the Shipments grid rules below; a shipment named after the PO counts. Where the shipment has no date yet, the PO keeps its own (else the shipment master PO's). The badge then shows S. (v28.555, Ben 28-Oct-26; source: server.mjs :: PO_ROWS_SQL mastered CTE, sd)
 - The supplier portal does not apply master inheritance. It shows each PO's own calculated dates. (source: server.mjs :: POS_SQL_PORTAL)
 - A PO links to a shipment through shipments.shipment_ref = purchase_orders.shipment_ref, or the PO's own number when shipment_ref is blank. (source: v_po_finance :: base join)
 - PO "late" = not complete, shipping or delivered, and the delivery date is in the past. (source: server.mjs :: PO_ROWS_SQL is_late)

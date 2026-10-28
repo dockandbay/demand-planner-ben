@@ -1,3 +1,11 @@
+## v28.555 (28-Oct-26) A PO on a shipment takes all its dates from that shipment
+- Ben: "Go with recommendations" (make every PO date read from its shipment).
+- PO grid, PO drawer DATES, actions and Cash Flow (all built from PO_ROWS_SQL): when a PO sits on a shipment, its ship, arrival and completion dates are the shipment's own effective dates, worked out with the Shipments grid rules (override ▸ Flexport matched by carrier ref or shipment name ▸ master-PO calc; completion = delivery override ▸ arrival + 7, + 0 for FOB or a Direct to Client market). A shipment named after the PO counts, as on the grid. Where the shipment has no date yet the PO keeps its own. POs with no shipment are unchanged.
+- Why: the PO side used the master PO's dates and its own Flexport match, so a PO could disagree with its shipment.
+- Live impact (read-only check 28-Oct-26), 3 open POs: PO-57AUMQ1 (IS128) completion 01-Oct-26 → 13-Oct-26 (IS128's Flexport FLEX-4114315 dates, not the master PO's); PO-57DILLARDS-LXJULY and PO-57USLX6 (IS198, Direct to Client) completion 11-Nov-26 → 04-Nov-26 (+ 0 days). Sandbox: 113 open POs on a shipment, 0 differences after the change.
+- Not changed: the shared view v_po_finance (supplier portal, payment ledgers) keeps its own dates.
+- No new env vars, migrations or cron routes.
+
 ## v28.554 (28-Oct-26) ILG: Rebaseline button above the table, phone cards, UK company pinned
 - Ben: "Move the button to rebaseline to the top of table. On mobile display as slimline cards"; card picked from a mockup (2-line card).
 - Manage 3PL ▸ UK (ILG): the Rebaseline button now sits in the selection bar above the table, and the review panel opens directly under it (was below the table). On a phone (≤ 640px) each SKU is a 2-line card: tick, SKU, diff; then ILG, Fulfil at report, set to.
