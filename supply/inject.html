@@ -3206,7 +3206,7 @@
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
     unpaid_payment:'Unpaid payment — a start deposit is owed (not assigned and not covered by a deposit pool). A not-yet-due invoice balance is not flagged here; once its due date passes it shows as Payment overdue. Excludes completed POs.',
     deposit_unassigned:'Deposit not assigned — this PO has a start deposit but no production-deposit reference linked (a master-data gap, separate from whether it’s paid). Assign a deposit reference, or mark No Deposit, on the MASTER DATA tab. Not raised on FUTURE or completed POs.',
-    late:'Late — should be completed: the completion date (delivery + 7, the Fulfil/Cin7 check-in) has passed but the PO isn’t marked complete.',
+    late:'Late — should be completed: the completion date (delivery + 7, or + 0 for FOB / Direct to Client; the Fulfil/Cin7 check-in) has passed but the PO isn’t marked complete.',
     production:'Late — should have shipped: the PO is still in PRODUCTION and its ship date has passed.',
     unassigned_shipment:'No shipment assigned — this PO isn’t on a shipment yet (and isn’t FOB / pickup).',
     dtc_not_approved:'Direct-to-Client details not approved — a DtC order whose packing/requirements the supplier hasn’t approved in the portal.',
@@ -5007,9 +5007,11 @@
       
       +'<tr><td class="l">Ship</td><td class="l"><b>'+(r.ship?fd(r.ship):'—')+'</b></td><td class="l">'+srcLbl(r.ship_src,r.delivery_master_po,r.shipment)+(PO_ACTCOND.production(r)?actMark(r.po,'production'):'')+'</td></tr>'
       +'<tr><td class="l">Arrival / Delivery</td><td class="l"><b>'+(r.delivery?fd(r.delivery):'—')+'</b></td><td class="l">'+srcLbl(r.delivery_src,r.delivery_master_po,r.shipment)+'</td></tr>'
-      +'<tr><td class="l"><b>Completion</b> <span class="mut tiny">delivery +7 · Fulfil/Cin7</span></td><td class="l"><b>'+(r.checkin?fd(r.checkin):'—')+'</b></td><td class="l mut tiny">calculated'+(PO_ACTCOND.late(r)?actMark(r.po,'late'):'')+'</td></tr>'
+      // v28.549: the completion offset is the shipment's (FOB or Direct to Client + 0, else + 7), so label it from the dates themselves
+      +(function(){ var _cd=(r.checkin&&r.delivery)?Math.round((Date.parse(String(r.checkin).slice(0,10))-Date.parse(String(r.delivery).slice(0,10)))/864e5):null;
+         return '<tr><td class="l"><b>Completion</b> <span class="mut tiny">'+(_cd==null?'delivery +7':_cd===0?'delivery +0 (FOB / Direct)':'delivery '+(_cd>0?'+':'')+_cd)+' · Fulfil/Cin7</span></td><td class="l"><b>'+(r.checkin?fd(r.checkin):'—')+'</b></td><td class="l mut tiny">calculated'+(r.delivery_master_po?' · 🚢 '+esc(r.delivery_master_po):'')+(PO_ACTCOND.late(r)?actMark(r.po,'late'):'')+'</td></tr>'; })()
       +'</tbody></table></div>'
-      +'<div class="mut tiny" style="margin:2px 2px 8px">Ship = production end + 7 days (or the shipment\'s departure). Delivery = ship + branch transit lead (air/sea by the shipment\'s mode; sea assumed without a shipment). Completion = delivery + 7.</div>';
+      +'<div class="mut tiny" style="margin:2px 2px 8px">Ship = production end + 7 days (or the shipment\'s departure). Delivery = ship + branch transit lead (air/sea by the shipment\'s mode; sea assumed without a shipment). Completion = the shipment\'s completion: delivery + 7, or + 0 for an FOB or Direct to Client shipment.</div>';
     // Landed cost (estimated) = goods + freight + import duty + tax. Freight auto-estimates from the order-plan
     // pallets (cheapest SEA container combo) ▸ Flexport quote — no container-size picker. Freight/import due
     // dates feed CASH FLOW, unless a shipment is assigned (then they follow the SHIPMENTS page).

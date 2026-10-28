@@ -102,7 +102,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: e19c25289756
+  server.mjs::PO_ROWS_SQL: 5527db7b91c3
   server.mjs::_tplFulfilShipLookup: a90edcb58d76
   server.mjs::_tplRefOverride: 292f4d59386e
   server.mjs::/api/hz-search: f0ac31208a4d
@@ -167,7 +167,7 @@ fingerprints:
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
   server.mjs::propagateShippingToPOs: f730be62e59b
   server.mjs::shipmentShippingFromMasterPO: 201b3cec2f32
-  server.mjs::case 'shipments': 9847bbee0f5b
+  server.mjs::case 'shipments': 9611b8722270
   server.mjs::poShipObj: bff1ca67664d
   server.mjs::upsertTracking: aaba6026cb4a
   server.mjs::case 'deposits': 987dc1c07280
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.544
+verified_version: v28.549
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -346,7 +346,7 @@ verified_version: v28.544
 - Ship date: the shipment's departure_date, else the Flexport departure, else production end + 7 days. The source badge shows S, FLEX or calc. (source: v_po_finance :: eff_ship, ship_src)
 - Delivery (goods land) date: the first one set of shipment delivery_date, arrival_date, landing_date, then Flexport arrival, then Flexport landing, else ship + transit lead. (source: v_po_finance :: eff_delivery)
 - Transit lead comes from the PO's branch: branches.air_lead_time_days when the shipment mode is air (or the Flexport mode starts with "air"), else branches.sea_lead_time_days. With no shipment, sea is assumed. (source: v_po_finance :: transit_lead)
-- Completion ("check-in", received at the warehouse): the shipment delivery_date if set, else delivery + 7 days. The exception is a DIRECT country PO that is its own shipment group: delivery + 0 days. (source: v_po_finance :: eff_checkin)
+- Completion ("check-in", received at the warehouse): the shipment delivery_date if set, else delivery + 7 days. Delivery + 0 days instead for an FOB shipment (v28.549, Ben 28-Oct-26) and for a DIRECT country PO that is its own shipment group. A PO's completion must match its linked shipment's. (source: v_po_finance :: eff_checkin; server.mjs :: PO_ROWS_SQL chk_eff)
 - Shipment dates always win over PO dates. On the admin grid a PO on a shipment also inherits the shipment master PO's ship, delivery and completion dates; the badge then shows S. (source: server.mjs :: PO_ROWS_SQL mastered CTE)
 - The supplier portal does not apply master inheritance. It shows each PO's own calculated dates. (source: server.mjs :: POS_SQL_PORTAL)
 - A PO links to a shipment through shipments.shipment_ref = purchase_orders.shipment_ref, or the PO's own number when shipment_ref is blank. (source: v_po_finance :: base join)
@@ -362,7 +362,7 @@ verified_version: v28.544
 ## Shipments
 - A shipment groups one or more POs. Its destination (country, branch) and export port use the shipment's own override if set, else the master PO's values. They are never written back to the POs. (source: server.mjs :: case 'shipments')
 - Flexport dates (v28.399, Flexport import): landing = Flexport port arrival (actual_arrival_date, else estimated_arrival_date); arrival = delivery to us (actual_delivered_in_full_date, else estimated_delivered_in_full_date, which Flexport shows as Predicted Delivery), else the port arrival. (source: server.mjs :: runFlexportImport)
-- Shipment grid dates: departure, then landing, then arrival, then completion. Each uses the shipment override, else Flexport, else a calculation from the master PO (production end + 7, then + branch transit by mode). Completion = delivery_date override, else arrival + 7 days. (source: server.mjs :: case 'shipments')
+- Shipment grid dates: departure, then landing, then arrival, then completion. Each uses the shipment override, else Flexport, else a calculation from the master PO (production end + 7, then + branch transit by mode). Completion = delivery_date override, else arrival + 7 days, or + 0 for an FOB or Direct to Client shipment (v28.549, the same rule as the PO). (source: server.mjs :: case 'shipments')
 - Flexport match: flexport_shipments_effective where flex_id = carrier_ref or shipment_name = shipment_ref. (source: server.mjs :: case 'shipments')
 - DHL/FedEx tracking: shipments with carrier DHL or FedEx, a carrier_ref and no arrival date are polled. The delivered date (else the carrier ETA) is written to shipments.tracked_delivery_date with tracked_source dhl or fedex. This field does not feed v_po_finance. (source: server.mjs :: upsertTracking)
 - Freight cost per shipment, first available: Flexport invoiced freight (total_freight_cost when it is not 0), else the Flexport quote; then cost_manual; then FOB = 0; then air = weight kg (Σ qty × products.prod_weight_uk) × air_freight_rates.rate_per_kg for the weight band (15 per kg if no band matches); then sea = the cheapest combination of freight_rates containers covering the pallets, for the destination market (UK rates if none resolves). (source: server.mjs :: shipFreightSrv, seaEstSrv)

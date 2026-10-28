@@ -1,3 +1,11 @@
+## v28.549 (28-Oct-26) Completion date: FOB + 0 days, and a PO's completion always matches its shipment
+- Ben, PO-1902138: "completion date under DATES of 22/10 but the linked shipment is 29/10. It MUST come from the linked shipment" and "on FOB the shipment completed date shouldn't be +7 days from ship date, it should be +0 days".
+- Shipment grid completion = arrival + 0 for an FOB shipment or a Direct to Client one (was always + 7). The PO side already used + 0 for Direct to Client; it now also uses + 0 when its shipment is FOB. So PO and shipment completion agree.
+- Live before the fix: all 29 open POs on Direct to Client shipments (sea 11, FOB 11, air 5; 2 already matched) showed a different completion from their shipment. 3 open FOB POs move 7 days earlier.
+- "Awaiting ERP receipt" (delivered, not received) uses the same + 0 for FOB.
+- PO ▸ DATES: the Completion row now shows the real offset (delivery + 0 (FOB / Direct) or + 7) and the shipment it comes from; the help text and the "Late, should be completed" wording say so.
+- Sandbox: all 5 open FOB POs now match their shipment's completion (was 1 of 5).
+
 ## v28.548 (28-Oct-26) WSSI phases 3 and 4: the signed-off plan (versioned), forecast snapshot and live overrides
 - Ben: "phase 3 and 4 - proceed"; plan on a new input page, overrides on the same page as more measures.
 - DEMAND ▸ Inputs ▸ WSSI plan: same grid as Open to buy (Market · channel ▸ category group × month). Measure: Sales £ / Sales units / Closing units (the plan) and Forecast override / Target closing (live overrides; blank = system value, shown in grey; overrides in blue). Copy, paste, fill, undo, template download / upload as on Open to buy.

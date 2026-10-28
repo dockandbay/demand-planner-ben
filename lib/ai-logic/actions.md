@@ -67,7 +67,7 @@ fingerprints:
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: e51539bd19c6
+  server.mjs::buildActionsRows: 565f9815e01a
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.542
+verified_version: v28.549
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -222,7 +222,7 @@ verified_version: v28.542
   - Date conflict (high): landing override before today while not shipping, delivered or complete.
   - Unassigned shipment (low): no shipment on a non-complete PO.
   - Shipment ETA passed (amber): arrival/delivery/landing before today and not marked arrived.
-  - Awaiting ERP receipt (amber): DELIVERED and arrival + 7 days before today.
+  - Awaiting ERP receipt (amber): DELIVERED and arrival + 7 days (+ 0 for an FOB shipment, v28.549) before today.
   - Ship check-in: ready to ship and the ship date (departure, else production end + 7) within 7 days. high if the date has passed, else amber.
   - Over 20 pallets (amber): sum(qty / pallet_qty) > 20 before shipping, not DIRECT.
   - Shipped to master (amber): a rider PO marked shipped whose master has not departed.

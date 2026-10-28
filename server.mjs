@@ -11852,7 +11852,7 @@ async function buildActionsRows() {
           UNION ALL
           -- PO sat in DELIVERED past its completion (arrival + 7) but not yet Received in Cin7/Fulfil → chase the receipt
           SELECT 'amber','Awaiting ERP receipt', po.po,
-            'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date,'YYYY-MM-DD')
+            'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + ((CASE WHEN lower(coalesce(s2.mode,''))='fob' THEN 0 ELSE 7 END)||' days')::interval)::date,'YYYY-MM-DD')
               ||') has passed — receive it in Cin7/Fulfil to complete the PO',
             'gotopo','po','', po.po
             FROM planner.purchase_orders po
@@ -11860,7 +11860,7 @@ async function buildActionsRows() {
             LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments_effective f
               WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
             WHERE coalesce(po.status,'') ILIKE '%deliver%' AND coalesce(po.status,'') NOT ILIKE '%complete%'
-              AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date < current_date
+              AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + ((CASE WHEN lower(coalesce(s2.mode,''))='fob' THEN 0 ELSE 7 END)||' days')::interval)::date < current_date   -- v28.549 FOB + 0
           UNION ALL
           SELECT 'high','Payment invalid', po,
             'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
@@ -12776,9 +12776,12 @@ supplySectionHandler = async (req, res, next) => {
             to_char(sh.landing_date,'YYYY-MM-DD')   ov_landing,
             to_char(sh.delivery_date,'YYYY-MM-DD')  ov_delivery,
             to_char(sh.arrival_date,'YYYY-MM-DD')   ov_arrival,
-            -- completion = warehouse-received = override (sh.delivery_date) ▸ EFFECTIVE arrival + 7 days
+            -- completion = warehouse-received = override (sh.delivery_date) ▸ EFFECTIVE arrival + 7 days.
+            -- v28.549 (Ben 28-Oct-26: "on FOB the shipment completed date shouldn't be +7 days, it should be +0"): + 0 for an FOB
+            -- shipment and for a Direct to Client one (the PO side uses the same rule, so a PO's completion = its shipment's).
             coalesce(to_char(sh.delivery_date,'YYYY-MM-DD'),
-              to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date)) + interval '7 days')::date,'YYYY-MM-DD')) completion,
+              to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date))
+                + ((CASE WHEN lower(coalesce(sh.mode,''))='fob' OR coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,''), '')='DIRECT' THEN 0 ELSE 7 END)||' days')::interval)::date,'YYYY-MM-DD')) completion,
             CASE WHEN sh.delivery_date IS NOT NULL THEN 'S'
                  WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.ship_calc) IS NOT NULL THEN 'calc' END completion_src,
             -- exception flags (client suppresses all of these once the shipment is Completed):
@@ -29024,6 +29027,10 @@ const PO_ROWS_SQL = `
           -- action-flag columns are added by the final SELECT off the view's base fields.
           WITH mastered AS (
             SELECT v.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
+                   -- v28.549 (Ben 28-Oct-26: completion MUST come from the linked shipment; FOB = + 0 days): the shipment grid's rule. An FOB
+                   -- shipment with no completion override completes on its arrival (the view's eff_checkin only knew the Direct to Client + 0).
+                   CASE WHEN lower(coalesce(v.sh_mode,''))='fob' AND v.sh_delivery IS NULL AND coalesce(m.eff_delivery, v.eff_delivery) IS NOT NULL   -- the view's own shipment join (shipment_ref, else the PO's own ref)
+                        THEN coalesce(m.eff_delivery, v.eff_delivery) ELSE coalesce(m.eff_checkin, v.eff_checkin) END chk_eff,
                    coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po,
                    -- v27.903 (Ben): the ERP date the drift banner compares against. When the PO exists in the Fulfil mirror,
                    -- Fulfil's header date (requested_delivery_date, else delivery_date) wins; only POs unknown to Fulfil fall
@@ -29053,7 +29060,7 @@ const PO_ROWS_SQL = `
             CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
             to_char(coalesce(m_ship, eff_ship),'YYYY-MM-DD') ship, CASE WHEN m_ship IS NOT NULL THEN 'S' ELSE ship_src END ship_src,
             to_char(coalesce(m_delivery, eff_delivery),'YYYY-MM-DD') delivery, CASE WHEN m_delivery IS NOT NULL THEN 'S' ELSE delivery_src END delivery_src,
-            to_char(coalesce(m_checkin, eff_checkin),'YYYY-MM-DD') checkin,
+            to_char(chk_eff,'YYYY-MM-DD') checkin,
             CASE WHEN m_delivery IS NOT NULL THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
             -- raw overrides for the PLAN date editors (blank = use the calculated value)
             to_char(end_production_overide,'YYYY-MM-DD') end_override,
@@ -29167,9 +29174,9 @@ const PO_ROWS_SQL = `
             -- ERP completion-date drift: flag only if the gap (in days) is ≥ 5% of how far out the completion is,
             -- with a hard minimum of 3 days. So a 1–2 day gap on a near-term PO no longer flags. Examples:
             --   100 days out → ceil(5)=5-day threshold; 30 days out → ceil(1.5)=2 → floored to the 3-day minimum.
-            (CASE WHEN erp_final_delivery_eff IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
-                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_eff)
-                      >= GREATEST(ceil(0.05 * abs(coalesce(m_checkin, eff_checkin) - CURRENT_DATE)), 3)
+            (CASE WHEN erp_final_delivery_eff IS NOT NULL AND chk_eff IS NOT NULL
+                  AND abs(chk_eff - erp_final_delivery_eff)
+                      >= GREATEST(ceil(0.05 * abs(chk_eff - CURRENT_DATE)), 3)
                   THEN 1 ELSE 0 END)::int erp_date_pending,
             -- supplier production-confidence: confirmed status + days since last confirmation
             coalesce(production_status,'') production_status,
