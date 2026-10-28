@@ -14235,6 +14235,7 @@ function wssiDerive(o,ly){
   o.sales=o.r; o.units=o.u; o.asp=d(o.r,o.u); o.price=d(o.clR,o.clU); o.full=o.clU?o.clF/o.clU*o.fullMul:null; o.disc=(o.price!=null&&o.full)?1-o.price/o.full:null;
   o.cost=d(o.cos,o.u); o.margin=o.r?1-o.cos/o.r:null; o.exit=o.clR?1-o.clC/o.clR:null;
   o.vsT=o.clC-o.tgC; o.otbRem=o.act||o.tot?null:o.tgC-o.clC;
+  o.otbRemR=o.act||o.tot?null:o.tgR-o.clR; o.otbRemU=o.act||o.tot?null:o.tgU-o.clU;   // v28.546 (Kathryn's template): OTB remaining in £ retail and units too
   o.cover=o.plU?o.clU/(o.plU/o.weeks):null; if(o.fwd===undefined)o.fwd=o.fwdU?o.clU/(o.fwdU/o.fwdW):null;
   if(o.act||o.tot){ /* actual or period: transfers / write-offs as measured */ } else { o.woU=o.woC=o.woR=null; o.trU=o.trC=o.trR=null; }
   if(ly){ o.lySales=ly.r; o.lyUnits=ly.u; o.lyAsp=d(ly.r,ly.u); o.lyInR=ly.inR; o.lyInC=ly.inC; o.lyInU=ly.inU; o.lyClR=ly.clR; o.lyClC=ly.clC; o.lyClU=ly.clU;
@@ -14261,7 +14262,7 @@ var WSSI_ROWS=[
  {k:'price',l:'Avg current selling price per unit £ (ex VAT)',s:'System',f:'gbp2',c:'plan',t:'r',tip:'Closing stock £ retail ÷ closing units. Each SKU is valued at its actual ASP over the last 3 months in that market (consumer channels), else full price × 0.95. Forecast months hold the last actual price.'},
  {k:'full',l:'Avg full price per unit £ (ex VAT)',s:'System',f:'gbp2',c:'plan',t:'r',tip:'RT price for the market (US = RT_US) converted to GBP and ex VAT (UK/EU ÷ 1.2, AU ÷ 1.1), weighted by closing stock. Wholesale (B2B only selected) = RT ÷ 2.'},
  {k:'disc',l:'Avg discount in stock % (current selling vs full price)',s:'Calc',f:'pct',c:'calc',t:'r',tip:'1 − current selling price ÷ full price.'},
- {k:'cost',l:'Avg cost per unit £',s:'System',f:'gbp2',c:'plan',t:'c',tip:'Product cost (products.cost, supplier currency USD) ÷ the FY USD rate, weighted by units sold. FOB cost: no freight or duty.'},
+ {k:'cost',l:'Avg cost per unit £',s:'System',f:'gbp2',c:'plan',t:'c',tip:'Landed cost per unit from the COGS feed (Fulfil landed cost for the market\'s warehouse, else supplier cost / set BOM), in GBP; SKUs without one use products.cost (USD, FOB). Weighted by units sold.'},
  {k:'cos',l:'Cost of sales £',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Units sold × product cost.'},
  {k:'margin',l:'Achieved margin % on sales',s:'Calc',f:'pct',c:'calc',t:null,tip:'1 − cost of sales ÷ sales £.'},
  {gap:1},
@@ -14294,7 +14295,9 @@ var WSSI_ROWS=[
  {k:'tgC',l:'Target closing stock £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',key:1,tip:'Target units × product cost.'},
  {k:'tgU',l:'Target closing stock units',s:'Calc',f:'int',c:'calc',t:'u',tip:'Per SKU: cover-weeks target (the category\'s target cover for that market and pool, default 8 weeks) × average weekly units of the next 3 months.'},
  {k:'vsT',l:'Closing stock vs target £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',sign:'over',tip:'Closing £ cost − target £ cost. Red = over target (too much stock), green = under.'},
+ {k:'otbRemR',l:'Open to buy remaining £ retail',s:'Calc',f:'gbp',c:'otb',t:'r',sign:'otb',tip:'Forecast months: target − projected closing £ retail (current selling). Positive = room left to buy; negative = over-bought.'},
  {k:'otbRem',l:'Open to buy remaining £ cost',s:'Calc',f:'gbp',c:'otb',t:'c',sign:'otb',key:1,tip:'Forecast months: target − projected closing £ cost. Positive = room left to buy; negative = over-bought.'},
+ {k:'otbRemU',l:'Open to buy remaining units',s:'Calc',f:'int',c:'otb',t:'u',sign:'otb',tip:'Forecast months: target − projected closing units. Positive = room left to buy; negative = over-bought.'},
  {gap:1},
  {k:'cover',l:'On-hand cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ this period\'s average weekly units sold from that stock.'},
  {k:'fwd',l:'Forward cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ average weekly units of the next 3 months.'},
@@ -14397,7 +14400,7 @@ function renderWssiView(body){
   var h='<div id="wssi-root"><div class="w-head"><div><h2>WSSI</h2><div class="w-sub">Weekly sales, stock and intake with open to buy. '+fyLbl+' runs '+wssiMon(D.months[ly])+' to '+wssiMon(D.months[D.months.length-1])+'; H1 Mar to Aug, H2 Sep to Feb. Read only.</div></div>'
     +'<div class="w-acts"><span class="w-meta">Actuals to '+wssiMon(D.actual_to)+' · built '+(D.built_at?new Date(D.built_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/ /g,'-').replace(',-',' '):'')+'</span>'
     +'<button class="w-btn" id="wssi-otb" title="DEMAND ▸ Inputs ▸ Open to buy">Enter open to buy ↗</button><button class="w-btn" id="wssi-refresh" title="Rebuild from live data (cached 10 minutes)">Refresh</button><button class="w-btn" id="wssi-dl">Download .xlsx</button></div></div>'
-    +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category')+pick('sea','Seasonality')+pick('st','Product status')
+    +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category group')+pick('sea','Seasonality')+pick('st','Product status')
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="wssi-fy">'+(D.fy_options||[curFy]).map(function(y){ return '<option value="'+y+'"'+(y===D.fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Show</span>'
     +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span>'

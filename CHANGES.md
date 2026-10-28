@@ -1,3 +1,12 @@
+## v28.546 (28-Oct-26) WSSI phase 1 (Kathryn's template): category groups, Non Core out, landed cost, OTB remaining in £ retail and units
+- Ben: "see Kathryn email HORIZON: how WSSI works and how to update open to buy" + WSSI _ OTB Format (1).xlsx, "analyse wssi and work through a plan of improvements", then "proceed" (phase 1).
+- Category becomes Category group, mapped per Kathryn's sheet 2 (Beach Towels, Beauty, Ponchos, Picnic & Outdoor, Bags, Home, Other; closed / unlisted categories = Other).
+- Non Core (point of sale, boxes, gift cards) is left out of the WSSI completely.
+- Cost is now landed cost from the COGS feed (planner.cogs_values, 8,783 rows on live: Fulfil landed cost, else supplier cost / set BOM) for the warehouse of the market and pool, in GBP; SKUs without one keep FOB cost. Sandbox: this-year margin 78% (was about 84% on FOB). The template's 63% is illustrative dummy data.
+- New rows: Open to buy remaining £ retail and units (beside £ cost). Discount in stock %, on-hand cover LY and target closing £ retail / units were already there.
+- Not changed: the product status default (the template's "Active (incl. future)" is marked as a placeholder, and defaulting to ACTIVE would drop the 1,668 CLOSED SKUs' history from last year).
+- Sandbox check: /api/demand/wssi?fy=2026 rebuilt in 8 s with category groups Beach Towels, Bags, Beauty, Home, Other, Picnic & Outdoor, Ponchos and no Non Core.
+
 ## v28.545 (28-Oct-26) Payments Due ▸ Paid this session: copy the payment email
 - Ben ("✓ Paid this session · 5 payments · Lixin $97,717.51 USD"): "can you add a link to copy the payment email on this popup".
 - Each supplier line in the Paid this session box has "✉ Copy email" and "Copy subject". The email uses the wording of HORIZON's paid-notification email ("This is to confirm that Dock & Bay has made a payment of 97,717.51 USD on 28-Oct-26, covering:") with a table of every PO and payment type paid this session for that supplier and currency, and the total. It is copied as formatted text (HTML + plain) so it pastes as a table into Gmail; the subject is "Payment made, Dock & Bay (97,717.51 USD)". Browsers without rich copy get the plain-text version.
