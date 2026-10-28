@@ -1,3 +1,9 @@
+## v28.558 (28-Oct-26) WSSI: transfers £ cost nets to zero
+- Katherine (via Ben): at all markets and all channels the transfers should net to zero. On live, transfer units and £ retail already did, but £ cost did not (FY27 to date -£35.4k), because the 3PL side was valued at the 3PL landed cost and the FBA side at the FBA landed cost.
+- lib/wssi.mjs: both sides of a 3PL / FBA transfer are now valued at the sending pool's landed cost per unit, so they cancel. Each pool's opening and closing stock £ cost still use that pool's own landed cost. Checked on a synthetic transfer (30 units, 3PL £4.00, FBA £5.50): before -£120 / +£165, after -£120 / +£120.
+- Logic doc: also states that write-offs / other are the residual of stock movement, not Fulfil adjustments or n8n.
+- No new env vars, migrations or cron routes.
+
 ## v28.557 (28-Oct-26) WSSI worksheet: edit open to buy, the plan and overrides on the WSSI
 - Ben: "the preferred way of working would be for editing the open to buy and the wssi plan would be to have worksheet mode to input on the wssi rather than separate tabs. this should only be at category/channel/market level, not top level." Layout picked from mockups: inline editable rows; toggle greyed at higher levels; retire the Inputs tabs.
 - DEMAND ▸ WSSI: a ✎ Worksheet toggle, on only with one market, one channel and one category group picked (seasonality and product status All); otherwise greyed with a hint. In worksheet mode these cells are editable in place (bordered) and the whole WSSI recalculates as you type:
