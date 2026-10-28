@@ -102,7 +102,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: 9297d1d761b5
+  server.mjs::PO_ROWS_SQL: e19c25289756
   server.mjs::_tplFulfilShipLookup: a90edcb58d76
   server.mjs::_tplRefOverride: 292f4d59386e
   server.mjs::/api/hz-search: f0ac31208a4d
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.541
+verified_version: v28.542
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)

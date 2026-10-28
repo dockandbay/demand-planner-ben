@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.528
+verified_version: v28.542
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -287,6 +287,7 @@ verified_version: v28.528
 - dtc_client_missing, "Direct to Client: client name missing" (v28.528, Ben 28-Oct-26, Client tab):
   - An open PO (not complete, cancelled or future) on a Direct to Client / B2B JLEW / B2B NEXT branch with no client name. PO grid and drawer only (client rule; not in SUPPLY > Actions).
 - Hide ▾ (PO grid) toggles: snoozed, payment due, timeline unread, and from v28.528 waiting for supplier approval (hides po_not_approved and dtc_not_approved from the count, badges and filter).
+- Country risk (op_country, ORDER PLAN tab; v28.542, Ben 28-Oct-26): a line on a UK / US / EU / AU / CA PO (not Direct to Client, not POLYBAG, not complete) whose SKU is not RELEASED in that market (v_product_availability.available_no_disc false; discontinue dates ignored, a discontinued SKU gets the Discontinued flag instead), not yet approved. The action (OP_EXC_SQL) and the line's "c" badge (po-detail not_avail_market) use this same rule; the Order plan shows a Country risk box listing the SKUs with Approve / Approve all. (source: server.mjs :: OP_EXC_SQL; supply/inject.html :: orderPlanPanel)
 - In the PO drawer (v28.302, Ben 13-Oct-26: "all actions must have this"): every tab with open actions starts with an Open actions (n) strip, one row per action with its explainer and the Ⓐ / SNOOZE marker. This covers the coded actions above and the drawer-only ones: supplier invoice awaiting approval or differing from the final, no freight rate, supplier completion date awaiting approval, production start / end status, unread supplier messages, unconfirmed order-plan changes, partial cartons / supplier risk / discontinued arrival / country risk to approve, supplier documents awaiting approval. Each is snoozable (same supply_action_state store, key poact|<po>|<code>) and a snoozed one drops from its tab count. Link Fulfil PO also shows a 1 badge and the marker next to its button in Linked records.
 (source: supply/inject.html :: PO_ACTCOND)
 

@@ -5169,6 +5169,13 @@
         return (n&&!/complete|shipping|deliver/i.test((poBy[po]||{}).status||''))?' <button class="save-btn op-apprpart" data-po="'+esc(po)+'" title="approve every partial-carton line on this PO">✓ Approve all partials ('+n+')</button>':''; })()
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override'+(editing?' · <b style="color:var(--pos)">editing quantities — change values, add SKUs below, then Save</b>':'')+'</div></div>'
       +erpDevBlock
+      +(function(){ var cr=(lines||[]).filter(function(l){ return Number(l.qty)>0 && (l.not_avail_market||String(l.st||'').toUpperCase()==='CLOSED') && !l.country_risk_approved; });   // v28.542 (Ben, PO-58AUWK1: "says country risk but which sku, there is no button to press")
+        if(!cr.length||_poLocked)return '';
+        return '<div style="margin:4px 0 10px;padding:9px 12px;background:var(--amber-bg);border:1px solid #eab308;border-radius:6px;max-width:1000px">'
+          +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:5px"><span style="font-weight:700;color:var(--amber)">⚠ Country risk: '+cr.length+' SKU'+(cr.length>1?'s':'')+' not released in '+esc(((_poCtry||'').toUpperCase())||'this market')+'</span>'
+          +'<button class="save-btn op-ctry-all" data-po="'+esc(po)+'" data-skus="'+esc(cr.map(function(l){ return l.sku; }).join('|'))+'" title="approve the country risk on every listed SKU (they will still be ordered for this market)">✓ Approve all</button>'
+          +'<span class="mut tiny">or remove the SKU / change the destination</span></div>'
+          +cr.map(function(l){ return '<div style="display:flex;gap:10px;align-items:center;padding:2px 0;font-size:12px"><span style="min-width:32ch;font-family:ui-monospace,Menlo,monospace">'+esc(l.sku)+'</span><span class="mut">'+units(Number(l.qty)||0)+' units'+(String(l.st||'').toUpperCase()==='CLOSED'?' · CLOSED product':'')+'</span><button class="save-btn light op-ctry-one" data-ps="'+esc(po+'|'+l.sku)+'" style="padding:1px 8px;font-size:11px">✓ Approve</button></div>'; }).join('')+'</div>'; })()
       +banner
       +'<div class="tw" style="max-width:1240px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th class="l" title="partial (p) / supplier risk (s) / discontinued (d) / country risk (c) — ⚠ needs review, ✓ approved">Exceptions</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:175px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
       +rows
@@ -5811,6 +5818,13 @@
         var h=(f?a(f.url,/^PO\d+$/i.test(f.external_ref||'')?f.external_ref:'Fulfil PO','open the linked Fulfil PO'+(f.external_ref?' ('+f.external_ref+')':'')):'')
           +xs.filter(function(x){ return x.url; }).map(function(x){ return a(x.url,x.number||('Fulfil '+x.id),'extra Fulfil PO'+(x.reference?' · '+x.reference:'')); }).join('');
         sp.innerHTML=h||'<span class="mut tiny">not in Fulfil yet</span>'; }).catch(function(){}); });
+    var _ctryAp=function(keys,b){ b.disabled=true; b.textContent='Approving…';   // v28.542: country risk approvals from the Order plan box (same route as the line "c" button)
+      Promise.all(keys.map(function(k){ return fetch('/api/supply/po-line/'+encodeURIComponent(k)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({field:'country',approved:true})}).then(function(r){ return r.json(); }); }))
+        .then(function(js){ var bad=js.filter(function(j){ return j&&j.error; }); if(bad.length)throw new Error(bad[0].error); try{ invalidateDerived(); }catch(_){} poRefetchPanel(po,i); })
+        .catch(function(e){ b.disabled=false; b.textContent='✓ Approve'; alert('Failed: '+(e&&e.message||e)); }); };
+    document.querySelectorAll('#podet-'+i+' .op-ctry-one').forEach(function(b){ b.onclick=function(){ _ctryAp([b.dataset.ps],b); }; });
+    document.querySelectorAll('#podet-'+i+' .op-ctry-all').forEach(function(b){ b.onclick=function(){ var ks=String(b.dataset.skus||'').split('|').filter(Boolean).map(function(sk){ return b.dataset.po+'|'+sk; });
+      if(!confirm('Approve the country risk on '+ks.length+' SKU'+(ks.length>1?'s':'')+' of '+b.dataset.po+'?'))return; _ctryAp(ks,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-apprpart').forEach(function(b){ b.onclick=function(){ var po=b.dataset.po, L=((document.getElementById('podet-'+i)||{})._poDetail||{}).lines||[];   // v28.528
       var hit=L.filter(function(l){ return (l.full_carton_check||'').indexOf('⚠')>=0 && !l.partial_carton_approved; }); if(!hit.length){ b.remove(); return; }
       if(!confirm('Approve '+hit.length+' partial-carton line'+(hit.length===1?'':'s')+' on '+po+'?'))return; b.disabled=true; b.textContent='Approving…';

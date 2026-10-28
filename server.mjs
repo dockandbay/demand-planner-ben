@@ -29130,7 +29130,7 @@ const OP_EXC_SQL = `
         AND coalesce(p.branch,'') NOT ILIKE '%direct to client%'
         AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA')
         AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
-          WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)
+          WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.available_no_disc)   -- v28.542: same rule as the line's "c" badge (po-detail not_avail_market): released-but-discontinued is the DISCONTINUED flag, not country risk (was is_available: PO-58AUWK1 showed a country risk with no SKU to approve)
   ) z`;
 
 // ---- Phase 1 SUPPLY caches (defined here so PO_ROWS_SQL / OP_EXC_SQL exist at boot-warm time) ------------------

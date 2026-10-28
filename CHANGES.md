@@ -1,3 +1,10 @@
+## v28.542 (28-Oct-26) Country risk: same rule everywhere, and a clear box to approve it
+- Ben (PO-58AUWK1): "says country risk but which sku, there is no button to press?"
+- Cause: the ORDER PLAN action counted a SKU as a country risk when it was not AVAILABLE in the market right now (discontinued counts), but the line's "c" button only shows when the SKU is not RELEASED there at all (discontinued is the separate "d" flag, by design since v28.098). BAGCOOL-MD-NAVY (released in AU, being discontinued) raised the action with no button; BAGCOOL-MD-MOJSPZ and BAGCOOL-MD-DKDIS (not released in AU) had only the small "c" button in the Exceptions column.
+- Now the action uses the line rule (released in the market, discontinue dates ignored), so the count and the buttons agree. On live this drops the country-risk action from 15 POs to 5.
+- The Order plan tab shows a "⚠ Country risk: n SKUs not released in AU" box listing each SKU with its units and "✓ Approve", plus "✓ Approve all" (same approval as the "c" button; CLOSED products included).
+- Sandbox check: approving a line's country risk through the same call set and then cleared the flag.
+
 ## v28.541 (28-Oct-26) Push to Fulfil saves the link; Link Fulfil PO opens searching the PO number
 - Ben: "when pushing to fulfil it should auto add the link on first push" and "search should auto search for that po number in linking to fulfil".
 - After every successful Push to Fulfil (create or update) the PO's Fulfil link (Master data > Linked records) is the Fulfil PO that was pushed to, saved as a hand link ("linked by Push to Fulfil") so it is the push target from then on, with the Fulfil PO number (a new draft has none yet: the reference is kept and the number replaces it once Fulfil numbers the PO, v28.526 / v28.527).
