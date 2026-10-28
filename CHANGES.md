@@ -1,3 +1,9 @@
+## v28.533 (28-Oct-26) Link Fulfil PO search finds POs through their sales order
+- Ben (PO-1891958 ▸ Master data ▸ Link Fulfil PO): "the fulfil search searches po table for sales order number but it could be smarter and also search sales order for the sales order and linked pos".
+- Cause: typing a sales order number or reference found the sale, but its POs were only found through purchase requests tied to the sale's LINES. Fulfil also ties a request to the sale itself (origin "sale.sale,<id>"): SO56641 (A0227 / GOLD27702-11, Goldstar) -> purchase request 2469 -> PO486 was missed that way.
+- Now a sales order match brings in POs from purchase requests tied to the sale or its lines, plus POs whose reference carries the sale's reference or any part of it ("A0227", "GOLD27702-11"). Rows found this way say "sales order SO56641 (Goldstar)". Read only; nothing is written to Fulfil.
+- Sandbox check (sandbox Fulfil): searches run cleanly through the new filters and return sales-order-linked POs.
+
 ## v28.532 (28-Oct-26) A supplier completion date that equals the entered production end needs nothing
 - Ben (PO-1891958 ▸ Dates: production end 21-Oct-26, supplier completion date 21-Oct-26 "awaiting approval"): "if the date is already the same no action required to update anything or do anything".
 - Dates tab: a pending supplier completion date equal to the PO's ENTERED production end shows "same as the entered production end · nothing to approve" (no Approve / Reject); the timeline no longer lists it under "Awaiting your approval" (no Apply button).

@@ -209,7 +209,7 @@ fingerprints:
   server.mjs::fulfilGuardCtx: 431118959c8c
   server.mjs::fulfilExistingCandidates: 4a108d8a257b
   server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
-  server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
+  server.mjs::/api/supply/fulfil/po-search: e8e5b8cb27f9
   server.mjs::/api/supply/po/:po/links: 7bb90b5c8d07
   server.mjs::poFulfilExtras: 5649f4f9f1fc
   server.mjs::ffExtraOn: acafa58afa08
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.527
+verified_version: v28.533
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -772,6 +772,7 @@ verified_version: v28.527
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.533 (Ben 28-Oct-26): the Link Fulfil PO search, on a sales order match (number or reference), also finds POs from purchase requests whose origin is the sale itself (not only via its lines), and POs whose reference contains the sale's reference or a part of it (split on / | ,). (source: server.mjs :: /api/supply/fulfil/po-search)
 - v28.527 (Ben 28-Oct-26): after every Push to Fulfil (create or update) the Fulfil PO is read straight back (fulfilMirrorOne with the HORIZON PO): its copy is filed under the pushed HORIZON PO (not the Fulfil reference), that PO's purchase_order_lines.erp_qty is recalculated at once (fulfilErpQtyFromMirror(po)), so ERP deviations reflect Fulfil immediately instead of after the next full import, and a hand-made link stores the Fulfil PO number. (source: server.mjs :: fulfilPushLines, fulfilMirrorOne, fulfilErpQtyFromMirror)
 - v28.526 (Ben 28-Oct-26): a hand-made Fulfil link saved while the Fulfil PO was a draft (no number yet, so its reference was stored) is fixed when the PO's Linked records open: one live Fulfil read by id, and the Fulfil PO number (e.g. PO483) replaces the stored reference. Resolver links are untouched. (source: server.mjs :: /api/supply/po/:po/links)
 - v28.522 (Ben 28-Oct-26): a HORIZON PO can carry EXTRA Fulfil POs (planner.po_fulfil_extra) besides its main Fulfil link. The main link (po_links fulfil, or the mirror) stays the only push / sync target; extras are listed under Linked records (＋ add another Fulfil PO, ✕ remove), found by HORIZON search, and mapped to the PO when matching Fulfil bills to Xero bills (fulfilBillPoLinks). A Fulfil PO is an extra on one HORIZON PO at most (moving asks), and is refused when cancelled, another PO's main link or mirror, or in a client PO group. HORIZON lines and totals do not change. (source: server.mjs :: poFulfilExtras, /api/supply/po/:po/fulfil-extra, fulfilBillPoLinks; supply/inject.html :: fulfilPoPicker)

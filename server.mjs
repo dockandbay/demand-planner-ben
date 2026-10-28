@@ -8679,11 +8679,17 @@ app.get('/api/supply/fulfil/po-search', async (req, res) => {
     if (q.length >= 2) {
       const pat = '%' + q.replace(/([\\%_])/g, '\\$1') + '%';
       add(await fulfilStrictSearch(FULFIL_MAP.poModel, ['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]], [['party.name', 'ilike', pat]]], FULFIL_GUARD_PO_FIELDS, 40, 'PO search'), 'search');
-      const sales = await fulfilStrictSearch('sale.sale', ['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]]], ['id', 'number'], 20, 'sales order search');
+      const sales = await fulfilStrictSearch('sale.sale', ['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]]], ['id', 'number', 'reference', 'party.name'], 20, 'sales order search');
       if (sales.length) {
-        const reqs = await fulfilStrictSearch('purchase.request', [['sale_lines.sale', 'in', sales.map(s => s.id)], ['purchase_line', '!=', null]], ['purchase_line.purchase'], 500, 'purchase requests');
+        const soTag = 'sales order ' + Array.from(new Set(sales.slice(0, 4).map(s => (s.number || String(s.reference || '').trim() || 'draft') + (s['party.name'] ? ' (' + s['party.name'] + ')' : '')))).join(', ');
+        // v28.533 (Ben, PO-1891958: "could be smarter and also search sales order for the sales order and linked pos"): a purchase request is tied to
+        // the sale through its lines OR directly (origin "sale.sale,<id>", e.g. SO56641 -> PO486); both now count.
+        const reqs = await fulfilStrictSearch('purchase.request', [['purchase_line', '!=', null], ['OR', [['sale_lines.sale', 'in', sales.map(s => s.id)]], [['origin', 'in', sales.map(s => 'sale.sale,' + s.id)]]]], ['purchase_line.purchase'], 500, 'purchase requests');
         const pids = Array.from(new Set(reqs.map(r => r['purchase_line.purchase']).filter(Boolean))).slice(0, 60);
-        if (pids.length) add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', pids]], FULFIL_GUARD_PO_FIELDS, 60, 'sale-linked POs'), 'sales order ' + sales.map(s => s.number).slice(0, 4).join(', '));
+        if (pids.length) add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', pids]], FULFIL_GUARD_PO_FIELDS, 60, 'sale-linked POs'), soTag);
+        // ...and POs whose reference carries the sale's reference or a part of it ("A0227 / GOLD27702-11")
+        const parts = Array.from(new Set(sales.flatMap(s => String(s.reference || '').split(/[\/|,]/).map(x => x.trim()).filter(x => x.length >= 4)))).slice(0, 8);
+        if (parts.length) add(await fulfilStrictSearch(FULFIL_MAP.poModel, ['OR'].concat(parts.map(x => [['reference', 'ilike', '%' + x.replace(/([\\%_])/g, '\\$1') + '%']])), FULFIL_GUARD_PO_FIELDS, 40, 'sale-reference POs'), soTag + ' reference');
       }
     }
     const list = Array.from(found.values()).slice(0, 80);
