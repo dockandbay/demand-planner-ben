@@ -10,14 +10,14 @@ sources:
   - server.mjs :: /api/demand/wssi-otb, /api/demand/wssi-otb/upload
   - migrations/396_wssi_otb_buy.sql :: planner.wssi_otb_buy
   - artifact_v16.7.html :: wssiPx
-verified_version: v28.548
+verified_version: v28.556
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: f531c8688d97
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
   server.mjs::/api/demand/wssi: 5f8825a8e6cb
-  artifact_v16.7.html::renderWssiView: c5deb5c6a425
+  artifact_v16.7.html::renderWssiView: 7f26d870d667
   artifact_v16.7.html::wssiCompute: 01239b344d37
   artifact_v16.7.html::wssiDerive: db209ab5e2b2
   artifact_v16.7.html::wssiPeriod: a36ce8d838b8

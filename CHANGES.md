@@ -1,3 +1,8 @@
+## v28.556 (28-Oct-26) WSSI links to the WSSI plan
+- Ben: "on the wssi there should be a link to https://horizon.dockandbay.com/#/demand/inputs/wssiplan".
+- DEMAND ▸ WSSI: a "WSSI plan ↗" button next to "Enter open to buy" opens DEMAND ▸ Inputs ▸ WSSI plan (#/demand/inputs/wssiplan) on the same financial year. It is a real link, so middle-click or right-click opens it in a new tab.
+- No new env vars, migrations or cron routes.
+
 ## v28.555 (28-Oct-26) A PO on a shipment takes all its dates from that shipment
 - Ben: "Go with recommendations" (make every PO date read from its shipment).
 - PO grid, PO drawer DATES, actions and Cash Flow (all built from PO_ROWS_SQL): when a PO sits on a shipment, its ship, arrival and completion dates are the shipment's own effective dates, worked out with the Shipments grid rules (override ▸ Flexport matched by carrier ref or shipment name ▸ master-PO calc; completion = delivery override ▸ arrival + 7, + 0 for FOB or a Direct to Client market). A shipment named after the PO counts, as on the grid. Where the shipment has no date yet the PO keeps its own. POs with no shipment are unchanged.
