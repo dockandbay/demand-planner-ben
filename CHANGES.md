@@ -1,3 +1,7 @@
+## v28.564 (28-Oct-26) WSSI: write-off wording corrected
+- Ben asked where the damages, samples and stock-count data came from: it does not; HORIZON reads none of it. The write-off row's tooltip and the logic doc listed those as if known. Both now say the write-off is the unexplained part of the stock movement (worked out, cause unknown), and name the known gap: moves between markets show as write-off / intake instead of transfers.
+- No logic change. No new env vars, migrations or cron routes.
+
 ## v28.563 (28-Oct-26) DEMAND Actions: hide older than 6 months, sort by date
 - Ben: "tick box defaulted to yes to hide actions for things more than 6 months old. also a sort by date option which shows items recent to latest".
 - DEMAND ▸ Actions (and Insights): each card shows the month it is about (the month in the alert or anomaly, else last full month for trading / stock / trend items). "Hide older than 6 months" is ticked by default and shows how many are hidden (sandbox: 37 of 180). New Sort: Severity then £ at risk (as before) or Date, newest first. Both remembered per browser.

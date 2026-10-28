@@ -14,7 +14,7 @@ sources:
   - artifact_v16.7.html :: wssiNotePop, wssiNoteVis, wssiNoteRefresh
   - server.mjs :: /api/demand/wssi-notes
   - migrations/400_wssi_notes.sql :: planner.wssi_notes
-verified_version: v28.559
+verified_version: v28.564
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: 49dc2f86d9c0
@@ -87,8 +87,8 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Actual months: movement = closing - opening + units sold, per pool.
   - If one pool fell while the other rose in the same month, the overlap is a transfer (3PL to FBA or back). Transfers net to zero when both pools are shown.
   - Transfer £ cost (v28.558, Katherine: transfers must net to zero at all markets and channels): both sides are valued at the sending pool's landed cost per unit, so the 3PL out and the FBA in cancel. Each pool's opening and closing stock £ cost stay at that pool's own landed cost; £ retail uses the market's selling price on both sides.
-  - Write-offs / other are not read from Fulfil stock adjustments or n8n: they are the negative part of the movement left after sales, intake and 3PL / FBA transfers. That covers damages, samples, stock counts (incl. ILG rebaselines), moves to branches HORIZON does not manage and moves between markets (one market's write-off is the other's intake). A write-off and an intake in the same pool and month offset each other; only the net shows.
-  - What is left is intake when positive and write-offs / other when negative (damages, samples, count corrections, moves to unmanaged branches).
+  - Write-offs / other are not read from Fulfil stock adjustments or n8n: they are the negative part of the movement left after sales, intake and 3PL / FBA transfers, so the cause is unknown. Known gap (Ben 28-Oct-26: "moves between markets is a transfer not a write off"): stock moved between markets (e.g. UK to EU) currently shows as a write-off in the sending market and intake in the receiving one; it nets out at all markets but in the wrong rows. A write-off and an intake in the same pool and month offset each other; only the net shows.
+  - What is left is intake when positive and write-offs / other when negative. The write-off is worked out, not measured: HORIZON has no record of the cause (no damages, samples or stock-count data is read).
   - Why not PO receipts: HORIZON's PO history only starts around Dec-25, so POs cannot give last year's intake.
 - Forecast months: intake = open POs (status Production, Ready to ship, Shipping; FUTURE is not confirmed and is left out) by expected arrival:
   shipment arrival > delivery > landing date > PO delivery override > PO landing override > production end (override, else start + supplier production days) + 7 days + the branch's sea lead time. Arrivals already overdue land in the first forecast month.
