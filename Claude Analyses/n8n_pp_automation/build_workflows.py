@@ -376,6 +376,8 @@ def to_prod(wf, cfg_update):
 if __name__ == "__main__":
     import sys
     b = to_prod(build_b(), B_PROD_SETTINGS) if "--prod-b" in sys.argv else build_b()
-    for tag, wf in (("A", build_a()), ("B", b)):
+    # A live on PROD (Ben 28-Oct-26): read only, emails new stuck/failed orders
+    a = to_prod(build_a(), {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2"}) if "--prod-a" in sys.argv else build_a()
+    for tag, wf in (("A", a), ("B", b)):
         json.dump(wf, open(os.path.join(HERE, f"workflow_{tag}.json"), "w"), indent=1)
         print(tag, wf["name"], len(wf["nodes"]), "nodes")

@@ -1,5 +1,5 @@
 {
- "name": "Ops | Order health check (hourly) [SANDBOX]",
+ "name": "Ops | Order health check (hourly)",
  "nodes": [
   {
    "id": "8ac638a5-aa67-52ca-af4f-6608fc3d74fd",
@@ -47,7 +47,7 @@
    ],
    "parameters": {
     "mode": "raw",
-    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"lookbackHours\": 48,\n  \"graceMinutes\": 30,\n  \"integratedSources\": [\n    \"cms_shopify\",\n    \"amazon_mws\",\n    \"faire\",\n    \"tiktok\"\n  ],\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"emailWhenClean\": false\n}",
+    "jsonOutput": "{\n  \"tenant\": \"PROD\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"lookbackHours\": 48,\n  \"graceMinutes\": 30,\n  \"integratedSources\": [\n    \"cms_shopify\",\n    \"amazon_mws\",\n    \"faire\",\n    \"tiktok\"\n  ],\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"emailWhenClean\": false\n}",
     "options": {}
    }
   },
@@ -113,8 +113,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -185,8 +185,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -257,8 +257,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
