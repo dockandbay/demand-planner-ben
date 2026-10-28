@@ -1,3 +1,12 @@
+## v28.560 (28-Oct-26) DEMAND Exceptions: accept proposals, undo, whole numbers, MTD
+- Katherine's feedback (via Ben); tick layout picked from a mockup.
+- Forecast < Actual and Forecast > Run-rate: new Proposal column (this month's run-rate rounded up, never below actual). Tick SKUs or tick all, then "Accept proposal (n)" sets the current-month forecast for every ticked SKU in one step. The Override box stays for another number.
+- Undo button on the Exceptions filter bar; every Exceptions edit (accept, override, Selling no forecast boxes) goes on the DEMAND undo stack (Ctrl/Cmd+Z too). Edits save automatically (legends no longer say Save Forecasts).
+- Override boxes take whole numbers only: "p", "12.5" or "10%" are refused with a message (before, "p" or "12p" could be read as a change and the row dropped out).
+- A SKU changed on Exceptions stays on screen marked UPDATED until a refresh, filter change or another sub-tab, instead of vanishing once it stops being an exception.
+- Selling no forecast: month-to-date column next to last month; the Min box ("Min last mo") filters on last full month's units (was the 3-month total). Min steps in 10s on every tab (was 50).
+- No new env vars, migrations or cron routes.
+
 ## v28.559 (28-Oct-26) WSSI cell notes; demand editors can save plan and overrides on live
 - Ben: "in wssi can user add notes to each cell. a little bar showing when notes are added or can be added on left of the spreadsheet like cell". Picked from mockups: left bar + cell marker; a note belongs to the exact filter view and shows (tagged) in the views above; demand edit users add, the author or an admin deletes.
 - DEMAND ▸ WSSI: a bar left of each row name (note count, amber; + on hover to add a note to the row or one of its months); an amber corner marker on cells with notes (hover to read, click to open); right-click any cell to add a note. Notes show who and when (ben@, dd-mmm-yy).

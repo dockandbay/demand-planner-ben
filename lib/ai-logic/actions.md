@@ -41,7 +41,7 @@ sources:
   - server.mjs :: biConsolidations
 fingerprints:
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
-  artifact_v16.7.html::renderExceptionsView: 0937db43e62d
+  artifact_v16.7.html::renderExceptionsView: c44edd2fbdd2
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
   artifact_v16.7.html::daClientDetectors: 57025c59e925
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.549
+verified_version: v28.560
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -88,6 +88,8 @@ verified_version: v28.549
   - Risk: All, Red or Amber.
   - Min units: hides rows with |delta| below the value entered. On Forecast < Actual and Forecast > Run-rate the box is labelled "Min gap" and a Gap column shows the delta it filters on: actual minus forecast (Forecast < Actual), forecast minus run-rate (Forecast > Run-rate). It is the gap, not the size of the row: forecast 120 and actual 125 is a gap of 5, hidden by Min gap 10 (v28.435, Ben 21-Oct-26 chose "keep gap, show it" after "min 10 shows nothing").
   - Deep links: #/demand/exceptions/<slug> (forecast-less-actual, forecast-greater-run-rate, or the tab key) open that tab; the SUPPLY router maps the slug to the tab key (v28.435; before, the raw slug fell back to the Forecast < Actual maths, so a Forecast > Run-rate link computed the wrong gap).
+  - Min steps in 10s (v28.560, Katherine; was 50). On Selling no forecast it is labelled "Min last mo" and filters on last full month's units (was the 3-month total, so a Min of 10 seemed to do nothing).
+- Editing (v28.560, Katherine): every forecast change made on Exceptions goes on the DEMAND undo stack (last 10; Undo button in the filter bar, or Ctrl/Cmd+Z), and saves automatically like the plan grid. Override boxes take whole numbers of units only; anything else (letters, decimals, %) is refused with a message and nothing changes. A SKU edited here stays on screen (status UPDATED) even when it is no longer an exception, until a refresh, a filter change or another sub-tab.
 - Sets (SKU type SET) are skipped on every sub-tab except Data & config.
 - SKU forecast = the subcategory forecast split by the SKU's share (buildSkuShares), with any manual SKU override applied on top. Actual = SKU sales for CUR_MONTH. A SKU is checked only for channels it is available in. (source: skuMonthlyMap)
 - Run-rate = month-to-date actual / days elapsed x days in month. If CUR_MONTH is before the calendar month (month boundary), the month counts as fully elapsed.
@@ -96,17 +98,19 @@ verified_version: v28.549
 - RED = forecast > 0 and actual >= forecast. The buy plan then assumes 0 further demand this month.
 - AMBER = actual < forecast but run-rate > forecast.
 - Delta = actual minus forecast.
-- The inline override changes the current-month SKU forecast and persists on Save Forecasts.
+- Proposal (v28.560, Katherine) = this month's run-rate rounded up (never below actual), so accepting it clears the exception. Tick SKUs (or tick all shown) and press Accept proposal: the current-month SKU forecast is set to the Proposal for every ticked row, as one undo step. The inline override sets a different number.
 
 ## Exceptions: Forecast > Run-rate
 - Fires only if forecast > 0, actual > 0, and at least 34% of the month has elapsed.
 - RED = run-rate < 50% of forecast. AMBER = run-rate < 75% of forecast.
 - Delta = forecast minus run-rate.
+- Proposal, tick boxes and Accept proposal as on Forecast < Actual (Proposal = this month's run-rate rounded up).
 
 ## Exceptions: Selling, no forecast
 - Recent = sum of the 3 months before CUR_MONTH.
 - Fires if recent >= 10 and the forward forecast (next 4 months including current) <= 10% of recent.
 - RED if recent >= 60 at SKU grain, or >= 200 at category grain. Otherwise AMBER.
+- Columns (v28.560): last full month, month to date, LY sales for the next 4 months, stock 3PL / FBA, then the next 4 months' forecast with an entry box each.
 
 ## Exceptions: Forecast anomalies
 - Looks at the forward 6 months and keeps the worst month per SKU.
