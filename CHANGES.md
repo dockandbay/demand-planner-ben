@@ -1,3 +1,8 @@
+## v28.543 (28-Oct-26) ERP deviations: who last changed each line
+- Ben: 'erp deviations on the po plan, can you also show a little note "zera@ changed on 19th oct" for example if there was a recent change'.
+- The ERP deviations box has a "Last change" column: the latest HORIZON order-plan change to that SKU from the PO record of change, e.g. "zera@ changed 19-Oct-26 (80 → 280)" or "ben@ changed 18-Oct-26 (added — qty 80)"; hover shows the full entry. Blank when the line was never changed in HORIZON (changes made in Fulfil are not in HORIZON's log).
+- Front end only (the PO detail already carries the change log). Check: the matcher, run on sample log rows, picks the exact SKU (not a longer SKU starting the same).
+
 ## v28.542 (28-Oct-26) Country risk: same rule everywhere, and a clear box to approve it
 - Ben (PO-58AUWK1): "says country risk but which sku, there is no button to press?"
 - Cause: the ORDER PLAN action counted a SKU as a country risk when it was not AVAILABLE in the market right now (discontinued counts), but the line's "c" button only shows when the SKU is not RELEASED there at all (discontinued is the separate "d" flag, by design since v28.098). BAGCOOL-MD-NAVY (released in AU, being discontinued) raised the action with no button; BAGCOOL-MD-MOJSPZ and BAGCOOL-MD-DKDIS (not released in AU) had only the small "c" button in the Exceptions column.
