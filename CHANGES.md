@@ -1,3 +1,9 @@
+## v28.534 (28-Oct-26) Order plan: link to the Fulfil PO next to Push to Fulfil
+- Ben (PO-58UKLX1 ▸ Order plan): "can we have the fulfil link on this page", placed next to Push to Fulfil (chosen from two layouts).
+- After "⬆ Push to Fulfil (full)" the toolbar now shows "↗ PO483" (or "↗ Fulfil PO" when HORIZON knows only the Fulfil id, as for automatically linked POs like PO-58UKLX1 / Fulfil id 345), opening the linked Fulfil PO in a new tab, plus one link per extra Fulfil PO (v28.522). From the PO's Linked records, falling back to the grid's Fulfil status; "not in Fulfil yet" when there is none.
+- End-date rule: Ben confirmed estimated (calculated) end dates are fine, so "Production end date missing" stays as it is.
+- Front end only.
+
 ## v28.533 (28-Oct-26) Link Fulfil PO search finds POs through their sales order
 - Ben (PO-1891958 ▸ Master data ▸ Link Fulfil PO): "the fulfil search searches po table for sales order number but it could be smarter and also search sales order for the sales order and linked pos".
 - Cause: typing a sales order number or reference found the sale, but its POs were only found through purchase requests tied to the sale's LINES. Fulfil also ties a request to the sale itself (origin "sale.sale,<id>"): SO56641 (A0227 / GOLD27702-11, Goldstar) -> purchase request 2469 -> PO486 was missed that way.
