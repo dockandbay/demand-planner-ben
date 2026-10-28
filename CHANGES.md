@@ -1,3 +1,10 @@
+## v28.537 (28-Oct-26) ERP qty counts a PO's extra Fulfil POs (drift clears when main + extras match)
+- Ben (PO-1892095 - PO475 ▸ Order plan): "i have linked to 2 PO's and when linking the second po i would expect the erp drift to disappear if they match". Main Fulfil PO475 holds TOWLB-CAB-LG-NAVY-R 1,300; the extra PO478 holds the two 800-unit lines (COLAGN, MIAMI), which showed as "not in ERP".
+- Now an extra Fulfil PO keeps a copy of its lines (migration 395), and HORIZON's ERP qty per SKU = main Fulfil PO + its extras (cancelled extras ignored). Linking or removing an extra reads its lines and recalculates that PO at once; every Fulfil refresh re-reads all extras first. The ERP deviations box, the ORDER PLAN badge and the grid's Fulfil drift / NEEDS ERP count all use it.
+- Push to Fulfil (full) on a PO with extras sends the MAIN Fulfil PO only what the extras do not already hold (plan qty - extras' qty per SKU), so the extras' lines are never duplicated into it; when the extras hold everything it says so and pushes nothing.
+- Migration 395_po_fulfil_extra_lines.sql (additive): po_fulfil_extra.lines jsonb, synced_at. The code works without it (extras then count nothing, as before).
+- Sandbox check: extra sandbox Fulfil 98 (7 of each pillow) on PO-57UKBL1 took ERP qty 2,100 -> 2,107 per SKU and the grid drift count followed; removing it restored 2,100.
+
 ## v28.536 (28-Oct-26) PO dates use the Flexport shipment linked on its shipment
 - Ben (PO-1892095 - PO475 ▸ Dates): Ship, Arrival / Delivery and Completion all showed 19-Oct-26 while the linked shipment's page shows completion 28-Dec-26.
 - Cause: the shipment is tied to Flexport only by its carrier ref (FLEX-4271937, named "PO-1892095" in Flexport). The shipment page matches on that ref (Flexport arrival 21-Dec + 7 = 28-Dec), but the PO date calc only matches on the PO's own Flexport reference or on the name, so the PO got no Flexport dates. It fell back to the shipment's hand-entered departure (19-Oct, which is Flexport's PACKING date) + the Direct to Client branch's 0 sea transit days.

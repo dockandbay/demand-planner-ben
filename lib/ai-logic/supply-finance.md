@@ -198,11 +198,11 @@ fingerprints:
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
   server.mjs::_tplConsumablesInside: e11316018639
-  server.mjs::fulfilPushLines: 669035e2e8e4
+  server.mjs::fulfilPushLines: 298c6bd1a928
   server.mjs::FULFIL_MAP: a6c47c881a14
   server.mjs::fulfilCompletionMap: df8ad2805725
   server.mjs::/api/supply/fulfil/drift: 5d0b453f9536
-  server.mjs::/api/supply/fulfil/grid-status: de13cc6028c0
+  server.mjs::/api/supply/fulfil/grid-status: 781293271e8a
   server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::fulfilImportPOs: 17755776cb38
   server.mjs::fulfilPushTarget: 2c0fb3c1cc0a
@@ -214,7 +214,7 @@ fingerprints:
   server.mjs::poFulfilExtras: 5649f4f9f1fc
   server.mjs::ffExtraOn: acafa58afa08
   server.mjs::/api/supply/po/:po/fulfil-extra: 4472ed8c5070
-  server.mjs::/api/supply/po/:po/fulfil-extra/remove: 1d5622e593be
+  server.mjs::/api/supply/po/:po/fulfil-extra/remove: 8c4122f3e2f0
   server.mjs::fulfilBillPoLinks: 4b6ff61ddfdc
   migrations/394_po_fulfil_extra.sql::planner.po_fulfil_extra: af950b575a37
   server.mjs::sovAnalyse: 9b73b85176ff
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.533
+verified_version: v28.537
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -772,6 +772,8 @@ verified_version: v28.533
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.537 (Ben 28-Oct-26): extra Fulfil POs keep a copy of their lines (po_fulfil_extra.lines, migration 395; ffxSyncLines on link and on every Fulfil refresh). ERP qty per SKU (purchase_order_lines.erp_qty, the ERP deviations basis) and the grid's fulfil_lines_pending = main Fulfil PO + non-cancelled extras. Push to Fulfil (full) sends the main Fulfil PO plan qty minus the extras' qty per SKU (lines fully on extras are left out; all on extras = nothing pushed). (source: server.mjs :: ffxSyncLines, fulfilErpQtyFromMirror, fulfilPushLines, /api/supply/fulfil/grid-status)
+  - migrations/395_po_fulfil_extra_lines.sql :: po_fulfil_extra.lines, synced_at
 - v28.533 (Ben 28-Oct-26): the Link Fulfil PO search, on a sales order match (number or reference), also finds POs from purchase requests whose origin is the sale itself (not only via its lines), and POs whose reference contains the sale's reference or a part of it (split on / | ,). (source: server.mjs :: /api/supply/fulfil/po-search)
 - v28.527 (Ben 28-Oct-26): after every Push to Fulfil (create or update) the Fulfil PO is read straight back (fulfilMirrorOne with the HORIZON PO): its copy is filed under the pushed HORIZON PO (not the Fulfil reference), that PO's purchase_order_lines.erp_qty is recalculated at once (fulfilErpQtyFromMirror(po)), so ERP deviations reflect Fulfil immediately instead of after the next full import, and a hand-made link stores the Fulfil PO number. (source: server.mjs :: fulfilPushLines, fulfilMirrorOne, fulfilErpQtyFromMirror)
 - v28.526 (Ben 28-Oct-26): a hand-made Fulfil link saved while the Fulfil PO was a draft (no number yet, so its reference was stored) is fixed when the PO's Linked records open: one live Fulfil read by id, and the Fulfil PO number (e.g. PO483) replaces the stored reference. Resolver links are untouched. (source: server.mjs :: /api/supply/po/:po/links)

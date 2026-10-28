@@ -5932,6 +5932,13 @@ async function fulfilPushLines(po, completion) {
       (SELECT coalesce(nullif((to_jsonb(p)->>('cost_' || lower(coalesce((SELECT su.code FROM planner.suppliers su WHERE su.name=$2 LIMIT 1), ''))))::numeric, 0), nullif(p.cost, 0)) FROM planner.products p WHERE p.sku=l.sku LIMIT 1) p_product,
       NULL::numeric p_last
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
+  // v28.537: with extra Fulfil POs (v28.522), the MAIN Fulfil PO gets only what the extras do not already cover (plan qty - extras' qty per SKU),
+  // so a full push never duplicates an extra's lines into the main PO.
+  if (await ffxLinesOn()) { const xq = {};
+    (await pool.query(`SELECT upper(trim(x->>'sku')) sku, sum(coalesce((x->>'qty')::numeric,0)) q FROM planner.po_fulfil_extra e CROSS JOIN LATERAL jsonb_array_elements(coalesce(e.lines,'[]'::jsonb)) x
+      WHERE e.po=$1 AND coalesce(e.state,'') NOT ILIKE 'cancel%' GROUP BY 1`, [po])).rows.forEach(r => { xq[r.sku] = Number(r.q) || 0; });
+    if (Object.keys(xq).length) { for (let k = lines.length - 1; k >= 0; k--) { const left = (Number(lines[k].qty) || 0) - (xq[String(lines[k].sku).toUpperCase()] || 0); if (left > 0) lines[k].qty = left; else lines.splice(k, 1); }
+      if (!lines.length) { const e = new Error('Every line of ' + po + ' is already on its extra Fulfil PO(s), so there is nothing to push to the main Fulfil PO.'); e.code = 'FULFIL_ALL_ON_EXTRAS'; throw e; } } }
   { let _pl = null, _pn = null; try { _pl = await priceListEstIndex(); _pn = plProdNum(((await pool.query(`SELECT prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}).prod_no); } catch (_) {}
     lines.forEach(l => { const pl = _pl ? plEstimate(_pl, supName, l.sku, l.qty, _pn) : null; const num = v => (v == null || v === '' ? null : Number(v));
       const cands = [[num(l.p_direct), l.p_direct_src], [pl, 'price list'], [num(l.p_product), 'products table'], [/^POLYBAG/i.test(String(l.sku || '')) ? PO_POLYBAG_DEFAULT_PRICE : null, 'polybag default']];
@@ -6179,6 +6186,7 @@ async function _fulfilImportPOsRun() {
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
   // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
   let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p._po).map(p => String(p._po)).concat([..._gPos]); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  try { await ffxSyncLines(); } catch (e) { console.error('[fulfil extra] refresh:', e && e.message); }   // v28.537: extras' lines before the ERP qty recalculation
   const _fxHealed = await poFlexRefHeal(); if (_fxHealed.length) console.log('[flexport heal] flexport_reference set on ' + _fxHealed.join(', '));   // v28.536
   const _supHealed = await poSupplierIdHeal(); if (_supHealed.length || _fxHealed.length) { console.log('[supplier heal] linked supplier on ' + _supHealed.join(', ')); try { invalidateSupplyCaches('po'); } catch (_) {} }   // v28.535
   let erp = null; if (!list.truncated) { try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; } }
@@ -6187,10 +6195,12 @@ async function _fulfilImportPOsRun() {
 // v28.362 (Ben 14-Oct-26): HORIZON's copy of the ERP qty (purchase_order_lines.erp_qty) follows FULFIL after every mirror run, so an
 // "ERP deviation" means the plan differs from Fulfil right now (dropship POs are changed in Fulfil and can't be pushed from HORIZON).
 // Per PO in the mirror (not cancelled): erp_qty = the Fulfil qty for that SKU (sum of its lines), 0 when Fulfil has no such line.
-async function fulfilErpQtyFromMirror(onlyPo) {   // v28.527: onlyPo = just that PO (after a push)
+async function fulfilErpQtyFromMirror(onlyPo) {   // v28.527: onlyPo = just that PO (after a push) · v28.537: + the PO's extra Fulfil POs (migration 395)
+  const _x = (await ffxLinesOn()) ? ` + coalesce((SELECT round(sum(coalesce((x->>'qty')::numeric,0)))::int FROM planner.po_fulfil_extra e CROSS JOIN LATERAL jsonb_array_elements(coalesce(e.lines,'[]'::jsonb)) x
+        WHERE e.po = l2.po AND coalesce(e.state,'') NOT ILIKE 'cancel%' AND upper(trim(x->>'sku')) = upper(trim(l2.sku))), 0)` : '';
   const fix = await pool.query(`UPDATE planner.purchase_order_lines l SET erp_qty = sub.q FROM (
       SELECT l2.po_sku, coalesce((SELECT round(sum(coalesce((x->>'qty')::numeric,0)))::int FROM planner.fulfil_purchase_orders fp CROSS JOIN LATERAL jsonb_array_elements(coalesce(fp.lines,'[]'::jsonb)) x
-        WHERE fp.po = l2.po AND upper(trim(x->>'sku')) = upper(trim(l2.sku))), 0) q
+        WHERE fp.po = l2.po AND upper(trim(x->>'sku')) = upper(trim(l2.sku))), 0)${_x} q
       FROM planner.purchase_order_lines l2 JOIN planner.fulfil_purchase_orders fp2 ON fp2.po = l2.po AND coalesce(fp2.state,'') NOT IN ('cancelled','cancel')
       WHERE ($1::text IS NULL OR l2.po = $1)) sub
     WHERE l.po_sku = sub.po_sku AND l.erp_qty IS DISTINCT FROM sub.q`, [onlyPo || null]);
@@ -6292,6 +6302,8 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
   try {
     const _gsCfg = fulfilConfigFor(await activeFulfilEnv());   // v27.888 (Ben): deep link per PO to its Fulfil record
     const _gsUrl = (fid) => (fid && _gsCfg.subdomain) ? ('https://' + _gsCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
+    const _xg = (await ffxLinesOn()) ? ` + coalesce((SELECT sum(coalesce((xx->>'qty')::numeric,0)) FROM planner.po_fulfil_extra e CROSS JOIN LATERAL jsonb_array_elements(coalesce(e.lines,'[]'::jsonb)) xx
+        WHERE e.po=po.po AND coalesce(e.state,'') NOT ILIKE 'cancel%' AND upper(trim(xx->>'sku'))=upper(trim(l.sku))),0)` : '';   // v28.537: + extra Fulfil POs
     const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required, coalesce(CASE WHEN lk.po IS NOT NULL THEN lk.external_id::bigint END, m.fulfil_id) fulfil_id,
         -- v28.199 (Ben): client PO flag (never created from HORIZON) + its manual Fulfil link (the push target; the mirror row is joined by that id)
         ${FULFIL_CLIENT_PO_SQL('po', 'b')} client_po, (lk.po IS NOT NULL) fulfil_link_manual, lk.external_ref fulfil_link_ref,
@@ -6309,7 +6321,7 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
         -- v27.789 (Ben): qty-level lines drift vs the Fulfil mirror (not in Fulfil → every line counts). Mirrors the Cin7 erp_pending.
         (CASE WHEN m.po IS NULL THEN (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)
               ELSE (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0
-                      AND coalesce(l.qty,0) IS DISTINCT FROM coalesce((SELECT (x->>'qty')::numeric FROM jsonb_array_elements(m.lines) x WHERE x->>'sku'=l.sku LIMIT 1),0)) END)::int fulfil_lines_pending
+                      AND coalesce(l.qty,0) IS DISTINCT FROM (coalesce((SELECT (x->>'qty')::numeric FROM jsonb_array_elements(m.lines) x WHERE x->>'sku'=l.sku LIMIT 1),0)${_xg})) END)::int fulfil_lines_pending
       FROM planner.purchase_orders po
       LEFT JOIN planner.po_links lk ON lk.po=po.po AND lk.system='fulfil' AND lk.status='linked' AND lk.found_by='manual' AND coalesce(lk.external_id,'') ~ '^[0-9]+$'
       LEFT JOIN planner.fulfil_purchase_orders m ON (CASE WHEN lk.po IS NOT NULL THEN m.fulfil_id = lk.external_id::bigint ELSE m.po=po.po END)
@@ -8640,6 +8652,23 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
 let _ffxOn = { at: 0, on: false };   // does planner.po_fulfil_extra exist (migration 394)? checked at most once a minute
 async function ffExtraOn() { if (Date.now() - _ffxOn.at < 60000) return _ffxOn.on;
   try { _ffxOn = { at: Date.now(), on: !!(await pool.query(`SELECT to_regclass('planner.po_fulfil_extra') t`)).rows[0].t }; } catch (e) { _ffxOn = { at: Date.now(), on: false }; } return _ffxOn.on; }
+// v28.537: extras keep a copy of their Fulfil lines (migration 395) so ERP qty = main Fulfil PO + extras. ffxLinesOn = that column exists.
+let _ffxLines = { at: 0, on: false };
+async function ffxLinesOn() { if (Date.now() - _ffxLines.at < 60000) return _ffxLines.on;
+  try { _ffxLines = { at: Date.now(), on: (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='po_fulfil_extra' AND column_name='lines'`)).rowCount > 0 }; }
+  catch (e) { _ffxLines = { at: Date.now(), on: false }; } return _ffxLines.on; }
+// Read the lines + state of extra Fulfil POs (ids, or every extra when none given) into po_fulfil_extra. Best effort; returns the HORIZON POs touched.
+async function ffxSyncLines(ids) {
+  if (!(await ffxLinesOn())) return [];
+  const rows = (await pool.query(`SELECT fulfil_id::text id, po FROM planner.po_fulfil_extra` + (ids && ids.length ? ` WHERE fulfil_id = ANY($1::bigint[])` : ''), ids && ids.length ? [ids.map(Number)] : [])).rows;
+  if (!rows.length) return [];
+  const fids = rows.map(r => Number(r.id)), byId = {};
+  const hdr = await fulfilSearchAll(FULFIL_MAP.poModel, [['id', 'in', fids]], ['id', 'number', 'state']);
+  const lns = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', 'in', fids], ['product', '!=', null]], ['purchase', 'product.code', 'quantity', 'unit_price']);
+  lns.forEach(l => { (byId[l.purchase] = byId[l.purchase] || []).push(_fulfilLineMap(l)); });
+  for (const h of hdr) await pool.query(`UPDATE planner.po_fulfil_extra SET lines=$2::jsonb, state=$3, number=coalesce($4, number), synced_at=now() WHERE fulfil_id=$1`, [h.id, JSON.stringify(byId[h.id] || []), h.state || null, h.number || null]);
+  return [...new Set(rows.map(r => r.po))];
+}
 async function poFulfilExtras(po) {
   try { return (await pool.query(`SELECT fulfil_id::text id, number, reference, supplier, state, url, added_by, to_char(added_at,'YYYY-MM-DD') added_at FROM planner.po_fulfil_extra WHERE po=$1 ORDER BY number NULLS LAST, fulfil_id`, [po])).rows; }
   catch (e) { if (e.code === '42P01') return []; throw e; }
@@ -8673,6 +8702,7 @@ app.post('/api/supply/po/:po/fulfil-extra', async (req, res) => {
     await pool.query(`INSERT INTO planner.po_fulfil_extra (fulfil_id, po, number, reference, supplier, state, url, added_by, added_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
       ON CONFLICT (fulfil_id) DO UPDATE SET po=$2, number=$3, reference=$4, supplier=$5, state=$6, url=$7, added_by=$8, added_at=now()`,
       [Number(fp.id), po, fp.number || null, fp.reference || null, fp['party.name'] || null, fp.state || null, furl, authUser(req) || null]);
+    try { await ffxSyncLines([fp.id]); await fulfilErpQtyFromMirror(po); } catch (e) { console.error('[fulfil extra] lines ' + po + ':', e && e.message); }   // v28.537: ERP qty counts it at once
     logPoChange(po, 'Linked records', 'Extra Fulfil PO linked: ' + (fp.number || fp.id) + (fp.reference ? ' (' + fp.reference + ')' : '') + (held.length ? ', moved from ' + held.join(', ') : ''), authUser(req));
     res.json({ ok: true, fulfil_id: fp.id, number: fp.number || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -8683,6 +8713,7 @@ app.post('/api/supply/po/:po/fulfil-extra/remove', async (req, res) => {
     if (!/^[0-9]+$/.test(eid)) return res.status(400).json({ error: 'fulfil_id required' });
     const r = await pool.query(`DELETE FROM planner.po_fulfil_extra WHERE po=$1 AND fulfil_id=$2 RETURNING number`, [po, eid]);
     if (r.rowCount) logPoChange(po, 'Linked records', 'Extra Fulfil PO unlinked: ' + (r.rows[0].number || eid), authUser(req));
+    if (r.rowCount) { try { await fulfilErpQtyFromMirror(po); } catch (_) {} }   // v28.537
     res.json({ ok: true, removed: r.rowCount });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
