@@ -1,3 +1,9 @@
+## v28.531 (28-Oct-26) Mark read on the PO timeline clears the unread action at once
+- Ben (PO drawer ▸ Timeline): '"mark read" an item but the actions didnt hide immediately and they should silently'.
+- Cause: Mark read saves to /api/supply/note-read/<id>, which does not name the PO, so the v28.523 silent PO refresh never ran; and that refresh left out the TIMELINE tab badge and its Open actions strip.
+- Now Mark read / mark unread updates the drawer's copy of the notes and silently re-reads the PO: the "unread supplier note" action, the TIMELINE tab badge, the Open actions banner (incl. "1 unread"), the grid badge and the nav counts all update without a reload.
+- Front end only.
+
 ## v28.530 (28-Oct-26) PO ▸ Client: client name is a searchable picker (like Assign deposit)
 - Ben (PO-59USLX1-DILLARDS ▸ Client): "could you make it a search filter of the list with add new in the search filter box, like assign deposit, not a tooltip style popup".
 - Client name is now a button (red "— pick or add client" when blank) that opens the same searchable popover as Assign deposit: saved key accounts first, then client names already used on other POs, each marked; typing filters; "＋ Add “…” as new client" appears for anything not on the list (Enter takes the first row); "✕ Clear client" at the bottom.

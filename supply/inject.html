@@ -3102,7 +3102,7 @@
     // in place from the stashed detail — keeps the snooze silent (no refetch/re-render) while the counts follow.
     document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav)return;
       if(!nav.querySelector('.potab[data-po="'+_cssEsc(po)+'"]'))return; var r=poBy[po]; if(!r)return;
-      var exc=poExceptions(r, pd._poDetail); var cnt={pay:exc.pay.length,dates:exc.dates.length,client:exc.client.length,shipments:exc.ship.length,masterdata:exc.master.length,oplan:exc.oplan.length};
+      var exc=poExceptions(r, pd._poDetail); var cnt={pay:exc.pay.length,dates:exc.dates.length,client:exc.client.length,shipments:exc.ship.length,masterdata:exc.master.length,oplan:exc.oplan.length,timeline:exc.timeline.length};   // v28.531: + timeline
       nav.querySelectorAll('.potab').forEach(function(btn){ var pt=btn.dataset.pt; if(!(pt in cnt))return; var n=cnt[pt], bd=btn.querySelector('.ex-badge');
         if(n>0){ var ttl=n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':''); if(bd){ bd.textContent=n; bd.title=ttl; } else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+ttl+'">'+n+'</span>'); }
         else if(bd){ bd.remove(); } }); });
@@ -3116,7 +3116,7 @@
       try{ invalidateDerived(); }catch(e){}
       refreshActInPlace(po,'');
       document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav||!nav.querySelector('.potab[data-po="'+key+'"]'))return;
-        var exc=poExceptions(rr,pd._poDetail), live={}; ['pay','landed','dates','oplan','ship','client','master'].forEach(function(k){ (exc[k]||[]).forEach(function(l){ live[l]=1; }); });
+        var exc=poExceptions(rr,pd._poDetail), live={}; ['pay','landed','dates','oplan','ship','client','master','timeline'].forEach(function(k){ (exc[k]||[]).forEach(function(l){ live[l]=1; }); });
         pd.querySelectorAll('.po-tab-acts').forEach(function(st){ var n=0; st.querySelectorAll('[data-lbl]').forEach(function(row){ if(live[row.dataset.lbl]||/awaiting approval$/.test(row.dataset.lbl))n++; else row.remove(); });
           if(!n)st.remove(); else { var bd=st.querySelector('.ex-badge'); if(bd)bd.textContent=n; } });
         var ban=pd.querySelector('.po-actions-banner'); if(ban){ var wasOpen=ban.open, t=document.createElement('div'); t.innerHTML=poOpenActionsPanel(po,pd._poDetail);
@@ -5663,7 +5663,10 @@
       fetch('/api/supply/note-read/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error);
           var repl=read?'<a class="note-read" data-id="'+id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+id+'" data-read="0">Mark read</button>';
-          var tmp=document.createElement('span'); tmp.innerHTML=repl; var neo=tmp.firstChild; if(b.parentNode){ b.parentNode.replaceChild(neo,b); _bindNoteRead(neo); } })
+          var tmp=document.createElement('span'); tmp.innerHTML=repl; var neo=tmp.firstChild; if(b.parentNode){ b.parentNode.replaceChild(neo,b); _bindNoteRead(neo); }
+          // v28.531 (Ben: "mark read an item but the actions didnt hide immediately and they should silently"): update the stashed notes and re-read the PO row
+          try{ var _pd=document.getElementById('podet-'+i), _ns=(_pd&&_pd._poDetail&&_pd._poDetail.notes)||[]; _ns.forEach(function(n){ if(String(n.id)===String(id))n.read=read; }); }catch(_){}
+          try{ if(window.__hzPoChanged)window.__hzPoChanged(po); }catch(_){} })
         .catch(function(e){ b.style.pointerEvents=''; b.style.opacity=''; alert('Could not update: '+(e.message||e)); }); }; };
     document.querySelectorAll('#podet-'+i+' .note-read').forEach(_bindNoteRead);
     // Escalate the most recent timeline message → email the supplier's portal users (internal-initiated)
