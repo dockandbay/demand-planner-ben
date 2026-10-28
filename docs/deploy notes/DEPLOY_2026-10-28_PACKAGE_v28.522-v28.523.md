@@ -1,6 +1,6 @@
 # Deploy package v28.522 to v28.523 (28-Oct-26)
 
-**STATUS 28-Oct-26: LIVE v28.523 (PR #28 merged). Migration 394 NOT yet applied on live (code tolerates it; extra Fulfil links need it).** Was: PR OPEN https://github.com/dockandbayteam/dock-bay-demand-planner/pull/28 (branch port/v28.523, from Ben 94d95ab6). **Migration 394 runs FIRST**, then Ben merges.
+**STATUS 28-Oct-26: LIVE v28.523 (PR #28 merged). Migration 394 applied on live 28-Oct-26 by Claude via MCP (Ben: "run migration 394"); read back: table present, 2 indexes, 0 rows, no anon access. COMPLETE.** Was: PR OPEN https://github.com/dockandbayteam/dock-bay-demand-planner/pull/28 (branch port/v28.523, from Ben 94d95ab6). **Migration 394 runs FIRST**, then Ben merges.
 
 ## What changed
 - v28.522 PO ▸ Linked records: more than one Fulfil PO per HORIZON PO (extras; the main link stays the push / sync target). Extras are searchable and used to match Fulfil bills to Xero bills.

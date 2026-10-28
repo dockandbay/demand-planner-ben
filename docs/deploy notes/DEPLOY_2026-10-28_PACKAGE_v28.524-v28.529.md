@@ -11,7 +11,7 @@
 - v28.529 Hide toggles relabel ACTION ITEMS (n).
 
 ## Migrations
-None. (Migration 394 from the previous package is still outstanding on live.)
+None. (Migration 394 from the previous package was applied on live 28-Oct-26.)
 
 ## Routes / env / cron
 No new routes, env vars or cron routes (connector tools ride on /mcp).
