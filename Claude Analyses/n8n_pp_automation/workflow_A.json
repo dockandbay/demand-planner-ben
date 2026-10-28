@@ -11,7 +11,7 @@
     -300
    ],
    "parameters": {
-    "content": "## Order health check (hourly)\nRead only. Flags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent).\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.",
+    "content": "## Order health check (hourly)\nFlags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent). Auto-fix (Ben 28-Oct-26): Amazon orders failed with 'Order total mismatch' where Fulfil left out Amazon's tax are retried via Retry Order Import (guarded sub-workflow, max `maxRetries`), then dropped from the email once imported. Only write: retry_order_import.\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.",
     "width": 520,
     "height": 300
    }
@@ -47,7 +47,7 @@
    ],
    "parameters": {
     "mode": "raw",
-    "jsonOutput": "{\n  \"tenant\": \"PROD\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"lookbackHours\": 48,\n  \"graceMinutes\": 30,\n  \"integratedSources\": [\n    \"cms_shopify\",\n    \"amazon_mws\",\n    \"faire\",\n    \"tiktok\"\n  ],\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"emailWhenClean\": false,\n  \"roundingTolerance\": 0.1,\n  \"approvalMode\": true\n}",
+    "jsonOutput": "{\n  \"tenant\": \"PROD\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"lookbackHours\": 48,\n  \"graceMinutes\": 30,\n  \"integratedSources\": [\n    \"cms_shopify\",\n    \"amazon_mws\",\n    \"faire\",\n    \"tiktok\"\n  ],\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"emailWhenClean\": false,\n  \"roundingTolerance\": 0.1,\n  \"approvalMode\": true,\n  \"autoRetry\": true,\n  \"maxRetries\": 2,\n  \"allowProdWrite\": true\n}",
     "options": {}
    }
   },
@@ -345,7 +345,247 @@
     0
    ],
    "parameters": {
-    "jsCode": "\nconst S = $('Settings').first().json;\nconst channels = {};\nfor (const c of $('Read channels').all()) channels[c.json.id] = c.json;\nconst whs = {};\nfor (const w of $('Read warehouses').all()) whs[w.json.id] = w.json.name;\nconst excBySale = {};\nfor (const e of $('Read open exceptions').all()) {\n  if (!e.json.sale) continue;\n  (excBySale[e.json.sale] = excBySale[e.json.sale] || []).push(String(e.json.log || e.json.rec_name || '').slice(0, 200));\n}\nconst host = S.baseUrl.replace(/\\/api\\/v2\\/?$/, '');\nconst now = Date.now();\nconst graceMs = S.graceMinutes * 60000;\n// Amazon (or other marketplace) ships these, so a stuck order only affects records, not the customer.\nconst marketplaceShips = name => /^Amazon (FBA|MCF)/i.test(name || '');\n\nfunction triage(p) {\n  const ex = p.exception;\n  const mm = ex.match(/total mismatch found (\\d+(?:\\.\\d+)?) instead of (\\d+(?:\\.\\d+)?)/i);\n  const sku = (ex.match(/Product ([^(\\s]+)\\(/) || [])[1];\n  let action;\n  if (mm && Math.abs(Number(mm[2]) - Number(mm[1])) <= S.roundingTolerance) {\n    action = `Rounding difference (${mm[1]} vs ${mm[2]}). Open the order, accept or adjust the total, then retry.`;\n    return { priority: 3, action };\n  }\n  if (mm) action = `Tax missing at import (${mm[1]} found, Amazon total ${mm[2]}). Open the order, retry the import; if it fails again add it to the Fulfil support ticket.`;\n  else if (/Product NULL/i.test(ex)) action = 'A line has no SKU on the channel order. Map the line to a product in Fulfil, then retry.';\n  else if (sku) action = `SKU ${sku} does not exist in Fulfil. Create or map the product, then retry the order.`;\n  else if (p.reason === 'confirmed, no shipment') action = 'Confirmed but no shipment was created. Check stock and warehouse, then process the order.';\n  else if (p.reason === 'draft' || p.reason === 'quotation') action = `Order is stuck in ${p.reason}. Open it and confirm/process it${ex ? ' after fixing the exception' : ''}.`;\n  else action = 'Open the order, read the exception, fix and retry.';\n  return { priority: p.marketplace ? 2 : 1, action };\n}\n\nconst problems = [];\nfor (const it of $('Read recent orders').all()) {\n  const s = it.json;\n  const ch = channels[s.channel] || {};\n  if (!S.integratedSources.includes(ch.source)) continue;\n  const created = Date.parse(String(s.create_date && s.create_date.iso_string || s.create_date) + 'Z');\n  if (isNaN(created) || now - created < graceMs) continue;\n  let reason = null;\n  if (['draft', 'quotation', 'failed'].includes(s.state)) reason = s.state;\n  else if (s.state === 'confirmed' && !(s.shipments || []).length) reason = 'confirmed, no shipment';\n  if (excBySale[s.id] && !reason) reason = 'open exception';\n  if (!reason) continue;\n  const warehouse = whs[s.warehouse] || '';\n  const p = { id: s.id, number: s.number || '', reference: s.reference || '', channel: ch.name || String(s.channel),\n              warehouse, marketplace: marketplaceShips(warehouse), state: s.state, reason,\n              created: new Date(created).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',\n              exception: (excBySale[s.id] || []).join(' | '), link: `${host}/client/#/model/sale.sale/${s.id}` };\n  Object.assign(p, triage(p));\n  problems.push(p);\n}\n// Email when there is anything NEW (kept in workflow static data; resolved ones drop out). The email lists\n// everything outstanding, with new ones flagged, so one email is the full to-do list.\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst current = {};\nlet fresh = 0;\nfor (const p of problems) {\n  p.isNew = !store.seen[p.id];\n  if (p.isNew) fresh++;\n  current[p.id] = store.seen[p.id] || new Date().toISOString();\n}\nstore.seen = current;\nproblems.sort((a, b) => a.priority - b.priority || (a.created < b.created ? -1 : 1));\nreturn [{ json: { tenant: S.tenant, problems, fresh, outstanding: problems.length,\n                  sendEmail: fresh > 0 || S.emailWhenClean, scanned: $('Read recent orders').all().length } }];\n"
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst channels = {};\nfor (const c of $('Read channels').all()) channels[c.json.id] = c.json;\nconst whs = {};\nfor (const w of $('Read warehouses').all()) whs[w.json.id] = w.json.name;\nconst excBySale = {};\nfor (const e of $('Read open exceptions').all()) {\n  if (!e.json.sale) continue;\n  (excBySale[e.json.sale] = excBySale[e.json.sale] || []).push(String(e.json.log || e.json.rec_name || '').slice(0, 200));\n}\nconst host = S.baseUrl.replace(/\\/api\\/v2\\/?$/, '');\nconst now = Date.now();\nconst graceMs = S.graceMinutes * 60000;\n// Amazon (or other marketplace) ships these, so a stuck order only affects records, not the customer.\nconst marketplaceShips = name => /^Amazon (FBA|MCF)/i.test(name || '');\n\nfunction triage(p) {\n  const ex = p.exception;\n  const mm = ex.match(/total mismatch found (\\d+(?:\\.\\d+)?) instead of (\\d+(?:\\.\\d+)?)/i);\n  const sku = (ex.match(/Product ([^(\\s]+)\\(/) || [])[1];\n  let action;\n  if (mm && Math.abs(Number(mm[2]) - Number(mm[1])) <= S.roundingTolerance) {\n    action = `Rounding difference (${mm[1]} vs ${mm[2]}). Open the order, accept or adjust the total, then retry.`;\n    return { priority: 3, action };\n  }\n  if (mm) action = `Tax missing at import (${mm[1]} found, Amazon total ${mm[2]}). Open the order, retry the import; if it fails again add it to the Fulfil support ticket.`;\n  else if (/Product NULL/i.test(ex)) action = 'A line has no SKU on the channel order. Map the line to a product in Fulfil, then retry.';\n  else if (sku) action = `SKU ${sku} does not exist in Fulfil. Create or map the product, then retry the order.`;\n  else if (p.reason === 'confirmed, no shipment') action = 'Confirmed but no shipment was created. Check stock and warehouse, then process the order.';\n  else if (p.reason === 'draft' || p.reason === 'quotation') action = `Order is stuck in ${p.reason}. Open it and confirm/process it${ex ? ' after fixing the exception' : ''}.`;\n  else action = 'Open the order, read the exception, fix and retry.';\n  return { priority: p.marketplace ? 2 : 1, action };\n}\n\nconst problems = [];\nfor (const it of $('Read recent orders').all()) {\n  const s = it.json;\n  const ch = channels[s.channel] || {};\n  if (!S.integratedSources.includes(ch.source)) continue;\n  const created = Date.parse(String(s.create_date && s.create_date.iso_string || s.create_date) + 'Z');\n  if (isNaN(created) || now - created < graceMs) continue;\n  let reason = null;\n  if (['draft', 'quotation', 'failed'].includes(s.state)) reason = s.state;\n  else if (s.state === 'confirmed' && !(s.shipments || []).length) reason = 'confirmed, no shipment';\n  if (excBySale[s.id] && !reason) reason = 'open exception';\n  if (!reason) continue;\n  const warehouse = whs[s.warehouse] || '';\n  const p = { id: s.id, number: s.number || '', reference: s.reference || '', channel: ch.name || String(s.channel),\n              warehouse, marketplace: marketplaceShips(warehouse), state: s.state, reason,\n              created: new Date(created).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',\n              exception: (excBySale[s.id] || []).join(' | '), link: `${host}/client/#/model/sale.sale/${s.id}` };\n  Object.assign(p, triage(p));\n  problems.push(p);\n}\n// Amazon \"Order total mismatch\" where Fulfil left out Amazon's tax (Ben 28-Oct-26): Fulfil's Retry Order Import\n// re-imports it correctly. Only when the gap looks like tax (expected/found 1.05 to 1.30) and under the retry cap.\nconst store = $getWorkflowStaticData('global');\nstore.retries = store.retries || {};\nconst retry = [];\nfor (const p of problems) {\n  const mm = p.exception.match(/total mismatch found (\\d+(?:\\.\\d+)?) instead of (\\d+(?:\\.\\d+)?)/i);\n  const ratio = mm ? Number(mm[2]) / Number(mm[1]) : 0;\n  p.retries = store.retries[p.id] || 0;\n  p.autoRetry = S.autoRetry === true && p.state === 'failed' && (channels[it_ch(p)] || {}).source === 'amazon_mws' &&\n                p.priority !== 3 && ratio >= 1.05 && ratio <= 1.30 && p.retries < S.maxRetries;\n  if (p.autoRetry) retry.push(p.id);\n}\nfunction it_ch(p) { return Object.keys(channels).find(k => channels[k].name === p.channel); }\nreturn [{ json: { tenant: S.tenant, problems, retry, anyRetry: retry.length > 0, scanned: $('Read recent orders').all().length } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "684882af-0497-51a1-846e-6e87b3248d06",
+   "name": "Amazon tax retries?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "2bbf609f-0db1-5399-ad23-421feb2b4563",
+       "leftValue": "={{ $json.anyRetry }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "1d9e221e-380d-5b05-a272-549adf1afb36",
+   "name": "Split retries",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1540,
+    -200
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nreturn $json.retry.map(id => ({ json: { tenant: S.tenant, method: 'PUT', path: '/model/sales_order/retry_order_import',\n  body: { sale_ids: [id] }, allow_prod_write: S.allowProdWrite === true, tag: { id } } }));\n"
+   }
+  },
+  {
+   "id": "1acefec6-b78d-5301-95b8-3a6ae708b5db",
+   "name": "Retry import (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    1760,
+    -200
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "acad4e51-ef89-5112-8d88-334781567d94",
+   "name": "Wait 30s",
+   "type": "n8n-nodes-base.wait",
+   "typeVersion": 1.1,
+   "position": [
+    1980,
+    -200
+   ],
+   "parameters": {
+    "resume": "timeInterval",
+    "amount": 30,
+    "unit": "seconds"
+   }
+  },
+  {
+   "id": "48505f7c-1e68-5a10-9fad-29b60cb9d60a",
+   "name": "Read back retried",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2200,
+    -200
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/sale.sale",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "number,state,total_amount"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"id\",\"in\",$('Find problems').first().json.retry]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "fb543098-2b88-5019-ae8a-53e9bf625c41",
+   "name": "Final decide",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2420,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst fp = $('Find problems').first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {}; store.retries = store.retries || {}; store.fixed = store.fixed || [];\nlet after = {};\ntry { for (const r of $('Read back retried').all()) after[r.json.id] = r.json; } catch (e) { after = {}; }\nconst remaining = [];\nfor (const p of fp.problems) {\n  if (p.autoRetry) {\n    store.retries[p.id] = (store.retries[p.id] || 0) + 1;\n    const a = after[p.id];\n    if (a && a.state !== 'failed') {\n      store.fixed.push({ reference: p.reference, channel: p.channel, warehouse: p.warehouse, number: a.number || '', state: a.state,\n                         total: a.total_amount && a.total_amount.decimal, link: p.link, at: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC' });\n      continue;\n    }\n  }\n  if (store.retries[p.id]) p.action = `Auto-retried ${store.retries[p.id]} time(s), still failing. ` + p.action;\n  remaining.push(p);\n}\n// Email only when something NEW needs a person; the email lists everything outstanding, new ones flagged.\nconst current = {};\nlet fresh = 0;\nfor (const p of remaining) {\n  p.isNew = !store.seen[p.id];\n  if (p.isNew) fresh++;\n  current[p.id] = store.seen[p.id] || new Date().toISOString();\n}\nstore.seen = current;\nconst keep = {}; for (const p of fp.problems) if (store.retries[p.id]) keep[p.id] = store.retries[p.id];\nstore.retries = keep;\nconst sendEmail = fresh > 0 || S.emailWhenClean;\nconst fixed = store.fixed.slice(-50);\nif (sendEmail) store.fixed = [];\nreturn [{ json: { tenant: S.tenant, problems: remaining, fresh, outstanding: remaining.length, fixed, sendEmail } }];\n"
    },
    "executeOnce": true
   },
@@ -355,7 +595,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
    "position": [
-    1320,
+    2640,
     0
    ],
    "parameters": {
@@ -389,11 +629,11 @@
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    1540,
+    2860,
     -100
    ],
    "parameters": {
-    "jsCode": "\nconst d = $json;\nconst S = $('Settings').first().json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst P = {\n  1: { label: 'URGENT: customer waiting', colour: '#c62828', note: 'Orders we ship ourselves (3PL). They cannot ship until fixed. Fix today.' },\n  2: { label: 'ACTION TODAY: records only', colour: '#ef6c00', note: 'Amazon has shipped or will ship these. Fix so Fulfil stock, invoices and reporting are right.' },\n  3: { label: 'LOW: minor', colour: '#757575', note: 'Small rounding differences. Fix when convenient.' },\n};\nconst counts = { 1: 0, 2: 0, 3: 0 };\nd.problems.forEach(p => counts[p.priority]++);\nconst th = 'style=\"text-align:left;background:#f2f2f2\"';\nlet body = '';\nfor (const k of [1, 2, 3]) {\n  const list = d.problems.filter(p => p.priority === k);\n  if (!list.length) continue;\n  const rows = list.map(p => `<tr><td><a href=\"${p.link}\">${esc(p.reference || p.number || p.id)}</a>${p.isNew ? ' <b style=\"color:#c62828\">NEW</b>' : ''}</td><td>${esc(p.channel)}</td><td>${esc(p.warehouse)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.action)}</td><td style=\"color:#666\">${esc(p.exception)}</td></tr>`).join('');\n  body += `<h3 style=\"color:${P[k].colour};margin:18px 0 4px\">${P[k].label} (${list.length})</h3><p style=\"margin:0 0 6px\">${P[k].note}</p>\n<table border=\"1\" cellpadding=\"5\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\"><tr><th ${th}>Order (opens Fulfil)</th><th ${th}>Channel</th><th ${th}>Ships from</th><th ${th}>Problem</th><th ${th}>Created</th><th ${th}>Action</th><th ${th}>Fulfil message</th></tr>${rows}</table>`;\n}\nconst pre = S.approvalMode ? '<p style=\"background:#fff3cd;padding:6px\"><b>PREVIEW for approval</b>: sent to Ben only. Once approved it goes to the ops team.</p>' : '';\nconst html = `<div style=\"font-family:Arial;font-size:13px\">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}<p style=\"color:#666;font-size:11px\">Hourly check, emails only when something new appears. Tenant ${esc(d.tenant)}.</p></div>`;\nconst subject = `${counts[1] ? 'URGENT ' : ''}Orders need action: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low (${d.fresh} new)`;\nreturn [{ json: { subject: (S.approvalMode ? '[PREVIEW] ' : '') + subject, html } }];\n"
+    "jsCode": "\nconst d = $json;\nconst S = $('Settings').first().json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst P = {\n  1: { label: 'URGENT: customer waiting', colour: '#c62828', note: 'Orders we ship ourselves (3PL). They cannot ship until fixed. Fix today.' },\n  2: { label: 'ACTION TODAY: records only', colour: '#ef6c00', note: 'Amazon has shipped or will ship these. Fix so Fulfil stock, invoices and reporting are right.' },\n  3: { label: 'LOW: minor', colour: '#757575', note: 'Small rounding differences. Fix when convenient.' },\n};\nconst counts = { 1: 0, 2: 0, 3: 0 };\nd.problems.forEach(p => counts[p.priority]++);\nconst th = 'style=\"text-align:left;background:#f2f2f2\"';\nlet body = '';\nfor (const k of [1, 2, 3]) {\n  const list = d.problems.filter(p => p.priority === k);\n  if (!list.length) continue;\n  const rows = list.map(p => `<tr><td><a href=\"${p.link}\">${esc(p.reference || p.number || p.id)}</a>${p.isNew ? ' <b style=\"color:#c62828\">NEW</b>' : ''}</td><td>${esc(p.channel)}</td><td>${esc(p.warehouse)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.action)}</td><td style=\"color:#666\">${esc(p.exception)}</td></tr>`).join('');\n  body += `<h3 style=\"color:${P[k].colour};margin:18px 0 4px\">${P[k].label} (${list.length})</h3><p style=\"margin:0 0 6px\">${P[k].note}</p>\n<table border=\"1\" cellpadding=\"5\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\"><tr><th ${th}>Order (opens Fulfil)</th><th ${th}>Channel</th><th ${th}>Ships from</th><th ${th}>Problem</th><th ${th}>Created</th><th ${th}>Action</th><th ${th}>Fulfil message</th></tr>${rows}</table>`;\n}\nconst fixedHtml = (d.fixed || []).length ? `<h3 style=\"color:#2e7d32;margin:18px 0 4px\">Fixed automatically since the last email (${d.fixed.length})</h3><p style=\"margin:0 0 6px\">Amazon tax-mismatch imports, re-imported by the flow. No action needed.</p><p style=\"font-size:12px\">` + d.fixed.map(f => `<a href=\"${f.link}\">${esc(f.reference)}</a> ${esc(f.channel)}, ${esc(f.warehouse)}: now ${esc(f.number)} ${esc(f.state)}, total ${esc(f.total)} (${esc(f.at)})`).join('<br>') + '</p>' : '';\nconst pre = S.approvalMode ? '<p style=\"background:#fff3cd;padding:6px\"><b>PREVIEW for approval</b>: sent to Ben only. Once approved it goes to the ops team.</p>' : '';\nconst html = `<div style=\"font-family:Arial;font-size:13px\">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}${fixedHtml}<p style=\"color:#666;font-size:11px\">Hourly check, emails only when something new needs a person. Amazon orders that failed only because Fulfil left out Amazon's tax are retried automatically (up to ${S.maxRetries} times) and drop off this list once they import. Tenant ${esc(d.tenant)}.</p></div>`;\nconst subject = `${counts[1] ? 'URGENT ' : ''}Orders need action: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low (${d.fresh} new)`;\nreturn [{ json: { subject: (S.approvalMode ? '[PREVIEW] ' : '') + subject, html } }];\n"
    }
   },
   {
@@ -402,7 +642,7 @@
    "type": "n8n-nodes-base.gmail",
    "typeVersion": 2.2,
    "position": [
-    1760,
+    3080,
     -100
    ],
    "parameters": {
@@ -489,6 +729,79 @@
    ]
   },
   "Find problems": {
+   "main": [
+    [
+     {
+      "node": "Amazon tax retries?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Amazon tax retries?": {
+   "main": [
+    [
+     {
+      "node": "Split retries",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Final decide",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Split retries": {
+   "main": [
+    [
+     {
+      "node": "Retry import (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Retry import (guarded)": {
+   "main": [
+    [
+     {
+      "node": "Wait 30s",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wait 30s": {
+   "main": [
+    [
+     {
+      "node": "Read back retried",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read back retried": {
+   "main": [
+    [
+     {
+      "node": "Final decide",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Final decide": {
    "main": [
     [
      {

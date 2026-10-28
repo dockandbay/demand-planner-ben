@@ -115,7 +115,7 @@ def if_branches(if_name, true_to, false_to=None):
 
 # ---------------------------------------------------------------------------------------------------------
 # A: order health check
-A_DECIDE = r"""
+A_FIND = r"""
 const S = $('Settings').first().json;
 const channels = {};
 for (const c of $('Read channels').all()) channels[c.json.id] = c.json;
@@ -170,21 +170,65 @@ for (const it of $('Read recent orders').all()) {
   Object.assign(p, triage(p));
   problems.push(p);
 }
-// Email when there is anything NEW (kept in workflow static data; resolved ones drop out). The email lists
-// everything outstanding, with new ones flagged, so one email is the full to-do list.
+// Amazon "Order total mismatch" where Fulfil left out Amazon's tax (Ben 28-Oct-26): Fulfil's Retry Order Import
+// re-imports it correctly. Only when the gap looks like tax (expected/found 1.05 to 1.30) and under the retry cap.
 const store = $getWorkflowStaticData('global');
-store.seen = store.seen || {};
+store.retries = store.retries || {};
+const retry = [];
+for (const p of problems) {
+  const mm = p.exception.match(/total mismatch found (\d+(?:\.\d+)?) instead of (\d+(?:\.\d+)?)/i);
+  const ratio = mm ? Number(mm[2]) / Number(mm[1]) : 0;
+  p.retries = store.retries[p.id] || 0;
+  p.autoRetry = S.autoRetry === true && p.state === 'failed' && (channels[it_ch(p)] || {}).source === 'amazon_mws' &&
+                p.priority !== 3 && ratio >= 1.05 && ratio <= 1.30 && p.retries < S.maxRetries;
+  if (p.autoRetry) retry.push(p.id);
+}
+function it_ch(p) { return Object.keys(channels).find(k => channels[k].name === p.channel); }
+return [{ json: { tenant: S.tenant, problems, retry, anyRetry: retry.length > 0, scanned: $('Read recent orders').all().length } }];
+"""
+
+A_SPLIT = r"""
+const S = $('Settings').first().json;
+return $json.retry.map(id => ({ json: { tenant: S.tenant, method: 'PUT', path: '/model/sales_order/retry_order_import',
+  body: { sale_ids: [id] }, allow_prod_write: S.allowProdWrite === true, tag: { id } } }));
+"""
+
+A_FINAL = r"""
+const S = $('Settings').first().json;
+const fp = $('Find problems').first().json;
+const store = $getWorkflowStaticData('global');
+store.seen = store.seen || {}; store.retries = store.retries || {}; store.fixed = store.fixed || [];
+let after = {};
+try { for (const r of $('Read back retried').all()) after[r.json.id] = r.json; } catch (e) { after = {}; }
+const remaining = [];
+for (const p of fp.problems) {
+  if (p.autoRetry) {
+    store.retries[p.id] = (store.retries[p.id] || 0) + 1;
+    const a = after[p.id];
+    if (a && a.state !== 'failed') {
+      store.fixed.push({ reference: p.reference, channel: p.channel, warehouse: p.warehouse, number: a.number || '', state: a.state,
+                         total: a.total_amount && a.total_amount.decimal, link: p.link, at: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC' });
+      continue;
+    }
+  }
+  if (store.retries[p.id]) p.action = `Auto-retried ${store.retries[p.id]} time(s), still failing. ` + p.action;
+  remaining.push(p);
+}
+// Email only when something NEW needs a person; the email lists everything outstanding, new ones flagged.
 const current = {};
 let fresh = 0;
-for (const p of problems) {
+for (const p of remaining) {
   p.isNew = !store.seen[p.id];
   if (p.isNew) fresh++;
   current[p.id] = store.seen[p.id] || new Date().toISOString();
 }
 store.seen = current;
-problems.sort((a, b) => a.priority - b.priority || (a.created < b.created ? -1 : 1));
-return [{ json: { tenant: S.tenant, problems, fresh, outstanding: problems.length,
-                  sendEmail: fresh > 0 || S.emailWhenClean, scanned: $('Read recent orders').all().length } }];
+const keep = {}; for (const p of fp.problems) if (store.retries[p.id]) keep[p.id] = store.retries[p.id];
+store.retries = keep;
+const sendEmail = fresh > 0 || S.emailWhenClean;
+const fixed = store.fixed.slice(-50);
+if (sendEmail) store.fixed = [];
+return [{ json: { tenant: S.tenant, problems: remaining, fresh, outstanding: remaining.length, fixed, sendEmail } }];
 """
 
 A_HTML = r"""
@@ -207,8 +251,9 @@ for (const k of [1, 2, 3]) {
   body += `<h3 style="color:${P[k].colour};margin:18px 0 4px">${P[k].label} (${list.length})</h3><p style="margin:0 0 6px">${P[k].note}</p>
 <table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:12px"><tr><th ${th}>Order (opens Fulfil)</th><th ${th}>Channel</th><th ${th}>Ships from</th><th ${th}>Problem</th><th ${th}>Created</th><th ${th}>Action</th><th ${th}>Fulfil message</th></tr>${rows}</table>`;
 }
+const fixedHtml = (d.fixed || []).length ? `<h3 style="color:#2e7d32;margin:18px 0 4px">Fixed automatically since the last email (${d.fixed.length})</h3><p style="margin:0 0 6px">Amazon tax-mismatch imports, re-imported by the flow. No action needed.</p><p style="font-size:12px">` + d.fixed.map(f => `<a href="${f.link}">${esc(f.reference)}</a> ${esc(f.channel)}, ${esc(f.warehouse)}: now ${esc(f.number)} ${esc(f.state)}, total ${esc(f.total)} (${esc(f.at)})`).join('<br>') + '</p>' : '';
 const pre = S.approvalMode ? '<p style="background:#fff3cd;padding:6px"><b>PREVIEW for approval</b>: sent to Ben only. Once approved it goes to the ops team.</p>' : '';
-const html = `<div style="font-family:Arial;font-size:13px">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}<p style="color:#666;font-size:11px">Hourly check, emails only when something new appears. Tenant ${esc(d.tenant)}.</p></div>`;
+const html = `<div style="font-family:Arial;font-size:13px">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}${fixedHtml}<p style="color:#666;font-size:11px">Hourly check, emails only when something new needs a person. Amazon orders that failed only because Fulfil left out Amazon's tax are retried automatically (up to ${S.maxRetries} times) and drop off this list once they import. Tenant ${esc(d.tenant)}.</p></div>`;
 const subject = `${counts[1] ? 'URGENT ' : ''}Orders need action: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low (${d.fresh} new)`;
 return [{ json: { subject: (S.approvalMode ? '[PREVIEW] ' : '') + subject, html } }];
 """
@@ -223,6 +268,9 @@ A_SETTINGS = {
     "emailWhenClean": False,
     "roundingTolerance": 0.10,
     "approvalMode": True,
+    "autoRetry": True,
+    "maxRetries": 2,
+    "allowProdWrite": False,
 }
 
 A_SINCE = "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')]%s]) }}"
@@ -233,7 +281,7 @@ A_CRON_NAME, A_CRON = "Hourly (:52)", "52 * * * *"
 
 def build_a():
     nodes = [
-        sticky("About", "## Order health check (hourly)\nRead only. Flags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent).\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.", -40, -300),
+        sticky("About", "## Order health check (hourly)\nFlags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent). Auto-fix (Ben 28-Oct-26): Amazon orders failed with 'Order total mismatch' where Fulfil left out Amazon's tax are retried via Retry Order Import (guarded sub-workflow, max `maxRetries`), then dropped from the email once imported. Only write: retry_order_import.\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.", -40, -300),
         schedule(A_CRON_NAME, A_CRON, 0, 0),
         settings(A_SETTINGS, 220, 0),
         fulfil_get("Read channels", "sale.channel", "name,source", None, 440, 0),
@@ -242,13 +290,23 @@ def build_a():
                    A_SINCE % ",[\"state\",\"in\",[\"draft\",\"quotation\",\"failed\",\"confirmed\"]]", 660, 0),
         fulfil_get("Read open exceptions", "channel.exception", "sale,log",
                    A_SINCE % ",[\"is_resolved\",\"=\",false]", 880, 0),
-        code("Find problems", A_DECIDE, 1100, 0, once=True),
-        if_node("New problems?", "={{ $json.sendEmail }}", 1320, 0),
-        code("Build email", A_HTML, 1540, -100),
-        gmail("Email unprocessed orders", "={{ $('Settings').first().json.alertEmailTo }}", "={{ $json.subject }}", "={{ $json.html }}", 1760, -100),
+        code("Find problems", A_FIND, 1100, 0, once=True),
+        if_node("Amazon tax retries?", "={{ $json.anyRetry }}", 1320, 0),
+        code("Split retries", A_SPLIT, 1540, -200),
+        dict(node("Retry import (guarded)", "n8n-nodes-base.executeWorkflow", 1.3, json.load(open(os.path.join(HERE, "reference/subworkflow_call_params.json"))), 1760, -200),
+             onError="continueRegularOutput"),  # a failed retry must not stop the alert email
+        node("Wait 30s", "n8n-nodes-base.wait", 1.1, {"resume": "timeInterval", "amount": 30, "unit": "seconds"}, 1980, -200),
+        fulfil_get("Read back retried", "sale.sale", "number,state,total_amount",
+                   "={{ JSON.stringify([[\"id\",\"in\",$('Find problems').first().json.retry]]) }}", 2200, -200),
+        code("Final decide", A_FINAL, 2420, 0, once=True),
+        if_node("New problems?", "={{ $json.sendEmail }}", 2640, 0),
+        code("Build email", A_HTML, 2860, -100),
+        gmail("Email unprocessed orders", "={{ $('Settings').first().json.alertEmailTo }}", "={{ $json.subject }}", "={{ $json.html }}", 3080, -100),
     ]
     conns = merge(chain(A_CRON_NAME, "Settings", "Read channels", "Read warehouses", "Read recent orders", "Read open exceptions",
-                        "Find problems", "New problems?"),
+                        "Find problems", "Amazon tax retries?"),
+                  if_branches("Amazon tax retries?", "Split retries", "Final decide"),
+                  chain("Split retries", "Retry import (guarded)", "Wait 30s", "Read back retried", "Final decide", "New problems?"),
                   if_branches("New problems?", "Build email"), chain("Build email", "Email unprocessed orders"))
     return {"name": "Ops | Order health check (hourly) [SANDBOX]", "nodes": nodes, "connections": conns,
             "settings": {"executionOrder": "v1", "errorWorkflow": ERROR_WORKFLOW_ID}}
@@ -433,7 +491,7 @@ if __name__ == "__main__":
     # A live on PROD (Ben 28-Oct-26): read only, emails new stuck/failed orders
     if "--cron-a" in sys.argv:  # one-off run time for a preview, e.g. --cron-a "7 3 * * *"
         A_CRON = sys.argv[sys.argv.index("--cron-a") + 1]
-    a_prod = {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2"}
+    a_prod = {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2", "allowProdWrite": True}  # retry_order_import only
     if "--approved-a" in sys.argv:  # Ben approved the email format: send to the ops team
         a_prod.update({"approvalMode": False,
                        "alertEmailTo": "ben@dockandbay.com, support@dockandbay.com, alexandria@dockandbay.com, sarah@dockandbay.com"})
