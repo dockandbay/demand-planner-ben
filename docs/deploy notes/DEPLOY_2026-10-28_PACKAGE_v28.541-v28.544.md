@@ -1,6 +1,6 @@
 # Deploy package v28.541 to v28.544 (28-Oct-26)
 
-**STATUS 28-Oct-26: PR OPEN** https://github.com/dockandbayteam/dock-bay-demand-planner/pull/31 (branch port/v28.544, from Ben 1fa104a2). Ben merges.
+**STATUS 28-Oct-26: MERGED 01:31Z (squash, 029a5c05) by Claude at Ben's request ("merge 31"); deploying.** Was: PR OPEN https://github.com/dockandbayteam/dock-bay-demand-planner/pull/31 (branch port/v28.544, from Ben 1fa104a2). Ben merges.
 
 ## What changed
 - v28.541 Push to Fulfil saves the PO's Fulfil link; Link Fulfil PO opens searching the PO number.
