@@ -63,7 +63,7 @@
    ],
    "parameters": {
     "mode": "raw",
-    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"allowProdWrite\": false,\n  \"horizonUrl\": \"https://horizon.dockandbay.com\",\n  \"secret\": \"__HZ_SECRET__\",\n  \"lostFoundId\": 10,\n  \"allowTestBatch\": true,\n  \"horizonEnabled\": false\n}",
+    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"allowProdWrite\": false,\n  \"horizonUrl\": \"https://horizon.dockandbay.com\",\n  \"secret\": \"__HZ_SECRET__\",\n  \"lostFoundId\": 10,\n  \"companyId\": 1,\n  \"allowTestBatch\": true,\n  \"horizonEnabled\": false\n}",
     "options": {}
    }
   },
@@ -129,7 +129,7 @@
     "genericAuthType": "httpHeaderAuth",
     "sendBody": true,
     "specifyBody": "json",
-    "jsonBody": "={{ JSON.stringify([[['code','in',$('Claim batches').item.json.lines.map(l => l.sku)]],0,1000,null,['id','code']]) }}",
+    "jsonBody": "={{ JSON.stringify([[['code','in',$('Claim batches').item.json.lines.map(l => l.sku)]],0,500,null,['id','code']]) }}",
     "options": {
      "timeout": 60000,
      "response": {
@@ -156,7 +156,7 @@
     0
    ],
    "parameters": {
-    "jsCode": "\nconst S = $('Settings').first().json, B = $('Claim batches').item.json;\nconst wh = (($('Read warehouse').item.json.body) || [])[0];\nconst prods = ($('Read products').item.json.body) || [];\nconst id = {}; prods.forEach(p => { id[String(p.code)] = p.id; });\nconst missing = B.lines.filter(l => id[l.sku] == null).map(l => l.sku);\nif (!wh || !wh.storage_location) return { json: { ok: false, batch: B, error: 'Fulfil warehouse \"' + B.warehouse + '\" not found in ' + S.tenant } };\nif (missing.length) return { json: { ok: false, batch: B, error: 'SKUs not in Fulfil ' + S.tenant + ': ' + missing.join(', ') } };\nconst lines = B.lines.map(l => ({ product: id[l.sku], quantity: Math.max(0, Number(l.set_to) || 0) }));\nreturn { json: { ok: true, batch: B, storage: wh.storage_location,\n  tenant: S.tenant, method: 'POST', path: '/model/stock.inventory', allow_prod_write: S.allowProdWrite === true, tag: { batch: B },\n  body: [{ location: wh.storage_location, lost_found: S.lostFoundId, date: B.date, type: 'cycle', reason: B.reason, lines: [['create', lines]] }] } };\n",
+    "jsCode": "\nconst S = $('Settings').first().json, B = $('Claim batches').item.json;\nconst wh = (($('Read warehouse').item.json.body) || [])[0];\nconst prods = ($('Read products').item.json.body) || [];\nconst id = {}; prods.forEach(p => { id[String(p.code)] = p.id; });\nconst missing = B.lines.filter(l => id[l.sku] == null).map(l => l.sku);\nif (!wh || !wh.storage_location) return { json: { ok: false, batch: B, error: 'Fulfil warehouse \"' + B.warehouse + '\" not found in ' + S.tenant } };\nif (missing.length) return { json: { ok: false, batch: B, error: 'SKUs not in Fulfil ' + S.tenant + ': ' + missing.join(', ') } };\nconst lines = B.lines.map(l => ({ product: id[l.sku], quantity: Math.max(0, Number(l.set_to) || 0) }));\nreturn { json: { ok: true, batch: B, storage: wh.storage_location,\n  tenant: S.tenant, method: 'POST', path: '/model/stock.inventory' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), allow_prod_write: S.allowProdWrite === true, tag: { batch: B },\n  body: [{ company: S.companyId, location: wh.storage_location, lost_found: S.lostFoundId, date: B.date, type: 'cycle', reason: B.reason, lines: [['create', lines]] }] } };\n",
     "mode": "runOnceForEachItem"
    }
   },
@@ -296,7 +296,7 @@
     -80
    ],
    "parameters": {
-    "jsCode": "\n// state rides in tag (the sub-workflow echoes it); on an error item fall back to the paired input\nconst S = $('Settings').first().json, res = $json; let t = res.tag; if (!t) { try { t = { batch: $('Build count').item.json.batch }; } catch (e) { t = {}; } }\nconst cid = res && res.data && res.data[0] ? (res.data[0].id || res.data[0]) : null;\nif (!res.ok || !cid) return { json: { ok: false, batch: t.batch, error: 'create failed: ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: t.batch, count_id: cid, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + cid + '/complete', body: [[cid]], allow_prod_write: S.allowProdWrite === true, tag: { batch: t.batch, count_id: cid } } };\n",
+    "jsCode": "\n// state rides in tag (the sub-workflow echoes it); on an error item fall back to the paired input\nconst S = $('Settings').first().json, res = $json; let t = res.tag; if (!t) { try { t = { batch: $('Build count').item.json.batch }; } catch (e) { t = {}; } }\nconst cid = res && res.data && res.data[0] ? (res.data[0].id || res.data[0]) : null;\nif (!res.ok || !cid) return { json: { ok: false, batch: t.batch, error: 'create failed: ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: t.batch, count_id: cid, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + cid + '/complete' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), body: [[cid]], allow_prod_write: S.allowProdWrite === true, tag: { batch: t.batch, count_id: cid } } };\n",
     "mode": "runOnceForEachItem"
    }
   },
@@ -436,7 +436,7 @@
     -160
    ],
    "parameters": {
-    "jsCode": "\nconst S = $('Settings').first().json, res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep complete').item.json; } catch (e) { prev = {}; } }\nif (!res.ok) return { json: { ok: false, batch: prev.batch, count_id: prev.count_id, error: 'complete failed (count ' + prev.count_id + ' left in draft): ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: prev.batch, count_id: prev.count_id, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + prev.count_id + '/confirm', body: [[prev.count_id]], allow_prod_write: S.allowProdWrite === true, tag: { batch: prev.batch, count_id: prev.count_id } } };\n",
+    "jsCode": "\nconst S = $('Settings').first().json, res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep complete').item.json; } catch (e) { prev = {}; } }\nif (!res.ok) return { json: { ok: false, batch: prev.batch, count_id: prev.count_id, error: 'complete failed (count ' + prev.count_id + ' left in draft): ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };\nreturn { json: { ok: true, batch: prev.batch, count_id: prev.count_id, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + prev.count_id + '/confirm' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), body: [[prev.count_id]], allow_prod_write: S.allowProdWrite === true, tag: { batch: prev.batch, count_id: prev.count_id } } };\n",
     "mode": "runOnceForEachItem"
    }
   },
@@ -663,7 +663,7 @@
     "genericAuthType": "httpHeaderAuth",
     "sendBody": true,
     "specifyBody": "json",
-    "jsonBody": "={{ JSON.stringify([[['inventory','=',$('After confirm').item.json.count_id]],0,1000,null,['product','expected_quantity','quantity']]) }}",
+    "jsonBody": "={{ JSON.stringify([[['inventory','=',$('After confirm').item.json.count_id]],0,500,null,['product','expected_quantity','quantity']]) }}",
     "options": {
      "timeout": 60000,
      "response": {

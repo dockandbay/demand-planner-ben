@@ -109,7 +109,7 @@ def build_d():
 
 # ── E: stocktake ───────────────────────────────────────────────────────────────────────────────────────────────────────
 E_SETTINGS = {"tenant": "SANDBOX", "baseUrl": "https://dockandbay-sandbox.fulfil.io/api/v2", "allowProdWrite": False,
-              "horizonUrl": HZ, "secret": "__HZ_SECRET__", "lostFoundId": 10, "allowTestBatch": True,
+              "horizonUrl": HZ, "secret": "__HZ_SECRET__", "lostFoundId": 10, "companyId": 1, "allowTestBatch": True,
               "horizonEnabled": False}   # False until HORIZON v28.553 + migration 399 are live: the sweep then does nothing
 E_CLAIM = r"""
 const S = $('Settings').first().json;
@@ -138,20 +138,20 @@ if (!wh || !wh.storage_location) return { json: { ok: false, batch: B, error: 'F
 if (missing.length) return { json: { ok: false, batch: B, error: 'SKUs not in Fulfil ' + S.tenant + ': ' + missing.join(', ') } };
 const lines = B.lines.map(l => ({ product: id[l.sku], quantity: Math.max(0, Number(l.set_to) || 0) }));
 return { json: { ok: true, batch: B, storage: wh.storage_location,
-  tenant: S.tenant, method: 'POST', path: '/model/stock.inventory', allow_prod_write: S.allowProdWrite === true, tag: { batch: B },
-  body: [{ location: wh.storage_location, lost_found: S.lostFoundId, date: B.date, type: 'cycle', reason: B.reason, lines: [['create', lines]] }] } };
+  tenant: S.tenant, method: 'POST', path: '/model/stock.inventory' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), allow_prod_write: S.allowProdWrite === true, tag: { batch: B },
+  body: [{ company: S.companyId, location: wh.storage_location, lost_found: S.lostFoundId, date: B.date, type: 'cycle', reason: B.reason, lines: [['create', lines]] }] } };
 """
 E_COMPLETE = r"""
 // state rides in tag (the sub-workflow echoes it); on an error item fall back to the paired input
 const S = $('Settings').first().json, res = $json; let t = res.tag; if (!t) { try { t = { batch: $('Build count').item.json.batch }; } catch (e) { t = {}; } }
 const cid = res && res.data && res.data[0] ? (res.data[0].id || res.data[0]) : null;
 if (!res.ok || !cid) return { json: { ok: false, batch: t.batch, error: 'create failed: ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };
-return { json: { ok: true, batch: t.batch, count_id: cid, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + cid + '/complete', body: [[cid]], allow_prod_write: S.allowProdWrite === true, tag: { batch: t.batch, count_id: cid } } };
+return { json: { ok: true, batch: t.batch, count_id: cid, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + cid + '/complete' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), body: [[cid]], allow_prod_write: S.allowProdWrite === true, tag: { batch: t.batch, count_id: cid } } };
 """
 E_CONFIRM = r"""
 const S = $('Settings').first().json, res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep complete').item.json; } catch (e) { prev = {}; } }
 if (!res.ok) return { json: { ok: false, batch: prev.batch, count_id: prev.count_id, error: 'complete failed (count ' + prev.count_id + ' left in draft): ' + JSON.stringify(res.error || res.data || res).slice(0, 400) } };
-return { json: { ok: true, batch: prev.batch, count_id: prev.count_id, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + prev.count_id + '/confirm', body: [[prev.count_id]], allow_prod_write: S.allowProdWrite === true, tag: { batch: prev.batch, count_id: prev.count_id } } };
+return { json: { ok: true, batch: prev.batch, count_id: prev.count_id, tenant: S.tenant, method: 'PUT', path: '/model/stock.inventory/' + prev.count_id + '/confirm' + '?context=' + encodeURIComponent(JSON.stringify({ company: S.companyId })), body: [[prev.count_id]], allow_prod_write: S.allowProdWrite === true, tag: { batch: prev.batch, count_id: prev.count_id } } };
 """
 E_AFTER_CONFIRM = r"""
 const res = $json; let prev = res.tag; if (!prev) { try { prev = $('Prep confirm').item.json; } catch (e) { prev = {}; } }
@@ -192,7 +192,7 @@ def build_e():
         settings(E_SETTINGS, 220, 0),
         code("Claim batches", E_CLAIM, 440, 0),
         fulfil_read("Read warehouse", "stock.location", "={{ JSON.stringify([[['type','=','warehouse'],['name','=',$json.warehouse]],0,2,null,['id','name','storage_location']]) }}", 660, 0),
-        fulfil_read("Read products", "product.product", "={{ JSON.stringify([[['code','in',$('Claim batches').item.json.lines.map(l => l.sku)]],0,1000,null,['id','code']]) }}", 880, 0),
+        fulfil_read("Read products", "product.product", "={{ JSON.stringify([[['code','in',$('Claim batches').item.json.lines.map(l => l.sku)]],0,500,null,['id','code']]) }}", 880, 0),
         code("Build count", E_BUILD, 1100, 0, each=True),
         if_ok("Ready?", "={{ $json.ok }}", 1320, 0),
         guarded("Create count (guarded)", 1540, -80),
@@ -205,7 +205,7 @@ def build_e():
         code("After confirm", E_AFTER_CONFIRM, 3080, -240, each=True),
         if_ok("Confirmed?", "={{ $json.ok }}", 3300, -240),
         fulfil_read("Read count", "stock.inventory", "={{ JSON.stringify([[['id','=',$json.count_id]],0,1,null,['id','number','state']]) }}", 3520, -320),
-        fulfil_read("Read count lines", "stock.inventory.line", "={{ JSON.stringify([[['inventory','=',$('After confirm').item.json.count_id]],0,1000,null,['product','expected_quantity','quantity']]) }}", 3740, -320),
+        fulfil_read("Read count lines", "stock.inventory.line", "={{ JSON.stringify([[['inventory','=',$('After confirm').item.json.count_id]],0,500,null,['product','expected_quantity','quantity']]) }}", 3740, -320),
         code("Join read-back", E_JOIN_READBACK, 3960, -320, each=True),
         code("Report to HORIZON", E_REPORT, 4180, 0),
     ]
