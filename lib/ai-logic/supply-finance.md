@@ -198,7 +198,7 @@ fingerprints:
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
   server.mjs::_tplConsumablesInside: e11316018639
-  server.mjs::fulfilPushLines: e869e47964a0
+  server.mjs::fulfilPushLines: b541536fb386
   server.mjs::FULFIL_MAP: a6c47c881a14
   server.mjs::fulfilCompletionMap: df8ad2805725
   server.mjs::/api/supply/fulfil/drift: 5d0b453f9536
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.540
+verified_version: v28.541
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -772,6 +772,7 @@ verified_version: v28.540
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.541 (Ben 28-Oct-26): every successful Push to Fulfil saves the PO's Fulfil link as a hand link to the Fulfil PO pushed to (fulfilLinkAfterPush; number when Fulfil has one, else the reference until it is numbered), so it is the push target from then on; the Link Fulfil PO picker opens searching the HORIZON PO number. (source: server.mjs :: fulfilLinkAfterPush, fulfilPushLines; supply/inject.html :: fulfilPoPicker)
 - v28.540 (Ben 28-Oct-26): when Fulfil refuses a line push with "shipment must be in draft, inbound or shipped state", the error names the supplier shipments holding the PO's line moves and their state (e.g. SS126, SS140 cancelled) and says to set them back to Draft in Fulfil first; the PO is re-confirmed as before. (source: server.mjs :: fulfilPushLines)
 - v28.537 (Ben 28-Oct-26): extra Fulfil POs keep a copy of their lines (po_fulfil_extra.lines, migration 395; ffxSyncLines on link and on every Fulfil refresh). ERP qty per SKU (purchase_order_lines.erp_qty, the ERP deviations basis) and the grid's fulfil_lines_pending = main Fulfil PO + non-cancelled extras. Push to Fulfil (full) sends the main Fulfil PO plan qty minus the extras' qty per SKU (lines fully on extras are left out; all on extras = nothing pushed). (source: server.mjs :: ffxSyncLines, fulfilErpQtyFromMirror, fulfilPushLines, /api/supply/fulfil/grid-status)
   - migrations/395_po_fulfil_extra_lines.sql :: po_fulfil_extra.lines, synced_at

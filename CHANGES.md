@@ -1,3 +1,9 @@
+## v28.541 (28-Oct-26) Push to Fulfil saves the link; Link Fulfil PO opens searching the PO number
+- Ben: "when pushing to fulfil it should auto add the link on first push" and "search should auto search for that po number in linking to fulfil".
+- After every successful Push to Fulfil (create or update) the PO's Fulfil link (Master data > Linked records) is the Fulfil PO that was pushed to, saved as a hand link ("linked by Push to Fulfil") so it is the push target from then on, with the Fulfil PO number (a new draft has none yet: the reference is kept and the number replaces it once Fulfil numbers the PO, v28.526 / v28.527).
+- The Link Fulfil PO picker opens with the HORIZON PO number already in the search box and searched (its first word: "PO-1892095  - PO475" searches PO-1892095), suggestions first; if that finds nothing it still falls back to the PO's sales order ref.
+- Sandbox check (rolled back): the link save turned PO-57UKBL1's automatic link into a hand link to the pushed Fulfil PO with its number, and created a link for a PO that had none.
+
 ## v28.540 (28-Oct-26) Push to Fulfil: clear message when cancelled supplier shipments block it
 - Ben (PO-58AULX1, Update / Create Fulfil PO): 'Fulfil 400: "The shipment must be in draft, inbound or shipped state to edit lines"'.
 - Cause (Fulfil): PO168 (id 418, AU, Lixin) is confirmed, but every line's incoming moves sit on supplier shipments SS126 (cancelled 24-Sep) and SS140 (cancelled 28-Oct 00:43 UTC). Fulfil does not let a PO's lines change while they are on a cancelled shipment. The push had already put PO168 back to confirmed, so nothing was left half done.

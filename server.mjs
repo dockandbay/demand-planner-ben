@@ -6081,7 +6081,8 @@ async function fulfilPushLines(po, completion) {
         }
       }
     }
-    try { await fulfilMirrorOne(fulfilId, 'push', po); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
+    try { await fulfilMirrorOne(fulfilId, 'push', po); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }
+    await fulfilLinkAfterPush(po, fulfilId, _fulfilUrl(fulfilId));   // v28.541   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null,
       problems: _upProblems, reconfirm_failed: _upProblems.length > 0 };
   }
@@ -6090,7 +6091,8 @@ async function fulfilPushLines(po, completion) {
   const created =await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
   const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
   await fulfilUpsertMetafield(newId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (definition pre-flighted above)
-  try { await fulfilMirrorOne(newId, 'push', po); } catch (e) { /* mirror best-effort */ }   // v27.738 · v28.527: + erp_qty + number
+  try { await fulfilMirrorOne(newId, 'push', po); } catch (e) { /* mirror best-effort */ }
+  await fulfilLinkAfterPush(po, newId, _fulfilUrl(newId));   // v28.541: first push = the link   // v27.738 · v28.527: + erp_qty + number
   return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(newId) };
 }
 // ── v27.738: Fulfil PO MIRROR (drift) — import Fulfil POs into planner.fulfil_purchase_orders (mig 282) ──
@@ -6109,6 +6111,18 @@ async function _fulfilMirrorUpsert(p, lines, source) {
 // v28.527 (Ben 28-Oct-26: "when user pushes to fulfil, it should read back and update the fulfil erp reference rather than waiting for a full
 // refresh in 3 hours"): with hzPo (the pushed HORIZON PO) the copy is filed under that PO (a hand-linked Fulfil PO's reference is not the
 // HORIZON PO), then that PO's erp_qty (the "ERP deviations" basis) and its hand link's Fulfil number are read back straight away.
+// v28.541 (Ben 28-Oct-26: "when pushing to fulfil it should auto add the link on first push"): after a push, the PO's Fulfil link (po_links fulfil)
+// is the PO that was pushed to, saved as a hand link (the push target from then on), with the Fulfil number once it has one (a draft has none:
+// the reference is kept and v28.526 / v28.527 swap in the number later). An existing hand link to that same Fulfil PO is only refreshed.
+async function fulfilLinkAfterPush(po, fulfilId, url) {
+  try { let num = null; try { const r = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['number', 'reference']]) || [])[0]; num = (r && (r.number || r.reference)) || null; } catch (_) {}
+    await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
+      VALUES ($1,'fulfil',$2,$3,$4,'linked','linked by Push to Fulfil','manual',now(),now())
+      ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=coalesce($3, planner.po_links.external_ref), url=coalesce($4, planner.po_links.url), status='linked', found_by='manual',
+        note=CASE WHEN planner.po_links.found_by='manual' AND planner.po_links.external_id=$2 THEN planner.po_links.note ELSE 'linked by Push to Fulfil' END, updated_at=now()`,
+      [po, String(fulfilId), num || po, url || null]);
+  } catch (e) { console.error('[fulfil push] link ' + po + ':', e && e.message); }
+}
 async function fulfilMirrorOne(fulfilId, source, hzPo) {
   if (!fulfilId) return;
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']]);

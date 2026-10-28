@@ -2299,10 +2299,13 @@
       fetch('/api/supply/fulfil/po-search?po='+encodeURIComponent(po)+(v.length>=2?'&q='+encodeURIComponent(v):'')).then(function(r){return r.json();}).then(function(j){ if(my!==seq)return;
         if(j&&j.error)throw new Error(j.error); L=(j&&j.rows)||[];
         cx.innerHTML=(j.client_po?'client PO':'stock PO')+(j.sales_order_ref?' · SO ref '+esc(j.sales_order_ref):'')+(j.env?' · Fulfil '+esc(j.env):'');
-        if(first&&!L.length&&j.sales_order_ref&&!q.value){ q.value=String(j.sales_order_ref).split(/[,;]/)[0].trim(); run(false); return; }
+        if(first&&!L.length&&j.sales_order_ref&&(!q.value||q.value===_q0)){ q.value=String(j.sales_order_ref).split(/[,;]/)[0].trim(); run(false); return; }
         draw();
       }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Fulfil search failed: '+esc(e&&e.message||e)+'</div>'; }); }
-    q.oninput=function(){ clearTimeout(t); t=setTimeout(function(){ run(false); },350); }; q.focus(); run(true);
+    q.oninput=function(){ clearTimeout(t); t=setTimeout(function(){ run(false); },350); };
+    // v28.541 (Ben: "search should auto search for that po number in linking to fulfil"): open already searching the HORIZON PO number
+    // (its first word, so "PO-1892095  - PO475" searches PO-1892095); the suggestions still come first.
+    var _q0=String(po||'').trim().split(/\s+/)[0]||''; if(_q0.length>=2){ q.value=_q0; } q.focus(); try{ q.select(); }catch(e){} run(true);
   }
   // v28.375 (Ben 15-Oct-26): PO > PAYMENTS > Xero bills. Status of every Xero bill tied to the PO (linked bill, bills naming the PO, and for a
   // client PO group the bills naming its Fulfil client POs), with HORIZON's payments on each and anything else Xero counts as paid.
