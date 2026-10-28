@@ -1,0 +1,440 @@
+{
+ "since": "2026-09-20",
+ "shipments": [
+  {
+   "shipment": "FBA19B447YR4",
+   "name": "FBA ASDN (04/06/2026 23:41)-POC3",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "POC3",
+   "items": [
+    {
+     "sku": "TOWLB-SUM-LG-COLAGN",
+     "fnsku": "B0DS6KQM85",
+     "shipped": 40,
+     "received": 40
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19H9P3FCM",
+   "name": "FBA ASDN (07/01/2026 19:22)-HLI2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "HLI2",
+   "items": [
+    {
+     "sku": "TOWLB-SUM-LG-COLAGN",
+     "fnsku": "B0DS6KQM85",
+     "shipped": 40,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19J53X1RT",
+   "name": "FBA ASDN (07/13/2026 19:31)-HLI2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "HLI2",
+   "items": [
+    {
+     "sku": "TOWLB-SUM-XL-COLAGN",
+     "fnsku": "B0DS6HVH42",
+     "shipped": 30,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19J55L5XG",
+   "name": "FBA ASDN (07/13/2026 19:31)-HLI2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "HLI2",
+   "items": [
+    {
+     "sku": "TOWLB-DES-XL-PNKPARA",
+     "fnsku": "B0G4XM44XX",
+     "shipped": 30,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19JJ3GJJN",
+   "name": "FBA ASDN (07/17/2026 23:05)-TCY2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "TCY2",
+   "items": [
+    {
+     "sku": "TOWLB-CAB-LG-RED-R",
+     "fnsku": "B081C9DP69",
+     "shipped": 40,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19JVKY66C",
+   "name": "FBA ASDN (07/22/2026 19:37)-HLI2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "HLI2",
+   "items": [
+    {
+     "sku": "TOWLB-CAB-LG-KHAKI-R",
+     "fnsku": "B08HGXWMMW",
+     "shipped": 40,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19JYBBT4K",
+   "name": "FBA ASDN (07/23/2026 19:40)-TCY1",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "TCY1",
+   "items": [
+    {
+     "sku": "TOWLB-SUM-XL-RAINB-R",
+     "fnsku": "B081C4VM3N",
+     "shipped": 30,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19LGRQZSZ",
+   "name": "FBA ASDN (08/11/2026 20:27)-TCY1",
+   "status": "CLOSED",
+   "from": "IUSJ",
+   "to_fc": "TCY1",
+   "items": [
+    {
+     "sku": "TOWLB-CAB-XL-LTPPL-R",
+     "fnsku": "B08HGQWXQB",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLB-DES-XL-BLUSKY",
+     "fnsku": "B0FLWNR622",
+     "shipped": 30,
+     "received": 30
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19LGR7WLS",
+   "name": "FBA ASDN (08/11/2026 20:27)-TCY1",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "TCY1",
+   "items": [
+    {
+     "sku": "HAIRW-SUM-UNICN-NB",
+     "fnsku": "B081GLYVKH",
+     "shipped": 60,
+     "received": 60
+    },
+    {
+     "sku": "PICNIC-CAB-XL-NAVY",
+     "fnsku": "B0B3YY1WP2",
+     "shipped": 12,
+     "received": 12
+    },
+    {
+     "sku": "TOWLB-CAB-XL-LTBGE-R",
+     "fnsku": "B081C2DP71",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLF-ESS-LG-BLUE-R",
+     "fnsku": "B06XB5SK8Q",
+     "shipped": 40,
+     "received": 40
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19LGRMT9F",
+   "name": "FBA ASDN (08/11/2026 20:27)-TCY1",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "TCY1",
+   "items": [
+    {
+     "sku": "PICNIC-CAB-LG-NAVY",
+     "fnsku": "B0B3Z832XT",
+     "shipped": 16,
+     "received": 16
+    },
+    {
+     "sku": "PICNIC-CAB-XL-NAVY",
+     "fnsku": "B0B3YY1WP2",
+     "shipped": 12,
+     "received": 12
+    },
+    {
+     "sku": "TOWLB-CAB-XL-LTBGE-R",
+     "fnsku": "B081C2DP71",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLB-SUM-XL-RAINB-R",
+     "fnsku": "B081C4VM3N",
+     "shipped": 30,
+     "received": 0
+    },
+    {
+     "sku": "TOWLF-ESS-LG-BLUE-R",
+     "fnsku": "B06XB5SK8Q",
+     "shipped": 40,
+     "received": 41
+    },
+    {
+     "sku": "TOWLF-ESS-XL-DKBLU",
+     "fnsku": "B09BNR7X6X",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLF-ESS-XL-GREY-R",
+     "fnsku": "B081C98HHH",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLF-ESS-XL-LTPPL",
+     "fnsku": "B09BNSTCLZ",
+     "shipped": 30,
+     "received": 30
+    },
+    {
+     "sku": "TOWLF-ESS-XL-PINK-R",
+     "fnsku": "B081C96SS3",
+     "shipped": 30,
+     "received": 30
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19MM8V5WK",
+   "name": "FBA ASDN (08/22/2026 19:32)-GYR2",
+   "status": "CLOSED",
+   "from": "IUSJ",
+   "to_fc": "GYR2",
+   "items": [
+    {
+     "sku": "BAGF-SUM-MD-CSTCANDY",
+     "fnsku": "B0DS675H8V",
+     "shipped": 100,
+     "received": 100
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19MMB8MP5",
+   "name": "FBA ASDN (08/22/2026 19:32)-GYR2",
+   "status": "CLOSED",
+   "from": "IUSJ",
+   "to_fc": "GYR2",
+   "items": [
+    {
+     "sku": "BAGF-SUM-MD-CSTCANDY",
+     "fnsku": "B0DS675H8V",
+     "shipped": 100,
+     "received": 100
+    },
+    {
+     "sku": "TOWLF-ESS-XL-DKBLU",
+     "fnsku": "B09BNR7X6X",
+     "shipped": 30,
+     "received": 30
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19MM78L3W",
+   "name": "FBA ASDN (08/22/2026 19:32)-TCY2",
+   "status": "CLOSED",
+   "from": "IUSP",
+   "to_fc": "TCY2",
+   "items": [
+    {
+     "sku": "TOWLB-CAB-LG-LTPNK-R",
+     "fnsku": "B08HGMV9BN",
+     "shipped": 40,
+     "received": 40
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19MNT4PKT",
+   "name": "FBA ASDN (08/23/2026 19:08)-MIT2",
+   "status": "CLOSED",
+   "from": "IUSJ",
+   "to_fc": "MIT2",
+   "items": [
+    {
+     "sku": "HAIRW-WAF-CHRYBMB",
+     "fnsku": "B0FLWV7W3Q",
+     "shipped": 60,
+     "received": 60
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19P17CPDX",
+   "name": "FBA ASDN (09/06/2026 18:57)-MIT2",
+   "status": "CLOSED",
+   "from": "IUSJ",
+   "to_fc": "MIT2",
+   "items": [
+    {
+     "sku": "MAKUP-HOM-3PAK-FBA",
+     "fnsku": "B0D31QM5WD",
+     "shipped": 200,
+     "received": 199
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19RYNBL9D",
+   "name": "FBA ASDN (10/03/2026 19:39)-SCK4",
+   "status": "RECEIVING",
+   "from": "IUSP",
+   "to_fc": "SCK4",
+   "items": [
+    {
+     "sku": "TOWLB-CAB-LG-PINK-R",
+     "fnsku": "B081C6QQ6C",
+     "shipped": 40,
+     "received": 40
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19S2SLM31",
+   "name": "FBA ASDN (10/05/2026 19:42)-GYR2",
+   "status": "RECEIVING",
+   "from": "IUSJ",
+   "to_fc": "GYR2",
+   "items": [
+    {
+     "sku": "HAIRW-WAF-CHRYBMB",
+     "fnsku": "B0FLWV7W3Q",
+     "shipped": 60,
+     "received": 59
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19S96H2Y6",
+   "name": "FBA ASDN (10/07/2026 20:06)-MIT2",
+   "status": "RECEIVING",
+   "from": "IUSP",
+   "to_fc": "MIT2",
+   "items": [
+    {
+     "sku": "MAKUP-HOM-9PAK-FBA",
+     "fnsku": "B0D31S3R31",
+     "shipped": 50,
+     "received": 50
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19S97TCTZ",
+   "name": "FBA ASDN (10/07/2026 20:06)-MIT2",
+   "status": "RECEIVING",
+   "from": "IUSP",
+   "to_fc": "MIT2",
+   "items": [
+    {
+     "sku": "MAKUP-HOM-9PAK-FBA",
+     "fnsku": "B0D31S3R31",
+     "shipped": 50,
+     "received": 49
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19V6H1832",
+   "name": "FBA ASDN (10/23/2026 19:11)-GYR2",
+   "status": "IN_TRANSIT",
+   "from": "IUSP",
+   "to_fc": "GYR2",
+   "items": [
+    {
+     "sku": "TOWLF-ESS-XL-GREY-R",
+     "fnsku": "B081C98HHH",
+     "shipped": 30,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  },
+  {
+   "shipment": "FBA19V6HC30Z",
+   "name": "FBA ASDN (10/23/2026 19:11)-GYR2",
+   "status": "IN_TRANSIT",
+   "from": "IUSP",
+   "to_fc": "GYR2",
+   "items": [
+    {
+     "sku": "TOWLF-ESS-XL-DKBLU",
+     "fnsku": "B09BNR7X6X",
+     "shipped": 30,
+     "received": 0
+    }
+   ],
+   "fulfil": [],
+   "unmatched_skus": []
+  }
+ ]
+}
