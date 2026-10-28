@@ -10,15 +10,16 @@ sources:
   - server.mjs :: /api/demand/wssi-otb, /api/demand/wssi-otb/upload
   - migrations/396_wssi_otb_buy.sql :: planner.wssi_otb_buy
   - artifact_v16.7.html :: wssiPx
-verified_version: v28.556
+  - artifact_v16.7.html :: wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut
+verified_version: v28.557
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: f531c8688d97
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
   server.mjs::/api/demand/wssi: 5f8825a8e6cb
-  artifact_v16.7.html::renderWssiView: 7f26d870d667
-  artifact_v16.7.html::wssiCompute: 01239b344d37
+  artifact_v16.7.html::renderWssiView: f65f45a2da18
+  artifact_v16.7.html::wssiCompute: 1aa040d9e745
   artifact_v16.7.html::wssiDerive: db209ab5e2b2
   artifact_v16.7.html::wssiPeriod: a36ce8d838b8
   artifact_v16.7.html::renderOtbInputView: 6cc3ee000029
@@ -26,6 +27,10 @@ fingerprints:
   server.mjs::/api/demand/wssi-otb/upload: 0386384c225c
   migrations/396_wssi_otb_buy.sql::planner.wssi_otb_buy: a1fe75d1c479
   artifact_v16.7.html::wssiPx: 4ff354639245
+  artifact_v16.7.html::wssiWsBind: c0335bcb7aa8
+  artifact_v16.7.html::wssiWsCombo: 843e7bc631ca
+  artifact_v16.7.html::wssiWsGet: 6f3766d93d44
+  artifact_v16.7.html::wssiWsPut: 24040f9ef50e
 ---
 
 # WSSI (DEMAND > WSSI)
@@ -118,6 +123,15 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Forecast override (sales units, open months, market × channel × group) replaces the system forecast: sales £ moves at that cell's ASP, cost of sales at landed cost, and the unit difference runs through projected closing stock of the channel's pool from that month on. Target closing override (units, per pool: DTC row = 3PL, FBA row = FBA) replaces the calculated target. Overrides are not versioned, and are not applied while a seasonality or product status filter is on.
 - Variances: this year vs forecast (closed months with a snapshot), this year (actual / forecast) vs plan (incl. intake + proposed vs planned intake; closing stock vs plan, red = above), forecast vs plan. Period totals only count months that have a plan value.
 (source: artifact_v16.7.html :: wssiCompute, wssiDerive, wssiPeriod, renderWssiPlanView; server.mjs :: /api/demand/wssi-plan, wssiSnapshotCurrent)
+
+## Worksheet mode (v28.557)
+- Ben 28-Oct-26: open to buy and the plan are edited on the WSSI itself, not on separate pages. The ✎ Worksheet toggle (remembered per browser) works only with exactly one market, one channel and one category group picked, and seasonality and product status on All, because every input is stored at market × channel × category group × month. At any higher level the toggle is greyed out and the WSSI stays read only.
+- Editable cells (bordered): Sales units in open months = Forecast override (blank clears it, 0 is a real override); Target closing stock units in open months = Target closing override, only for DTC (the 3PL pool) or FBA; Proposed units and Proposed £ retail in open months = open to buy, saved as units or £ retail by the row typed in; Planned sales £, Planned sales units and Planned closing stock units in any month = the plan draft. Open month = not yet actual and not before the current month.
+- In worksheet mode the plan rows and the variances against plan use the draft being edited (else the latest locked version, as outside the worksheet). The first plan edit creates the draft from the latest locked version (server); an admin locks it from the worksheet bar as the next version.
+- Proposed rows show what is left after matching POs; the cell tooltip gives what was entered and the units on POs. Editing starts from the entered amount.
+- Saving: each change shows at once and the whole WSSI recalculates; it saves through the same endpoints as before (/api/demand/wssi-otb, /wssi-overrides, /wssi-plan/cells, demand edit rights) and is reverted with a message if the save fails. Enter moves down to the next editable row, Tab across months; a pasted block fills months across and the rows below as shown (read-only cells skipped); Undo / Ctrl+Z undoes the last 50 changes.
+- DEMAND ▸ Inputs ▸ Open to buy and WSSI plan are no longer in the menu; their links open the WSSI worksheet. The all-markets grids (for .xlsx upload or pasting many rows) are reached from "Bulk grid" on the worksheet bar.
+(source: artifact_v16.7.html :: renderWssiView, wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut)
 
 ## Data and speed
 - GET /api/demand/wssi?fy=<start year> builds one year in about 6 s on live and caches it for 10 minutes. Refresh rebuilds (?fresh=1). Reads only.

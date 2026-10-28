@@ -1,3 +1,14 @@
+## v28.557 (28-Oct-26) WSSI worksheet: edit open to buy, the plan and overrides on the WSSI
+- Ben: "the preferred way of working would be for editing the open to buy and the wssi plan would be to have worksheet mode to input on the wssi rather than separate tabs. this should only be at category/channel/market level, not top level." Layout picked from mockups: inline editable rows; toggle greyed at higher levels; retire the Inputs tabs.
+- DEMAND ▸ WSSI: a ✎ Worksheet toggle, on only with one market, one channel and one category group picked (seasonality and product status All); otherwise greyed with a hint. In worksheet mode these cells are editable in place (bordered) and the whole WSSI recalculates as you type:
+  - Sales units, open months: forecast override.
+  - Proposed units / Proposed £ retail, open months: open to buy (saved in the unit typed).
+  - Target closing stock units, open months: target override (DTC = the 3PL pool, FBA).
+  - Planned sales £ / units / closing units: the plan draft (the first edit starts it from the latest locked version; an admin locks it from the worksheet bar).
+- Enter / Tab move on, paste a block from Excel or Sheets, Undo or Ctrl/Cmd+Z (last 50). Each change saves at once through the existing endpoints and is reverted with a message if it fails.
+- DEMAND ▸ Inputs ▸ Open to buy and WSSI plan are removed from the menu; their links open the WSSI worksheet. The all-markets grids stay reachable from "Bulk grid" on the worksheet bar for .xlsx upload. This replaces the v28.556 "WSSI plan ↗" button.
+- Logic: lib/ai-logic/wssi.md, Worksheet mode. No new env vars, migrations or cron routes.
+
 ## v28.556 (28-Oct-26) WSSI links to the WSSI plan
 - Ben: "on the wssi there should be a link to https://horizon.dockandbay.com/#/demand/inputs/wssiplan".
 - DEMAND ▸ WSSI: a "WSSI plan ↗" button next to "Enter open to buy" opens DEMAND ▸ Inputs ▸ WSSI plan (#/demand/inputs/wssiplan) on the same financial year. It is a real link, so middle-click or right-click opens it in a new tab.
