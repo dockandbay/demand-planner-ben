@@ -23161,11 +23161,20 @@ app.post('/api/supply/fulfil-dates-sync', async (req, res) => {
     const po = String((it && it.po) || '').trim(), date = String((it && it.date) || '').slice(0, 10);
     if (!po || !date) { skipped.push({ po: po || '?', reason: 'missing po or date' }); continue; }
     try {
-      let rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', po]], 0, 1, null, ['id']]);
-      if (!rows.length) rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', po]], 0, 1, null, ['id']]);
-      if (!rows.length) { skipped.push({ po, reason: 'not in Fulfil' }); continue; }
-      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
+      // v28.538 (Ben, PO-1895877: "Update ERP gives 'not in fulfil' but the linked po is"): the Fulfil PO is the PO's LINKED one first (hand link, then
+      // the mirror), as for the line push; only then a Fulfil PO numbered / referenced exactly like the HORIZON PO. Was number / reference only, so a
+      // PO linked to Fulfil PO388 (reference "TAG10793-57/7484/PO-1895877") was "not in Fulfil".
+      let fid = null;
+      const lk = (await pool.query(`SELECT external_id FROM (SELECT external_id, 1 pri FROM planner.po_links WHERE po=$1 AND system='fulfil' AND status='linked' AND found_by='manual' AND coalesce(external_id,'') ~ '^[0-9]+$'
+        UNION ALL SELECT fulfil_id::text, 2 FROM planner.fulfil_purchase_orders WHERE po=$1 AND coalesce(state,'') NOT IN ('cancel','cancelled')) t ORDER BY pri LIMIT 1`, [po])).rows[0];
+      if (lk) fid = Number(lk.external_id);
+      if (!fid) { let rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', po]], 0, 1, null, ['id']]);
+        if (!rows.length) rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', po]], 0, 1, null, ['id']]);
+        if (rows.length) fid = rows[0].id; }
+      if (!fid) { skipped.push({ po, reason: 'not in Fulfil: link its Fulfil PO under Master data > Linked records' }); continue; }
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fid, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
       await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [po, date]);
+      try { await fulfilMirrorOne(fid, 'push', po); } catch (_) {}   // read the Fulfil PO back (v28.527)
       updated++;
     } catch (e) { skipped.push({ po, reason: String(e.message || e).slice(0, 120) }); }
   }

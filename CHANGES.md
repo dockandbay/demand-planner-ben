@@ -1,3 +1,8 @@
+## v28.538 (28-Oct-26) Update ERP (Fulfil date) uses the PO's linked Fulfil PO
+- Ben (PO-1895877 ▸ Dates, "Fulfil PO delivery date 30-Oct-26 -> completed-at-warehouse 06-Nov-26", Update ERP): error "not in Fulfil" although the PO is linked.
+- Cause: the date push looked for a Fulfil PO numbered "PO-1895877" or with exactly that reference. PO-1895877 is linked by hand to Fulfil PO388 (id 545, draft, reference "TAG10793-57/7484/PO-1895877"), so nothing matched.
+- Now the date push (single PO and the bulk date sync) writes to the PO's linked Fulfil PO first (hand link, then HORIZON's Fulfil copy), and only then looks for a Fulfil PO named like the HORIZON PO. After the write it reads the Fulfil PO back (v28.527). When there is no Fulfil PO at all the message says to link one under Master data > Linked records.
+
 ## v28.537 (28-Oct-26) ERP qty counts a PO's extra Fulfil POs (drift clears when main + extras match)
 - Ben (PO-1892095 - PO475 ▸ Order plan): "i have linked to 2 PO's and when linking the second po i would expect the erp drift to disappear if they match". Main Fulfil PO475 holds TOWLB-CAB-LG-NAVY-R 1,300; the extra PO478 holds the two 800-unit lines (COLAGN, MIAMI), which showed as "not in ERP".
 - Now an extra Fulfil PO keeps a copy of its lines (migration 395), and HORIZON's ERP qty per SKU = main Fulfil PO + its extras (cancelled extras ignored). Linking or removing an extra reads its lines and recalculates that PO at once; every Fulfil refresh re-reads all extras first. The ERP deviations box, the ORDER PLAN badge and the grid's Fulfil drift / NEEDS ERP count all use it.
