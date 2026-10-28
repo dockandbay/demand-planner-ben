@@ -1,6 +1,6 @@
 # Deploy package v28.524 to v28.529 (28-Oct-26)
 
-**STATUS 28-Oct-26: PR OPEN** https://github.com/dockandbayteam/dock-bay-demand-planner/pull/29 (branch port/v28.529, from Ben 92357bff). Ben merges.
+**STATUS 28-Oct-26: LIVE v28.529 (PR #29 merged).** Was: PR OPEN https://github.com/dockandbayteam/dock-bay-demand-planner/pull/29 (branch port/v28.529, from Ben 92357bff). Ben merges.
 
 ## What changed
 - v28.524 Global-search PO / shipment drawers use the grid drawer header and width.
