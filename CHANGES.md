@@ -1,3 +1,8 @@
+## v28.539 (28-Oct-26) ERP deviations box: HORIZON | Fulfil | Difference
+- Ben (PO ▸ Order plan): "i find this very confusing way to show erp drift" ("PICNIC-DES-LG-SPRCLUB 80 → 0", "TOWLB-SUM-LG-OCEAN 280 → 80"). Chose columns + difference.
+- The box now has separate HORIZON and Fulfil columns, and a Difference column in words: "not in Fulfil" (Fulfil has no such line), "Fulfil short 200" or "Fulfil over 40"; plus a Total row when more than one line differs. The title names the linked Fulfil PO when known ("differ from Fulfil (PO483)"). The Fulfil column includes extra Fulfil POs (v28.537).
+- Front end only.
+
 ## v28.538 (28-Oct-26) Update ERP (Fulfil date) uses the PO's linked Fulfil PO
 - Ben (PO-1895877 ▸ Dates, "Fulfil PO delivery date 30-Oct-26 -> completed-at-warehouse 06-Nov-26", Update ERP): error "not in Fulfil" although the PO is linked.
 - Cause: the date push looked for a Fulfil PO numbered "PO-1895877" or with exactly that reference. PO-1895877 is linked by hand to Fulfil PO388 (id 545, draft, reference "TAG10793-57/7484/PO-1895877"), so nothing matched.
