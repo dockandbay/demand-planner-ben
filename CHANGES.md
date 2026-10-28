@@ -1,3 +1,10 @@
+## v28.550 (28-Oct-26) Stale screens: lists served from an old copy now correct themselves
+- Ben: "fix stale screens". PO-1902138 opened 3 h after Zera moved production end 15-Oct → 10-Nov still showed 15-Oct (grid, DATES tab and its shipment), while the single-PO read was right.
+- Cause: the supply list caches are stale-while-revalidate. After another user's edit, the next request on a server copy gets the last build while it rebuilds behind, and nothing told the page; an idle Vercel instance can hold a build that is hours old.
+- Server: a cached section (PO grid, shipments, cash flow, deposits, ...) that is still stale first waits up to 1.5 s for its rebuild (SEC_STALE_GRACE_MS); if it still goes out stale it carries X-HZ-Stale: 1. X-HZ-Fresh: 1 waits for a build newer than every pending edit (the supplier portal's protocol, v27.880 / v28.189).
+- Page: the fetch wrapper sees X-HZ-Stale, re-fetches once with X-HZ-Fresh and hands the fresh JSON over: changed PO grid rows are patched in place (open PO detail re-read, expansion and scroll kept), the shipments list and row map are replaced, an open PO or shipment window re-renders, other sections repaint once the view is idle.
+- Sandbox: another session moved a PO's production end; the page first showed the old date, then about 20 s later the grid row and the open PO showed the new one with no reload. The editor's own reads were never stale.
+
 ## v28.549 (28-Oct-26) Completion date: FOB + 0 days, and a PO's completion always matches its shipment
 - Ben, PO-1902138: "completion date under DATES of 22/10 but the linked shipment is 29/10. It MUST come from the linked shipment" and "on FOB the shipment completed date shouldn't be +7 days from ship date, it should be +0 days".
 - Shipment grid completion = arrival + 0 for an FOB shipment or a Direct to Client one (was always + 7). The PO side already used + 0 for Direct to Client; it now also uses + 0 when its shipment is FOB. So PO and shipment completion agree.

@@ -1134,9 +1134,15 @@
   function poTouched(url,init){ try{ var mm=/^\/api\/supply\/po\/([^\/?#]+)/.exec(url), po=mm?decodeURIComponent(mm[1]):'';
     if(!po&&init&&typeof init.body==='string'&&init.body.charAt(0)==='{'){ var b=JSON.parse(init.body); if(b&&typeof b.po==='string')po=b.po; }
     if(!po||!window.__hzPoChanged)return; clearTimeout(_poTouchT[po]); _poTouchT[po]=setTimeout(function(){ delete _poTouchT[po]; window.__hzPoChanged(po); },500); }catch(e){} }
+  // v28.550 (Ben "fix stale screens"): a section answered from a stale server cache (X-HZ-Stale: 1, another user's edit not yet rebuilt)
+  // is passed through at once; one background re-fetch with X-HZ-Fresh: 1 waits for a fresh build and hands the JSON to __hzFreshSection.
+  var staleQ={};
+  function staleFollow(url,r){ try{ if(!r||!r.ok||r.headers.get('X-HZ-Stale')!=='1')return; var mm=/^\/api\/supply\/([a-z0-9-]+)$/.exec(url); if(!mm||staleQ[url])return; staleQ[url]=1;
+      _f(url,{headers:{'X-HZ-Fresh':'1'}}).then(function(r2){ return r2.ok?r2.json():null; }).then(function(d){ delete staleQ[url]; if(d&&!d.error){ memo={}; if(window.__hzFreshSection)window.__hzFreshSection(mm[1],d); } },function(){ delete staleQ[url]; }); }catch(e){} }
   window.fetch=function(input,init){
     var url=(typeof input==='string')?input:((input&&input.url)||''); var m=((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
     if(url.indexOf('/api/')!==0||m!=='GET'||(init&&init.body)){ var w=_f(input,init); if(m!=='GET'&&url.indexOf('/api/')===0)w.then(function(r){ memo={}; if(r&&r.ok)poTouched(url,init); },function(){}); return w; }
+    if(init&&init.headers&&init.headers['X-HZ-Fresh']==='1')return _f(input,init);   // v28.550: a stale-copy follow-up must not join the stale request
     var now=Date.now(), h=memo[url]; if(h&&now-h.at<MEMO_MS){ try{ return Promise.resolve(h.res.clone()); }catch(e){ delete memo[url]; } }
     if(inflight[url]) return inflight[url].then(function(r){ return r.clone(); });
     // v28.385 (Ben 15-Oct-26, "didnt load on first click ... loaded on second"): a GET that fails on the network or with 502 / 503 / 504
@@ -1144,7 +1150,7 @@
     // Each failed attempt is still an api_failure in the health log; the retry is noted as a metric (api_retry, ok or not).
     var _once=function(){ return _f(input,init); }, _retry=function(why){ return new Promise(function(res){ setTimeout(res,600); }).then(_once).then(function(r2){ try{ if(window.hzHealthMetric)window.hzHealthMetric('metric','api_retry '+(r2.ok?'ok':'failed'),{path:url.split('?')[0],first:why,second:r2.status},'api_retry'); }catch(_){} return r2; }); };
     var p=_once().then(function(r){ return (r.status===502||r.status===503||r.status===504)?_retry('HTTP '+r.status):r; },function(e){ if(e&&e.name==='AbortError')throw e; return _retry('network'); })
-      .then(function(r){ delete inflight[url]; if(r.ok&&memoable(url)){ try{ memo[url]={at:Date.now(),res:r.clone()}; }catch(e){} } return r; },function(e){ delete inflight[url]; throw e; });
+      .then(function(r){ delete inflight[url]; if(r.ok&&memoable(url)){ try{ memo[url]={at:Date.now(),res:r.clone()}; }catch(e){} } staleFollow(url,r); return r; },function(e){ delete inflight[url]; throw e; });
     inflight[url]=p; return p.then(function(r){ return r.clone(); });
   };
 })();
@@ -1195,6 +1201,7 @@
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
   var _newDepId=null;   // v28.127: id of a just-created deposit → pinned + opened for edit on the next Deposits render
   var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
+  var _poDrawerRef=null, _shipDrawerRef=null;   // v28.550: the PO / shipment open in a drawer (fresh-section hand-over re-reads it)
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
   var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
@@ -1225,6 +1232,26 @@
     var _g=_opGen;   // v28.151 (review F3): ok-only + generation check
     fetch('/api/supply/'+key).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json();}).then(function(d){ if(!d||d.error||_g!==_opGen)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
       cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
+  // v28.550 (Ben 28-Oct-26 "fix stale screens"): the fetch wrapper calls this with the FRESH copy of a section the server first answered
+  // from a stale cache (X-HZ-Stale). Swap it into every client-side copy (section cache, PO / shipment row maps, the shipments list), re-read
+  // an open PO or shipment window, and repaint the section on screen as soon as the view is idle (checked every 2 s for a minute).
+  window.__hzFreshSection=function(key,d){ try{ if(!d||d.error)return; var g=_opGen, tk=_navToken, prev=cache[key];
+      cache[key]=d; _hzCacheAt[key]=Date.now();
+      // PO grid: patch only the rows that changed, in place (keeps an expanded PO, scroll and filters), and re-read their open detail
+      if(key==='purchase-orders'&&Array.isArray(d)){ var _sig=function(r){ try{ var o={}; for(var k in r)if(k.charAt(0)!=='_')o[k]=r[k]; return JSON.stringify(o); }catch(e){ return ''; } }, chg=[];
+        // diff against the list the grid was drawn from (poBy may already hold a fresher single-row read for an open PO, while its grid row does not)
+        var pm={}; (Array.isArray(prev)?prev:[]).forEach(function(r){ if(r&&r.po)pm[r.po]=r; });
+        d.forEach(function(x){ if(!x||!x.po)return; var o=pm[x.po]||poBy[x.po]; if(!o||_sig(o)!==_sig(x))chg.push(x); });   // the fresh build is newer than every edit so far, so it wins
+        if(window.__poRowApply&&chg.length<=300){ chg.forEach(function(x){ try{ window.__poRowApply(x); if(window.__poPanelRefresh)window.__poPanelRefresh(x.po); }catch(e){ poBy[x.po]=x; } }); }
+        else chg.forEach(function(x){ poBy[x.po]=x; });
+        if(_poDrawerRef&&document.getElementById('podet-DRAWER')&&chg.some(function(x){ return x.po===_poDrawerRef; })){ try{ poRefetchPanel(_poDrawerRef,'DRAWER'); }catch(e){} }
+        if(window.__poRowApply&&chg.length<=300)return; }
+      if(key==='shipments'&&d.shipments){ shipFull=d.shipments; d.shipments.forEach(function(x){ if(x&&x.shipment_ref)shipBy[x.shipment_ref]=x; }); }
+      if(key==='shipments'&&_poDrawerRef&&document.getElementById('podet-DRAWER')){ try{ poRefetchPanel(_poDrawerRef,'DRAWER'); }catch(e){} }
+      if(key==='shipments'&&_shipDrawerRef&&document.getElementById('shipdet-DRAWER')){ try{ var sb=document.getElementById('shipdet-DRAWER'), at=sb.querySelector('.shtab.active'), st=at?at.dataset.st:'dates'; shipExpand(_shipDrawerRef,'DRAWER',function(bx){ var tb=bx.querySelector('.shtab[data-st="'+st+'"]'); if(tb)tb.click(); }); }catch(e){} }
+      var paint=function(){ if(tk!==_navToken||current!==key||cache[key]!==d||g!==_opGen)return true; if(!hzViewIdle())return false; try{ renderSectionData(key,d); }catch(e){} return true; };
+      if(!paint()){ var n=0, t=setInterval(function(){ if(paint()||++n>=30)clearInterval(t); },2000); }
+    }catch(e){} };
   function invalidateDerived(){ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing','deposits'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
@@ -5273,7 +5300,7 @@
       +'<div class="tl-pane" data-tlp="changes" style="display:none">'+chgList+'</div>'; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
     // Refresh ONLY this PO's row (single-row endpoint) instead of pulling the whole ~1400-row grid — much faster.
-    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr; loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
+    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr){ rr._rowAt=Date.now(); poBy[po]=rr; } loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
   // FAST refresh for PAYMENT edits (start-deposit %/amount, completion, balance, dates): a payment edit only changes
   // row-level figures — the lines/costs (po-detail) are unchanged — so re-pull ONLY the recomputed row and re-render
   // the panel from the CACHED detail. One clean render with the fresh value: no slow po-detail fetch (~5s) and no
@@ -8143,7 +8170,7 @@
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer — the grid row that
     // normally patches itself may not exist on this page (e.g. PURCHASE ORDERS ▸ Plan).
     if(_shipPatchRow!==refreshShipDrawer){ _shipDrawerPrevPatch=_shipPatchRow; _shipPatchRow=refreshShipDrawer; }
-    var render=function(){ shipExpand(ref,'DRAWER'); };
+    var render=function(){ shipExpand(ref,'DRAWER'); }; _shipDrawerRef=ref;   // v28.550
     if(shipBy[ref])render();
     else fetchShipmentsFull(function(list){ (list||[]).forEach(function(s){ shipBy[s.shipment_ref]=s; }); render(); });
   }
@@ -8152,7 +8179,7 @@
     delete cache['shipments']; invalidateDerived(); shipFull=null;   // header fields (shipBy) come from the shipments list — refetch it
     fetchShipmentsFull(function(list){ (list||[]).forEach(function(s){ shipBy[s.shipment_ref]=s; });
       shipExpand(ref,'DRAWER',function(bx){ var tb=bx.querySelector('.shtab[data-st="'+st+'"]'); if(tb)tb.click(); }); }); }
-  function closeShipDrawer(silent){ var bg=document.getElementById('shipdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+  function closeShipDrawer(silent){ var bg=document.getElementById('shipdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg); _shipDrawerRef=null;
     maybeResetDrawerZ();
     if(!silent && _shipPatchRow===refreshShipDrawer){ _shipPatchRow=_shipDrawerPrevPatch; _shipDrawerPrevPatch=null; } }
   function gotoShipmentPage(ref){ _pendingShip=ref; showPoSub('shipments'); }   // "Full page ↗" — jump to the full Shipments tab + expand
@@ -8544,11 +8571,11 @@
     // may not exist on this page (e.g. the What's Next report).
     _poDrawerPrevPatch=_poPatchRow; _poDrawerPrevRefresh=_poRefresh;
     _poPatchRow=function(){ poRefetchPanel(po,'DRAWER'); };
-    _poRefresh=function(){ poRefetchPanel(po,'DRAWER'); };
+    _poRefresh=function(){ poRefetchPanel(po,'DRAWER'); }; _poDrawerRef=po;   // v28.550: the fresh-section hand-over re-reads this PO
     // Always refetch THIS PO's row so the drawer shows current data (poBy may be stale after an edit elsewhere —
     // e.g. a "pay" on the Payments Due report). Cheap single-row fetch; falls back to the full list if needed.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
-        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; var _ms=document.querySelector('#podrawer .mdh-id'); if(_ms&&!_ms.querySelector('.mdh-sup')&&(rr.supplier_name||rr.supplier))_ms.insertAdjacentHTML('beforeend','<span class="mdh-sup">'+esc(rr.supplier_name||rr.supplier)+'</span>'); loadPoDetail(po,'DRAWER',tab); return; }
+        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ rr._rowAt=Date.now(); poBy[po]=rr; var _ms=document.querySelector('#podrawer .mdh-id'); if(_ms&&!_ms.querySelector('.mdh-sup')&&(rr.supplier_name||rr.supplier))_ms.insertAdjacentHTML('beforeend','<span class="mdh-sup">'+esc(rr.supplier_name||rr.supplier)+'</span>'); loadPoDetail(po,'DRAWER',tab); return; }
         if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; }
         return fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); }); })
       .catch(function(e){ if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; } var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:var(--neg)">Could not load PO: '+esc(e.message||e)+'</span>'; });
@@ -8576,7 +8603,7 @@
     // underlying view (e.g. the BUY plan popup) is all that's left.
     var sr=document.getElementById('supply-root');
     if(sr && sr.classList.contains('hz-drawer-overlay') && !document.getElementById('podrawer-bg') && !document.getElementById('shipdrawer-bg')){ sr.classList.remove('hz-drawer-overlay'); sr.style.display='none'; }
-    if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
+    if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } _poDrawerRef=null; }
   try{ window.openPODrawer=openPODrawer; window.closePODrawer=closePODrawer; window.hzCfgContribModel=hzCfgContribModel; window.hzCfgRunoffSubs=hzCfgRunoffSubs; }catch(e){}   // let the DEMAND/BUY artifact open the PO drawer + render the lifted config panels (DEMAND ▸ Config)
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 

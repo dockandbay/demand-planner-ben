@@ -12162,6 +12162,7 @@ async function _sectionBuild(sec) {
   if (out == null) throw new Error('section ' + sec + ' returned an error');
   return out;
 }
+const SEC_STALE_GRACE_MS = Math.max(0, Number(process.env.SEC_STALE_GRACE_MS || 1500));   // v28.550: how long a stale section request waits for its revalidation
 function _secCache(sec) { return _lc.get('sec:' + sec) || _lcNew('sec:' + sec, () => _sectionBuild(sec), SECTION_CACHE_TTL_MAP[sec]); }
 function _sectionRecompute(sec) { const st = _secCache(sec); return (st.job || _lcJob(st, 0, null)).p.catch(() => null); }
 if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
@@ -12392,7 +12393,21 @@ supplySectionHandler = async (req, res, next) => {
   if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0 && !_isFake) {
     // v28.167: lazy scoped cache (see _lcGet): fresh or someone else's stale value at once (revalidated behind); cold or this
     // session's own edit pending → waits for the single-flight rebuild. A failed cold build falls through to a live compute.
-    try { return res.json(await _lcGet(_secCache(_sec))); } catch (_) { /* live compute below */ }
+    // v28.550 (Ben 28-Oct-26 "fix stale screens"): an instance idle for hours held a section built before another user's edit and served
+    // it once (SWR) with nothing telling the page; PO-1902138 showed the 15-Oct end date 3 h after Zera moved it to 10-Nov. Now, like the
+    // supplier portal (v27.880 / v28.189): a stale copy first gives its revalidation up to SEC_STALE_GRACE_MS; if it still goes out stale it
+    // carries `X-HZ-Stale: 1` and the page re-fetches with `X-HZ-Fresh: 1` (waits for a build newer than every pending edit) and repaints.
+    try {
+      const st = _secCache(_sec), _fresh = req.get('x-hz-fresh') === '1';
+      let v = await _lcGet(st, _fresh ? _lcFreshNeed(st) : null);
+      if (!_fresh && _lcIsStale(st, v) && st.job) {
+        const j = st.job.p.catch(() => null); await Promise.race([j, new Promise(r => setTimeout(r, SEC_STALE_GRACE_MS).unref?.())]);
+        if (st.entry && st.entry.v !== v && !_lcIsStale(st, st.entry.v)) v = st.entry.v;
+      }
+      if (!_fresh && _lcIsStale(st, v)) res.set('X-HZ-Stale', '1');
+      res.set('Vary', 'X-HZ-Fresh');
+      return res.json(v);
+    } catch (_) { /* live compute below */ }
   }
   try {
     switch (req.params.section) {
