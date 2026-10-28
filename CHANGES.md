@@ -1,3 +1,8 @@
+## v28.565 (28-Oct-26) Manage 3PL ▸ UK (ILG): tick boxes and SKUs left aligned, SKU column 1.5x
+- Ben: "left align the tick boxes and skus and extend sku column by 50%".
+- The page-wide table rules (fixed layout, cells right aligned) gave all 9 columns 184px and pushed the tick box to the right of its column. The table now sets its own widths: tick column 36px (box at the left), SKU column 276px (1.5x), the rest share the remainder. "not in Fulfil" / "not in report" sit on a second line under the SKU, so no SKU is cut off (sandbox: 0 of 568 rows clipped, was 20).
+- No new env vars, migrations or cron routes.
+
 ## v28.564 (28-Oct-26) WSSI: write-off wording corrected
 - Ben asked where the damages, samples and stock-count data came from: it does not; HORIZON reads none of it. The write-off row's tooltip and the logic doc listed those as if known. Both now say the write-off is the unexplained part of the stock movement (worked out, cause unknown), and name the known gap: moves between markets show as write-off / intake instead of transfers.
 - No logic change. No new env vars, migrations or cron routes.
