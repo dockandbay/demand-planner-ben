@@ -11225,8 +11225,30 @@
     el.innerHTML='<div style="margin:8px 0 12px;padding:10px 14px;border:2px solid var(--pos);border-radius:8px;background:var(--pos-bg,transparent);text-align:left">'
       +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="color:var(--pos)">✓ Paid this session</b><span class="tiny mut">'+PDUE_PAID.length+' payment'+(PDUE_PAID.length===1?'':'s')+'</span><span class="lnk-btn" id="pdue-paid-clr" style="margin-left:auto;cursor:pointer;color:var(--blue)">Clear</span></div>'
       +'<div style="margin-top:4px">'+tot+'</div>'
-      +'<div class="tiny mut" style="margin-top:4px">'+Object.keys(sups).sort().map(function(k){ var p=k.split('|'); return esc(p[0]||'Other')+' '+esc(fmtCur(Math.round(sups[k]*100)/100,p[1])); }).join(' · ')+'</div></div>';
-    var c=document.getElementById('pdue-paid-clr'); if(c)c.onclick=function(){ PDUE_PAID=[]; pduePaidBox(); }; }
+      +'<div class="tiny" style="margin-top:4px;display:grid;gap:3px">'+Object.keys(sups).sort().map(function(k){ var p=k.split('|');
+        return '<div><span class="mut">'+esc(p[0]||'Other')+' '+esc(fmtCur(Math.round(sups[k]*100)/100,p[1]))+'</span>'
+          +' <span class="lnk-btn pdue-mail" data-k="'+esc(k)+'" style="cursor:pointer;color:var(--blue);margin-left:6px" title="copy a payment confirmation email for '+esc(p[0]||'this supplier')+' (formatted: paste into Gmail)">✉ Copy email</span>'
+          +' <span class="lnk-btn pdue-subj" data-k="'+esc(k)+'" style="cursor:pointer;color:var(--blue);margin-left:6px" title="copy the email subject">Copy subject</span></div>'; }).join('')+'</div></div>';
+    var c=document.getElementById('pdue-paid-clr'); if(c)c.onclick=function(){ PDUE_PAID=[]; pduePaidBox(); };
+    // v28.545 (Ben: "can you add a link to copy the payment email on this popup"): per supplier, the payment confirmation email (wording of
+    // HORIZON's paid-notification email) with each PO and payment paid this session, copied as rich text (HTML + plain) for Gmail; subject separately.
+    var mailFor=function(k){ var p=k.split('|'), sup=p[0]||'', ccy=p[1]||'', its=PDUE_PAID.filter(function(x){ return x.sup===sup&&x.ccy===ccy; });
+      var tot=Math.round(its.reduce(function(a,x){ return a+x.amt; },0)*100)/100, m=function(v){ return Number(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }, day=fd(localToday());
+      var subj='Payment made, Dock & Bay ('+m(tot)+' '+ccy+')';
+      var html='<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.5"><p>Hello'+(sup?' '+esc(sup)+' team':'')+',</p>'
+        +'<p>This is to confirm that Dock &amp; Bay has made a payment of <b>'+esc(m(tot))+' '+esc(ccy)+'</b> on <b>'+esc(day)+'</b>, covering:</p>'
+        +'<table style="border-collapse:collapse;font-size:13px"><tr><th style="text-align:left;padding:4px 10px;border-bottom:1px solid #ccc">PO</th><th style="text-align:left;padding:4px 10px;border-bottom:1px solid #ccc">Payment</th><th style="text-align:right;padding:4px 10px;border-bottom:1px solid #ccc">Amount ('+esc(ccy)+')</th></tr>'
+        +its.map(function(x){ return '<tr><td style="padding:3px 10px">'+esc(x.ref)+'</td><td style="padding:3px 10px">'+esc(x.type||'')+'</td><td style="padding:3px 10px;text-align:right">'+esc(m(x.amt))+'</td></tr>'; }).join('')
+        +'<tr><td style="padding:4px 10px;border-top:1px solid #ccc"><b>Total</b></td><td style="border-top:1px solid #ccc"></td><td style="padding:4px 10px;text-align:right;border-top:1px solid #ccc"><b>'+esc(m(tot))+'</b></td></tr></table>'
+        +'<p>Thank you,<br>Dock &amp; Bay Accounts</p></div>';
+      var txt='Hello'+(sup?' '+sup+' team':'')+',\n\nThis is to confirm that Dock & Bay has made a payment of '+m(tot)+' '+ccy+' on '+day+', covering:\n\n'
+        +its.map(function(x){ return x.ref+'  '+(x.type||'')+'  '+m(x.amt); }).join('\n')+'\nTotal  '+m(tot)+' '+ccy+'\n\nThank you,\nDock & Bay Accounts';
+      return {subj:subj,html:html,txt:txt}; };
+    var done=function(el,msg){ var o=el.textContent; el.textContent=msg; setTimeout(function(){ el.textContent=o; },1600); };
+    el.querySelectorAll('.pdue-mail').forEach(function(a){ a.onclick=function(){ var e=mailFor(a.dataset.k);
+      try{ if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){ navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([e.html],{type:'text/html'}),'text/plain':new Blob([e.txt],{type:'text/plain'})})]).then(function(){ done(a,'✓ Email copied'); },function(){ navigator.clipboard.writeText(e.txt).then(function(){ done(a,'✓ Copied (plain)'); }); }); }
+        else { legacyCopy(e.txt); done(a,'✓ Copied (plain)'); } }catch(_){ try{ legacyCopy(e.txt); done(a,'✓ Copied (plain)'); }catch(__){} } }; });
+    el.querySelectorAll('.pdue-subj').forEach(function(a){ a.onclick=function(){ var e=mailFor(a.dataset.k); try{ if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(e.subj).then(function(){ done(a,'✓ Subject copied'); }); else { legacyCopy(e.subj); done(a,'✓ Subject copied'); } }catch(_){} }; }); }
   var PDUE_STATE={status:'outstanding4w',supplier:''};   // Payments Due filters (persist across re-renders); default = outstanding due within 4 weeks (incl. overdue)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
   var CF_TYPES=['Deposit','Completion','Balance','Other','Freight','Import duty','Import tax'];
@@ -11976,7 +11998,7 @@
         var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
         if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
           _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
-        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
+        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
         var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
         if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
           var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }

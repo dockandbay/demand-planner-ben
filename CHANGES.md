@@ -1,3 +1,8 @@
+## v28.545 (28-Oct-26) Payments Due ▸ Paid this session: copy the payment email
+- Ben ("✓ Paid this session · 5 payments · Lixin $97,717.51 USD"): "can you add a link to copy the payment email on this popup".
+- Each supplier line in the Paid this session box has "✉ Copy email" and "Copy subject". The email uses the wording of HORIZON's paid-notification email ("This is to confirm that Dock & Bay has made a payment of 97,717.51 USD on 28-Oct-26, covering:") with a table of every PO and payment type paid this session for that supplier and currency, and the total. It is copied as formatted text (HTML + plain) so it pastes as a table into Gmail; the subject is "Payment made, Dock & Bay (97,717.51 USD)". Browsers without rich copy get the plain-text version.
+- Front end only. Check: the builder, run on sample payments, gives the expected subject, lines and total.
+
 ## v28.544 (28-Oct-26) PO grid Fulfil column updates straight after a push
 - Ben: "when i updated lines in the po order plan into fulfil all cleared but the po grid still showed 'update lines'".
 - Cause: the grid keeps the Fulfil status (in sync / Update lines / Update date) for 60 seconds, and the refresh after a push reused that saved copy, so it showed the pre-push state until the next reload.
