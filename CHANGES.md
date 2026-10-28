@@ -1,3 +1,9 @@
+## v28.530 (28-Oct-26) PO ▸ Client: client name is a searchable picker (like Assign deposit)
+- Ben (PO-59USLX1-DILLARDS ▸ Client): "could you make it a search filter of the list with add new in the search filter box, like assign deposit, not a tooltip style popup".
+- Client name is now a button (red "— pick or add client" when blank) that opens the same searchable popover as Assign deposit: saved key accounts first, then client names already used on other POs, each marked; typing filters; "＋ Add “…” as new client" appears for anything not on the list (Enter takes the first row); "✕ Clear client" at the bottom.
+- Same save as before: picking a key account still offers to apply its defaults (packing, requirements, address); a new name still shows "Create as key account". The browser suggestion list (datalist) is gone.
+- Front end only.
+
 ## v28.529 (28-Oct-26) Hide ▾ updates the ACTION ITEMS count
 - Ben: "adding items to the HIDE on po grid should change the count of action items" (ACTION ITEMS (229) stayed put).
 - Cause: the Hide toggles re-filtered the grid and badges, but the ACTION ITEMS (n) pill lives in the filter bar, which is not redrawn, so its number only changed on a full reload.

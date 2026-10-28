@@ -4778,7 +4778,7 @@
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
       +'<div class="cli-form">'
-      +cliRow('Client name','<input class="fci txt dtc-client" list="kalist" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'" style="width:360px;text-align:left" placeholder="type, or pick a saved key account…" title="pick a saved key account to pull in its packing / requirements / address"><datalist id="kalist"></datalist> <button class="save-btn dtc-mkka" data-po="'+esc(r.po)+'" style="display:none" title="save this client as a key account in config, using this PO&rsquo;s current packing / requirements / address">＋ Create as key account</button>')
+      +cliRow('Client name','<input type="hidden" class="dtc-client" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'"><button type="button" class="dep-pick dtc-client-pick'+(r.client?'':' needdep')+'" data-po="'+esc(r.po)+'" style="min-width:260px;text-align:left" title="search saved key accounts and clients, or add a new client">'+(r.client?esc(r.client):'— pick or add client')+' ▾</button> <button class="save-btn dtc-mkka" data-po="'+esc(r.po)+'" style="display:none" title="save this client as a key account in config, using this PO&rsquo;s current packing / requirements / address">＋ Create as key account</button>')
       +cliRow('Direct-to-Client type','<label style="margin-right:16px;cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_key_account"'+(r.dtc_key_account?' checked':'')+'> Key account</label><label style="cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_custom"'+(r.dtc_custom?' checked':'')+'> Custom</label>')
       +'<div class="cdev-row" data-po="'+esc(r.po)+'"'+(r.dtc_custom?'':' style="display:none"')+'>'+cliRow('Custom order product(s) <span class="mut tiny">(product developments — shown to the supplier; pick one or more)</span>','<div class="cdev-pick" data-po="'+esc(r.po)+'" data-cur="'+esc(r.custom_dev_ref||'')+'"><span class="mut tiny">loading…</span></div>')+'</div>'
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
@@ -5487,15 +5487,39 @@
     function mkKaToggle(){ var inp=document.querySelector('#podet-'+i+' .dtc-client'), btn=document.querySelector('#podet-'+i+' .dtc-mkka'); if(!inp||!btn)return;
       var v=(inp.value||'').trim(); var isKa=(KA_LIST||[]).some(function(k){return String(k.name||'').toLowerCase()===v.toLowerCase();});
       btn.style.display=(v && !isKa)?'':'none'; }
-    fetchKeyAccounts(function(list){ var dl=document.getElementById('kalist'); if(dl)dl.innerHTML=(list||[]).map(function(k){return '<option value="'+esc(k.name)+'">';}).join(''); mkKaToggle(); });
-    document.querySelectorAll('#podet-'+i+' .dtc-client').forEach(function(inp){
-      inp.oninput=mkKaToggle;
-      inp.onchange=function(){ var val=(inp.value||'').trim(); inp.classList.add('saved');
-        shipPost('/api/supply/po/'+encodeURIComponent(po),{client:val},function(){ if(poBy[po])poBy[po].client=val; });
-        mkKaToggle();
-        var ka=(KA_LIST||[]).filter(function(k){return String(k.name||'').toLowerCase()===val.toLowerCase();})[0];
-        if(ka && confirm('Apply "'+ka.name+'" key-account defaults to this PO?\n\nThis overwrites the current packing / labelling, client requirements and delivery address.')){
-          shipPost('/api/supply/po/'+encodeURIComponent(po)+'/apply-key-account',{name:ka.name},function(j){ if(j&&j.error){alert(j.error);return;} invalidateDerived(); poRefetchPanel(po,i); }); } }; });
+    fetchKeyAccounts(function(){ mkKaToggle(); });
+    // v28.530 (Ben: "client name could you make it a search filter of the list with add new in the search filter box, like assign deposit, not a
+    // tooltip style popup"): the deposit-style picker. Search box over saved key accounts (first) and client names already on other POs, plus
+    // "＋ Add … as new client" for whatever is typed, and Clear. Picking a key account still offers its defaults; a new name offers "Create as key account".
+    function setClient(val){ var inp=document.querySelector('#podet-'+i+' .dtc-client'), btn=document.querySelector('#podet-'+i+' .dtc-client-pick'); val=String(val||'').trim();
+      if(inp)inp.value=val; if(btn){ btn.innerHTML=(val?esc(val):'— pick or add client')+' ▾'; btn.classList.toggle('needdep',!val); }
+      shipPost('/api/supply/po/'+encodeURIComponent(po),{client:val},function(){ if(poBy[po])poBy[po].client=val; });
+      mkKaToggle();
+      var ka=val&&(KA_LIST||[]).filter(function(k){return String(k.name||'').toLowerCase()===val.toLowerCase();})[0];
+      if(ka && confirm('Apply "'+ka.name+'" key-account defaults to this PO?\n\nThis overwrites the current packing / labelling, client requirements and delivery address.')){
+        shipPost('/api/supply/po/'+encodeURIComponent(po)+'/apply-key-account',{name:ka.name},function(j){ if(j&&j.error){alert(j.error);return;} invalidateDerived(); poRefetchPanel(po,i); }); } }
+    document.querySelectorAll('#podet-'+i+' .dtc-client-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); closeShPop();
+      var cur=String((poBy[po]||{}).client||'').trim();
+      var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+      pop.innerHTML='<div class="shpop-h">Client for <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search, or type a new client name…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
+      placePop(pop,b.getBoundingClientRect()); setTimeout(function(){ document.addEventListener('mousedown',shPopOutside,true); },0);
+      fetchKeyAccounts(function(list){ var kas=(list||[]).map(function(k){ return String(k.name||'').trim(); }).filter(Boolean), kl={}; kas.forEach(function(n){ kl[n.toLowerCase()]=1; });
+        var used={}; Object.keys(poBy).forEach(function(k){ var c=String((poBy[k]||{}).client||'').trim(); if(c&&!kl[c.toLowerCase()])used[c.toLowerCase()]=used[c.toLowerCase()]||c; });
+        var others=Object.keys(used).map(function(k){ return used[k]; }).sort(function(a,b){ return a.localeCompare(b); });
+        function render(q){ var t=String(q||'').trim(), ql=t.toLowerCase(), html='';
+          var m=function(n){ return !ql||n.toLowerCase().indexOf(ql)>=0; }, ka=kas.filter(m), ot=others.filter(m);
+          var exact=kas.concat(others).some(function(n){ return n.toLowerCase()===ql; });
+          if(t&&!exact)html+='<div class="shpop-opt" data-new="'+esc(t)+'" style="font-weight:700;color:var(--blue)">＋ Add “'+esc(t)+'” as new client</div>';
+          ka.slice(0,ql?40:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+' <span class="mut tiny">key account</span>'+(n.toLowerCase()===cur.toLowerCase()?' <span class="mut tiny">· current</span>':'')+'</div>'; });
+          ot.slice(0,ql?40:10).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+' <span class="mut tiny">on other POs</span>'+(n.toLowerCase()===cur.toLowerCase()?' <span class="mut tiny">· current</span>':'')+'</div>'; });
+          if(cur)html+='<div class="shpop-opt unassign" data-clear="1">✕ Clear client ('+esc(cur)+')</div>';   // last, so Enter never clears
+          if(!ql&&(ka.length>15||ot.length>10))html+='<div class="mut tiny" style="padding:5px 10px">type to search '+(kas.length+others.length)+' clients…</div>';
+          if(!html)html='<div class="mut tiny" style="padding:6px 10px">Type a client name to add it.</div>';
+          var L=document.getElementById('shpop-list'); L.innerHTML=html;
+          L.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); setClient(o.dataset.clear?'':(o.dataset.new||o.dataset.v)); }; }); }
+        var q=pop.querySelector('.shpop-q'); render(''); q.oninput=function(){ render(q.value); };
+        q.onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); var first=document.querySelector('#shpop-list .shpop-opt'); if(first)first.click(); } };
+        q.focus(); }); }; });
     document.querySelectorAll('#podet-'+i+' .dtc-mkka').forEach(function(btn){ btn.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .dtc-client'); var v=(inp&&inp.value||'').trim(); if(!v){alert('Enter a client name first.');return;}
       if(!confirm('Create "'+v+'" as a key account in config, using this PO’s current packing / labelling, client requirements and delivery address?'))return;
       btn.disabled=true; shipPost('/api/supply/po/'+encodeURIComponent(po)+'/create-key-account',{},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} KA_LIST=null; invalidateDerived(); poRefetchPanel(po,i); }); }; });
