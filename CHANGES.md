@@ -1,3 +1,8 @@
+## v28.551 (28-Oct-26) FBA shipment ship-from: a clear + New address button
+- Ben: "how to add a new address, i see existing address edit but not add new" (the form only said "same code = edit; new code = new address").
+- Create FBA shipment ▸ Ship from: "edit this address" (code fixed, Save changes) and a separate "+ New address" (blank form, company prefilled, Add address). A new address refuses a code that already exists, and keeps what was typed when a save fails. Cancel closes either form.
+- jsdom: edit and new forms, duplicate code refused with nothing posted, new code saved and selected.
+
 ## v28.550 (28-Oct-26) Stale screens: lists served from an old copy now correct themselves
 - Ben: "fix stale screens". PO-1902138 opened 3 h after Zera moved production end 15-Oct → 10-Nov still showed 15-Oct (grid, DATES tab and its shipment), while the single-PO read was right.
 - Cause: the supply list caches are stale-while-revalidate. After another user's edit, the next request on a server copy gets the last build while it rebuilds behind, and nothing told the page; an idle Vercel instance can hold a build that is hours old.

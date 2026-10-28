@@ -3399,8 +3399,12 @@ function fbaShipCreate(){ if(FBA_SHIP.busy)return; var rows=fbaShipRows(); if(!r
 function fbaShipResume(id){ fetch('/api/supply/fba-inbound/plans/'+id).then(function(r){return r.json();}).then(function(j){ if(j.plan){ FBA_SHIP.plan=j.plan; FBA_SHIP.sc=j.sc; fbaShipDraw();
   if(!j.plan.error&&(j.plan.op_id||FBA_SHIP_LBL[j.plan.stage]))fbaShipAdvance('next'); } }); }
 function fbaShipSaveAddr(){ var f=document.getElementById('fbaship-addr'); if(!f)return; var b={}; f.querySelectorAll('[data-k]').forEach(function(i){ b[i.dataset.k]=i.value; });
+  if(f.dataset.new==='1'){ var cd=String(b.code||'').trim().toUpperCase(); b.code=cd;   // v28.551: + New address never overwrites an existing one
+    FBA_SHIP.draft=b;
+    if(!cd){ FBA_SHIP.err='Give the new address a code (e.g. CN-FLEXPORT-NINGBO).'; fbaShipDraw(); return; }
+    if(FBA_SHIP.addr.some(function(a){ return String(a.code||'').toUpperCase()===cd; })){ FBA_SHIP.err='Code '+cd+' is already used by another address. Pick a new code, or use "edit this address".'; fbaShipDraw(); return; } }
   fetch('/api/supply/fba-inbound/ship-from',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(j){
-    if(!j.ok){ FBA_SHIP.err=j.error||'Not saved'; fbaShipDraw(); return; } FBA_SHIP.edit=false; FBA_SHIP.sf=j.code;
+    if(!j.ok){ FBA_SHIP.err=j.error||'Not saved'; fbaShipDraw(); return; } FBA_SHIP.edit=false; FBA_SHIP.draft=null; FBA_SHIP.sf=j.code;
     return fetch('/api/supply/fba-inbound/ship-from').then(function(r){return r.json();}).then(function(a){ FBA_SHIP.addr=a.rows||[]; FBA_SHIP.err=''; fbaShipDraw(); }); }); }
 function fbaShipDraw(){
   var m=document.getElementById('fbaship-modal'); if(!m)return; var p=FBA_SHIP.plan, E=fbaShipEsc, cur=fbaShipStep(p);
@@ -3428,12 +3432,16 @@ function fbaShipDraw(){
     if(open.length)h+='<div style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--hover)"><b>Open '+E(CUR)+' shipments from HORIZON:</b> '+open.map(function(x){ return '<a href="javascript:void 0" data-fsresume="'+x.id+'" style="color:var(--blue);font-weight:600;margin-left:8px">'+E(x.name||('#'+x.id))+' · '+E(x.stage.replace(/_/g,' '))+'</a>'; }).join('')+'</div>';
     h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b>Ship from</b><select id="fbaship-sf" style="font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'
       +FBA_SHIP.addr.map(function(a){ return '<option value="'+E(a.code)+'"'+(a.code===FBA_SHIP.sf?' selected':'')+'>'+E(a.label)+(a.default_for?' (default '+E(a.default_for)+')':'')+'</option>'; }).join('')+'</select>'
-      +'<a href="javascript:void 0" data-fs="editaddr" style="color:var(--blue);font-size:11px">'+(FBA_SHIP.edit?'close':'edit this / add another address (e.g. Flexport China)')+'</a></div>'
+      // v28.551 (Ben 28-Oct-26: "i see existing address edit but not add new"): separate Edit and + New address
+      +(FBA_SHIP.edit?'<a href="javascript:void 0" data-fs="closeaddr" style="color:var(--blue);font-size:11px">close</a>'
+        :'<a href="javascript:void 0" data-fs="editaddr" style="color:var(--blue);font-size:11px">edit this address</a>'+btn('newaddr','+ New address',''))+'</div>'
       +'<div class="mut" style="margin-bottom:10px">'+E([sf.name,sf.address_line1,sf.address_line2,sf.city,sf.state_code,sf.postal_code,sf.country_code].filter(Boolean).join(', '))+(sf.phone?' · ☎ '+E(sf.phone):' · <b style="color:var(--neg)">no phone: Amazon requires one, add it</b>')+'</div>';
     if(FBA_SHIP.edit){ var F=[['code','Code (e.g. CN-FLEXPORT-NINGBO)'],['label','Label'],['name','Contact / site name'],['company_name','Company'],['address_line1','Address line 1'],['address_line2','Address line 2'],['city','City'],['state_code','State / province code'],['postal_code','Postcode'],['country_code','Country (2 letters)'],['phone','Phone'],['email','Email']];
-      h+='<div id="fbaship-addr" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;margin-bottom:10px;padding:10px;border:1px dashed var(--line);border-radius:8px">'
-        +F.map(function(f){ return '<label style="font-size:10px" class="mut">'+f[1]+'<input data-k="'+f[0]+'" value="'+E(sf[f[0]]||'')+'" style="display:block;width:100%;box-sizing:border-box;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--ink)"></label>'; }).join('')
-        +'<div style="grid-column:1/-1">'+btn('saveaddr','Save address','go')+' <span class="mut">Same code = edit; new code = new address.</span></div></div>'; }
+      var isNew=FBA_SHIP.edit==='new', av=isNew?(FBA_SHIP.draft||{company_name:'Dock & Bay'}):sf;   // a new address starts blank (company prefilled)
+      h+='<div id="fbaship-addr" data-new="'+(isNew?'1':'')+'" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;margin-bottom:10px;padding:10px;border:1px dashed var(--line);border-radius:8px">'
+        +'<div style="grid-column:1/-1;font-weight:700">'+(isNew?'New ship-from address':'Edit '+E(sf.label||sf.code||''))+'</div>'
+        +F.map(function(f){ return '<label style="font-size:10px" class="mut">'+f[1]+(f[0]==='code'&&!isNew?' (fixed)':'')+'<input data-k="'+f[0]+'" value="'+E(av[f[0]]||'')+'"'+(f[0]==='code'&&!isNew?' readonly':'')+' style="display:block;width:100%;box-sizing:border-box;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--ink)"></label>'; }).join('')
+        +'<div style="grid-column:1/-1">'+btn('saveaddr',isNew?'Add address':'Save changes','go')+' '+btn('closeaddr','Cancel','')+(isNew?' <span class="mut">Give it a new code, e.g. CN-FLEXPORT-NINGBO.</span>':'')+'</div></div>'; }
     h+='<div style="margin-bottom:6px"><b>'+rows.length+'</b> ticked SKU'+(rows.length===1?'':'s')+' · <b>'+units.toLocaleString()+'</b> units · prep and labels: Seller</div>'
       +(rows.length?'<div style="overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+['SKU','Amazon SKU','Units','Cartons','Box ('+uom[0]+')','Box '+uom[1],''].map(function(t){return '<th style="padding:5px 8px;border-bottom:1px solid var(--line);background:var(--hover)">'+t+'</th>';}).join('')+'</tr></thead><tbody>'
         +rows.map(function(r){ var ok=boxed(r); return '<tr><td style="padding:4px 8px">'+E(r.sku)+'</td><td style="padding:4px 8px">'+(r.msku!==r.sku?E(r.msku):'<span class="mut">same</span>')+'</td><td style="padding:4px 8px">'+r.qty+'</td><td style="padding:4px 8px">'+(r.cp>0&&r.qty%r.cp===0?(r.qty/r.cp)+' × '+r.cp:'<span style="color:var(--amber)">loose'+(r.cp?' (carton '+r.cp+')':'')+'</span>')+'</td><td style="padding:4px 8px">'+(r.dims.every(function(x){return x>0;})?r.dims.join(' × '):'<span style="color:var(--amber)">missing</span>')+'</td><td style="padding:4px 8px">'+(r.wt>0?r.wt:'<span style="color:var(--amber)">missing</span>')+'</td><td style="padding:4px 8px">'+(ok?'<span style="color:var(--pos)">✓ boxed</span>':'<span style="color:var(--amber)">box contents in Seller Central</span>')+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="mut">Tick the Ship box on the rows to send, then open this again.</div>')
@@ -3475,7 +3483,7 @@ function fbaShipDraw(){
   }
   m.innerHTML=h+'</div></div>';
   m.querySelectorAll('[data-fs]').forEach(function(b){ b.onclick=function(){ var a=b.dataset.fs;
-    if(a==='close')fbaShipClose(); else if(a==='editaddr'){ FBA_SHIP.edit=!FBA_SHIP.edit; fbaShipDraw(); } else if(a==='saveaddr')fbaShipSaveAddr();
+    if(a==='close')fbaShipClose(); else if(a==='editaddr'){ FBA_SHIP.edit='edit'; fbaShipDraw(); } else if(a==='newaddr'){ FBA_SHIP.edit='new'; FBA_SHIP.err=''; FBA_SHIP.draft=null; fbaShipDraw(); } else if(a==='closeaddr'){ FBA_SHIP.edit=false; FBA_SHIP.err=''; FBA_SHIP.draft=null; fbaShipDraw(); } else if(a==='saveaddr')fbaShipSaveAddr();
     else if(a==='create')fbaShipCreate(); else if(a==='retry')fbaShipAdvance('next'); else if(a==='placement')fbaShipAdvance('placement');
     else if(a==='confplace')fbaShipAdvance('confirm_placement',{placementOptionId:FBA_SHIP.pick.po});
     else if(a==='transport'){ var d=document.getElementById('fbaship-ready'); FBA_SHIP.ready=d?d.value:''; fbaShipAdvance('transport',{readyDate:FBA_SHIP.ready}); }
