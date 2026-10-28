@@ -1,3 +1,9 @@
+## v28.544 (28-Oct-26) PO grid Fulfil column updates straight after a push
+- Ben: "when i updated lines in the po order plan into fulfil all cleared but the po grid still showed 'update lines'".
+- Cause: the grid keeps the Fulfil status (in sync / Update lines / Update date) for 60 seconds, and the refresh after a push reused that saved copy, so it showed the pre-push state until the next reload.
+- Now every refresh that follows a write (Push to Fulfil from the order plan, the grid or the popup, date push, bulk date sync, drift approve, Link Fulfil PO, Import from Fulfil, and any PO save via the silent PO refresh) reads the Fulfil status fresh. The first paint of the grid still uses the 60-second copy.
+- Front end only.
+
 ## v28.543 (28-Oct-26) ERP deviations: who last changed each line
 - Ben: 'erp deviations on the po plan, can you also show a little note "zera@ changed on 19th oct" for example if there was a recent change'.
 - The ERP deviations box has a "Last change" column: the latest HORIZON order-plan change to that SKU from the PO record of change, e.g. "zera@ changed 19-Oct-26 (80 → 280)" or "ben@ changed 18-Oct-26 (added — qty 80)"; hover shows the full entry. Blank when the line was never changed in HORIZON (changes made in Fulfil are not in HORIZON's log).
