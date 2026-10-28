@@ -1,3 +1,11 @@
+## v28.552 (28-Oct-26) CONFIG ▸ Admin ▸ Gmail connectors: accounts@ and ops@
+- Ben: "add a second slot for ops@ ... move accounts@ and ops@ into admin. called GMAIL CONNECTORS"; layout picked from a mockup (cards side by side).
+- New admin page CONFIG ▸ Admin ▸ Gmail connectors: one card per mailbox with status, connected since / by, last read, what uses it, and Connect / Reconnect / Disconnect (admin only). Read only, as before.
+- ops@dockandbay.com is a second mailbox slot (for the ILG daily stock report, next). Same Google client and redirect URI, so no new environment variables. The connect link is signed with its slot and HORIZON refuses a Google account that is not that mailbox.
+- ACCOUNTS ▸ Reconcile keeps its mail tools; connecting moved to the admin page (it links there).
+- Migration 398_gmail_connectors.sql (additive): planner.accounts_gmail id check widened to 1 (accounts@) and 2 (ops@). Without it, connecting ops@ fails; accounts@ keeps working.
+- Sandbox: 398 applied; accounts@ still connected and its mail read works (22 messages, last day); the ops@ connect link goes to Google with login_hint ops@; page checked in Chrome.
+
 ## v28.551 (28-Oct-26) FBA shipment ship-from: a clear + New address button
 - Ben: "how to add a new address, i see existing address edit but not add new" (the form only said "same code = edit; new code = new address").
 - Create FBA shipment ▸ Ship from: "edit this address" (code fixed, Save changes) and a separate "+ New address" (blank form, company prefilled, Add address). A new address refuses a code that already exists, and keeps what was typed when a save fails. Cancel closes either form.

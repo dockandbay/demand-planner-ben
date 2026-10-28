@@ -8853,8 +8853,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback','gmail-connectors']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -9871,6 +9871,37 @@
             if(!label){ err.textContent='Country label required.'; return; }
             fetch('/api/config/country',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:code,label:label,sort:99})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }).catch(function(e){ err.textContent=(e&&e.message)||'failed'; }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      // v28.552 (Ben 28-Oct-26, mockup "cards side by side"): CONFIG ▸ Admin ▸ Gmail connectors. One card per mailbox (accounts@, ops@): status,
+      // last read, what uses it, Connect / Reconnect / Disconnect (admin). Read only: HORIZON never sends, labels or deletes mail.
+      SUBS['gmail-connectors']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        var flash=''; try{ var fm=/[?&]gmail=([^&#]*)/.exec(location.search); if(fm){ flash=decodeURIComponent(fm[1].replace(/\+/g,' ')); history.replaceState(null,'',location.pathname+location.hash); } }catch(e){}
+        var draw=function(d,disc){
+          var h='<div style="text-align:left;max-width:980px"><div class="sect-h">Gmail connectors</div><div class="count" style="margin-bottom:12px">Read-only access: HORIZON never sends, labels or deletes mail. To connect, sign in to Google as that mailbox in this browser first, then press Connect.</div>';
+          if(flash){ var ok=/^connected /.test(flash); h+='<div class="count" style="padding:8px 10px;border-radius:6px;margin-bottom:10px;background:'+(ok?'var(--pos-bg)':'var(--neg-bg)')+';color:'+(ok?'var(--pos)':'var(--neg)')+'">'+esc(flash)+'</div>'; }
+          if(!d.configured)h+='<div class="count" style="color:var(--neg);margin-bottom:10px">Google client not set on this server (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS).</div>';
+          h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">';
+          (d.connectors||[]).forEach(function(c){ var on=!!c.connected, at=String(c.connected_at||'').split(' '), lr=String(c.last_ok_at||'').split(' ');
+            h+='<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);min-width:0">'
+              +'<div style="font-weight:700;margin-bottom:6px;word-break:break-all">'+esc(c.mailbox)+'</div>'
+              +(c.error?'<div class="count" style="color:var(--neg)">'+esc(c.error)+'</div>':c.migrated===false?'<div class="count" style="color:var(--neg)">Run migration 398 first.</div>'
+                :on?'<div><span style="color:var(--pos);font-weight:700">● Connected</span> <span class="count">since '+esc(hzTrkDate(at[0])+(at[1]?' '+at[1]:''))+(c.connected_by?' by '+esc(shortUser(c.connected_by)):'')+'</span></div>'
+                  +'<div class="count">Last read '+(c.last_ok_at?esc(hzTrkDate(lr[0])+(lr[1]?' '+lr[1]:'')):'not yet')+'</div>'
+                  +(c.last_error?'<div class="count" style="color:var(--neg)">'+esc(c.last_error)+'</div>':'')
+                :'<div><span style="color:var(--faint);font-weight:700">○ Not connected</span></div><div class="count">Sign in to Google as '+esc(c.mailbox)+' in this browser, then Connect.</div>')
+              +'<div class="count" style="margin-top:6px">Used by: '+esc(c.use||'')+'</div>'
+              +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
+              +(c.can_write&&d.configured?(on?'<button class="save-btn light" data-gmc="'+esc(c.slot)+'">Reconnect</button><button class="save-btn light" data-gmd="'+esc(c.slot)+'"'+(disc===c.slot?' style="color:var(--neg)">Click again to disconnect':'>Disconnect')+'</button>'
+                :'<button class="save-btn" data-gmc="'+esc(c.slot)+'" style="background:var(--blue);color:#fff">Connect '+esc(String(c.mailbox).split('@')[0])+'@</button>'):(c.can_write?'':'<span class="count">Only an admin can connect or disconnect.</span>'))
+              +'</div></div>'; });
+          b.innerHTML=h+'</div></div>';
+          b.querySelectorAll('[data-gmc]').forEach(function(x){ x.onclick=function(){ location.href='/api/accounts/gmail/connect?slot='+encodeURIComponent(x.getAttribute('data-gmc')); }; });
+          b.querySelectorAll('[data-gmd]').forEach(function(x){ x.onclick=function(){ var sl=x.getAttribute('data-gmd');
+            if(disc!==sl){ draw(d,sl); setTimeout(function(){ if(document.body.contains(x))draw(d,null); },5000); return; }
+            fetch('/api/accounts/gmail/disconnect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({slot:sl})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); }); })
+              .then(function(){ flash=sl+'@ disconnected'; load(); }).catch(function(e){ flash='Not disconnected: '+(e.message||e); load(); }); }; }); };
+        var load=function(){ fetch('/api/admin/gmail-connectors').then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'load failed')+'</div>'; return; } draw(d,null); })
+          .catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; }); };
+        load(); };
       SUBS['dhl-tracking']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/tracking/config').then(function(resp){return resp.json();}).then(function(d){
           if(!d||d.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'load failed')+'</div>'; return; }
@@ -21242,11 +21273,11 @@
     h+='<div class="ac-cards"><div class="ac-card" style="min-width:340px"><div style="font-weight:600;margin-bottom:6px">Gmail mailbox</div>';
     if(!st.configured) h+='<div class="count">Google client not set on this server (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS).</div>';
     else if(!st.migrated) h+='<div class="count">Run migration 348 (planner.accounts_gmail) first.</div>';
-    else if(!st.connected) h+='<div class="count" style="margin-bottom:8px">Not connected. Sign in to Google as <b>'+esc(st.mailbox_hint)+'</b> in this browser, then connect. HORIZON only gets read access: it never sends, labels or deletes mail.</div>'+(st.can_write?'<button class="save-btn" id="ac-gm-connect" style="background:var(--blue);color:#fff">Connect Gmail</button>':'<div class="count">Only an admin can connect the mailbox.</div>');
+    else if(!st.connected) h+='<div class="count" style="margin-bottom:8px">Not connected. Sign in to Google as <b>'+esc(st.mailbox_hint)+'</b> in this browser, then connect. HORIZON only gets read access: it never sends, labels or deletes mail.</div>'+'<a href="#/config/admin/gmail-connectors" class="save-btn" style="background:var(--blue);color:#fff;text-decoration:none;display:inline-block">Connect in CONFIG ▸ Admin ▸ Gmail connectors</a>';   // v28.552: connecting moved to admin
     else { var c=String(st.connected_at||'').split(' ');
       h+='<div>Connected: <b>'+esc(st.email)+'</b></div><div class="count">since '+esc(hzTrkDate(c[0])+(c[1]?' '+c[1]:''))+(st.connected_by?' by '+esc(String(st.connected_by).split('@')[0]+'@'):'')+' · read only</div>';
       if(st.last_error) h+='<div class="count" style="color:var(--neg)">'+esc(st.last_error)+'</div>';
-      if(st.can_write) h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
+      h+='<div class="count" style="margin-top:8px">Reconnect or disconnect in <a href="#/config/admin/gmail-connectors">CONFIG ▸ Admin ▸ Gmail connectors</a>.</div>'; }   // v28.552
     h+='</div></div>';
     var card=h; h=hTop; if(!st.connected)h+=card;
     if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+'<div class="sect-h" id="ac-mbx" style="margin-top:28px;cursor:pointer"><span>'+(AC_IN.mbx?'▾ ':'▸ ')+'</span>accounts@ mailbox, receipts not reaching accounts@, recent mail</div><div id="ac-mbxbody" style="'+(AC_IN.mbx?'':'display:none')+'">'+card+acFwHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@ <span class="tiny mut">last 2 months, newest 50</span></div>';
@@ -22369,7 +22400,7 @@
       SECTIONS.forEach(function(t){ if(['purchase-orders','reports','payments','config'].indexOf(t[0])<0)add('Supply ▸ '+tc(t[1]),'#/supply/'+t[0]); }); }catch(e){}
     var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
     Object.keys(SCL).forEach(function(k){ add('Supply ▸ Config ▸ '+SCL[k],'#/supply/config/'+k); });
-    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback'};
+    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
     var DML={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     Object.keys(DML).forEach(function(k){ add('Config ▸ Demand ▸ '+DML[k],'#/config/demand/'+k); });

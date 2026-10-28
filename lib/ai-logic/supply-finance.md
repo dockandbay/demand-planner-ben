@@ -109,7 +109,7 @@ fingerprints:
   supply/inject.html::runCmd: d0195899403f
   supply/inject.html::gotoPO: 3a92dc2c4023
   supply/inject.html::gotoPOFilter: 0775f59112be
-  supply/inject.html::hzCmdPages: 2e4edcdf3487
+  supply/inject.html::hzCmdPages: 9029a8d3a9e6
   supply/inject.html::fillErpFulfil: 6bfb8bb869f8
   server.mjs::/api/client/commission/orders/search: dff873219789
   server.mjs::/api/client/commission/orders/fulfil-tag: 237f8471b12a
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.550
+verified_version: v28.552
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -482,6 +482,7 @@ verified_version: v28.550
 
 ## ACCOUNTS (from v28.247)
 - ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. From v28.252 the grant is read access only for most writes: connecting or disconnecting Gmail and running the bank or back-date refresh need admin (403 accounts_admin_only otherwise); ACCOUNTS users may also upload bank statements, save or reset payee treatments, mark forwarding actioned or ignored, read new mail, switch automatic receipt attachment on or off and run it (v28.265 to v28.275), and only the accounts mailbox (GMAIL_MAILBOX_ACCOUNTS, default accounts@dockandbay.com) can be connected. If the permission lookup itself fails (a database error), the write gate, ACCOUNTS and the signed-in user's rights answer 503 "try again" rather than treating the user as having no rights (v28.297). (source: server.mjs :: accountsGate)
+- Gmail connectors (v28.552, Ben 28-Oct-26): HORIZON reads two mailboxes, read only (it never sends, labels or deletes mail): accounts@ (ACCOUNTS ▸ Reconcile receipts and bank lines) and ops@ (the ILG daily stock report for Manage 3PL ▸ UK). An admin connects, reconnects or disconnects each one in CONFIG ▸ Admin ▸ Gmail connectors, signed in to Google as that mailbox; HORIZON refuses a different Google account. One row per mailbox in planner.accounts_gmail (1 = accounts@, 2 = ops@, migration 398). (source: server.mjs :: /api/admin/gmail-connectors)
 - Payables (v28.283, Ben 12-Oct-26): contact groups are always expanded (click folds one), one Overdue and one Total due column instead of ageing buckets. Each bill shows a HORIZON check: the PO numbers linked to it or found in its number / reference (PO-xxxx), whether they are in HORIZON (In HORIZON / not linked / Not in HORIZON / No PO), HORIZON's PO value against the bill total (only when the currencies match; within 0.5% or 1) and HORIZON's balance due date against the bill's due date (within a day); when the amount paid equals the HORIZON PO value, the amount still due is flagged as extra on the bill. A recommendation per overdue supplier bill: write off (part-paid, under ACC_WRITEOFF_MAX = 200 in the bill currency still due), part-paid larger balance (check with the supplier), unpaid (pay or query); summary chips filter the list. Create supplier credit note (admins and ACCOUNTS users, drawer + confirm): re-reads the bill in Xero, refuses if it is not part-paid or the amount due is 200 or more, then creates an approved ACCPAYCREDIT for the amount due (account and tax of the bill's main line unless the person picks another, reference WRITE-OFF <bill>, optional reason on the line) and allocates it to the bill; logged once per bill (accounts_credit_log, mig 359), counted in Rules ▸ Metrics. (source: server.mjs :: accCnBill, /api/accounts/payables/credit-note; supply/inject.html :: acRenderPayables, acPayRec, acPayHz, acCnOpen, acCnPaint)
 - Payables: open Xero bills in UK and AU (status approved or awaiting approval, amount due above zero) from the hourly Xero bill cache, grouped by contact, org and currency, aged by due date into Not due, 1-30, 31-60, 61-90 and 90+ days overdue. Amounts stay in the bill currency (no GBP conversion). (source: server.mjs :: /api/accounts/payables)
 - A contact counts as a Supplier when any of its bills is linked to a HORIZON PO, or its Xero name ends " - <supplier code>" matching a HORIZON supplier code. The Suppliers pill shows only those; All contacts shows every open bill. (source: server.mjs :: /api/accounts/payables)

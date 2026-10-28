@@ -3817,6 +3817,14 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
 // Redirect URI = <origin>/api/accounts/gmail/callback (must be registered on the Google client for both sandbox and live).
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GMAIL_MAILBOX_HINT = process.env.GMAIL_MAILBOX_ACCOUNTS || 'accounts@dockandbay.com';
+// v28.552 (Ben 28-Oct-26: "add a second slot for ops@ ... move accounts@ and ops@ into admin, called GMAIL CONNECTORS"): one row per mailbox in
+// planner.accounts_gmail (id 1 = accounts@, id 2 = ops@; migration 398), same Google client, same read-only scope. Connected from
+// CONFIG ▸ Admin ▸ Gmail connectors. Every existing caller reads the accounts slot by default.
+const GMAIL_SLOTS = {
+  accounts: { id: 1, mailbox: GMAIL_MAILBOX_HINT, use: 'ACCOUNTS ▸ Reconcile (receipts, bank lines)' },
+  ops: { id: 2, mailbox: process.env.GMAIL_MAILBOX_OPS || 'ops@dockandbay.com', use: 'Manage 3PL ▸ UK (ILG daily stock report)' },
+};
+const gmailSlot = (k) => GMAIL_SLOTS[k] ? k : 'accounts';
 function gmailCfg() { const id = process.env.GMAIL_CLIENT_ID_ACCOUNTS, secret = process.env.GMAIL_CLIENT_SECRET_ACCOUNTS; return id && secret ? { id, secret } : null; }
 // v28.252: the seal key is GMAIL_SEAL_KEY (any long random string) when set, so rotating the OAuth client secret no longer bricks the stored
 // refresh token; rows sealed before it was set still open with the old client-secret derivation (gmailUnseal tries both).
@@ -3828,26 +3836,38 @@ function gmailUnseal(s) { const b = Buffer.from(String(s || '').replace(/^g1:/, 
   try { return open(false); } catch (e) { if (!process.env.GMAIL_SEAL_KEY) throw e; return open(true); } }
 function gmailRedirectUri(req) { if (process.env.GMAIL_REDIRECT_URI_ACCOUNTS) return process.env.GMAIL_REDIRECT_URI_ACCOUNTS;
   return (_reqHttps(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host) + '/api/accounts/gmail/callback'; }
-async function gmailRow() { try { return (await pool.query(`SELECT email, refresh_token_enc, scope, connected_by, to_char(connected_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') connected_at,
-  to_char(last_ok_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') last_ok_at, last_error FROM planner.accounts_gmail WHERE id = 1`)).rows[0] || null; }
+async function gmailRow(slot) { try { return (await pool.query(`SELECT email, refresh_token_enc, scope, connected_by, to_char(connected_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') connected_at,
+  to_char(last_ok_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') last_ok_at, last_error FROM planner.accounts_gmail WHERE id = $1`, [GMAIL_SLOTS[gmailSlot(slot)].id])).rows[0] || null; }
   catch (e) { if (/does not exist/.test(e.message)) return { missing: true }; throw e; } }
-let _gmailTok = null;   // { at, exp } access token cache (1 hour from Google)
-async function gmailAccessToken() {
-  if (_gmailTok && _gmailTok.exp > Date.now() + 60000) return _gmailTok.at;
-  const cfg = gmailCfg(), row = await gmailRow(); if (!cfg) throw new Error('Gmail client not set'); if (!row || row.missing) throw new Error('Gmail not connected');
+const _gmailToks = {};   // slot -> { at, exp } access token cache (1 hour from Google)
+async function gmailAccessToken(slot) { slot = gmailSlot(slot); const t = _gmailToks[slot];
+  if (t && t.exp > Date.now() + 60000) return t.at;
+  const cfg = gmailCfg(), row = await gmailRow(slot); if (!cfg) throw new Error('Gmail client not set'); if (!row || row.missing) throw new Error('Gmail (' + GMAIL_SLOTS[slot].mailbox + ') not connected');
   const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: cfg.id, client_secret: cfg.secret, refresh_token: gmailUnseal(row.refresh_token_enc), grant_type: 'refresh_token' }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) { const msg = 'Gmail token refresh failed: ' + (j.error_description || j.error || ('HTTP ' + r.status));
-    try { await pool.query('UPDATE planner.accounts_gmail SET last_error = $1 WHERE id = 1', [msg]); } catch (_) {} _gmailTok = null; throw new Error(msg); }
-  _gmailTok = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 }; return j.access_token;
+    try { await pool.query('UPDATE planner.accounts_gmail SET last_error = $1 WHERE id = $2', [msg, GMAIL_SLOTS[slot].id]); } catch (_) {} delete _gmailToks[slot]; throw new Error(msg); }
+  _gmailToks[slot] = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 }; return j.access_token;
 }
-async function gmailGet(path) {   // GET https://gmail.googleapis.com/gmail/v1/users/me/<path>
-  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken() } });
+async function gmailGet(path, slot) {   // GET https://gmail.googleapis.com/gmail/v1/users/me/<path>   (slot: 'accounts' default, 'ops')
+  slot = gmailSlot(slot);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken(slot) } });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { if (r.status === 401) _gmailTok = null; throw new Error('Gmail ' + r.status + ': ' + ((j.error && j.error.message) || 'request failed')); }
+  if (!r.ok) { if (r.status === 401) delete _gmailToks[slot]; throw new Error('Gmail ' + r.status + ': ' + ((j.error && j.error.message) || 'request failed')); }
   return j;
 }
+async function gmailSlotStatus(req, slot) { const row = await gmailRow(slot), S = GMAIL_SLOTS[slot];
+  return { slot, mailbox: S.mailbox, use: S.use, can_write: !!(req.me && (req.me.is_admin || req.me.live === false)), configured: !!gmailCfg(), migrated: !(row && row.missing),
+    connected: !!(row && !row.missing), email: row && row.email || null, connected_by: row && row.connected_by || null, connected_at: row && row.connected_at || null,
+    last_ok_at: row && row.last_ok_at || null, last_error: row && row.last_error || null }; }
+app.get('/api/admin/gmail-connectors', async (req, res) => {   // v28.552: CONFIG ▸ Admin ▸ Gmail connectors (admin only, like the page)
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); req.me = me;
+    const out = []; for (const k of Object.keys(GMAIL_SLOTS)) { try { out.push(await gmailSlotStatus(req, k)); } catch (e) { out.push({ slot: k, mailbox: GMAIL_SLOTS[k].mailbox, use: GMAIL_SLOTS[k].use, error: e.message }); } }
+    res.set('Cache-Control', 'no-store').json({ connectors: out, configured: !!gmailCfg(), redirect_uri: gmailRedirectUri(req) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/accounts/gmail/status', async (req, res) => {
   try { const row = await gmailRow();
     res.set('Cache-Control', 'no-store').json({ can_write: !!(req.me && (req.me.is_admin || req.me.live === false)), configured: !!gmailCfg(), migrated: !(row && row.missing), connected: !!(row && !row.missing), mailbox_hint: GMAIL_MAILBOX_HINT, redirect_uri: gmailRedirectUri(req),
@@ -3855,23 +3875,26 @@ app.get('/api/accounts/gmail/status', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Connect: signed state (HMAC, 10 minutes) bound to a short-lived cookie in this browser, so a forged callback cannot plant a mailbox.
+const GMAIL_BACK = '#/config/admin/gmail-connectors';   // v28.552: connect / disconnect live on CONFIG ▸ Admin ▸ Gmail connectors
 app.get('/api/accounts/gmail/connect', (req, res) => {
-  const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + '#/accounts/reconcile');
+  const slot = gmailSlot(req.query.slot);
+  if (slot !== 'accounts' && !(req.me && (req.me.is_admin || req.me.live === false))) return res.redirect('/?gmail=' + encodeURIComponent('Only an admin can connect a mailbox') + GMAIL_BACK);
+  const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + GMAIL_BACK);
   const nonce = crypto.randomBytes(16).toString('base64url'), ts = Date.now().toString(36);
-  const state = ts + '.' + nonce + '.' + crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + nonce).digest('base64url');
+  const state = ts + '.' + slot + '.' + nonce + '.' + crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + slot + '.' + nonce).digest('base64url');   // the slot is signed too
   res.append('Set-Cookie', 'hz_gstate=' + nonce + '; Path=/api/accounts/gmail; Max-Age=600; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : ''));
   res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({ client_id: cfg.id, redirect_uri: gmailRedirectUri(req), response_type: 'code', scope: GMAIL_SCOPE,
-    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', login_hint: GMAIL_MAILBOX_HINT, state }).toString());
+    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', login_hint: GMAIL_SLOTS[slot].mailbox, state }).toString());
 });
 app.get('/api/accounts/gmail/callback', async (req, res) => {
-  const back = (msg) => res.redirect('/?gmail=' + encodeURIComponent(msg) + '#/accounts/reconcile');
+  const back = (msg) => res.redirect('/?gmail=' + encodeURIComponent(msg) + GMAIL_BACK);
   try {
     const cfg = gmailCfg(); if (!cfg) return back('Gmail client not set on this server');
     if (req.query.error) return back('Google: ' + String(req.query.error).slice(0, 80));
-    const [ts, nonce, sig] = String(req.query.state || '').split('.');
+    const [ts, slotQ, nonce, sig] = String(req.query.state || '').split('.'), slot = gmailSlot(slotQ), S = GMAIL_SLOTS[slot];
     const ck = (/(?:^|;\s*)hz_gstate=([^;]+)/.exec(String(req.headers.cookie || '')) || [])[1];
-    const good = ts && nonce && sig && ck === nonce && Date.now() - parseInt(ts, 36) < 600000 &&
-      sig === crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + nonce).digest('base64url');   // plus the cookie match: an attacker has neither
+    const good = ts && slotQ === slot && nonce && sig && ck === nonce && Date.now() - parseInt(ts, 36) < 600000 &&
+      sig === crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + slot + '.' + nonce).digest('base64url');   // plus the cookie match: an attacker has neither
     res.append('Set-Cookie', 'hz_gstate=; Path=/api/accounts/gmail; Max-Age=0; HttpOnly; SameSite=Lax');
     if (!good) return back('Connect link expired or opened in another browser, click Connect again');
     const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -3882,18 +3905,20 @@ app.get('/api/accounts/gmail/callback', async (req, res) => {
     if (!String(j.scope || '').split(' ').includes(GMAIL_SCOPE)) return back('Read access to Gmail was not ticked, connect again and allow it');
     const p = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { authorization: 'Bearer ' + j.access_token } }).then(x => x.json()).catch(() => ({}));
     if (!p.emailAddress) return back('Could not read the mailbox address from Gmail');
-    if (String(p.emailAddress).toLowerCase() !== String(GMAIL_MAILBOX_HINT).toLowerCase()) return back('That Google account is ' + String(p.emailAddress).toLowerCase() + '. Sign in to Google as ' + GMAIL_MAILBOX_HINT + ' and connect again');   // v28.252: only the accounts mailbox
-    await pool.query(`INSERT INTO planner.accounts_gmail (id, email, refresh_token_enc, scope, connected_by, connected_at, last_ok_at, last_error) VALUES (1,$1,$2,$3,$4,now(),now(),null)
+    if (String(p.emailAddress).toLowerCase() !== String(S.mailbox).toLowerCase()) return back('That Google account is ' + String(p.emailAddress).toLowerCase() + '. Sign in to Google as ' + S.mailbox + ' and connect again');   // v28.252: only the accounts mailbox
+    await pool.query(`INSERT INTO planner.accounts_gmail (id, email, refresh_token_enc, scope, connected_by, connected_at, last_ok_at, last_error) VALUES ($5,$1,$2,$3,$4,now(),now(),null)
       ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, refresh_token_enc=EXCLUDED.refresh_token_enc, scope=EXCLUDED.scope, connected_by=EXCLUDED.connected_by, connected_at=now(), last_ok_at=now(), last_error=null`,
-      [p.emailAddress.toLowerCase(), gmailSeal(j.refresh_token), j.scope || GMAIL_SCOPE, (req.me && req.me.email) || authUser(req) || null]);
-    _gmailTok = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+      [p.emailAddress.toLowerCase(), gmailSeal(j.refresh_token), j.scope || GMAIL_SCOPE, (req.me && req.me.email) || authUser(req) || null, S.id]);
+    _gmailToks[slot] = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
     back('connected ' + p.emailAddress.toLowerCase());
   } catch (e) { log500(e); back(/does not exist/.test(e.message) ? 'Run migration 348 first' : ('Connect failed: ' + e.message)); }
 });
 app.post('/api/accounts/gmail/disconnect', async (req, res) => {
-  try { const row = await gmailRow(); if (!row || row.missing) return res.json({ ok: true });
+  try { const slot = gmailSlot((req.body && req.body.slot) || req.query.slot);
+    if (slot !== 'accounts' && !(req.me && (req.me.is_admin || req.me.live === false))) return res.status(403).json({ error: 'Only an admin can disconnect a mailbox' });
+    const row = await gmailRow(slot); if (!row || row.missing) return res.json({ ok: true });
     try { await fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: gmailUnseal(row.refresh_token_enc) }) }); } catch (_) {}
-    await pool.query('DELETE FROM planner.accounts_gmail WHERE id = 1'); _gmailTok = null; res.json({ ok: true });
+    await pool.query('DELETE FROM planner.accounts_gmail WHERE id = $1', [GMAIL_SLOTS[slot].id]); delete _gmailToks[slot]; res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Recent mail (read-only): subject, from, date, attachments, Stripe receipt link present. ?q= is a Gmail search (default last 30 days).
@@ -3929,10 +3954,11 @@ const ACC_LEARN_BUDGET_MS = Math.max(30000, Number(process.env.ACC_LEARN_BUDGET_
 const _accAMT = /(?:(£|€|\$|A\$|AU\$|US\$|GBP|USD|EUR|AUD)\s?)?(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!\d)/g;
 function accAmounts(txt) { const s = new Map(); let m; _accAMT.lastIndex = 0; while ((m = _accAMT.exec(String(txt || '')))) { const v = Number(m[2].replace(/,/g, '') + '.' + m[3]); if (v > 0) s.set(v.toFixed(2), m[1] || s.get(v.toFixed(2)) || ''); } return [...s]; }
 class AccBudget { constructor(ms) { this.t0 = Date.now(); this.ms = ms; } left() { return this.ms - (Date.now() - this.t0); } out() { return this.left() <= 0; } }
-async function gmailGetPaced(path, budget) {   // Gmail per-user quota: back off on 429 / quota 403 / 5xx (Retry-After when given); stop when the budget is gone
+async function gmailGetPaced(path, budget, slot) {   // Gmail per-user quota: back off on 429 / quota 403 / 5xx (Retry-After when given); stop when the budget is gone
+  slot = gmailSlot(slot);
   for (let a = 0; a < 12; a++) {
-    const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken() } });
-    if (r.status === 401) { _gmailTok = null; continue; }
+    const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken(slot) } });
+    if (r.status === 401) { delete _gmailToks[slot]; continue; }
     const j = await r.json().catch(() => ({}));
     if (r.status === 429 || r.status >= 500 || (r.status === 403 && /quota|rate/i.test(JSON.stringify(j)))) {
       const wait = Math.min(60000, (Number(r.headers.get('retry-after')) || 0) * 1000 || (r.status === 403 ? 20000 : 2000 * (a + 1)));
