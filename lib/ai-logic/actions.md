@@ -43,7 +43,7 @@ fingerprints:
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
   artifact_v16.7.html::renderExceptionsView: ba470f4fee51
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
-  artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
+  artifact_v16.7.html::renderDemandActionsView: 390207e4054f
   artifact_v16.7.html::daClientDetectors: 57025c59e925
   artifact_v16.7.html::daForecastTrend: f4be6d3e7fb3
   artifact_v16.7.html::daAnomalies: 74acb0249bec
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.562
+verified_version: v28.563
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -157,6 +157,7 @@ verified_version: v28.562
 - Product data comes from /api/supply/products-all.
 
 ## DEMAND Actions: server rules (category x market, UK/US/EU/AU)
+- Date, hide old and sort (v28.563, Ben): an action's date is the month it is about: the YYYY_MM in its key (alerts such as spikes, dives, negative units and zero gaps, and anomalies to review), else last full month (trading vs LY, A-player stock-outs, back-in-stock, forecast vs trend, sustained trends). Each card shows that month. "Hide older than 6 months" (ticked by default, remembered per browser) hides actions about a month before the 1st of the month 6 months ago (in Oct-26: before Apr-26) and says how many are hidden; status counts follow it. Sort: Severity then £ at risk (default), or Date newest first (then severity).
 - Sell-through target actions no longer fire: targets were decommissioned on 17-Aug-26, so the target map is empty.
 - Trading behind last year:
   - Compares the last complete month's units with the same month LY. Skipped if both are < 20.

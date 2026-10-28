@@ -1,3 +1,8 @@
+## v28.563 (28-Oct-26) DEMAND Actions: hide older than 6 months, sort by date
+- Ben: "tick box defaulted to yes to hide actions for things more than 6 months old. also a sort by date option which shows items recent to latest".
+- DEMAND ▸ Actions (and Insights): each card shows the month it is about (the month in the alert or anomaly, else last full month for trading / stock / trend items). "Hide older than 6 months" is ticked by default and shows how many are hidden (sandbox: 37 of 180). New Sort: Severity then £ at risk (as before) or Date, newest first. Both remembered per browser.
+- No new env vars, migrations or cron routes.
+
 ## v28.562 (28-Oct-26) Selling no forecast: hide SKUs without inventory
 - Ben: "have a tick box defaulted to true which is 'hide skus without inventory' so if 3pl has no inventory this hide on dtc and b2b, if fba has no inventory hide with no stock in fba".
 - DEMAND ▸ Exceptions ▸ Selling no forecast: "Hide SKUs without inventory" tick box, on by default (remembered per browser). DTC and B2B rows need 3PL stock in that market, FBA rows need FBA stock (the SOH columns). Sandbox: 195 SKUs → 116.

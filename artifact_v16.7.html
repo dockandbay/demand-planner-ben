@@ -5283,7 +5283,10 @@ var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=4, SB_A3=6, SB_LC=
 // 12-month regression on UK ILG actuals (Aug-25→Jul-26): 0.449 bags/DTC-unit (R²=0.95); size mix Med 33.5 / Lar 57.2 / XL 9.2.
 var SB_RATIO=0.449, SB_MMED=33.5, SB_MLAR=57.2, SB_MXLG=9.2;
 var TGT_CACHE=null;
-var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
+var _da={sec:'actions',mkt:'all',cat:'all',status:'open',hideOld:true,sort:'severity'};
+try{ if(localStorage.getItem('hz_da_hideold')==='0')_da.hideOld=false; if(localStorage.getItem('hz_da_sort')==='date')_da.sort='date'; }catch(e){}   // v28.563 remembered per browser
+// v28.563 (Ben): an action's date = the month it is about: the YYYY_MM in its key (alerts, anomalies), else last full month (trading, stock, trend items)
+function daItemMonth(x){ var m=/(\d{4})_(\d{2})/.exec(String(x&&x.key||'')); if(m)return m[1]+'-'+m[2]; var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); } // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
 // stock-outs, anomalies). INSIGHTS = trends to read (trading vs LY, divergent growth). Default → actions.
 var DA_INSIGHT_TYPES={'Trading behind last year':1,'Trading ahead of last year':1,'Forecast vs trend':1};
@@ -17428,15 +17431,17 @@ function renderDemandActionsView(body,opts){
     var MK=[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']];
     // restrict to the active section first; everything below (cats, counts, cards) works within it
     all=all.filter(function(x){ return daSection(x)===_da.sec; });
-    var cats=Array.from(new Set(all.map(function(x){return x.cat;}))).sort();
+    var _n0=new Date(), _cut=new Date(_n0.getFullYear(),_n0.getMonth()-6,1), cutM=_cut.getFullYear()+'-'+String(_cut.getMonth()+1).padStart(2,'0');   // older than 6 months = before this month 6 months ago
+    var nOld=all.filter(function(x){ return daItemMonth(x)<cutM; }).length; var visAll=_da.hideOld?all.filter(function(x){ return daItemMonth(x)>=cutM; }):all;   // all keeps the old ones, so unticking brings them back
+    var cats=Array.from(new Set(visAll.map(function(x){return x.cat;}))).sort();
     // status counts (across the market/category filter so the pill numbers reflect what you're looking at)
-    var byMkCat=all.filter(function(x){ return (_da.mkt==='all'||x.market===_da.mkt)&&(_da.cat==='all'||x.cat===_da.cat); });
+    var byMkCat=visAll.filter(function(x){ return (_da.mkt==='all'||x.market===_da.mkt)&&(_da.cat==='all'||x.cat===_da.cat); });
     var cnt=function(s){ return s==='all'?byMkCat.length:byMkCat.filter(function(x){return x.status===s;}).length; };
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
     var f=byMkCat.filter(function(x){ return _da.status==='all'?true:x.status===_da.status; });
     // re-sort after merging server + client items: severity (high→info) then £ impact desc
     var _rank={high:0,amber:1,info:2};
-    f.sort(function(a,b){ return (_rank[a.severity]-_rank[b.severity]) || ((b.impact||0)-(a.impact||0)) || (a.cat<b.cat?-1:1); });
+    f.sort(function(a,b){ return (_da.sort==='date'?(daItemMonth(a)<daItemMonth(b)?1:daItemMonth(a)>daItemMonth(b)?-1:0):0) || (_rank[a.severity]-_rank[b.severity]) || ((b.impact||0)-(a.impact||0)) || (a.cat<b.cat?-1:1); });   // v28.563 Date = newest month first
     var mpill=function(v,lbl){ return '<button class="dsub'+(_da.mkt===v?' active':'')+'" data-mk="'+v+'">'+lbl+'</button>'; };
     var spill=function(v,lbl){ return '<button class="dsub'+(_da.status===v?' active':'')+'" data-st="'+v+'">'+lbl+' ('+cnt(v)+')</button>'; };
     var bar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'
@@ -17444,7 +17449,9 @@ function renderDemandActionsView(body,opts){
       +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
         +'<span style="font-size:11px;font-weight:700;color:var(--faint)">MARKET</span>'+MK.map(function(m){return mpill(m[0],m[1]);}).join('')
         +'<span style="font-size:11px;font-weight:700;color:var(--faint);margin-left:8px">CATEGORY</span>'
-        +'<select id="da-cat" class="flt" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"><option value="all">All categories</option>'+cats.map(function(c){return '<option value="'+tHesc(c)+'"'+(_da.cat===c?' selected':'')+'>'+tHesc(c)+'</option>';}).join('')+'</select></div>';
+        +'<select id="da-cat" class="flt" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"><option value="all">All categories</option>'+cats.map(function(c){return '<option value="'+tHesc(c)+'"'+(_da.cat===c?' selected':'')+'>'+tHesc(c)+'</option>';}).join('')+'</select>'
+        +'<span style="font-size:11px;font-weight:700;color:var(--faint);margin-left:8px">SORT</span><select id="da-sort" class="flt" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"><option value="severity"'+(_da.sort==='severity'?' selected':'')+'>Severity, then £ at risk</option><option value="date"'+(_da.sort==='date'?' selected':'')+'>Date, newest first</option></select>'
+        +'<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);margin-left:8px;cursor:pointer" title="An action\'s date is the month it is about; trading and stock actions are about last month"><input type="checkbox" id="da-hideold"'+(_da.hideOld?' checked':'')+'>Hide older than 6 months'+(nOld?' <span style="color:var(--faint)">('+nOld+(_da.hideOld?' hidden':'')+')</span>':'')+'</label></div>';
     var cards=f.map(function(x){ var c=SC[x.severity]||'var(--faint)'; var resolved=(x.status!=='open');
       var btns = resolved
         ? '<button class="da-act" data-k="'+tHesc(x.key)+'" data-s="open" style="border:1px solid var(--blue);color:var(--blue);background:var(--card);border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">↺ Restore to open</button>'
@@ -17454,7 +17461,7 @@ function renderDemandActionsView(body,opts){
           +' <button class="da-act" data-k="'+tHesc(x.key)+'" data-s="dismissed" style="border:1px solid var(--line);background:var(--card);border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Dismiss</button>';
       var stTag = resolved ? ' <span style="font-size:10px;color:var(--faint)">· '+x.status+(x.status==='snoozed'?(x.snooze_until?' until '+x.snooze_until:' indefinitely'):'')+'</span>' : '';
       return '<div style="background:var(--card);border:1px solid var(--line);border-left:3px solid '+c+';border-radius:8px;padding:12px 16px 10px 18px;margin-bottom:10px;box-shadow:var(--shadow);animation:fadeUp .18s ease both;'+(resolved?'opacity:.72':'')+'">'
-        +'<div style="display:flex;align-items:baseline;gap:8px"><div style="font-weight:700;font-size:12.5px;flex:1"><span style="color:'+c+'">'+tHesc(x.type)+'</span> · '+tHesc(x.cat)+' '+tHesc(x.market)+stTag+'</div>'
+        +'<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:10.5px;font-weight:700;color:var(--muted);background:var(--hover);border-radius:9px;padding:1px 7px;white-space:nowrap" title="The month this is about">'+(function(m){ return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m.slice(5,7)-1]+'-'+m.slice(2,4); })(daItemMonth(x))+'</span><div style="font-weight:700;font-size:12.5px;flex:1"><span style="color:'+c+'">'+tHesc(x.type)+'</span> · '+tHesc(x.cat)+' '+tHesc(x.market)+stTag+'</div>'
         +(x.impact>0?'<div style="font-weight:700;font-size:12px;color:'+c+'" title="estimated £ at risk">'+daMoney(x.impact)+'</div>':'')+'</div>'
         +'<div style="font-size:12px;color:var(--muted);margin:2px 0 7px">'+tHesc(x.detail)
         +((x.sku||x.jump)?' <a href="#" class="da-jump"'+(x.sku?' data-sku="'+tHesc(x.sku)+'"':'')+(x.jump?' data-jump="'+JSON.stringify(x.jump).replace(/"/g,'&quot;')+'"':'')+' style="color:var(--blue);text-decoration:none;font-weight:600;white-space:nowrap">Open in Plan ↗</a>':'')
@@ -17476,6 +17483,8 @@ function renderDemandActionsView(body,opts){
     body.querySelectorAll('[data-mk]').forEach(function(b){ b.onclick=function(){ _da.mkt=b.dataset.mk; draw(all); }; });
     body.querySelectorAll('[data-st]').forEach(function(b){ b.onclick=function(){ _da.status=b.dataset.st; draw(all); }; });
     var cs=document.getElementById('da-cat'); if(cs)cs.onchange=function(){ _da.cat=cs.value; draw(all); };
+    var dso=document.getElementById('da-sort'); if(dso)dso.onchange=function(){ _da.sort=dso.value; try{ localStorage.setItem('hz_da_sort',_da.sort); }catch(e){} draw(all); };
+    var dho=document.getElementById('da-hideold'); if(dho)dho.onchange=function(){ _da.hideOld=dho.checked; try{ localStorage.setItem('hz_da_hideold',_da.hideOld?'1':'0'); }catch(e){} draw(all); };
     body.querySelectorAll('.da-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s,b.dataset.days).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
     body.querySelectorAll('.da-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault();
       if(b.dataset.sku) daJumpToPlan(b.dataset.sku);
