@@ -1,6 +1,6 @@
 # Deploy package v28.554 to v28.555 (28-Oct-26)
 
-**STATUS 28-Oct-26: PR https://github.com/dockandbayteam/dock-bay-demand-planner/pull/34 open, awaiting Ben's "merge 34".** Ben HEAD 23c914a7.
+**STATUS 28-Oct-26: MERGED 08:11Z (284c478b, squash) by Claude at Ben's request ("merge 34"); deploy run 40655077749 success; LIVE v28.555 (read back /api/version).** Was: PR https://github.com/dockandbayteam/dock-bay-demand-planner/pull/34. Ben HEAD 23c914a7.
 
 ## What changed
 - v28.554 ILG: Rebaseline button above the table, 2-line phone cards; HORIZON's Fulfil reads for the ILG compare pinned to the UK company (Fulfil holds stock per company); a rebaseline capped at 500 SKUs (Fulfil page size).
