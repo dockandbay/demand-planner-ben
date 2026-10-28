@@ -1,3 +1,10 @@
+## v28.536 (28-Oct-26) PO dates use the Flexport shipment linked on its shipment
+- Ben (PO-1892095 - PO475 ▸ Dates): Ship, Arrival / Delivery and Completion all showed 19-Oct-26 while the linked shipment's page shows completion 28-Dec-26.
+- Cause: the shipment is tied to Flexport only by its carrier ref (FLEX-4271937, named "PO-1892095" in Flexport). The shipment page matches on that ref (Flexport arrival 21-Dec + 7 = 28-Dec), but the PO date calc only matches on the PO's own Flexport reference or on the name, so the PO got no Flexport dates. It fell back to the shipment's hand-entered departure (19-Oct, which is Flexport's PACKING date) + the Direct to Client branch's 0 sea transit days.
+- Now a PO on a shipment whose carrier ref is a FLEX id, with no Flexport reference of its own, takes that id. Runs on every PO save, when a shipment's carrier ref is saved, and on every Fulfil refresh. On live: 417 POs get it; 372 already matched that same Flexport shipment (no change), 35 gain Flexport dates (14 open, incl. PO475 / 476 / 477, PO-57UKWK1, PO-57USLX1/2, PO-57USWK1), and 10 older P53 / P54 / P56 POs switch to the Flexport shipment their shipment page already uses.
+- PO475 after this: arrival 21-Dec-26 (Flexport), completion 28-Dec-26. Its Ship stays 19-Oct-26 while the shipment carries that hand-entered departure (Flexport estimates 07-Nov-26).
+- Sandbox dry run (rolled back): 366 POs.
+
 ## v28.535 (28-Oct-26) POs with a supplier name but no supplier link get linked (so supplier terms apply)
 - Ben (PO-1892095 - PO475 ▸ Payments): "no invoice due date but the balance defaults to the production end date ... this supplier has terms".
 - Cause: the PO has supplier_name "XR Textile" but no supplier_id, so none of XR Textile's terms (deposit / completion / balance %, credit days and type, production days) reach it; the balance due date falls back to the production end. On live 22 POs are like this (10 open, all Direct to Client POs created Aug to Sep, e.g. PO-1891958, PO-1903237, PO-1892097 - PO477); 12 have an exactly matching supplier.

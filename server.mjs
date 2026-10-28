@@ -6130,6 +6130,17 @@ async function poSupplierIdHeal(po) {
         AND ($1::text IS NULL OR p.po = $1) RETURNING p.po`, [po || null])).rows.map(r => r.po); }
   catch (e) { console.error('[supplier heal]', e && e.message); return []; }
 }
+// v28.536 (Ben 28-Oct-26, PO-1892095 - PO475 ▸ Dates showed 19-Oct for ship, arrival and completion while its shipment page shows completion
+// 28-Dec): the PO date calc (v_po_finance) finds the Flexport shipment by the PO's flexport_reference or by name, but this PO's shipment is linked to
+// Flexport only through its carrier ref (FLEX-4271937, Flexport name "PO-1892095"), so the PO got no Flexport dates and fell back to departure + the
+// Direct to Client branch's 0 transit days. A PO on a shipment whose carrier ref is a FLEX id, with no flexport_reference of its own, takes that id.
+// Runs on every PO / shipment save and every Fulfil refresh; po limits it to one PO. Returns the POs fixed.
+async function poFlexRefHeal(po) {
+  try { return (await pool.query(`UPDATE planner.purchase_orders p SET flexport_reference = upper(trim(sh.carrier_ref)) FROM planner.shipments sh
+      WHERE sh.shipment_ref = p.shipment_ref AND trim(coalesce(sh.carrier_ref,'')) ~* '^FLEX-[0-9]+$' AND coalesce(trim(p.flexport_reference),'') = ''
+        AND ($1::text IS NULL OR p.po = $1) RETURNING p.po`, [po || null])).rows.map(r => r.po); }
+  catch (e) { console.error('[flexport heal]', e && e.message); return []; }
+}
 async function fulfilImportPOs() { if (_fulfilImportBusy) return _fulfilImportBusy; _fulfilImportBusy = _fulfilImportPOsRun().finally(() => { _fulfilImportBusy = null; }); return _fulfilImportBusy; }
 async function _fulfilImportPOsRun() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
@@ -6168,7 +6179,8 @@ async function _fulfilImportPOsRun() {
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
   // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
   let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p._po).map(p => String(p._po)).concat([..._gPos]); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
-  const _supHealed = await poSupplierIdHeal(); if (_supHealed.length) { console.log('[supplier heal] linked supplier on ' + _supHealed.join(', ')); try { invalidateSupplyCaches('po'); } catch (_) {} }   // v28.535
+  const _fxHealed = await poFlexRefHeal(); if (_fxHealed.length) console.log('[flexport heal] flexport_reference set on ' + _fxHealed.join(', '));   // v28.536
+  const _supHealed = await poSupplierIdHeal(); if (_supHealed.length || _fxHealed.length) { console.log('[supplier heal] linked supplier on ' + _supHealed.join(', ')); try { invalidateSupplyCaches('po'); } catch (_) {} }   // v28.535
   let erp = null; if (!list.truncated) { try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; } }
   return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated, erp_qty: erp };
 }
@@ -23263,6 +23275,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     `SELECT ${_trackKeys.map(k => `${k}::text AS ${k}`).join(',')} FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0] || {}; } catch (e) {} }
   const _trackBy = authUser(req) || null;
   await poSupplierIdHeal(req.params.po);   // v28.535: a missing supplier link means no supplier terms on this PO
+  await poFlexRefHeal(req.params.po);   // v28.536: Flexport dates through the shipment's FLEX carrier ref
   if (body.end_production_overide && /^\d{4}-\d{2}-\d{2}/.test(String(body.end_production_overide))) {   // v28.532: setting the end date to the supplier's pending date = done
     try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$3, applied_at=now() WHERE po=$1 AND kind='completion_date' AND status='pending' AND left(coalesce(value,''),10)=$2`,
       [req.params.po, String(body.end_production_overide).slice(0, 10), (_trackBy || 'internal') + ' (end date set to the same date)']); } catch (_) {} }
@@ -24206,6 +24219,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now() RETURNING (xmax = 0) AS inserted`, vals);
     if (up.rows[0] && up.rows[0].inserted) await noteShipmentCreated(pool, ref, authUser(req));
+    if ('carrier_ref' in (req.body || {})) await poFlexRefHeal();   // v28.536: a FLEX carrier ref reaches the POs on board (only those with none of their own)
     // status → Shipping advances the POs on board (same as the "→ set shipping" action / supplier portal)
     if ((req.body || {}).status === 'Shipping') await propagateShippingToPOs(ref);
     // Step 3: a shipment date change cascades to every PO aboard (they inherit the master's effective dates).
