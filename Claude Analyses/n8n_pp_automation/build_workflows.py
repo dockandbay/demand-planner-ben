@@ -119,13 +119,37 @@ A_DECIDE = r"""
 const S = $('Settings').first().json;
 const channels = {};
 for (const c of $('Read channels').all()) channels[c.json.id] = c.json;
+const whs = {};
+for (const w of $('Read warehouses').all()) whs[w.json.id] = w.json.name;
 const excBySale = {};
 for (const e of $('Read open exceptions').all()) {
   if (!e.json.sale) continue;
-  (excBySale[e.json.sale] = excBySale[e.json.sale] || []).push(String(e.json.log || e.json.rec_name || '').slice(0, 160));
+  (excBySale[e.json.sale] = excBySale[e.json.sale] || []).push(String(e.json.log || e.json.rec_name || '').slice(0, 200));
 }
+const host = S.baseUrl.replace(/\/api\/v2\/?$/, '');
 const now = Date.now();
 const graceMs = S.graceMinutes * 60000;
+// Amazon (or other marketplace) ships these, so a stuck order only affects records, not the customer.
+const marketplaceShips = name => /^Amazon (FBA|MCF)/i.test(name || '');
+
+function triage(p) {
+  const ex = p.exception;
+  const mm = ex.match(/total mismatch found (\d+(?:\.\d+)?) instead of (\d+(?:\.\d+)?)/i);
+  const sku = (ex.match(/Product ([^(\s]+)\(/) || [])[1];
+  let action;
+  if (mm && Math.abs(Number(mm[2]) - Number(mm[1])) <= S.roundingTolerance) {
+    action = `Rounding difference (${mm[1]} vs ${mm[2]}). Open the order, accept or adjust the total, then retry.`;
+    return { priority: 3, action };
+  }
+  if (mm) action = `Tax missing at import (${mm[1]} found, Amazon total ${mm[2]}). Open the order, retry the import; if it fails again add it to the Fulfil support ticket.`;
+  else if (/Product NULL/i.test(ex)) action = 'A line has no SKU on the channel order. Map the line to a product in Fulfil, then retry.';
+  else if (sku) action = `SKU ${sku} does not exist in Fulfil. Create or map the product, then retry the order.`;
+  else if (p.reason === 'confirmed, no shipment') action = 'Confirmed but no shipment was created. Check stock and warehouse, then process the order.';
+  else if (p.reason === 'draft' || p.reason === 'quotation') action = `Order is stuck in ${p.reason}. Open it and confirm/process it${ex ? ' after fixing the exception' : ''}.`;
+  else action = 'Open the order, read the exception, fix and retry.';
+  return { priority: p.marketplace ? 2 : 1, action };
+}
+
 const problems = [];
 for (const it of $('Read recent orders').all()) {
   const s = it.json;
@@ -138,31 +162,55 @@ for (const it of $('Read recent orders').all()) {
   else if (s.state === 'confirmed' && !(s.shipments || []).length) reason = 'confirmed, no shipment';
   if (excBySale[s.id] && !reason) reason = 'open exception';
   if (!reason) continue;
-  problems.push({ id: s.id, number: s.number || '', reference: s.reference || '', channel: ch.name || String(s.channel),
-                  state: s.state, reason, created: new Date(created).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
-                  exception: (excBySale[s.id] || []).join(' | ') });
+  const warehouse = whs[s.warehouse] || '';
+  const p = { id: s.id, number: s.number || '', reference: s.reference || '', channel: ch.name || String(s.channel),
+              warehouse, marketplace: marketplaceShips(warehouse), state: s.state, reason,
+              created: new Date(created).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+              exception: (excBySale[s.id] || []).join(' | '), link: `${host}/client/#/model/sale.sale/${s.id}` };
+  Object.assign(p, triage(p));
+  problems.push(p);
 }
-// Email only problems not already emailed (kept in workflow static data; resolved ones drop out).
+// Email when there is anything NEW (kept in workflow static data; resolved ones drop out). The email lists
+// everything outstanding, with new ones flagged, so one email is the full to-do list.
 const store = $getWorkflowStaticData('global');
 store.seen = store.seen || {};
 const current = {};
-const fresh = [];
+let fresh = 0;
 for (const p of problems) {
+  p.isNew = !store.seen[p.id];
+  if (p.isNew) fresh++;
   current[p.id] = store.seen[p.id] || new Date().toISOString();
-  if (!store.seen[p.id]) fresh.push(p);
 }
 store.seen = current;
-return [{ json: { tenant: S.tenant, fresh, outstanding: problems.length, sendEmail: fresh.length > 0 || S.emailWhenClean,
-                  scanned: $('Read recent orders').all().length } }];
+problems.sort((a, b) => a.priority - b.priority || (a.created < b.created ? -1 : 1));
+return [{ json: { tenant: S.tenant, problems, fresh, outstanding: problems.length,
+                  sendEmail: fresh > 0 || S.emailWhenClean, scanned: $('Read recent orders').all().length } }];
 """
 
 A_HTML = r"""
 const d = $json;
+const S = $('Settings').first().json;
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-const rows = d.fresh.map(p => `<tr><td>${esc(p.number)}</td><td>${esc(p.reference)}</td><td>${esc(p.channel)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.exception)}</td></tr>`).join('');
-const html = `<p><b>${d.fresh.length} new order(s) not processed</b> (${d.outstanding} outstanding in total, tenant ${esc(d.tenant)}). Orders older than the grace period on integrated channels that are draft, quotation, failed, confirmed without a shipment, or carrying an open exception.</p>
-<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:12px"><tr><th>Order</th><th>Reference</th><th>Channel</th><th>Problem</th><th>Created</th><th>Exception</th></tr>${rows}</table>`;
-return [{ json: { subject: `Orders not processed (${d.tenant}): ${d.fresh.length} new, ${d.outstanding} outstanding`, html } }];
+const P = {
+  1: { label: 'URGENT: customer waiting', colour: '#c62828', note: 'Orders we ship ourselves (3PL). They cannot ship until fixed. Fix today.' },
+  2: { label: 'ACTION TODAY: records only', colour: '#ef6c00', note: 'Amazon has shipped or will ship these. Fix so Fulfil stock, invoices and reporting are right.' },
+  3: { label: 'LOW: minor', colour: '#757575', note: 'Small rounding differences. Fix when convenient.' },
+};
+const counts = { 1: 0, 2: 0, 3: 0 };
+d.problems.forEach(p => counts[p.priority]++);
+const th = 'style="text-align:left;background:#f2f2f2"';
+let body = '';
+for (const k of [1, 2, 3]) {
+  const list = d.problems.filter(p => p.priority === k);
+  if (!list.length) continue;
+  const rows = list.map(p => `<tr><td><a href="${p.link}">${esc(p.reference || p.number || p.id)}</a>${p.isNew ? ' <b style="color:#c62828">NEW</b>' : ''}</td><td>${esc(p.channel)}</td><td>${esc(p.warehouse)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.action)}</td><td style="color:#666">${esc(p.exception)}</td></tr>`).join('');
+  body += `<h3 style="color:${P[k].colour};margin:18px 0 4px">${P[k].label} (${list.length})</h3><p style="margin:0 0 6px">${P[k].note}</p>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:12px"><tr><th ${th}>Order (opens Fulfil)</th><th ${th}>Channel</th><th ${th}>Ships from</th><th ${th}>Problem</th><th ${th}>Created</th><th ${th}>Action</th><th ${th}>Fulfil message</th></tr>${rows}</table>`;
+}
+const pre = S.approvalMode ? '<p style="background:#fff3cd;padding:6px"><b>PREVIEW for approval</b>: sent to Ben only. Once approved it goes to the ops team.</p>' : '';
+const html = `<div style="font-family:Arial;font-size:13px">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}<p style="color:#666;font-size:11px">Hourly check, emails only when something new appears. Tenant ${esc(d.tenant)}.</p></div>`;
+const subject = `${counts[1] ? 'URGENT ' : ''}Orders need action: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low (${d.fresh} new)`;
+return [{ json: { subject: (S.approvalMode ? '[PREVIEW] ' : '') + subject, html } }];
 """
 
 A_SETTINGS = {
@@ -173,18 +221,24 @@ A_SETTINGS = {
     "integratedSources": ["cms_shopify", "amazon_mws", "faire", "tiktok"],
     "alertEmailTo": "ben@dockandbay.com",
     "emailWhenClean": False,
+    "roundingTolerance": 0.10,
+    "approvalMode": True,
 }
 
 A_SINCE = "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')]%s]) }}"
 
 
+A_CRON_NAME, A_CRON = "Hourly (:52)", "52 * * * *"
+
+
 def build_a():
     nodes = [
         sticky("About", "## Order health check (hourly)\nRead only. Flags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent).\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.", -40, -300),
-        schedule("Hourly (:52)", "52 * * * *", 0, 0),
+        schedule(A_CRON_NAME, A_CRON, 0, 0),
         settings(A_SETTINGS, 220, 0),
         fulfil_get("Read channels", "sale.channel", "name,source", None, 440, 0),
-        fulfil_get("Read recent orders", "sale.sale", "number,reference,state,channel,create_date,shipments",
+        fulfil_get("Read warehouses", "stock.location", "name", "={{ JSON.stringify([[\"type\",\"=\",\"warehouse\"]]) }}", 550, 160),
+        fulfil_get("Read recent orders", "sale.sale", "number,reference,state,channel,warehouse,create_date,shipments",
                    A_SINCE % ",[\"state\",\"in\",[\"draft\",\"quotation\",\"failed\",\"confirmed\"]]", 660, 0),
         fulfil_get("Read open exceptions", "channel.exception", "sale,log",
                    A_SINCE % ",[\"is_resolved\",\"=\",false]", 880, 0),
@@ -193,7 +247,7 @@ def build_a():
         code("Build email", A_HTML, 1540, -100),
         gmail("Email unprocessed orders", "={{ $('Settings').first().json.alertEmailTo }}", "={{ $json.subject }}", "={{ $json.html }}", 1760, -100),
     ]
-    conns = merge(chain("Hourly (:52)", "Settings", "Read channels", "Read recent orders", "Read open exceptions",
+    conns = merge(chain(A_CRON_NAME, "Settings", "Read channels", "Read warehouses", "Read recent orders", "Read open exceptions",
                         "Find problems", "New problems?"),
                   if_branches("New problems?", "Build email"), chain("Build email", "Email unprocessed orders"))
     return {"name": "Ops | Order health check (hourly) [SANDBOX]", "nodes": nodes, "connections": conns,
@@ -377,7 +431,13 @@ if __name__ == "__main__":
     import sys
     b = to_prod(build_b(), B_PROD_SETTINGS) if "--prod-b" in sys.argv else build_b()
     # A live on PROD (Ben 28-Oct-26): read only, emails new stuck/failed orders
-    a = to_prod(build_a(), {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2"}) if "--prod-a" in sys.argv else build_a()
+    if "--cron-a" in sys.argv:  # one-off run time for a preview, e.g. --cron-a "7 3 * * *"
+        A_CRON = sys.argv[sys.argv.index("--cron-a") + 1]
+    a_prod = {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2"}
+    if "--approved-a" in sys.argv:  # Ben approved the email format: send to the ops team
+        a_prod.update({"approvalMode": False,
+                       "alertEmailTo": "ben@dockandbay.com, support@dockandbay.com, alexandria@dockandbay.com, sarah@dockandbay.com"})
+    a = to_prod(build_a(), a_prod) if "--prod-a" in sys.argv else build_a()
     for tag, wf in (("A", a), ("B", b)):
         json.dump(wf, open(os.path.join(HERE, f"workflow_{tag}.json"), "w"), indent=1)
         print(tag, wf["name"], len(wf["nodes"]), "nodes")
