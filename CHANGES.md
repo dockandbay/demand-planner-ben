@@ -1,3 +1,8 @@
+## v28.567 (29-Oct-26) Ask Claude button retired (hidden)
+- Ben: "I want to retire ask Claude button. Hide it."
+- The orange "Ask" button in the top bar is hidden; it was the only way to open the Ask Claude drawer. The drawer code, /api/assistant routes, saved conversations and the MCP connector are untouched, so it can be brought back by removing display:none on #ask-claude-btn.
+- No new env vars, migrations or cron routes.
+
 ## v28.565 (28-Oct-26) Manage 3PL ▸ UK (ILG): tick boxes and SKUs left aligned, SKU column 1.5x
 - Ben: "left align the tick boxes and skus and extend sku column by 50%".
 - The page-wide table rules (fixed layout, cells right aligned) gave all 9 columns 184px and pushed the tick box to the right of its column. The table now sets its own widths: tick column 36px (box at the left), SKU column 276px (1.5x), the rest share the remainder. "not in Fulfil" / "not in report" sit on a second line under the SKU, so no SKU is cut off (sandbox: 0 of 568 rows clipped, was 20).
