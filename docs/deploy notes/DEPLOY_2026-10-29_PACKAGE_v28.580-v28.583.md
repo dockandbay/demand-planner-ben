@@ -1,6 +1,6 @@
 # Deploy package v28.580-v28.583 (29-Oct-26)
 
-Ben source HEAD: 0f2a9eae (0f2a9eae946d6455dda0a344a3262b9e7a426b1d). Live before this deploy: /api/version = v28.579 (read 29-Oct-26). Status: PENDING PR (migration 401 to run on live first)
+Ben source HEAD: 0f2a9eae (0f2a9eae946d6455dda0a344a3262b9e7a426b1d). Live before this deploy: /api/version = v28.579 (read 29-Oct-26). Status: LIVE (migration 401 run on live by Ben and read back; PR #47 merged ef8f4fae; deploy run 40852158737 green; /api/version read back v28.583 29-Oct-26)
 
 ## What changed
 - v28.580: HOME (click the HORIZON logo, #/home): Needs you, To do, most visited pages, status cards by area, recent supply changes. Personal To do list: top bar drawer next to Inbox (add, edit, delete, done). New API GET/POST /api/todos, PATCH/DELETE /api/todos/:id (scoped to the caller; exempt from the edit-rights gate), GET /api/home.
