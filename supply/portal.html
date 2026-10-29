@@ -73,6 +73,51 @@
     .pv-btn, #supply-root button:not(.lnk-btn), #supply-root select, #supply-root input:not([type=checkbox]):not([type=radio]):not([type=file]), .pv-card input, #pv-confirm-box button{min-height:40px;box-sizing:border-box}
     #supply-root .lnk-btn{padding:10px 4px !important}
   }
+
+  /* ── v28.573 (Ben 29-Oct-26: "supplier portal should have side navigation like HORIZON", left, picked mockup): left rail on desktop
+     (>= 900px), the HORIZON #hz-leftrail look. Built from the portal's own section pills + level-2 tabs (a click presses the real one), so
+     routing, badges and EN/中文 labels stay one source. Phones keep the top menu. Off with ?rail=0. */
+  #pp-rail{display:none}
+  @media (min-width:900px){
+    body.pp-rail #pp-rail{display:flex;position:fixed;top:0;left:0;bottom:0;width:240px;background:#0d1626;color:#93a1b8;flex-direction:column;z-index:1000;border-right:1px solid rgba(255,255,255,.08)}
+    body.pp-rail header.pv-top, body.pp-rail #pv-wrap{margin-left:240px}
+    body.pp-rail header.pv-top .pv-brand, body.pp-rail header.pv-top .pv-div, body.pp-rail header.pv-top h1, body.pp-rail header.pv-top .sup, body.pp-rail header.pv-top #pp-secs{display:none!important}
+    body.pp-rail header.pv-top{min-height:52px;box-sizing:border-box}
+    body.pp-rail #supply-root #pp-tabs{display:none!important}
+    body.pp-rail.pp-rail-min #pp-rail{width:76px}
+    body.pp-rail.pp-rail-min header.pv-top, body.pp-rail.pp-rail-min #pv-wrap{margin-left:76px}
+  }
+  #pp-rail .rl-brand{display:flex;align-items:center;gap:9px;height:52px;padding:0 16px;flex:0 0 auto;border-bottom:1px solid rgba(255,255,255,.08);color:#fff}
+  #pp-rail .rl-brand .nm{display:grid;line-height:1.15;min-width:0}
+  #pp-rail .rl-brand .nm b{font-weight:800;font-size:13px;letter-spacing:.13em}
+  #pp-rail .rl-brand .nm span{font-size:12px;font-weight:600;color:#c9d3e2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #pp-rail .rl-list{flex:1;overflow-y:auto;padding:10px}
+  #pp-rail .rl1{display:flex;align-items:center;gap:11px;width:100%;padding:10px 11px;border:0;background:none;color:#93a1b8;font:inherit;font-size:12.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:9px;cursor:pointer;text-align:left;margin-top:2px;position:relative}
+  #pp-rail .rl1 svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+  #pp-rail .rl1:hover,#pp-rail .rl2:hover{color:#fff;background:rgba(255,255,255,.06)}
+  #pp-rail .rl1.on{color:#fff;background:rgba(255,255,255,.10)}
+  #pp-rail .rl1.on:before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:#5aa6ea}
+  #pp-rail .rl1 .lab{flex:1;min-width:0}
+  #pp-rail .rl1 .lab .pp-zh,#pp-rail .rl2 .pp-zh{margin-left:4px;opacity:.75;text-transform:none;letter-spacing:0}
+  #pp-rail .rl2wrap{padding:2px 0 5px 12px;margin:1px 0 3px 16px;position:relative}
+  #pp-rail .rl2wrap:before{content:"";position:absolute;left:2px;top:0;bottom:6px;width:1px;background:rgba(255,255,255,.10)}
+  #pp-rail .rl2{display:block;width:100%;text-align:left;border:0;background:none;color:#93a1b8;font:inherit;font-size:12.5px;font-weight:600;padding:7px 34px 7px 10px;border-radius:7px;cursor:pointer;position:relative}
+  #pp-rail .rl2.on{color:#fff;font-weight:700}
+  #pp-rail .rl2.on:before{content:"";position:absolute;left:-11px;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#5aa6ea}
+  #pp-rail .rl-badge{position:absolute;right:8px;top:50%;transform:translateY(-50%);min-width:16px;height:16px;line-height:16px;padding:0 4px;border-radius:8px;background:#ef4444;color:#fff;font-size:9.5px;font-weight:800;text-align:center;letter-spacing:0;pointer-events:none}
+  #pp-rail .rl-foot{flex:0 0 auto;border-top:1px solid rgba(255,255,255,.08);padding:11px 14px;display:flex;align-items:center;gap:9px;font-size:11.5px}
+  #pp-rail .rl-ver{background:rgba(245,184,61,.16);color:#f5b83d;font-size:9px;font-weight:800;letter-spacing:.03em;padding:3px 7px;border-radius:6px;white-space:nowrap}
+  #pp-rail .rl-min{margin-left:auto;background:none;border:0;color:#93a1b8;font-size:15px;line-height:1;cursor:pointer;width:28px;height:28px;border-radius:7px;display:grid;place-items:center}
+  #pp-rail .rl-min:hover{color:#fff;background:rgba(255,255,255,.08)}
+  #pp-rail button:focus-visible{outline:2px solid #5aa6ea;outline-offset:1px}
+  body.pp-rail-min #pp-rail .rl-brand{padding:0;justify-content:center}
+  body.pp-rail-min #pp-rail .rl-brand .nm, body.pp-rail-min #pp-rail .rl2wrap, body.pp-rail-min #pp-rail .rl-ver{display:none}
+  body.pp-rail-min #pp-rail .rl1{flex-direction:column;gap:3px;padding:9px 2px;border-radius:9px}
+  body.pp-rail-min #pp-rail .rl1 .lab{flex:0 0 auto;font-size:8.5px;text-align:center;line-height:1.1}
+  body.pp-rail-min #pp-rail .rl1 .lab .pp-zh{display:block;margin:0}
+  body.pp-rail-min #pp-rail .rl1 .rl-badge{top:6px;right:6px;transform:none}
+  body.pp-rail-min #pp-rail .rl-foot{justify-content:center;padding:11px 6px}
+  body.pp-rail-min #pp-rail .rl-min{margin:0}
 </style>
 </head>
 <body>
@@ -185,7 +230,53 @@
         var sp=top.querySelector('.sp'); if(sp&&sp.nextSibling)top.insertBefore(lg,sp.nextSibling); else top.appendChild(lg);
         lg.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ window.DBPortalView.setLang(b.dataset.lang); }; });
         var cur=(window.ppGetLang&&window.ppGetLang())||'en'; if(cur==='zh')window.DBPortalView.setLang('zh'); else lg.querySelector('[data-lang="en"]').classList.add('on'); } }
+      ppRail(sup);   // v28.573: HORIZON-style left rail on desktop
     }).catch(function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; });
+  }
+
+  // ── v28.573 (Ben 29-Oct-26): HORIZON-style left rail for the supplier portal (desktop). It mirrors #pp-secs (level 1) and the active
+  // section's #pp-tabs (level 2) and presses the real pill / tab on click, so portal-view.js stays the only router. Rebuilt whenever those
+  // rows change (active state, badges, bilingual labels, host tabs added late). Collapsed state is per browser. ?rail=0 turns it off.
+  function ppRail(sup){
+    try{ if(/[?&]rail=0\b/.test(location.search))return; }catch(e){}
+    var ICO={orders:'<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
+      custom:'<path d="M12 3l2.4 5.6L20 11l-5.6 2.4L12 19l-2.4-5.6L4 11l5.6-2.4z"/>',
+      finance:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M7 9v.01M17 15v.01"/>',
+      samples:'<path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/>',
+      product:'<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.4"/>',
+      profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+      messages:'<path d="M4 5h16v11H8l-4 4z"/>'};
+    var MIN=false; try{ MIN=localStorage.getItem('pp-rail-min')==='1'; }catch(e){}
+    var rail=document.createElement('nav'); rail.id='pp-rail'; rail.setAttribute('aria-label','Main menu'); rail.setAttribute('data-i18n-skip','1');   // labels arrive already bilingual; keep the zh sweep out
+    rail.innerHTML='<div class="rl-brand"><svg width="28" height="19" viewBox="3 7 54 35" aria-hidden="true"><circle cx="30" cy="27" r="18" fill="#f5b83d"/><rect x="3" y="27" width="54" height="15" fill="#0d1626"/><path d="M8 31h44M12 35h36M17 39h26" stroke="#5aa6ea" stroke-width="2"/></svg><span class="nm"><b>HORIZON</b><span>'+esc(sup)+'</span></span></div>'
+      +'<div class="rl-list"></div><div class="rl-foot"><span class="rl-ver" title="app version">__APP_VERSION__</span><button type="button" class="rl-min" title="Shrink or expand the menu" aria-label="Shrink or expand the menu"></button></div>';
+    document.body.appendChild(rail); document.body.classList.add('pp-rail');
+    try{ var sbx=document.getElementById('sbx-banner'); if(sbx)rail.style.top=sbx.offsetHeight+'px'; }catch(e){}   // sandbox-only fixed banner sits above the rail document.body.classList.toggle('pp-rail-min',MIN);
+    var list=rail.querySelector('.rl-list'), mb=rail.querySelector('.rl-min');
+    function setMin(v){ MIN=v; document.body.classList.toggle('pp-rail-min',v); mb.innerHTML=v?'&raquo;':'&laquo;'; try{ localStorage.setItem('pp-rail-min',v?'1':'0'); }catch(e){} }
+    setMin(MIN); mb.onclick=function(){ setMin(!MIN); };
+    function lab(el,badgeSel){ var c=el.cloneNode(true); c.querySelectorAll(badgeSel).forEach(function(b){ b.remove(); }); c.querySelectorAll('[id]').forEach(function(x){ x.removeAttribute('id'); }); return c.innerHTML; }
+    function badge(el,sel){ var b=el.querySelector(sel); if(!b||b.classList.contains('done'))return ''; var n=parseInt(b.textContent,10); return n>0?'<span class="rl-badge">'+n+'</span>':''; }
+    function shown(t){ return !t.hidden&&t.style.display!=='none'; }
+    var pending=false, lastH=null;
+    function build(){ pending=false; var secs=document.querySelectorAll('#pp-secs .pp-sec'), tabs=document.getElementById('pp-tabs'); if(!secs.length)return;
+      var h=''; secs.forEach(function(sb,i){ var sec=sb.dataset.sec, on=sb.classList.contains('active');
+        h+='<button type="button" class="rl1'+(on?' on':'')+'" data-rs="'+i+'"'+(on?' aria-current="true"':'')+' title="'+esc(sb.textContent.replace(/\d+$/,''))+'"><svg viewBox="0 0 24 24" aria-hidden="true">'+(ICO[sec]||ICO.orders)+'</svg><span class="lab">'+lab(sb,'.pp-sec-n')+'</span>'+badge(sb,'.pp-sec-n')+'</button>';
+        if(on&&tabs){ var ts=[].slice.call(tabs.querySelectorAll('.rtab[data-sec="'+sec+'"]')).filter(shown); if(ts.length>1){ h+='<div class="rl2wrap">';
+          ts.forEach(function(t){ var a=t.classList.contains('active'); h+='<button type="button" class="rl2'+(a?' on':'')+'" data-rt="'+esc(t.dataset.pt)+'"'+(a?' aria-current="page"':'')+'>'+lab(t,'.ex-badge')+badge(t,'.ex-badge')+'</button>'; });
+          h+='</div>'; } } });
+      if(h===lastH)return; lastH=h; list.innerHTML=h; }   // write only when OUR output changes: comparing with list.innerHTML looped against the zh sweep and froze the tab
+    function later(){ if(pending)return; pending=true; setTimeout(build,40); }   // a timer, not requestAnimationFrame (paused in background tabs)
+    list.addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b)return;
+      if(b.dataset.rs!=null){ var sb=document.querySelectorAll('#pp-secs .pp-sec')[+b.dataset.rs]; if(sb)sb.click(); }
+      else if(b.dataset.rt){ var t=document.querySelector('#pp-tabs .rtab[data-pt="'+b.dataset.rt+'"]'); if(t)t.click(); }
+      later(); });
+    // portal-view.js re-renders and replaces #pp-secs / #pp-tabs, so watch the page and rebuild only when a change touches those rows
+    function hits(n){ if(!n)return false; if(n.nodeType!==1)n=n.parentElement; if(!n)return false; return !!(n.closest&&n.closest('#pp-secs,#pp-tabs'))||!!(n.querySelector&&n.querySelector('#pp-secs,#pp-tabs')); }
+    new MutationObserver(function(recs){ for(var i=0;i<recs.length;i++){ var r=recs[i]; if(rail.contains(r.target))continue;
+      if(hits(r.target)){ later(); return; } for(var j=0;j<r.addedNodes.length;j++){ if(hits(r.addedNodes[j])){ later(); return; } } for(var k=0;k<r.removedNodes.length;k++){ if(hits(r.removedNodes[k])){ later(); return; } } } })
+      .observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','hidden']});   // no characterData: badge numbers are replaced as nodes
+    build();
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──

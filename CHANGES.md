@@ -1,3 +1,10 @@
+## v28.573 (29-Oct-26) Supplier portal: HORIZON-style left menu (desktop)
+- Ben: "portal should have side navigation as well like horizon" (supplier portal, left, picked mockup).
+- Desktop (900px and wider): a left rail in the HORIZON look. HORIZON logo + supplier name at the top; sections (ORDERS, CUSTOM, FINANCE, SAMPLES, PRODUCT, PROFILE) with icons and their counts; the active section's pages nested underneath with their counts (e.g. CUSTOM: Ready to batch, Batches, Sample files); version + shrink button at the foot (shrinks to icons, remembered per browser). The top bar keeps EN/中文, Inbox and Sign out; the old section pills and level-2 row are hidden on desktop.
+- Phones keep the existing top menu (rail hidden below 900px). Turn the rail off with ?rail=0.
+- How it works: the rail mirrors the portal's own section pills and level-2 tabs and presses the real one on click, so routing, deep links, counts and bilingual labels stay in portal-view.js. It rebuilds only when its own output changes (a first build compared page HTML and looped against the 中文 sweep, freezing the tab; fixed before commit), on a timer rather than requestAnimationFrame (paused in background tabs). In the sandbox it starts below the SANDBOX banner.
+- Standalone portal only (supply/portal.html); the staff CONFIG ▸ Portal preview is unchanged. Client only: no new env vars, migrations or cron routes.
+
 ## v28.572 (29-Oct-26) Supplier portal ▸ CUSTOM: level-2 menu and deep links
 - Ben: "for custom show a level 2 menu for all key pages and deep links".
 - CUSTOM's pages are now real level-2 tabs in the portal menu (like ORDERS / FINANCE): Ready to batch (count of waiting lines) | Batches (to-do count) | Sample files. The v28.571 in-page pills are gone where the portal menu is present.
