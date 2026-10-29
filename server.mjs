@@ -34065,7 +34065,8 @@ app.post('/api/portal/logout', async (req, res) => {
 // the signed-in portal session (never from the browser) and the user's email; the Customiser maps names to its suppliers
 // (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own portal rules, so saving
 // an AWB still ships the orders and emails the customers there. Staff see the same tab in CONFIG ▸ Portal preview (writes need SUPPLY edit).
-const CUST_PATH_RE = /^(status|waiting|batches|batches\/create|batches\/[0-9a-f-]{36}(\/(respond|lines|photo|made|cartons|po|artwork|production))?|files\/[0-9a-f-]{36})$/i;
+const CUST_PATH_RE = /^(status|waiting|samples|batches|batches\/create|batches\/[0-9a-f-]{36}(\/(respond|lines|photo|made|cartons|po|artwork|production))?|files\/[0-9a-f-]{36})$/i;
+// samples (v28.568): the Customiser's print sheet samples, a list with signed storage links (the files never pass through HORIZON)
 const CUST_POST_RE = /^batches\/(create|[0-9a-f-]{36}\/(respond|lines|photo|made|cartons))$/i;   // create: v28.518 the supplier makes a batch
 function custConfigured() { return !!(process.env.CUSTOMISER_API_URL && String(process.env.CUSTOMISER_API_KEY || '').length >= 24); }
 async function custProxy(req, res, suppliers, actor, path) {

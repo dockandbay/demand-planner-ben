@@ -38,14 +38,14 @@
     }
     function loadList() {
       host.innerHTML = '<div class="hzc"><div class="hzc-msg">Loading custom orders…</div></div>';
-      Promise.all([api('batches'), api('waiting').catch(function () { return { lines: [] }; })]).then(function (r) { var j = r[0]; ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; ST.waiting = r[1].lines || []; ST.wpick = {}; drawList(); })
+      Promise.all([api('batches'), api('waiting').catch(function () { return { lines: [] }; }), api('samples').catch(function () { return { files: [] }; })]).then(function (r) { var j = r[0]; ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; ST.waiting = r[1].lines || []; ST.samples = r[2].files || []; ST.wpick = {}; drawList(); })
         .catch(function (e) { host.innerHTML = '<div class="hzc"><div class="hzc-msg err">' + esc(e.message) + '</div></div>'; });
     }
     function drawList() {
       var L = ST.list, todo = L.filter(function (b) { return b.status === 'sent' || b.status === 'confirmed' || (b.status === 'made' && b.n_awb < Math.max(1, b.n_cartons)); }).length;
       if (opts.onCount) opts.onCount(todo);
       var h = '<div class="hzc"><div class="hzc-card"><h3>Custom orders</h3><div class="hzc-mut2">Personalised towels from the Dock &amp; Bay Customiser. Make a batch from the lines ready to batch (or accept one Dock &amp; Bay sends you), make it within the week, then enter the cartons with their DHL AWB.' + (ST.example ? ' <b>These are example batches for testing.</b>' : '') + '</div></div>';
-      h += waitingCard();
+      h += waitingCard() + samplesCard();
       if (!L.length) { host.innerHTML = h + '<div class="hzc-msg">No custom order batches yet.</div></div>'; wireWaiting(); return; }
       h += '<div class="hzc-card hzc-scroll"><table><thead><tr><th>PO</th><th>Tuesday</th><th>Accept by</th><th>Made by</th><th>Lines</th><th>Towels</th><th>Progress</th><th>Cartons</th><th>Status</th></tr></thead><tbody>';
       L.forEach(function (b) {
@@ -59,6 +59,16 @@
       wireWaiting();
     }
     // ── ready to batch (v28.518) ──
+    // v28.568 (Ben 29-Oct-26: "create him some sample files to download in supplier portal"): print sheets in the factory's own layout
+    // (1, 2, 4, 8, 16 or 32 towels per file, 0.5 cm gaps, grey edge lines, QR and colour strip at the end of each towel). Direct links.
+    function samplesCard() {
+      var F = ST.samples || []; if (!F.length) return '';
+      function mb(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB'; }
+      var h = '<div class="hzc-card"><h3>Sample print files</h3><div class="hzc-mut2">Print sheets in the layout from your reference file: single towels, or 2, 4, 8, 16 or 32 towels in one file. 0.5 cm between designs, a grey line on both outer edges, and at the end of each towel the QR code, a CMYK colour strip and the reference (cut off at the stitch line). Empty places on a part-filled sheet are blank. CMYK TIFF, 200 dpi, LZW. <b>Samples only: please print one or two and tell us what to change. Do not produce them.</b></div>';
+      h += '<div class="hzc-scroll"><table><thead><tr><th>File</th><th>Size</th><th></th></tr></thead><tbody>';
+      F.forEach(function (f) { h += '<tr><td>' + esc(f.name) + '</td><td>' + mb(f.bytes || 0) + '</td><td><a class="hzc-btn" href="' + esc(f.url) + '" rel="noopener">Download</a></td></tr>'; });
+      return h + '</tbody></table></div></div>';
+    }
     function waitingCard() {
       var W = ST.waiting || [], ro = !opts.canWrite; if (!W.length) return '<div class="hzc-card"><h3>Ready to batch</h3><div class="hzc-mut2">No lines are waiting. New custom orders appear here once they are approved.</div></div>';
       var n = W.filter(function (l) { return ST.wpick[l.id]; }).length, towels = W.reduce(function (a, l) { return a + (l.qty || 0); }, 0);

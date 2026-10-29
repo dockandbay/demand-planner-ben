@@ -1,3 +1,8 @@
+## v28.568 (29-Oct-26) Supplier portal ▸ Custom orders: sample print files
+- Ben: "Jack can pick singles. 2.4.8.16,32 combined ... Let's create him some sample files to download in supplier portal".
+- New "Sample print files" card on the Custom orders tab: the Customiser's print sheet samples in the factory's own layout (from Jack's reference TIFF), with size and a Download button each. The list comes from the Customiser (new proxied path `samples`); each link is a 1 hour signed storage link, so the files never pass through HORIZON.
+- The card shows only when the Customiser has sample files. No new env vars, migrations or cron routes.
+
 ## v28.567 (29-Oct-26) Ask Claude button retired (hidden)
 - Ben: "I want to retire ask Claude button. Hide it."
 - The orange "Ask" button in the top bar is hidden; it was the only way to open the Ask Claude drawer. The drawer code, /api/assistant routes, saved conversations and the MCP connector are untouched, so it can be brought back by removing display:none on #ask-claude-btn.
