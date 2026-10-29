@@ -1,6 +1,6 @@
 # Deploy package v28.574 to v28.575 (29-Oct-26)
 
-Ben source HEAD: 114b3c39 (114b3c393a793976923bc6a2764fd6a3baadb705). Live before this deploy: /api/version = v28.573 (read 29-Oct-26). Status: PENDING (port branch port/v28.575, PR to dockandbayteam/dock-bay-demand-planner)
+Ben source HEAD: 114b3c39 (114b3c393a793976923bc6a2764fd6a3baadb705). Live before this deploy: /api/version = v28.573 (read 29-Oct-26). Status: LIVE (PR #43 merged 4c9c41d9; deploy run 40829807073 green; /api/version read back v28.575 29-Oct-26)
 
 ## What changed
 - v28.574: Supplier portal > Purchase Orders toolbar: more space (search 280px, 38px controls, 10px gaps, status pills on their own row). Desktop only.
@@ -18,7 +18,7 @@ None.
 None. (New authenticated route /api/supply/portal-staff/:sid sits behind the normal HORIZON login gate; it is NOT a secret-only route.)
 
 ## Checks (port branch)
-See the PR.
+sync-ben.cjs clean port (.ben-port.json to a3ff6108); run-all.cjs, npm test, prebuild-race all passed; PR checks green.
 
 ## After merge
 Read back https://horizon.dockandbay.com/api/version = v28.575. PORTALS > Supplier > Open portal > Lixin opens Lixin's portal with the Staff view badge.
