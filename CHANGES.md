@@ -1,3 +1,11 @@
+## v28.590 (30-Oct-26) B2B requests: decide per line, held stock, reason codes, seasonality flag
+- Kathryn's email "B2B allocation requests in Horizon: suggested improvements", points 1, 4, 5 and 9 (phase A). Ben chose the decision panel and a separate Held column from mockups.
+- **Decide per line:** Approve / Reject on an open request is replaced by **Decide**, a wide panel with every line: Approve, Reduce or Reject, the approved qty, and a reason code (No stock, Timing, Margin, Customer declined, Substitute offered, Other). Starts on the recommendation; bulk Accept all recommended / Approve all in full / Reject all; default reason; note. Any units approved = approved ("part approved" when reduced), none = rejected. Old approve / reject API actions still work.
+- **Held stock:** approved units are held until the required-by date + 14 days, or until an approver presses **Release hold** on the closed card. Later analyses (B2B page and requests) take held units off stock on the date, and any held units beyond that stock off feasible in-production POs. Page has a new **Held B2B** column; open requests show as "pending" (not deducted).
+- **Seasonality flag (!):** a line is flagged when forecast to date is 1.5x+ the recent-sales estimate (and 20+ units more). Warning only.
+- Emails show approved qty and reason per line, "part approved" in the subject, and the hold-until date.
+- **Migration 404** `404_b2b_request_decisions.sql`: adds `decisions` jsonb, `hold_until` date, `reason` text to `planner.b2b_requests` (additive). No env vars, no cron routes. Logic topic b2b-allocation updated.
+
 ## v28.588 (29-Oct-26) B2B Allocation: REQUESTS on the toolbar row
 - Ben chose option A of mockups/b2b-requests-layout-options.html: the purple REQUESTS button (with its open count) moves onto the Client / Required by / Market toolbar row, pinned to the right end, so it no longer takes its own line. Client only.
 
