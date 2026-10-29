@@ -1,3 +1,11 @@
+## v28.593 (30-Oct-26) B2B requests: customer stages + Fulfil SO, other markets, reserve by tier, chaser
+- Kathryn's improvements 8, 6, 7 and 11 (phase C). With v28.590 to v28.592 all 11 of her points are covered.
+- **After approval (8):** approved cards show Customer: Approved > Offered > Accepted / Declined > Shipped, with buttons for the requester, approvers and admins. Shipped needs the **Fulfil sales order number**. Declined and Shipped release the hold and email the requester + notify list; Declined sets reason Customer declined. A shipped request can't be reopened.
+- **Other markets (6):** short lines show what UK / US / EU / AU could give by the same date (their stock on the date less their reserve and held B2B units), as an option for the Transfer route. Not counted in can allocate.
+- **Reserve by tier / lifecycle (7):** requests keep A-tier 12 wk, B 9, C 9, run-off 4 (PHASE OUT / LAST SEASON or discontinuing within 26 weeks of the date). Editable in Settings. The page's Keep cover input is unchanged.
+- **Chaser (11):** NEW CRON ROUTE **POST /api/cron/b2b-chase** (x-webhook-secret = N8N_WEBHOOK_SECRET; suggest hourly in n8n; `?dry=1` lists only). One digest email to the approvers of requests open longer than the Settings hours (default 24), each at most once a day, overdue first. Open cards past their required-by date show "overdue".
+- **Migration 405** `405_b2b_request_stages.sql`: adds stage, stage_at, stage_by, stage_log, fulfil_so, last_chased_at to `planner.b2b_requests` (additive). **Migrations 404 and 405 must both be run before deploying** (the request list reads their columns). No new env vars.
+
 ## v28.592 (30-Oct-26) B2B requests: route per line, price + margin after freight, offer an alternative
 - Kathryn's improvements 2, 10 and 3 (phase B), inside the Decide panel. Decide now re-analyses first so the numbers are today's.
 - **Route per line:** Stock / Expedite PO / Air order / Transfer (default from the analysis). On approval, non-stock routes add a **To do** for the approver (e.g. "Expedite PO-57UKLX1 for B2B-0007: 30 x SKU", "Raise air order ...", with est. air freight and link), due on the required-by date. No PO lines or Fulfil writes.

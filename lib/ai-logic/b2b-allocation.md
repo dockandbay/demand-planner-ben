@@ -16,21 +16,35 @@ sources:
   - supply/inject.html :: b2bReqSubmitBox
   - supply/inject.html :: b2bReqDrawer
   - migrations/402_b2b_requests.sql :: file
+  - server.mjs :: b2bHeld
+  - server.mjs :: b2bKeepWeeks
+  - server.mjs :: b2bReqTodos
+  - server.mjs :: b2bChase
+  - server.mjs :: /api/cron/b2b-chase
+  - migrations/404_b2b_request_decisions.sql :: file
+  - migrations/405_b2b_request_stages.sql :: file
 fingerprints:
-  server.mjs::b2bScenarioRows: a4460ae3a15f
+  server.mjs::b2bScenarioRows: 2add7a956c45
   server.mjs::/api/scenario/b2b: 8e896d52de7c
   supply/inject.html::b2bRender: 1752faebe4e1
-  server.mjs::b2bReqAnalyse: e396096116c0
+  server.mjs::b2bReqAnalyse: ef3919c04a73
   server.mjs::b2bReqList: 0ef35c999672
   server.mjs::b2bReqWhatsApp: 6c52cacd67ef
-  server.mjs::b2bReqEmailHtml: d94b08353852
-  server.mjs::/api/scenario/b2b/requests: a87c5a4dc02b
-  server.mjs::/api/scenario/b2b/requests/:ref/:act: ad8a57e467c0
-  server.mjs::/api/scenario/b2b/request-settings: 207686102f90
+  server.mjs::b2bReqEmailHtml: 5e711d0dfc65
+  server.mjs::/api/scenario/b2b/requests: cfb8465ced0e
+  server.mjs::/api/scenario/b2b/requests/:ref/:act: 1fcc628afa3f
+  server.mjs::/api/scenario/b2b/request-settings: 5dc585a1249e
   supply/inject.html::b2bReqSubmitBox: 253faa69a6b3
-  supply/inject.html::b2bReqDrawer: 8ec049c12245
+  supply/inject.html::b2bReqDrawer: 88c1700b6b53
   migrations/402_b2b_requests.sql::file: 5807986fcf10
-verified_version: v28.592
+  server.mjs::b2bHeld: bd217de9f488
+  server.mjs::b2bKeepWeeks: 56015d47f9cd
+  server.mjs::b2bReqTodos: 407870e8b0fa
+  server.mjs::b2bChase: 3d3ce9703024
+  server.mjs::/api/cron/b2b-chase: 4358c8026784
+  migrations/404_b2b_request_decisions.sql::file: caa1c648c4c1
+  migrations/405_b2b_request_stages.sql::file: 0d26dcdb3dd2
+verified_version: v28.593
 ---
 
 ## What it is
@@ -59,6 +73,10 @@ verified_version: v28.592
 - Route, price and margin (v28.592, Kathryn's improvements 2 and 10): pressing Decide first re-analyses the request, then each approved line gets a ROUTE (B2B_ROUTES: Stock, Expedite PO, Air order, Transfer; default = Stock when the approved qty fits in from-stock, Expedite PO when it fits in stock + feasible production, else Air order) and a wholesale PRICE per unit (default b2bWholesale: 50% of retail, retail / 1.2 first for UK and EU; editable). Air freight (b2bFreightUsd) = units not given from stock x unit weight (prod_weight_uk) x USD 10/kg (B2B_AIR_USD_KG), for the Air order and Expedite PO routes only. Margin after freight = (price - cost) x approved qty - freight converted to the market currency (b2bUsdPer: UK uses app_settings usd_gbp_rate; EU / AU / CA use fx_rates for the year; shown "n/a" when a rate, price or cost is missing). Cost = market COGS (3PL final), else the average PO cost price (same as the page). Stored per line as route and price in decisions.
 - Follow-up actions (b2bReqTodos): on approval, every approved line (or alternative) on a route other than Stock adds a To do for the approver, due on the required-by date: "Expedite <feasible in-market POs> for B2B-x: N x SKU", "Raise air order for B2B-x: N x SKU" or "Transfer N x SKU into <market> for B2B-x", with the client, date, estimated air freight and a link. Nothing is written to POs, Fulfil or other systems.
 - Offer alternative (v28.592, Kathryn's improvement 3): on a line approved below its requested qty the approver can add a substitute SKU and qty, press Analyse (POST /api/scenario/b2b/requests/:ref/analyse-sku, the same analysis for that SKU, market and date) and approve a qty of it with its own route. The original line's reason becomes "Substitute offered", so the unfilled original qty is kept as missed demand. Stored on the line as sub_sku, sub_qty, sub_approved_qty, sub_route; approved alternative units count as approved units and are HELD like any other (b2bHeld includes sub_sku). The alternative must exist in PRODUCT.
+- Reserve by tier and lifecycle on REQUESTS (v28.593, Kathryn's improvement 7, b2bKeepWeeks): weeks of own-channel cover kept back = A-tier 12, B-tier 9, C-tier / other 9, run-off 4 (defaults; edited in the Requests drawer > Settings, app_settings b2b_reserve_weeks). Run-off = products.status PHASE OUT or LAST SEASON, or discontinue_date_final on or before the required-by date + 26 weeks; it wins over tier. Each line shows "Reserve N wk (basis)". The B2B Allocation PAGE still uses its own Keep cover input for every SKU, so the page and a request can differ for A-tier and run-off SKUs.
+- Other markets (v28.593, Kathryn's improvement 6): for lines that are short, the request analysis also works out what UK / US / EU / AU (CA is decommissioned) could give by the same date: that market's stock on the date (on hand - own sales to the date + inbound by the date - its own held B2B units) less its own reserve (same tier / run-off rule). Shown as "Other markets could give: UK 15,379, US 10,439" under the line, as an option for the Transfer route. It is NOT counted in can allocate.
+- Customer stage after approval (v28.593, Kathryn's improvement 8, migration 405): an approved request moves Approved > Offered > Accepted or Declined > Shipped. The requester, approvers and admins can move it on (forward only). Shipped needs the Fulfil sales order number (stored upper-case in fulfil_so). Declined and Shipped end the hold (declined stock goes back; shipped stock has left or sits on the Fulfil order), Declined sets the request reason to Customer declined, and both email the requester plus the notify list. Every step is logged in stage_log (stage, when, who, note, SO). A shipped request cannot be reopened.
+- Chaser (v28.593, Kathryn's improvement 11, b2bChase): POST /api/cron/b2b-chase (n8n, x-webhook-secret) sends ONE digest email to the approvers listing every request still open after b2b_chase_hours (Settings, default 24) that has not been chased in the last 20 hours; requests past their required-by date are listed first as OVERDUE. last_chased_at is stamped. ?dry=1 lists without emailing. Open cards past their required-by date show an "overdue" badge.
 - Seasonality flag (b2bReqAnalyse): a line is flagged "(!)" when forecast to date is at least 1.5x the own-channel sales estimate (3-month velocity x days) and at least 20 units more (B2B_SEASON_RATIO, B2B_SEASON_MIN), meaning the 9-week reserve, based on recent sales, may be too low. It is a warning only; the allocation still uses velocity.
 - Each decision re-runs the analysis and stores a snapshot named after the decision, then emails the requester plus the notify list with the analysis, the approved qty and reason per line, who decided it, when and why, and the hold-until date.
 - Re-analyse (open requests) stores a "reanalysed" snapshot so the history shows how the numbers moved (e.g. a PO slipping).

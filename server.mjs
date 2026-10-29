@@ -24865,6 +24865,7 @@ app.get('/api/buy-extra-stock', async (req, res) => {
 async function b2bScenarioRows(skus, market, date) {
   return (await pool.query(`
       SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
+        coalesce(p.market_tier,'') tier, upper(coalesce(btrim(p.status),'')) pstatus, nullif(btrim(p.discontinue_date_final),'') disc,   -- v28.593: reserve by tier / lifecycle (requests)
         (coalesce((SELECT sum(available) FROM planner.v_product_inventory pi WHERE pi.sku=p.sku AND pi.warehouse LIKE $2||'\\_%'),0)
          + CASE WHEN $2='us' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int available,
         coalesce((SELECT sum(units) FROM planner.sales_actuals sa WHERE sa.sku=p.sku AND lower(sa.country)=$2
@@ -24977,6 +24978,23 @@ async function b2bUsdPer(mk) {
     const now = new Date(), fy = now.getMonth() + 1 >= 3 ? now.getFullYear() : now.getFullYear() - 1, per = o[fy] && o[fy][B2B_CUR[mk]];
     return g && per > 0 ? g / per : null; } catch (e) { return null; }
 }
+// v28.593 (Kathryn's improvement 7): the own-channel reserve on REQUESTS varies by tier and lifecycle. Run-off = status PHASE OUT or
+// LAST SEASON, or discontinue_date_final on or before the required-by date + 26 weeks. Weeks are editable in Settings (app_settings
+// b2b_reserve_weeks, JSON {A, B, C, runoff}). The B2B Allocation page keeps its own "Keep cover" input.
+const B2B_RESERVE_DEFAULT = { A: 12, B: 9, C: 9, runoff: 4 };
+async function b2bReserveRules() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='b2b_reserve_weeks'`)).rows[0]; const o = r && r.value ? JSON.parse(r.value) : {};
+    const out = {}; for (const k of Object.keys(B2B_RESERVE_DEFAULT)) { const v = Number(o[k]); out[k] = Number.isFinite(v) && v >= 0 && v <= 52 ? v : B2B_RESERVE_DEFAULT[k]; } return out; }
+  catch (e) { return Object.assign({}, B2B_RESERVE_DEFAULT); }
+}
+function b2bKeepWeeks(d, date, rules) {
+  const ref = new Date((date || new Date().toISOString().slice(0, 10)) + 'T00:00:00Z'); ref.setUTCDate(ref.getUTCDate() + 182);
+  const disc = /^\d{4}-\d{2}-\d{2}/.test(String(d.disc || '')) ? String(d.disc).slice(0, 10) : null;
+  if (d.pstatus === 'PHASE OUT' || d.pstatus === 'LAST SEASON' || (disc && disc <= ref.toISOString().slice(0, 10))) return { weeks: rules.runoff, basis: 'Run-off' };
+  const t = String(d.tier || '').toUpperCase(); return t === 'A' ? { weeks: rules.A, basis: 'A-tier' } : t === 'B' ? { weeks: rules.B, basis: 'B-tier' } : { weeks: rules.C, basis: t === 'C' ? 'C-tier' : 'Standard' };
+}
+const B2B_MARKETS = ['UK', 'US', 'EU', 'AU'];   // CA decommissioned
+const B2B_CHASE_HOURS_DEFAULT = 24;
 const B2B_SEASON_RATIO = 1.5, B2B_SEASON_MIN = 20;   // flag a line when forecast to date is 1.5x+ the sales-rate estimate and at least 20 units more
 // Held = approved lines of approved requests in this market whose hold has not expired; pending = lines of open requests (shown, not
 // deducted). excludeId leaves one request out (its own analysis). Before migration 404 there are no decisions: nothing is held.
@@ -25022,10 +25040,12 @@ async function b2bReqAnalyse(lines, market, date, selfId) {
       const k = String(r.sku).toUpperCase(); fc[k] = (fc[k] || 0) + Number(r.u) * part; }); } catch (e) { fc = {}; }
   const todayS = new Date().toISOString().slice(0, 10);
   const daysUntil = date ? Math.max(0, Math.floor((new Date(date + 'T00:00:00Z') - new Date(todayS + 'T00:00:00Z')) / 864e5)) : 0;
+  const rules = await b2bReserveRules();
   const rows = lines.map(l => { const d = by[l.sku], qty = Number(l.qty) || 0;
     if (!d) return { sku: l.sku, qty, found: false, verdict: 'Unknown SKU', can_allocate: 0, short: qty };
+    const kw = b2bKeepWeeks(d, date, rules);   // v28.593: reserve weeks by tier / lifecycle
     const avail = d.available || 0, vel = (d.recent_units || 0) / 90, inbBy = d.inbound_by_date || 0, h = held[l.sku] || { held: 0, held_refs: [], pending: 0, pending_refs: [] };
-    const expSold = Math.round(vel * daysUntil), raw = Math.max(0, avail - expSold + inbBy), proj = Math.max(0, raw - h.held), heldOver = Math.max(0, h.held - raw), reserve = Math.ceil(vel * 7 * B2B_KEEP_WEEKS), giveable = Math.max(0, proj - reserve);
+    const expSold = Math.round(vel * daysUntil), raw = Math.max(0, avail - expSold + inbBy), proj = Math.max(0, raw - h.held), heldOver = Math.max(0, h.held - raw), reserve = Math.ceil(vel * 7 * kw.weeks), giveable = Math.max(0, proj - reserve);
     let prodFeas = 0; const expPos = []; (d.production || []).forEach(pp => { const q = Number(pp.qty) || 0, land = pp.exped_land || ''; if (q > 0 && (pp.po_market || '') === mk && (!date || (land && land <= date))) { prodFeas += q; expPos.push({ po: pp.po, qty: q, land }); } });
     prodFeas = Math.max(0, prodFeas - heldOver);   // v28.590: held units that stock on the date cannot cover come out of in-production
     const fromStock = Math.min(qty, giveable), fromProd = Math.min(Math.max(0, qty - fromStock), prodFeas), ful = fromStock + fromProd, short = Math.max(0, qty - ful);
@@ -25035,11 +25055,24 @@ async function b2bReqAnalyse(lines, market, date, selfId) {
       forecast_to_date: fcd, own_sales_to_date: expSold, held: h.held, held_refs: h.held_refs, pending: h.pending, pending_refs: h.pending_refs,
       season_flag: season, season_ratio: season ? (expSold > 0 ? Math.round(fcd / expSold * 10) / 10 : null) : undefined,
       wholesale: b2bWholesale(mk.toUpperCase(), d.retail), cost: Number(d.cogs) > 0 ? Number(d.cogs) : (Number(d.avg_cost) > 0 ? Number(d.avg_cost) : null),   // v28.592: price + margin
-      weight: d.weight == null || d.weight === '' ? null : Number(d.weight), exped_pos: expPos, stock_on_date: proj, reserve, can_allocate: ful, from_stock: fromStock, from_production: fromProd, short,
+      weight: d.weight == null || d.weight === '' ? null : Number(d.weight), exped_pos: expPos, stock_on_date: proj, reserve, keep_weeks: kw.weeks, reserve_basis: kw.basis, can_allocate: ful, from_stock: fromStock, from_production: fromProd, short,
       cover_after_wk: coverAfter, verdict: short === 0 ? 'Yes' : (ful > 0 ? 'Partial' : 'Short') };
   });
   const summary = { requested: rows.reduce((a, r) => a + r.qty, 0), can_allocate: rows.reduce((a, r) => a + (r.can_allocate || 0), 0), short: rows.reduce((a, r) => a + (r.short || 0), 0),
-    skus: rows.length, skus_short: rows.filter(r => r.verdict !== 'Yes').length, held: rows.reduce((a, r) => a + (r.held || 0), 0), currency: B2B_CUR[mk.toUpperCase()], usd_per: await b2bUsdPer(mk.toUpperCase()), air_usd_kg: B2B_AIR_USD_KG, keep_weeks: B2B_KEEP_WEEKS, market: mk.toUpperCase(), required_by: date || null };
+    skus: rows.length, skus_short: rows.filter(r => r.verdict !== 'Yes').length, held: rows.reduce((a, r) => a + (r.held || 0), 0), currency: B2B_CUR[mk.toUpperCase()], usd_per: await b2bUsdPer(mk.toUpperCase()), air_usd_kg: B2B_AIR_USD_KG, keep_weeks: rules.C, reserve_rules: rules, market: mk.toUpperCase(), required_by: date || null };
+  // v28.593 (Kathryn's improvement 6): for lines that are short, what other markets could give by the same date (their stock on the
+  // date less their own held B2B units and their own reserve). Shown as a Transfer option; never counted in can allocate.
+  const shortSkus = rows.filter(r => r.found && r.short > 0).map(r => r.sku);
+  if (shortSkus.length) {
+    await Promise.all(B2B_MARKETS.filter(m => m !== mk.toUpperCase()).map(async m => {
+      try { const [od, oh] = await Promise.all([b2bScenarioRows(shortSkus, m.toLowerCase(), date), b2bHeld(shortSkus, m, null)]);
+        od.forEach(d => { const k = String(d.sku).toUpperCase(), vel = (d.recent_units || 0) / 90, hh = (oh[k] || {}).held || 0;
+          const stockOn = Math.max(0, (d.available || 0) - Math.round(vel * daysUntil) + (d.inbound_by_date || 0) - hh), give = Math.max(0, stockOn - Math.ceil(vel * 7 * b2bKeepWeeks(d, date, rules).weeks));
+          const row = rows.find(r => r.sku === k); if (row && give > 0) (row.other_markets = row.other_markets || []).push({ market: m, giveable: give }); }); }
+      catch (e) { console.warn('[b2b] other markets ' + m + ' ' + (e && e.message)); }
+    }));
+    rows.forEach(r => { if (r.other_markets) r.other_markets.sort((a, b) => b.giveable - a.giveable); });
+  }
   return { summary, rows };
 }
 const b2bFd = d => { if (!d) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : String(d); };
@@ -25073,12 +25106,13 @@ function b2bReqEmailHtml(r, a, head, extra) {
     + (r.hold_until ? '<p style="font-size:13px">Approved units are held off stock in later analyses until <b>' + b2bFd(r.hold_until) + '</b>.</p>' : '')
     + (r.notes ? '<p style="font-size:13px"><b>Notes:</b> ' + b2bEsc(r.notes) + '</p>' : '')
     + '<p><a href="' + b2bReqLink(r.ref) + '" style="background:#2361d8;color:#fff;padding:9px 14px;border-radius:7px;text-decoration:none;font-weight:700;font-size:13px">Open in HORIZON</a></p>'
-    + '<p style="font-size:11px;color:#8b98ad">Market ' + b2bEsc(s.market || r.market) + '. On hand = available in the market\'s warehouses. Inbound = shipments landing on or before the required-by date. Forecast = demand plan from today to the required-by date. Can allocate keeps ' + (s.keep_weeks || B2B_KEEP_WEEKS) + ' weeks of own-channel cover (3-month sales rate) and counts in-production POs that can land in time.</p></div>';
+    + '<p style="font-size:11px;color:#8b98ad">Market ' + b2bEsc(s.market || r.market) + '. On hand = available in the market\'s warehouses. Inbound = shipments landing on or before the required-by date. Forecast = demand plan from today to the required-by date. Can allocate keeps own-channel cover (3-month sales rate) of ' + (s.reserve_rules ? s.reserve_rules.A + ' weeks for A-tier, ' + s.reserve_rules.B + ' for B, ' + s.reserve_rules.C + ' for C and ' + s.reserve_rules.runoff + ' for run-off SKUs' : (s.keep_weeks || B2B_KEEP_WEEKS) + ' weeks') + ' and counts in-production POs that can land in time.</p></div>';
 }
 const B2B_REQ_COLS = `r.id, r.ref, coalesce(r.client,'') client, r.market, to_char(r.required_by,'YYYY-MM-DD') required_by, r.lines, coalesce(r.notes,'') notes, r.status,
   coalesce(r.created_by,'') created_by, to_char(r.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at, coalesce(r.decided_by,'') decided_by,
   to_char(r.decided_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') decided_at, coalesce(r.decision_note,'') decision_note,
   r.decisions, to_char(r.hold_until,'YYYY-MM-DD') hold_until, coalesce(r.reason,'') reason,   -- v28.590: migration 404
+  r.stage, to_char(r.stage_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') stage_at, coalesce(r.stage_by,'') stage_by, r.stage_log, coalesce(r.fulfil_so,'') fulfil_so,   -- v28.593: migration 405
   (r.status <> 'open' AND r.decided_at > now() - interval '${B2B_REOPEN_DAYS} days') reopenable,   -- v28.591: closed requests can be reopened for 7 days
   to_char((r.decided_at + interval '${B2B_REOPEN_DAYS} days') AT TIME ZONE 'Europe/London','YYYY-MM-DD') reopen_until`;
 // v28.592: approved lines routed through expedite / air / transfer become To do items for the approver (due on the required-by date).
@@ -25111,7 +25145,7 @@ app.get('/api/scenario/b2b/requests', async (req, res) => {
       FROM planner.b2b_requests r ORDER BY (r.status='open') DESC, coalesce(r.decided_at, r.created_at) DESC LIMIT 300`)).rows;
     const out = { me: email, can_decide: !!(me.is_admin || me.live === false || (email && approvers.includes(email))), is_admin: !!(me.is_admin || me.live === false),
       open: rows.filter(r => r.status === 'open'), closed: rows.filter(r => r.status !== 'open') };
-    if (out.is_admin) out.settings = { notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers };
+    if (out.is_admin) out.settings = { notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers, reserve: await b2bReserveRules(), chase_hours: await b2bChaseHours() };
     res.set('Cache-Control', 'no-store').json(out);
   } catch (e) { if (e && e.code === '42P01') return res.json({ open: [], closed: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -25152,14 +25186,35 @@ app.post('/api/scenario/b2b/requests/:ref/analyse-sku', async (req, res) => {
 });
 app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
-    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release', 'reopen'].includes(act)) return res.status(404).json({ error: 'not found' });
+    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release', 'reopen', 'stage'].includes(act)) return res.status(404).json({ error: 'not found' });
     const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
     const isAdmin = !!(me.is_admin || me.live === false), approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), canDecide = isAdmin || approvers.includes(email);
+    if (act === 'stage') {   // v28.593 (Kathryn's improvement 8): offered -> accepted / declined -> shipped (+ Fulfil SO), on approved requests
+      if (r.status !== 'approved') return res.status(409).json({ error: 'Only an approved request can move to offered, accepted, declined or shipped.' });
+      if (!(canDecide || email === String(r.created_by).toLowerCase())) return res.status(403).json({ error: 'Only the requester, an approver or an admin can update this.' });
+      const b = req.body || {}, stg = String(b.stage || ''), note = String(b.note || '').trim().slice(0, 500), so = String(b.so || '').trim().toUpperCase().slice(0, 60);
+      const ORDER = { offered: 1, accepted: 2, declined: 2, shipped: 3 }; if (!ORDER[stg]) return res.status(400).json({ error: 'Unknown stage.' });
+      if (r.stage === 'declined' || r.stage === 'shipped') return res.status(409).json({ error: 'This request is already ' + r.stage + '.' });
+      if (r.stage && ORDER[stg] <= ORDER[r.stage]) return res.status(409).json({ error: 'This request is already ' + r.stage + '.' });
+      if (stg === 'shipped' && !so && !r.fulfil_so) return res.status(400).json({ error: 'Add the Fulfil sales order number (e.g. SO59482) when marking it shipped.' });
+      const entry = { stage: stg, at: new Date().toISOString(), by: email, note: note || null, so: so || null };
+      // declined or shipped ends the hold: declined stock goes back; shipped stock has left (or sits on the Fulfil order)
+      await pool.query(`UPDATE planner.b2b_requests SET stage=$2, stage_at=now(), stage_by=$3, stage_log=coalesce(stage_log,'[]'::jsonb) || $4::jsonb,
+          fulfil_so=coalesce(nullif($5,''), fulfil_so), hold_until=CASE WHEN $2 IN ('declined','shipped') THEN NULL ELSE hold_until END,
+          reason=CASE WHEN $2='declined' THEN 'customer_declined' ELSE reason END WHERE id=$1`, [r.id, stg, email, JSON.stringify([entry]), so]);
+      if (stg === 'declined' || stg === 'shipped') {
+        const notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), to = [...new Set([String(r.created_by || '').toLowerCase()].concat(notify).filter(x => /@/.test(x)))];
+        try { if (to.length) await sendResendEmail({ to, subject: 'B2B request ' + r.ref + ' ' + stg + ': ' + (r.client || 'no client') + ', ' + r.market + (so ? ', ' + so : ''),
+          html: '<div style="font-family:Arial,sans-serif;font-size:14px"><p><b>' + b2bEsc(r.ref) + '</b> (' + b2bEsc(r.client || 'no client') + ', ' + b2bEsc(r.market) + ') was marked <b>' + stg + '</b> by ' + b2bEsc(email) + (so ? ', Fulfil order ' + b2bEsc(so) : '') + (note ? ': ' + b2bEsc(note) : '') + '. Its held stock is released.</p><p><a href="' + b2bReqLink(r.ref) + '">Open in HORIZON</a></p></div>', kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
+      }
+      return res.json({ ok: true, stage: stg });
+    }
     if (act === 'reopen') {   // v28.591 (Ben): back to Open within 7 days of the decision; the decision, reason and any hold are cleared
       if (r.status === 'open') return res.status(409).json({ error: 'This request is already open.' });
+      if (r.stage === 'shipped') return res.status(409).json({ error: 'This request has shipped (' + (r.fulfil_so || 'Fulfil order') + ') and cannot be reopened. Use Request again.' });
       if (!(canDecide || (r.status === 'cancelled' && email === String(r.created_by).toLowerCase()))) return res.status(403).json({ error: 'Only an approver or an admin can reopen a decided request (the creator can reopen one they cancelled).' });
       const note = String((req.body && req.body.note) || '').trim().slice(0, 2000), was = r.status;
-      const up = await pool.query(`UPDATE planner.b2b_requests SET status='open', decided_by=NULL, decided_at=NULL, decision_note=NULL, decisions=NULL, hold_until=NULL, reason=NULL
+      const up = await pool.query(`UPDATE planner.b2b_requests SET status='open', decided_by=NULL, decided_at=NULL, decision_note=NULL, decisions=NULL, hold_until=NULL, reason=NULL, stage=NULL, stage_at=NULL, stage_by=NULL, fulfil_so=NULL
           WHERE id=$1 AND status <> 'open' AND decided_at > now() - interval '${B2B_REOPEN_DAYS} days'`, [r.id]);
       if (!up.rowCount) return res.status(409).json({ error: 'This request was decided more than ' + B2B_REOPEN_DAYS + ' days ago and can no longer be reopened. Submit a new request.' });
       const a = await b2bReqAnalyse(Array.isArray(r.lines) ? r.lines : [], r.market, r.required_by, r.id); await b2bReqSnap(r.id, 'reopened', a, email);
@@ -25236,8 +25291,39 @@ app.post('/api/scenario/b2b/request-settings', async (req, res) => {
     const b = req.body || {};
     for (const [k, v] of [['b2b_request_notify', b.notify], ['b2b_request_approvers', b.approvers]]) { if (v === undefined) continue;
       await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [k, clean(v)]); }
-    res.json({ ok: true, notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers: await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), by: email });
+    if (b.reserve && typeof b.reserve === 'object') {   // v28.593: reserve weeks by tier / run-off (0 to 52)
+      const o = {}; for (const k of Object.keys(B2B_RESERVE_DEFAULT)) { const v = Number(b.reserve[k]); if (!Number.isFinite(v) || v < 0 || v > 52) return res.status(400).json({ error: 'Reserve weeks must be 0 to 52.' }); o[k] = Math.round(v * 10) / 10; }
+      await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('b2b_reserve_weeks',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(o)]); }
+    if (b.chase_hours !== undefined) { const h = Number(b.chase_hours); if (!Number.isFinite(h) || h < 1 || h > 720) return res.status(400).json({ error: 'Chase after must be 1 to 720 hours.' });
+      await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('b2b_chase_hours',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(Math.round(h))]); }
+    res.json({ ok: true, notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers: await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), reserve: await b2bReserveRules(), chase_hours: await b2bChaseHours(), by: email });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.593 (Kathryn's improvement 11): chaser for open requests. n8n calls POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET),
+// e.g. hourly. Requests open longer than b2b_chase_hours (Settings, default 24) and not chased in the last 20 hours go into ONE digest
+// email to the approvers; requests past their required-by date are listed first as OVERDUE. ?dry=1 lists without emailing or stamping.
+async function b2bChaseHours() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='b2b_chase_hours'`)).rows[0]; const v = Number(r && r.value); return v >= 1 && v <= 720 ? v : B2B_CHASE_HOURS_DEFAULT; } catch (e) { return B2B_CHASE_HOURS_DEFAULT; } }
+async function b2bChase(dry) {
+  const hours = await b2bChaseHours();
+  const rows = (await pool.query(`SELECT ${B2B_REQ_COLS}, (r.required_by < CURRENT_DATE) overdue, round(extract(epoch FROM now() - r.created_at) / 3600)::int age_h
+      FROM planner.b2b_requests r WHERE r.status='open' AND r.created_at < now() - make_interval(hours => $1::int)
+        AND (r.last_chased_at IS NULL OR r.last_chased_at < now() - interval '20 hours') ORDER BY (r.required_by < CURRENT_DATE) DESC, r.required_by NULLS LAST`, [hours])).rows;
+  if (!rows.length) return { chased: 0, hours };
+  const approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT);
+  if (!dry) {
+    const li = rows.map(r => '<li style="margin-bottom:6px">' + (r.overdue ? '<b style="color:#d23227">OVERDUE</b> ' : '') + '<a href="' + b2bReqLink(r.ref) + '">' + b2bEsc(r.ref) + '</a> ' + b2bEsc(r.client || 'no client') + ', ' + b2bEsc(r.market)
+      + ', ' + b2bN((r.lines || []).reduce((a, l) => a + (Number(l.qty) || 0), 0)) + ' units, required by ' + b2bFd(r.required_by) + ', from ' + b2bEsc(r.created_by) + ', waiting ' + (r.age_h >= 48 ? Math.round(r.age_h / 24) + ' days' : r.age_h + ' hours') + '</li>').join('');
+    const nOver = rows.filter(r => r.overdue).length;
+    try { await sendResendEmail({ to: approvers, subject: 'B2B requests waiting for a decision: ' + rows.length + (nOver ? ' (' + nOver + ' overdue)' : ''),
+      html: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828"><p>These B2B allocation requests are still open after ' + hours + ' hours:</p><ul>' + li + '</ul><p style="font-size:12px;color:#5b6b83">Decide them in HORIZON (DEMAND > Scenario planner > B2B Allocation > REQUESTS). Each request is chased at most once a day.</p></div>', kind: 'b2b-request', ref: 'chase', by: 'cron' }); }
+    catch (e) { console.warn('[b2b-chase] email ' + (e && e.message)); }
+    await pool.query(`UPDATE planner.b2b_requests SET last_chased_at=now() WHERE id = ANY($1::bigint[])`, [rows.map(r => r.id)]);
+  }
+  return { chased: rows.length, overdue: rows.filter(r => r.overdue).length, refs: rows.map(r => r.ref), hours, dry: !!dry };
+}
+app.post('/api/cron/b2b-chase', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await b2bChase(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // settings USD→GBP rate (app_settings.usd_gbp_rate; USD per GBP) for the B2B air-rush £ bracket
 app.get('/api/scenario/fx', async (req, res) => {
