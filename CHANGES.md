@@ -1,3 +1,9 @@
+## v28.569 (29-Oct-26) Supplier portal: CUSTOM is its own top-menu section
+- Ben: "move CUSTOM in supplier portal to the top menu for those approved for it".
+- Custom orders moves out of ORDERS into a new top-level section CUSTOM (定制 for China-based suppliers), placed right after ORDERS, with the to-do count as the section badge. Same gate as before: it appears only when the Customiser says the supplier is linked (`/api/portal/custom/status` → `linked: true`); every other supplier sees no CUSTOM.
+- Links: the section is `#/custom`; old `#/orders/custom` links still land on it and are rewritten to `#/custom`. The staff CONFIG ▸ Portal preview matches.
+- `DBPortalView.addTab` gains `secAfter` (position of a new section pill) and `badge` (count shown on the tab and summed into the section pill). Client only: no new env vars, migrations or cron routes.
+
 ## v28.568 (29-Oct-26) Supplier portal ▸ Custom orders: sample print files
 - Ben: "Jack can pick singles. 2.4.8.16,32 combined ... Let's create him some sample files to download in supplier portal".
 - New "Sample print files" card on the Custom orders tab: the Customiser's print sheet samples in the factory's own layout (from Jack's reference TIFF), with size and a Download button each. The list comes from the Customiser (new proxied path `samples`); each link is a 1 hour signed storage link, so the files never pass through HORIZON.

@@ -10417,7 +10417,7 @@
             }) 
             // v28.504: the supplier's Custom orders tab (Customiser batches) when that supplier is linked; writes need SUPPLY edit
             if(window.HZCustomOrders&&window.DBPortalView.addTab){ var cb='/api/supply/custom-portal/'+encodeURIComponent(name)+'/';
-              window.HZCustomOrders.status(cb,function(st){ if(PORTAL_SUP!==name)return; window.DBPortalView.addTab({pt:'custom',label:'Custom orders'+(st.todo?' ('+st.todo+')':''),sec:'orders',render:function(host){ window.HZCustomOrders.render(host,{base:cb,canWrite:!ME||!ME.live||!!(ME.supply_edit||ME.is_admin)}); }}); }); } }
+              window.HZCustomOrders.status(cb,function(st){ if(PORTAL_SUP!==name)return; window.DBPortalView.addTab({pt:'custom',label:'Custom orders',badge:st.todo||0,sec:'custom',secLabel:'CUSTOM',secAfter:'orders',render:function(host){ window.HZCustomOrders.render(host,{base:cb,canWrite:!ME||!ME.live||!!(ME.supply_edit||ME.is_admin)}); }}); }); } }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; syncHash(); mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
