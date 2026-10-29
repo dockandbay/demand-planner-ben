@@ -1884,7 +1884,8 @@ app.get('/api/demand/intake', async (_req, res) => {
       pool.query(`SELECT value FROM planner.app_settings WHERE key='intake_lead_days'`).catch(() => ({ rows: [] })),
     ]);
     const days = parseInt(a.rows[0] && a.rows[0].value, 10);
-    res.set('Cache-Control', 'no-store').json({ deadlines: d.rows, snoozes: s.rows, lead_days: Number.isFinite(days) && days >= 0 ? days : 0 });
+    const camp = await campaignIntakeDeadlines().catch(() => []);   // v28.589: confirmed campaign SKUs (empty before migration 403)
+    res.set('Cache-Control', 'no-store').json({ deadlines: d.rows, snoozes: s.rows, lead_days: Number.isFinite(days) && days >= 0 ? days : 0, campaigns: camp });
   } catch (e) { if (_intakeMissing(e)) return res.json({ deadlines: [], snoozes: [], lead_days: 0, missing_migration: 340 }); log500(e); res.status(500).json({ error: 'Could not load intake deadlines' }); }
 });
 app.post('/api/demand/intake/deadline', async (req, res) => {
@@ -26374,7 +26375,9 @@ async function _demandActionsBase() {
       else if (ch >= 0.4) push('info', 'Trading ahead of last year', r.category, r.market, 'last month ' + Math.round(ty).toLocaleString() + 'u vs ' + Math.round(lyv).toLocaleString() + 'u LY (+' + Math.round(ch * 100) + '%)' + (cpl ? ' — ' + cpl : ' — check cover'), 0);
     });
     // Upcoming trading-calendar events (next 6 weeks): is there cover for the planned spike?
-    const calEv = (await _pCal).rows;
+    const calEv = [];   // v28.589: a campaign may name several markets ("UK,US"): one event per market
+    (await _pCal).rows.forEach(e => { const ms = String(e.market || '').split(',').map(s => s.trim()).filter(Boolean);
+      (ms.length > 1 ? ms : [e.market]).forEach(m => calEv.push({ ...e, market: m })); });
     calEv.forEach(e => {
       const mkt = e.market, cat = e.category, u = Number(e.uplift) || 0;
       const du = Number(e.days_until), wk = Math.max(0, Math.round(du / 7));
@@ -26589,17 +26592,96 @@ app.post('/api/forecast/changes/bulk', async (req, res) => {
 });
 
 // Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
-const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_list: 'text', event_type: 'text', title: 'text', uplift_pct: 'numeric', notes: 'text' };
+// v28.589 (Ben 30-Oct-26, Kathryn's Launch Readiness spec, migration 403): a row with a status is a marketing CAMPAIGN: market may hold
+// several markets ("UK,US"), channels 'DTC' / 'FBA' / 'DTC,FBA', status draft / confirmed, intake_date overrides launch minus 7 days,
+// uplift = {tier: [low, high]} %, and its SKUs + tiers live in campaign_skus (sku_list is kept in step for the PLAN markers / Actions).
+const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_list: 'text', event_type: 'text', title: 'text', uplift_pct: 'numeric', notes: 'text',
+  channels: 'text', status: 'text', intake_date: 'date', intake_reason: 'text', uplift: 'jsonb', target_cover_weeks: 'numeric' };
+const CAMPAIGN_TIERS = ['Hero', 'Supporting', 'Cross-sell'];
+const CAMPAIGN_INTAKE_DAYS = 7;   // required intake = launch date minus 7 days unless overridden on the campaign
+const _campMissing = e => /campaign_skus|column "(channels|status|intake_date|intake_reason|uplift|target_cover_weeks|updated_by)"/.test(String(e && e.message));
 app.get('/api/trading-calendar', async (req, res) => {
   try {
-    const r = await pool.query(`SELECT id, to_char(event_date,'YYYY-MM-DD') event_date, coalesce(market,'') market,
-      coalesce(category,'ALL') category, coalesce(sku_list,'') sku_list, coalesce(event_type,'') event_type, coalesce(title,'') title,
-      uplift_pct, coalesce(notes,'') notes
-      FROM planner.trading_calendar ORDER BY event_date NULLS LAST, id`);
+    let rows, campaigns = true;
+    try {
+      rows = (await pool.query(`SELECT c.id, to_char(c.event_date,'YYYY-MM-DD') event_date, coalesce(c.market,'') market,
+        coalesce(c.category,'ALL') category, coalesce(c.sku_list,'') sku_list, coalesce(c.event_type,'') event_type, coalesce(c.title,'') title,
+        c.uplift_pct, coalesce(c.notes,'') notes, c.channels, c.status, to_char(c.intake_date,'YYYY-MM-DD') intake_date, c.intake_reason,
+        c.uplift, c.target_cover_weeks, c.updated_by, to_char(c.updated_at,'YYYY-MM-DD') updated,
+        coalesce((SELECT json_agg(json_build_object('sku',s.sku,'tier',s.tier,'uplift_low',s.uplift_low,'uplift_high',s.uplift_high) ORDER BY s.sku)
+                  FROM planner.campaign_skus s WHERE s.event_id=c.id), '[]'::json) skus
+        FROM planner.trading_calendar c ORDER BY c.event_date NULLS LAST, c.id`)).rows;
+    } catch (e) {
+      if (!_campMissing(e)) throw e; campaigns = false;   // before migration 403: plain events only
+      rows = (await pool.query(`SELECT id, to_char(event_date,'YYYY-MM-DD') event_date, coalesce(market,'') market,
+        coalesce(category,'ALL') category, coalesce(sku_list,'') sku_list, coalesce(event_type,'') event_type, coalesce(title,'') title,
+        uplift_pct, coalesce(notes,'') notes
+        FROM planner.trading_calendar ORDER BY event_date NULLS LAST, id`)).rows;
+    }
     const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`)).rows.map(c => c.category);
-    res.json({ events: r.rows, categories: cats });
+    res.json({ events: rows, categories: cats, campaigns, intake_days: CAMPAIGN_INTAKE_DAYS });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// New campaign: a Draft, UK, DTC, launching on the 1st of next month until edited.
+app.post('/api/trading-calendar/campaign', async (req, res) => {   // declared before /:id so it isn't caught by it
+  const b = req.body || {};
+  try {
+    const r = await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, event_type, title, channels, status, updated_by, updated_at)
+      VALUES (coalesce($1::date, (date_trunc('month', current_date) + interval '1 month')::date), $2, 'ALL', 'Marketing', $3, 'DTC', 'draft', $4, now()) RETURNING id`,
+      [b.event_date || null, b.market || 'UK', String(b.title || 'New campaign').slice(0, 200), authUser(req) || null]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// Replace a campaign's SKUs: body {skus:[{sku, tier, uplift_low?, uplift_high?}]}. Unknown SKUs are refused; sku_list follows.
+app.post('/api/trading-calendar/:id/skus', async (req, res) => {
+  const id = parseInt(req.params.id, 10), list = Array.isArray(req.body && req.body.skus) ? req.body.skus : null;
+  if (!Number.isFinite(id) || !list) return res.status(400).json({ error: 'skus (a list) is required' });
+  const seen = {}, items = [];
+  for (const it of list.slice(0, 1000)) {
+    const sku = String((it && it.sku) || '').trim().toUpperCase(); if (!sku || seen[sku]) continue; seen[sku] = 1;
+    const tier = CAMPAIGN_TIERS.includes(it.tier) ? it.tier : 'Hero';
+    const num = v => (v === '' || v == null || !Number.isFinite(Number(v))) ? null : Number(v);
+    items.push([sku, tier, num(it.uplift_low), num(it.uplift_high)]);
+  }
+  const client = await pool.connect();
+  try {
+    const known = new Set((await client.query(`SELECT sku FROM planner.products WHERE sku = ANY($1)`, [items.map(x => x[0])])).rows.map(r => r.sku));
+    const unknown = items.filter(x => !known.has(x[0])).map(x => x[0]);
+    if (unknown.length) return res.status(400).json({ error: 'Not in the product master: ' + unknown.slice(0, 10).join(', ') + (unknown.length > 10 ? ' and ' + (unknown.length - 10) + ' more' : '') });
+    await client.query('BEGIN');
+    const ev = await client.query(`SELECT 1 FROM planner.trading_calendar WHERE id=$1 FOR UPDATE`, [id]);
+    if (!ev.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Campaign not found' }); }
+    await client.query(`DELETE FROM planner.campaign_skus WHERE event_id=$1`, [id]);
+    for (const x of items) await client.query(`INSERT INTO planner.campaign_skus (event_id, sku, tier, uplift_low, uplift_high) VALUES ($1,$2,$3,$4,$5)`, [id, ...x]);
+    await client.query(`UPDATE planner.trading_calendar SET sku_list=$2, updated_by=$3, updated_at=now() WHERE id=$1`,
+      [id, items.map(x => x[0]).sort().join(',') || null, authUser(req) || null]);
+    await client.query('COMMIT');
+    res.json({ ok: true, count: items.length });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+// Campaign intake deadlines for DEMAND > Analysis > Intake deadlines: every CONFIRMED campaign SKU x (market x channel) location
+// (DTC -> <market>_3pl, FBA -> <market>_fba) gets the campaign's intake date (override, else launch minus 7 days); a SKU in two
+// campaigns keeps the earliest. Computed on read, never written into intake_deadlines (those stay manual overrides).
+async function campaignIntakeDeadlines() {
+  const r = await pool.query(`SELECT c.id, c.title, c.market, coalesce(c.channels,'DTC') channels,
+      to_char(coalesce(c.intake_date, c.event_date - $1::int),'YYYY-MM-DD') deadline, to_char(c.event_date,'YYYY-MM-DD') launch, s.sku, s.tier
+    FROM planner.trading_calendar c JOIN planner.campaign_skus s ON s.event_id=c.id
+    WHERE c.status='confirmed' AND c.event_date IS NOT NULL`, [CAMPAIGN_INTAKE_DAYS]);
+  const best = {};
+  for (const x of r.rows) {
+    const mkts = String(x.market || '').toUpperCase().split(',').map(s => s.trim()).filter(m => /^(UK|US|EU|AU)$/.test(m));
+    const chs = String(x.channels || '').toUpperCase().split(',').map(s => s.trim());
+    for (const m of mkts) for (const ch of chs) {
+      const loc = m.toLowerCase() + (ch === 'FBA' ? '_fba' : ch === 'DTC' ? '_3pl' : ''); if (!/_(3pl|fba)$/.test(loc)) continue;
+      const k = x.sku + '|' + loc, o = best[k];
+      if (!o || x.deadline < o.deadline) best[k] = { sku: x.sku, location: loc, deadline: x.deadline, launch: x.launch, campaign: x.title, campaign_id: Number(x.id), tier: x.tier };
+    }
+  }
+  return Object.values(best);
+}
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};
   try { const r = await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes)
@@ -26628,7 +26710,9 @@ app.post('/api/trading-calendar/:id/delete', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar/:id', (req, res) =>
-  patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint'));
+  patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint', async (n) => {   // v28.589: audit trail (who / when)
+    if (n) await pool.query(`UPDATE planner.trading_calendar SET updated_by=$2, updated_at=now() WHERE id=$1::bigint`, [req.params.id, authUser(req) || null]).catch(() => {});
+    return {}; }));
 
 // ── SAMPLES — writes ─────────────────────────────────────────────────────────────
 const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_company:'text', first_name:'text',

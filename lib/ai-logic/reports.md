@@ -3,6 +3,12 @@ topic: reports
 title: Reports
 covers: Read-only reports in HORIZON: REPORTS menu (Exec Summary, Performance metrics, Slow Moving, Key Arrivals, Markdown & EOS, Stock Availability), DEMAND analysis views (Trends, Accuracy, Forecast trend anomalies, Safety stock, Stock cover, Ship bags, AI Insights), Inventory Status Report, SUPPLY Pipeline, What's next, Supplier delays, Production summary, Payments Due, PRODUCT Reports
 sources:
+  - artifact_v16.7.html :: campOpenEditor
+  - artifact_v16.7.html :: renderCalendarView
+  - artifact_v16.7.html :: intakeRows
+  - server.mjs :: campaignIntakeDeadlines
+  - server.mjs :: /api/trading-calendar/:id/skus
+  - migrations/403_campaigns.sql :: file
   - artifact_v16.7.html :: renderReportView
   - artifact_v16.7.html :: renderExecView
   - artifact_v16.7.html :: buildExecData
@@ -53,6 +59,12 @@ sources:
   - server.mjs :: /api/product/reports/approval-stats
   - supply/inject.html :: renderApprovalStats
 fingerprints:
+  artifact_v16.7.html::campOpenEditor: 5feec8201cd0
+  artifact_v16.7.html::renderCalendarView: eadc62496857
+  artifact_v16.7.html::intakeRows: 007306b7a9d4
+  server.mjs::campaignIntakeDeadlines: 1f202cbcacc9
+  server.mjs::/api/trading-calendar/:id/skus: c9b87262f691
+  migrations/403_campaigns.sql::file: 24814647902f
   artifact_v16.7.html::renderReportView: ccfa229ffa43
   artifact_v16.7.html::renderExecView: 255e38a51f5e
   artifact_v16.7.html::buildExecData: 279a59ce1aeb
@@ -104,10 +116,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: 94260d4d7248
+  supply/inject.html::renderSampleCosts: ae5bd1769d61
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
-  supply/inject.html::renderApprovalStats: 8b05799a9531
-verified_version: v28.585
+  supply/inject.html::renderApprovalStats: 5bbb05e2ccf8
+verified_version: v28.589
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -484,10 +496,18 @@ verified_version: v28.585
 - REPORTS ▸ Stock Availability and the SA drawer show a Description column (the product name) next to the SKU, and on phone cards under the SKU. The filter box accepts SKU codes (any word containing a hyphen keeps the old "any of these SKUs" match) or plain words, which must all appear in the SKU or the description ("whitsunday large"). Display only. (source: saRows, saTableHTML, saRowMatch)
 
 ## Intake deadlines (DEMAND ▸ Analysis ▸ Intake deadlines, v28.224/225, SUG-0045)
-- Rows are SKU x BRANCH LOCATION: UK/US/EU/AU 3PL (if the SKU sells DTC, B2B, TikTok or Zalando there) and FBA (if it sells on FBA there); masters only, not discontinued. Deadline precedence: a SKU date at that location > the location's intake date (planner.intake_deadlines sku='*') > the market launch date minus app_settings.intake_lead_days (default 0). Deadlines more than 90 days past are ignored. (source: intakeRows)
+- Rows are SKU x BRANCH LOCATION: UK/US/EU/AU 3PL (if the SKU sells DTC, B2B, TikTok or Zalando there) and FBA (if it sells on FBA there); masters only, not discontinued. Deadline precedence: a SKU date at that location > a CONFIRMED campaign's intake date for that SKU there (v28.589, earliest campaign wins; the row shows the campaign and tier) > the location's intake date (planner.intake_deadlines sku='*') > the market launch date minus app_settings.intake_lead_days (default 0). Deadlines more than 90 days past are ignored. (source: intakeRows)
 - Status by the deadline, at that location only: In stock (stock there; US FBA includes AWD); On track (an inbound ETA to that location on or before the deadline; for FBA this includes pending transfers from the 3PL, planned or dispatched, from /api/supply/fba-transfers/list, and a planned transfer with no ETA counts as No ETA); No ETA; Late (earliest inbound after the deadline, by N days); Missing (no stock there, nothing inbound). Missing, Late and No ETA are alerts. (source: intakeRows, _ikInbound)
 - Snooze hides an alert until a date (planner.alert_snoozes, key intake|SKU|location), optional reason; bulk set SKU dates and bulk snooze on selected rows. (source: renderIntakeView; server.mjs :: /api/demand/intake)
 - The red counter on DEMAND ▸ Analysis and on the Intake deadlines tab = alerts not snoozed whose deadline is overdue or within 60 days. (source: intakeAlertCount, intakeBadgeSync)
+
+## Marketing campaigns (DEMAND ▸ Calendar, v28.589, Kathryn's Launch Readiness spec)
+- A campaign is entered once: name, launch date, one or more markets (UK, US, EU, AU), channels DTC and / or Amazon, status Draft or Confirmed, its SKUs with a tier each (Hero / Supporting / Cross-sell), uplift low / high % per tier (merchandising) and an optional target cover in weeks (blank = category target). Stored as one planner.trading_calendar row (status not null) plus planner.campaign_skus; the row's sku_list is kept in step so the PLAN "C" markers and DEMAND Actions still see it. (source: campOpenEditor; server.mjs :: /api/trading-calendar/:id/skus; migrations/403_campaigns.sql)
+- Required intake date = launch date minus 7 days, unless overridden on the campaign (a reason is required). (source: campIntake; server.mjs :: campaignIntakeDeadlines)
+- Confirmed campaigns feed Intake deadlines: each SKU x selected market x channel gets the campaign's intake date at that location (DTC = <market>_3pl, Amazon = <market>_fba). A SKU in two campaigns keeps the earliest date. Computed on read, never written into intake_deadlines, so a date typed on a SKU there still wins and moving or deleting a campaign leaves nothing behind. Draft campaigns feed nothing. (source: server.mjs :: campaignIntakeDeadlines; intakeRows)
+- The editor flags any SKU not sold in a selected market x channel (PRODUCT availability: available_<market>_dtc / _fba) and shows Yes / No per SKU per market x channel. A parent code adds every SKU under it; SKUs not in the product master are refused. (source: campSkuAvail, campOpenEditor)
+- The calendar timeline shows each campaign once (name, markets, channels, SKU count, Draft dashed / Confirmed solid); click it or Open to edit. Uplift is stored and shown only: it does not change the forecast or the buy yet. Migration 403 merged the old Marketing rows that held the tier in Notes (15 rows into 9 campaigns, all Draft). (source: renderCalTimeline, renderCalendarView)
+- Q: Why does an Intake deadlines row show a campaign name? A: A confirmed campaign set that SKU's intake date at that location (launch minus 7 days unless overridden).
 
 ## 3PL invoicing: Coghlans weekly (from v28.267)
 - Coghlans (AU 3PL) invoices weekly by email from accounts.receivable@coghlan.com.au ("Coghlan Invoice DOK#####", .xlsx + .pdf). HORIZON scans accounts@ (read only) at most every 6 hours with the health checks, and on "Check accounts@ now", and imports each new invoice's .xlsx into 3PL invoicing (AU Coghlans, period = the month of the invoice's own Period End). An invoice already uploaded by hand (DOK number in the filename) is linked, not duplicated. (source: server.mjs :: coghlansMailImport)

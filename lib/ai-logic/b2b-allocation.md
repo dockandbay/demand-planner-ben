@@ -24,13 +24,13 @@ fingerprints:
   server.mjs::b2bReqList: 0ef35c999672
   server.mjs::b2bReqWhatsApp: 6c52cacd67ef
   server.mjs::b2bReqEmailHtml: af140c00447c
-  server.mjs::/api/scenario/b2b/requests: 7830e2cfe8a3
+  server.mjs::/api/scenario/b2b/requests: a87c5a4dc02b
   server.mjs::/api/scenario/b2b/requests/:ref/:act: 9bc9937858f7
   server.mjs::/api/scenario/b2b/request-settings: 207686102f90
   supply/inject.html::b2bReqSubmitBox: 083887167eb5
-  supply/inject.html::b2bReqDrawer: 47f046e18566
+  supply/inject.html::b2bReqDrawer: f30eec3e3cd2
   migrations/402_b2b_requests.sql::file: 5807986fcf10
-verified_version: v28.585
+verified_version: v28.589
 ---
 
 ## What it is
@@ -55,6 +55,7 @@ verified_version: v28.585
 - Approve / Reject: approvers and admins; a reason is required to reject. Cancel: the person who created it (or an admin). Only open requests can be decided; the first decision wins.
 - Each decision re-runs the analysis and stores a snapshot named after the decision, then emails the requester plus the notify list with the analysis and who decided it, when and why.
 - Re-analyse (open requests) stores a "reanalysed" snapshot so the history shows how the numbers moved (e.g. a PO slipping).
+- Request cards (v28.586-v28.589) list the SKU lines with quantity, can allocate and verdict; a request with more than 3 lines shows the first 3 and a "Show N more lines" expander. The market shows as a coloured badge, and an open request whose latest verdict allows it shows the recommendation above Approve.
 - The Requests drawer has Open and Closed tabs (Closed = approved, rejected, cancelled), each card showing who created it and when, who decided it and when, the decision note, the request notes, the latest totals, actions and the Analysis history (every snapshot, newest first).
 
 ## Common questions
