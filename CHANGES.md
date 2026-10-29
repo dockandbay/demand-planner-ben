@@ -1,3 +1,9 @@
+## v28.591 (30-Oct-26) B2B requests: Reopen within 7 days, then Request again
+- Ben: "add a feature to take it from CLOSED to open within 1 week of the decision" and "if cannot reopen have a button to request again".
+- Closed cards show **Reopen** (with "until dd-mmm-yy") for 7 days after the decision: approvers / admins for any request, the creator for one they cancelled. It goes back to Open, the decision, reasons and any held stock are cleared, a "Reopened" snapshot is stored and the requester plus notify list are emailed.
+- After 7 days the card shows **Request again**: loads the client, market and lines onto the B2B page (set a new required-by date, analyse, submit); the notes start "Request again of B2B-...". A new request is created; the old one stays closed.
+- Server + client; no migration (uses migration 404 columns), no env vars, no cron routes.
+
 ## v28.590 (30-Oct-26) B2B requests: decide per line, held stock, reason codes, seasonality flag
 - Kathryn's email "B2B allocation requests in Horizon: suggested improvements", points 1, 4, 5 and 9 (phase A). Ben chose the decision panel and a separate Held column from mockups.
 - **Decide per line:** Approve / Reject on an open request is replaced by **Decide**, a wide panel with every line: Approve, Reduce or Reject, the approved qty, and a reason code (No stock, Timing, Margin, Customer declined, Substitute offered, Other). Starts on the recommendation; bulk Accept all recommended / Approve all in full / Reject all; default reason; note. Any units approved = approved ("part approved" when reduced), none = rejected. Old approve / reject API actions still work.

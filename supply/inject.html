@@ -16533,7 +16533,7 @@
 
   // ---- B2B ALLOCATION ----
   var B2B_COS=['UK','US','EU','AU','CA'];
-  var _b2bLast=null;
+  var _b2bLast=null, _b2bPrefill=null, _b2bAgain='';   // v28.591: request-again hook (set when the B2B page renders) and the ref being re-requested
   function b2bWholesale(co,retail){ if(retail==null||retail==='')return null; var r=Number(retail); return (co==='UK'||co==='EU')?(r/1.2*0.5):(r*0.5); }
   function renderB2B(c){ var st={co:'UK',cur:'USD',keep:9,src:'mix',rushUsd:10,fxRate:1.34};
     c.innerHTML=scenAnnot('b2b')
@@ -16614,6 +16614,14 @@
     // v28.585: B2B requests
     var _rqb=document.getElementById('b2b-req'); if(_rqb)_rqb.onclick=function(){ b2bReqSubmitBox(st); };
     var _rqs=document.getElementById('b2b-reqs'); if(_rqs)_rqs.onclick=function(){ b2bReqDrawer(''); };
+    // v28.591 (Ben: "if cannot reopen have a button to request again"): load a closed request's client, market and lines back onto the
+    // page; the requester sets a new required-by date, analyses and submits (the notes start with "Request again of B2B-...").
+    _b2bPrefill=function(r){ var cl=document.getElementById('b2b-client'); if(cl)cl.value=r.client||'';
+      if(r.market){ c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.toggle('active',x.dataset.co===r.market);}); st.co=r.market; }
+      var bd=document.getElementById('b2b-date'); if(bd)bd.value='';
+      document.getElementById('b2b-lines').value=(r.lines||[]).map(function(l){ return l.sku+', '+(l.qty||''); }).join('\n');
+      var out=document.getElementById('b2b-out'); if(out)out.innerHTML='<div class="b2bq-note" style="border-color:var(--blue);background:var(--blue-soft)"><b>Request again of '+esc(r.ref)+'.</b> Client, market and lines are loaded. Set the new Required by date, press Analyse order, then Submit for approval.</div>';
+      _b2bAgain=r.ref; if(bd){ bd.focus(); try{ bd.showPicker&&bd.showPicker(); }catch(e){} } };
     b2bqCount(); try{ var _rqm=/\/scenario\/b2b\/(B2B-\d+)/i.exec(location.hash||''); if(_rqm)b2bReqDrawer(_rqm[1].toUpperCase()); }catch(e){}
   }
   // ── v28.585 (Ben 29-Oct-26): B2B allocation REQUESTS. "Submit for approval" next to Analyse order sends the same inputs (client,
@@ -16647,7 +16655,7 @@
   function b2bqJ(method,url,body){ return fetch(url,{method:method,cache:'no-store',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }); }
   function b2bqCopy(text,msgEl){ try{ navigator.clipboard.writeText(text).then(function(){ if(msgEl)msgEl.textContent='Copied, paste into WhatsApp'; },function(){ if(msgEl)msgEl.textContent='Select the text and copy it'; }); }catch(e){ if(msgEl)msgEl.textContent='Select the text and copy it'; } }
   function b2bqCount(){ fetch('/api/scenario/b2b/requests',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ B2BQ.d=d; if(d&&B2BQ.focus&&!B2BQ._ft){ var _inC=(d.closed||[]).some(function(r){ return r.ref===B2BQ.focus; }), _inO=(d.open||[]).some(function(r){ return r.ref===B2BQ.focus; }); if(_inC||_inO){ B2BQ._ft=true; B2BQ.tab=_inC?'closed':'open'; } } var n=(d&&d.open||[]).length, el=document.getElementById('b2b-reqn'); if(el)el.innerHTML=n?'<span style="background:#fff;color:#7c3aed;border-radius:999px;padding:0 7px;font-size:11px;font-weight:800">'+n+' open</span>':''; if(document.getElementById('b2bq-dr'))b2bqDraw(); }).catch(function(){}); }
-  function b2bqSnapHtml(a){ var s=a.summary||{}, K={submitted:'Submitted',reanalysed:'Re-analysed',approved:'Approved',rejected:'Rejected',cancelled:'Cancelled',released:'Hold released'};
+  function b2bqSnapHtml(a){ var s=a.summary||{}, K={submitted:'Submitted',reanalysed:'Re-analysed',approved:'Approved',rejected:'Rejected',cancelled:'Cancelled',released:'Hold released',reopened:'Reopened'};
     return '<div class="q-snap"><div style="font-weight:700;font-size:12px;margin-bottom:4px">'+esc(K[a.kind]||a.kind)+' '+esc(fd(a.created_at))+' '+esc(String(a.created_at||'').slice(11))+' · '+esc(shortUser?shortUser(a.created_by):a.created_by)+' <span class="mut tiny" style="font-weight:400">· '+units(s.can_allocate||0)+' of '+units(s.requested||0)+' can allocate'+(s.short?', '+units(s.short)+' short':'')+'</span></div>'
       +'<div style="overflow-x:auto"><table><thead><tr><th>SKU</th><th style="text-align:right">Req</th><th style="text-align:right">On hand</th><th style="text-align:right">Inbound</th><th style="text-align:right">Forecast</th><th style="text-align:right">Can alloc</th><th style="text-align:right">Cover</th><th>Verdict</th></tr></thead><tbody>'
       +(a.rows||[]).map(function(x){ return '<tr><td style="font-family:ui-monospace,Menlo,monospace">'+esc(x.sku)+'</td><td style="text-align:right">'+units(x.qty||0)+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.on_hand||0))+(x.held?'<div class="mut" title="'+esc(b2bqRefs(x.held_refs))+'">−'+units(x.held)+' held</div>':'')+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.inbound_by_date||0))+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.forecast_to_date||0))+'</td><td style="text-align:right">'+units(x.can_allocate||0)+'</td><td style="text-align:right">'+(x.cover_after_wk==null?'-':esc(String(x.cover_after_wk))+' wk')+'</td><td class="v-'+esc(String(x.verdict||'').split(' ')[0])+'">'+esc(x.verdict||'')+(x.season_flag?' <span class="q-flag" title="Forecast to date is well above the recent sales rate the reserve uses">(!)</span>':'')+'</td></tr>'; }).join('')
@@ -16702,13 +16710,15 @@
       +(r.reason?'<span class="k">Reason</span><span>'+esc(b2bqRsName(r.reason))+'</span>':'')+(r.decision_note?'<span class="k">Note</span><span>'+esc(r.decision_note)+'</span>':'')+(r.notes?'<span class="k">Request</span><span>'+esc(r.notes)+'</span>':'')+'</div>';
     var act='';
     if(B2BQ.act&&B2BQ.act.ref===r.ref&&B2BQ.act.kind==='decide')act=b2bqDecHtml(r);
-    else if(B2BQ.act&&B2BQ.act.ref===r.ref){ var A=B2BQ.act, lbl={approve:'Approve',reject:'Reject',cancel:'Cancel request'}[A.kind];
+    else if(B2BQ.act&&B2BQ.act.ref===r.ref){ var A=B2BQ.act, lbl={approve:'Approve',reject:'Reject',cancel:'Cancel request',reopen:'Reopen request'}[A.kind];
       act='<div style="display:flex;flex-direction:column;gap:6px"><textarea id="b2bq-note" rows="2" placeholder="'+(A.kind==='reject'?'Reason (required)':'Note (optional)')+'"></textarea><div class="q-btns"><button class="q-btn '+(A.kind==='approve'?'ok':A.kind==='reject'?'no':'pri')+'" data-q="confirm" data-ref="'+esc(r.ref)+'"'+(B2BQ.busy?' disabled':'')+'>'+(B2BQ.busy?'Saving…':esc(lbl))+'</button><button class="q-btn" data-q="actx">Back</button></div>'+(A.err?'<div class="q-err">'+esc(A.err)+'</div>':'')+'</div>'; }
     else if(!closed){ act=b2bqRec(r)+'<div class="q-btns">'+(d.can_decide?'<button class="q-btn ok" data-q="decide" data-ref="'+esc(r.ref)+'">Decide</button>':'')
       +'<button class="q-btn" data-q="reanalyse" data-ref="'+esc(r.ref)+'">Re-analyse</button>'+((d.is_admin||String(r.created_by).toLowerCase()===me)?'<button class="q-btn" data-q="cancel" data-ref="'+esc(r.ref)+'">Cancel</button>':'')
       +'<button class="q-btn" data-q="wa" data-ref="'+esc(r.ref)+'">Copy for WhatsApp</button><span class="mut tiny q-msg" data-ref="'+esc(r.ref)+'"></span></div>'; }
     else act=(r.status==='approved'&&r.hold_until&&r.hold_until>=new Date().toISOString().slice(0,10)?'<div class="q-hold"><span>Holding '+units((r.decisions||[]).reduce(function(a,x){ return a+(Number(x.approved_qty)||0); },0))+' units off stock until <b>'+esc(fd(r.hold_until))+'</b></span>'+(d.can_decide?'<button class="q-btn" data-q="release" data-ref="'+esc(r.ref)+'">Release hold</button>':'')+'</div>':'')
-      +'<div class="q-btns"><button class="q-btn" data-q="wa" data-ref="'+esc(r.ref)+'">Copy for WhatsApp</button><span class="mut tiny q-msg" data-ref="'+esc(r.ref)+'"></span></div>';
+      +'<div class="q-btns">'+(r.reopenable&&(d.can_decide||(r.status==='cancelled'&&String(r.created_by).toLowerCase()===me))?'<button class="q-btn pri" data-q="reopen" data-ref="'+esc(r.ref)+'" title="Back to Open for a new decision'+(r.status==='approved'?'; releases its held stock':'')+'">Reopen</button><span class="mut tiny" style="align-self:center">until '+esc(fd(r.reopen_until))+'</span>'
+        :(!r.reopenable?'<button class="q-btn pri" data-q="again" data-ref="'+esc(r.ref)+'" title="Decided more than 7 days ago: load its client, market and lines on the page to submit a new request">Request again</button>':''))
+      +'<button class="q-btn" data-q="wa" data-ref="'+esc(r.ref)+'">Copy for WhatsApp</button><span class="mut tiny q-msg" data-ref="'+esc(r.ref)+'"></span></div>';
     var det=B2BQ.det[r.ref], op=!!B2BQ.open[r.ref];
     return '<div class="q-c'+(B2BQ.focus===r.ref?' focus':'')+'" data-card="'+esc(r.ref)+'"><div class="q-top"><b>'+esc(r.ref)+'</b><span>'+esc(r.client||'no client')+'</span>'+b2bqMkt(r.market)+'<span class="q-st '+esc(r.status)+'">'+esc(r.status==='approved'&&(r.decisions||[]).some(function(x){ return (Number(x.approved_qty)||0)<(Number(x.qty)||0); })?'part approved':r.status)+'</span></div>'
       +'<div class="mut tiny">'+units(uq)+' units · '+nL+' SKU'+(nL===1?'':'s')+' · required by '+esc(fd(r.required_by))+(s.requested!=null?' · latest: '+units(s.can_allocate||0)+' can allocate'+(s.short?', '+units(s.short)+' short':''):'')+'</div>'
@@ -16744,7 +16754,8 @@
       if(q==='tab'){ B2BQ.tab=t.getAttribute('data-t'); B2BQ.act=null; dr.classList.remove('wide'); b2bqDraw(); return; }
       if(q==='lines'){ B2BQ.lines=B2BQ.lines||{}; B2BQ.lines[ref]=!B2BQ.lines[ref]; b2bqDraw(); return; }
       if(q==='hist'){ B2BQ.open[ref]=!B2BQ.open[ref]; if(B2BQ.open[ref])b2bqLoadDet(ref); b2bqDraw(); return; }
-      if(q==='approve'||q==='reject'||q==='cancel'){ B2BQ.act={ref:ref,kind:q}; b2bqDraw(); var n=document.getElementById('b2bq-note'); if(n)n.focus(); return; }
+      if(q==='again'){ var ra=b2bqFind(ref); if(!ra)return; b2bqClose(); if(_b2bPrefill)_b2bPrefill(ra); else { location.hash='#/demand/scenario/b2b'; } return; }
+      if(q==='approve'||q==='reject'||q==='cancel'||q==='reopen'){ B2BQ.act={ref:ref,kind:q}; b2bqDraw(); var n=document.getElementById('b2bq-note'); if(n)n.focus(); return; }
       if(q==='actx'){ B2BQ.act=null; dr.classList.remove('wide'); b2bqDraw(); return; }
       if(q==='decide'){ var r0=b2bqFind(ref); if(!r0)return; B2BQ.act={ref:ref,kind:'decide',dec:b2bqDecInit(r0),reason:''}; dr.classList.add('wide'); b2bqDraw(); return; }
       if(q==='dec-rec'||q==='dec-all'||q==='dec-none'){ var A0=B2BQ.act, r1=b2bqFind(A0&&A0.ref); if(!r1)return;
@@ -16757,7 +16768,7 @@
         b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(Ad.ref)+'/decide',{decisions:decs,reason:Ad.reason||'',note:noteD}).then(function(){ B2BQ.busy=false; B2BQ.act=null; dr.classList.remove('wide'); delete B2BQ.det[Ad.ref]; B2BQ.tab='closed'; B2BQ.focus=Ad.ref; b2bqCount(); })
           .catch(function(err){ B2BQ.busy=false; Ad.err=err.message; b2bqDrawKeep(noteD); }); return; }
       if(q==='confirm'){ var A=B2BQ.act; if(!A)return; var note=(document.getElementById('b2bq-note')||{}).value||''; B2BQ.busy=true; b2bqDraw(); var keep=document.getElementById('b2bq-note'); if(keep)keep.value=note;
-        b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(A.ref)+'/'+A.kind,{note:note}).then(function(){ B2BQ.busy=false; B2BQ.act=null; delete B2BQ.det[A.ref]; B2BQ.tab='closed'; B2BQ.focus=A.ref; b2bqCount(); })
+        b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(A.ref)+'/'+A.kind,{note:note}).then(function(){ B2BQ.busy=false; B2BQ.act=null; delete B2BQ.det[A.ref]; B2BQ.tab=A.kind==='reopen'?'open':'closed'; B2BQ.focus=A.ref; b2bqCount(); })
           .catch(function(err){ B2BQ.busy=false; A.err=err.message; b2bqDraw(); var k2=document.getElementById('b2bq-note'); if(k2)k2.value=note; }); return; }
       if(q==='reanalyse'){ t.disabled=true; t.textContent='Re-analysing…'; b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(ref)+'/reanalyse',{}).then(function(){ delete B2BQ.det[ref]; B2BQ.open[ref]=true; b2bqLoadDet(ref); b2bqCount(); }).catch(function(err){ t.disabled=false; t.textContent='Re-analyse'; alert(err.message); }); return; }
       if(q==='wa'){ var m=dr.querySelector('.q-msg[data-ref="'+ref+'"]'); var go=function(j){ b2bqCopy(j.whatsapp||'',m); }; if(B2BQ.det[ref]&&B2BQ.det[ref].whatsapp)go(B2BQ.det[ref]); else b2bqJ('GET','/api/scenario/b2b/requests/'+encodeURIComponent(ref)).then(function(j){ B2BQ.det[ref]=j; go(j); }).catch(function(err){ if(m)m.textContent=err.message; }); return; }
@@ -16778,11 +16789,12 @@
     var lines=_b2bLast.data.map(function(x){ return {sku:(x.d&&x.d.sku)||x.sku||'', qty:x.qty||0}; }).filter(function(l){ return l.sku&&l.qty>0; });
     box.innerHTML='<div class="b2bq-note" style="border-color:var(--blue);background:var(--blue-soft)"><b>Submit for approval: '+esc(cl||'no client')+' · '+esc(_b2bLast.co)+' · '+(dt?'required by '+esc(fd(dt)):'<span style="color:var(--neg)">no required-by date</span>')+' · '+lines.length+' SKU'+(lines.length===1?'':'s')+'</b>'
       +'<div class="mut tiny">Same lines as the analysis above. The notify list (Kathryn, Sarah, Ben) gets one email with the full analysis; you get a WhatsApp summary to share.</div>'
-      +'<textarea id="b2b-req-notes" rows="2" placeholder="Notes for the approvers (optional)" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;box-sizing:border-box"></textarea>'
+      +'<textarea id="b2b-req-notes" rows="2" placeholder="Notes for the approvers (optional)" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;box-sizing:border-box">'+(_b2bAgain?esc('Request again of '+_b2bAgain+'. '):'')+'</textarea>'
       +'<div style="display:flex;gap:6px;align-items:center"><button class="pill active" id="b2b-req-go" style="background:var(--blue);color:#fff;border-color:var(--blue)"'+(dt?'':' disabled')+'>Submit</button><button class="pill" id="b2b-req-x">Cancel</button><span class="tiny" id="b2b-req-msg" style="color:var(--neg)">'+(dt?'':'Set the Required by date and analyse again.')+'</span></div></div>';
     document.getElementById('b2b-req-x').onclick=function(){ box.innerHTML=''; };
     document.getElementById('b2b-req-go').onclick=function(){ var btn=this, msg=document.getElementById('b2b-req-msg'); btn.disabled=true; btn.textContent='Submitting…'; msg.textContent='';
       b2bqJ('POST','/api/scenario/b2b/requests',{client:cl,market:_b2bLast.co,date:dt,lines:lines,notes:(document.getElementById('b2b-req-notes')||{}).value||''}).then(function(j){
+        _b2bAgain='';
         box.innerHTML='<div class="b2bq-note"><div><b>Request '+esc(j.ref)+' submitted.</b> <span class="mut">'+((j.notified||[]).length?'Emailed '+esc(j.notified.map(function(e){ return e.split('@')[0]; }).join(', '))+'.':'')+' Copy the summary below into WhatsApp.</span></div>'
           +'<pre id="b2b-req-wa">'+esc(j.whatsapp||'')+'</pre><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="pill active" id="b2b-req-copy" style="background:#128c4a;color:#fff;border-color:#128c4a">Copy for WhatsApp</button><span class="tiny mut" id="b2b-req-cmsg"></span>'
           +'<span class="tiny mut">Direct link:</span><span class="tiny" style="font-family:ui-monospace,Menlo,monospace;user-select:all;word-break:break-all">'+esc(j.link||'')+'</span><button class="pill" id="b2b-req-open">Open request</button></div></div>';

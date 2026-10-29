@@ -24961,6 +24961,7 @@ const B2B_REQ_APPROVERS_DEFAULT = ['kathryn@dockandbay.com', 'sarah@dockandbay.c
 const B2B_KEEP_WEEKS = 9;   // own-channel cover reserved before allocating (the Analyse order default)
 // v28.590 (Ben 30-Oct-26, Kathryn's improvements 1, 4, 5, 9, migration 404): per-line decisions hold stock; reason codes; seasonality flag.
 const B2B_HOLD_DAYS = 14;   // approved units stay held until the required-by date + this many days (or an approver releases them)
+const B2B_REOPEN_DAYS = 7;   // v28.591 (Ben 30-Oct-26): a closed request can be put back to Open for this many days after its decision
 const B2B_REASONS = { no_stock: 'No stock', timing: 'Timing', margin: 'Margin', customer_declined: 'Customer declined', substitute: 'Substitute offered', other: 'Other' };
 const B2B_SEASON_RATIO = 1.5, B2B_SEASON_MIN = 20;   // flag a line when forecast to date is 1.5x+ the sales-rate estimate and at least 20 units more
 // Held = approved lines of approved requests in this market whose hold has not expired; pending = lines of open requests (shown, not
@@ -25058,7 +25059,9 @@ function b2bReqEmailHtml(r, a, head, extra) {
 const B2B_REQ_COLS = `r.id, r.ref, coalesce(r.client,'') client, r.market, to_char(r.required_by,'YYYY-MM-DD') required_by, r.lines, coalesce(r.notes,'') notes, r.status,
   coalesce(r.created_by,'') created_by, to_char(r.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at, coalesce(r.decided_by,'') decided_by,
   to_char(r.decided_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') decided_at, coalesce(r.decision_note,'') decision_note,
-  r.decisions, to_char(r.hold_until,'YYYY-MM-DD') hold_until, coalesce(r.reason,'') reason`;   // v28.590: migration 404
+  r.decisions, to_char(r.hold_until,'YYYY-MM-DD') hold_until, coalesce(r.reason,'') reason,   -- v28.590: migration 404
+  (r.status <> 'open' AND r.decided_at > now() - interval '${B2B_REOPEN_DAYS} days') reopenable,   -- v28.591: closed requests can be reopened for 7 days
+  to_char((r.decided_at + interval '${B2B_REOPEN_DAYS} days') AT TIME ZONE 'Europe/London','YYYY-MM-DD') reopen_until`;
 async function b2bReqGet(ref) { return (await pool.query(`SELECT ${B2B_REQ_COLS} FROM planner.b2b_requests r WHERE r.ref=$1`, [ref])).rows[0] || null; }
 async function b2bReqSnap(id, kind, a, by) { await pool.query(`INSERT INTO planner.b2b_request_analyses (request_id, kind, summary, rows, created_by) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)`, [id, kind, JSON.stringify(a.summary), JSON.stringify(a.rows), by]); }
 function b2bReqLines(raw) { const m = {}, order = []; (Array.isArray(raw) ? raw : []).forEach(l => { const sku = String((l && l.sku) || '').trim().toUpperCase(), q = parseInt(l && l.qty, 10) || 0; if (!sku || q <= 0) return; if (!(sku in m)) { m[sku] = 0; order.push(sku); } m[sku] += q; }); return order.slice(0, 200).map(s => ({ sku: s, qty: m[s] })); }
@@ -25100,9 +25103,23 @@ app.post('/api/scenario/b2b/requests', async (req, res) => {
 });
 app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
-    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release'].includes(act)) return res.status(404).json({ error: 'not found' });
+    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release', 'reopen'].includes(act)) return res.status(404).json({ error: 'not found' });
     const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
     const isAdmin = !!(me.is_admin || me.live === false), approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), canDecide = isAdmin || approvers.includes(email);
+    if (act === 'reopen') {   // v28.591 (Ben): back to Open within 7 days of the decision; the decision, reason and any hold are cleared
+      if (r.status === 'open') return res.status(409).json({ error: 'This request is already open.' });
+      if (!(canDecide || (r.status === 'cancelled' && email === String(r.created_by).toLowerCase()))) return res.status(403).json({ error: 'Only an approver or an admin can reopen a decided request (the creator can reopen one they cancelled).' });
+      const note = String((req.body && req.body.note) || '').trim().slice(0, 2000), was = r.status;
+      const up = await pool.query(`UPDATE planner.b2b_requests SET status='open', decided_by=NULL, decided_at=NULL, decision_note=NULL, decisions=NULL, hold_until=NULL, reason=NULL
+          WHERE id=$1 AND status <> 'open' AND decided_at > now() - interval '${B2B_REOPEN_DAYS} days'`, [r.id]);
+      if (!up.rowCount) return res.status(409).json({ error: 'This request was decided more than ' + B2B_REOPEN_DAYS + ' days ago and can no longer be reopened. Submit a new request.' });
+      const a = await b2bReqAnalyse(Array.isArray(r.lines) ? r.lines : [], r.market, r.required_by, r.id); await b2bReqSnap(r.id, 'reopened', a, email);
+      const r2 = await b2bReqGet(r.ref), notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT);
+      const to = [...new Set([String(r.created_by || '').toLowerCase()].concat(notify).filter(x => /@/.test(x)))];
+      try { if (to.length) await sendResendEmail({ to, subject: 'B2B request ' + r.ref + ' reopened: ' + (r.client || 'no client') + ', ' + r.market,
+        html: b2bReqEmailHtml(r2, a, 'B2B request reopened', '<p style="font-size:14px;margin:0 0 12px"><b>Reopened</b> by ' + b2bEsc(email) + ' (was ' + b2bEsc(was) + (was === 'approved' ? ', its held stock is released' : '') + ')' + (note ? ': ' + b2bEsc(note) : '') + '. It needs a new decision.</p>'), kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
+      return res.json({ ok: true, status: 'open' });
+    }
     if (act === 'release') {   // v28.590: stop an approved request holding stock (customer declined, shipped early ...)
       if (!canDecide) return res.status(403).json({ error: 'Only an approver or an admin can release held stock.' });
       const up = await pool.query(`UPDATE planner.b2b_requests SET hold_until=NULL WHERE id=$1 AND status='approved' AND hold_until IS NOT NULL`, [r.id]);

@@ -25,12 +25,12 @@ fingerprints:
   server.mjs::b2bReqWhatsApp: 6c52cacd67ef
   server.mjs::b2bReqEmailHtml: 39ab078e8850
   server.mjs::/api/scenario/b2b/requests: a87c5a4dc02b
-  server.mjs::/api/scenario/b2b/requests/:ref/:act: c79f1e771981
+  server.mjs::/api/scenario/b2b/requests/:ref/:act: 7febe0b7d777
   server.mjs::/api/scenario/b2b/request-settings: 207686102f90
-  supply/inject.html::b2bReqSubmitBox: 083887167eb5
-  supply/inject.html::b2bReqDrawer: 1f66d7c129ed
+  supply/inject.html::b2bReqSubmitBox: 253faa69a6b3
+  supply/inject.html::b2bReqDrawer: 1c57d2d8b824
   migrations/402_b2b_requests.sql::file: 5807986fcf10
-verified_version: v28.590
+verified_version: v28.591
 ---
 
 ## What it is
@@ -55,6 +55,7 @@ verified_version: v28.590
 - Decide (v28.590, migration 404, Kathryn's improvements 1, 4, 5, 9): approvers and admins decide each LINE in a decision panel: approve in full, reduce (approved qty between 1 and the requested qty) or reject (0). The panel starts on the recommendation (approved qty = can allocate) with bulk buttons (Accept all recommended, Approve all in full, Reject all). Any line approved below its requested qty needs a reason code (No stock, Timing, Margin, Customer declined, Substitute offered, Other) unless a note is given; a request-level default reason fills lines without one. The per-line result is stored in b2b_requests.decisions ([{sku, qty, approved_qty, reason}]) plus reason and decision_note.
 - Status after a decision: any approved units = approved (shown "part approved" when any line is below its requested qty); nothing approved = rejected. The older whole-request approve / reject actions still work (every line in full, or every line at 0). Cancel: the person who created it (or an admin). Only open requests can be decided; the first decision wins.
 - HELD stock (b2bHeld): approved units of approved requests in the same market are held until hold_until = required-by date + 14 days (B2B_HOLD_DAYS), or until an approver / admin presses Release hold (hold_until cleared, a "released" snapshot stored). Every later analysis (the page and requests) takes held units off stock on the date first; held units beyond that stock come off the feasible in-production qty, so the same production cannot be promised twice. A request never holds against itself. Open (undecided) requests are shown as "pending" against the SKU but NOT deducted.
+- Reopen (v28.591, Ben): a closed request (approved, rejected or cancelled) can be put back to Open for 7 days after its decision (B2B_REOPEN_DAYS; the card shows "Reopen until dd-mmm-yy"). Approvers and admins can reopen any; the creator can reopen one they cancelled. Reopening clears the decision, per-line decisions, reason and any hold (held stock is released), stores a "reopened" snapshot and emails the requester plus the notify list. After 7 days the card shows "Request again" instead: it loads the client, market and lines back onto the B2B Allocation page (required-by date left blank to set), and the submit notes start "Request again of B2B-...". That creates a NEW request; the old one stays closed.
 - Seasonality flag (b2bReqAnalyse): a line is flagged "(!)" when forecast to date is at least 1.5x the own-channel sales estimate (3-month velocity x days) and at least 20 units more (B2B_SEASON_RATIO, B2B_SEASON_MIN), meaning the 9-week reserve, based on recent sales, may be too low. It is a warning only; the allocation still uses velocity.
 - Each decision re-runs the analysis and stores a snapshot named after the decision, then emails the requester plus the notify list with the analysis, the approved qty and reason per line, who decided it, when and why, and the hold-until date.
 - Re-analyse (open requests) stores a "reanalysed" snapshot so the history shows how the numbers moved (e.g. a PO slipping).
