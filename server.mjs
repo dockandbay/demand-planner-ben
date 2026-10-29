@@ -25032,7 +25032,8 @@ function b2bReqLines(raw) { const m = {}, order = []; (Array.isArray(raw) ? raw 
 app.get('/api/scenario/b2b/requests', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); const approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT);
     const rows = (await pool.query(`SELECT ${B2B_REQ_COLS}, (SELECT count(*)::int FROM planner.b2b_request_analyses a WHERE a.request_id=r.id) n_analyses,
-        (SELECT a.summary FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_summary
+        (SELECT a.summary FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_summary,
+        (SELECT a.rows FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_rows   -- v28.587: SKU lines on the card
       FROM planner.b2b_requests r ORDER BY (r.status='open') DESC, coalesce(r.decided_at, r.created_at) DESC LIMIT 300`)).rows;
     const out = { me: email, can_decide: !!(me.is_admin || me.live === false || (email && approvers.includes(email))), is_admin: !!(me.is_admin || me.live === false),
       open: rows.filter(r => r.status === 'open'), closed: rows.filter(r => r.status !== 'open') };

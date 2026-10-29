@@ -1,3 +1,9 @@
+## v28.587 (29-Oct-26) B2B requests: SKUs and quantities, market badges, recommendation
+- Ben: "in the requests you must show what SKUs and quantities are".
+- Ben: "can UK and US countries have a coloured badge". The market shows as a coloured badge on each card (UK blue, US red, EU purple, AU green, CA amber).
+- Ben: "if verdict is YES show a recommendation above the approve button". Open requests show a recommendation from the latest analysis above Approve / Reject: approve (every SKU Yes, green), partial (amber, can allocate of requested, short), or reject or wait (none can be allocated, red).
+- Each request card in the Requests drawer lists its lines: SKU (with product name), quantity, can allocate and verdict from the latest analysis. The list API adds the latest analysis rows (last_rows).
+
 ## v28.586 (29-Oct-26) To do "your personal list" note; B2B REQUESTS button top right
 - Ben: "add a tooltip note about this being your personal to do list".
 - The To do button's tooltip and the drawer (an "i" tip plus one line under the title) say it is your personal list and only you can see it. Client only.
