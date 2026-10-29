@@ -1,3 +1,7 @@
+## v28.583 (29-Oct-26) To do drawer: Open and Done tabs
+- Ben: "can this have 2 tabs, open and done in the drawer".
+- The drawer has two tabs, **Open** (add box + open items) and **Done** (ticked items, newest first; untick to reopen, or delete), each with its count. Replaces the collapsible "Done (n)" list. Client only.
+
 ## v28.582 (29-Oct-26) PRODUCT: more than one of the same component (e.g. 3 x Core Product)
 - Libby: "Just went to add in the 3 xmas tea towel brief sheets. I still can't seem to add more than one core component".
 - Cause: "+ Add component" hid every catalogue type already on the product, and a product can hold only one component per name, so a second "Core Product" could not be added (or merged into the first).

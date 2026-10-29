@@ -163,6 +163,11 @@
 #todo-dr .td-btn.ghost{background:none;color:var(--blue)}
 #todo-dr .td-btn.danger{border-color:var(--neg);background:var(--neg)}
 #todo-dr .td-body{flex:1;overflow-y:auto;padding:6px 8px 20px}
+#todo-dr .td-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line)}
+#todo-dr .td-tab{border:0;background:none;color:var(--muted);font:inherit;font-weight:700;font-size:13px;padding:9px 12px 8px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+#todo-dr .td-tab.on{color:var(--ink);border-bottom-color:var(--blue)}
+#todo-dr .td-tc{font-size:11px;font-weight:700;background:var(--line2);color:var(--muted);border-radius:999px;padding:0 7px}
+#todo-dr .td-tab.on .td-tc{background:var(--blue-soft);color:var(--blue-ink)}
 #todo-dr .td-sec{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:12px 8px 4px;cursor:default;background:none;border:0;width:100%;text-align:left}
 #todo-dr button.td-sec{cursor:pointer}
 #todo-dr .td-it{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px;border-radius:8px}
@@ -20630,7 +20635,7 @@
   // Personal To do list: top bar drawer next to Inbox (/api/todos, one list per person, migration 401).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
   var HOME={d:null,acts:null,opx:null,samp:null,cl:null,recent:null,at:0};
-  var TODO={open:[],done:[],loaded:false,showDone:false,edit:null,del:null,err:'',busy:false};
+  var TODO={open:[],done:[],loaded:false,tab:'open',edit:null,del:null,err:'',busy:false};   // v28.583: drawer tabs Open | Done
   function hmCan(k){ var m=ME||null; if(!m)return false; if(m.live===false||m.is_admin)return true; return !!m[k]; }
   function hmToday(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   function ensureHomeRoot(){ if(document.getElementById('home-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -20768,12 +20773,15 @@
       +'<div class="td-ops">'+ops+'</div></div>'; }
   function todoRender(){ var dr=document.getElementById('todo-dr'); if(!dr)return; var today=hmToday(), o=TODO.open||[], dn=TODO.done||[];
     var keep=document.getElementById('td-new'), kv=keep?keep.value:'', kd=document.getElementById('td-new-due'), kdv=kd?kd.value:'', fo=document.activeElement&&document.activeElement.id;
-    dr.innerHTML='<div class="td-hd"><h2>To do</h2><span class="hm-s" style="color:var(--muted)">'+o.length+' open</span><button class="td-x" data-td="close" aria-label="Close">×</button></div>'
-      +'<div class="td-add"><div class="td-row"><input type="text" id="td-new" maxlength="300" placeholder="What needs doing?" aria-label="New item" value="'+esc(kv)+'"><button class="td-btn" data-td="add"'+(TODO.busy?' disabled':'')+'>Add</button></div>'
-      +'<div class="td-row"><label for="td-new-due" style="color:var(--muted);font-size:12px">Due (optional)</label><input type="date" id="td-new-due" value="'+esc(kdv)+'"></div></div>'
+    var onDone=TODO.tab==='done';
+    dr.innerHTML='<div class="td-hd"><h2>To do</h2><button class="td-x" data-td="close" aria-label="Close">×</button></div>'
+      +'<div class="td-tabs" role="tablist"><button role="tab" class="td-tab'+(onDone?'':' on')+'" data-td="tab" data-t="open" aria-selected="'+(!onDone)+'">Open <span class="td-tc">'+o.length+'</span></button><button role="tab" class="td-tab'+(onDone?' on':'')+'" data-td="tab" data-t="done" aria-selected="'+onDone+'">Done <span class="td-tc">'+dn.length+'</span></button></div>'
+      +(onDone?'':'<div class="td-add"><div class="td-row"><input type="text" id="td-new" maxlength="300" placeholder="What needs doing?" aria-label="New item" value="'+esc(kv)+'"><button class="td-btn" data-td="add"'+(TODO.busy?' disabled':'')+'>Add</button></div>'
+      +'<div class="td-row"><label for="td-new-due" style="color:var(--muted);font-size:12px">Due (optional)</label><input type="date" id="td-new-due" value="'+esc(kdv)+'"></div></div>')
       +(TODO.err?'<div class="td-err">'+esc(TODO.err)+'</div>':'')
-      +'<div class="td-body">'+(o.length?o.map(function(t){ return todoItemHtml(t,false,today); }).join(''):'<div class="td-empty">'+(TODO.loaded?'Nothing open. Add an item above.':'Loading…')+'</div>')
-      +(dn.length?'<button class="td-sec" data-td="toggledone" aria-expanded="'+(TODO.showDone?'true':'false')+'">'+(TODO.showDone?'▾':'▸')+' Done ('+dn.length+')</button>'+(TODO.showDone?dn.map(function(t){ return todoItemHtml(t,true,today); }).join(''):''):'')
+      +'<div class="td-body">'+(onDone
+        ?(dn.length?dn.map(function(t){ return todoItemHtml(t,true,today); }).join(''):'<div class="td-empty">'+(TODO.loaded?'Nothing done yet. Ticked items move here.':'Loading…')+'</div>')
+        :(o.length?o.map(function(t){ return todoItemHtml(t,false,today); }).join(''):'<div class="td-empty">'+(TODO.loaded?'Nothing open. Add an item above.':'Loading…')+'</div>'))
       +'</div>';
     if(fo){ var f=document.getElementById(fo); if(f){ f.focus(); if(f.setSelectionRange&&f.type==='text'){ try{ f.setSelectionRange(f.value.length,f.value.length); }catch(e){} } } } }
   function todoWire(dr){ dr.addEventListener('click',function(e){ var t=e.target.closest('[data-td]'); if(!t)return; var a=t.getAttribute('data-td'), id=+t.getAttribute('data-id');
@@ -20785,7 +20793,7 @@
       if(a==='del'){ TODO.del=id; TODO.edit=null; todoRender(); return; }
       if(a==='delno'){ TODO.del=null; todoRender(); return; }
       if(a==='delyes'){ todoDel(id); return; }
-      if(a==='toggledone'){ TODO.showDone=!TODO.showDone; todoRender(); return; } });
+      if(a==='tab'){ TODO.tab=t.getAttribute('data-t')==='done'?'done':'open'; TODO.edit=null; TODO.del=null; todoRender(); return; } });
     dr.addEventListener('change',function(e){ var t=e.target; if(t.getAttribute&&t.getAttribute('data-td')==='tick'){ todoPatch(+t.getAttribute('data-id'),{done:t.checked}); } });
     dr.addEventListener('keydown',function(e){ if(e.key!=='Enter')return; if(e.target.id==='td-new'||e.target.id==='td-new-due'){ e.preventDefault(); todoSubmitNew(); }
       else if(e.target.id==='td-e-title'||e.target.id==='td-e-due'){ e.preventDefault(); todoSaveEdit(TODO.edit); } }); }
