@@ -1,3 +1,7 @@
+## v28.577 (29-Oct-26) Portal users grouped by supplier
+- Ben: "portalusers group by supplier so it's clearer to see".
+- SUPPLY ▸ CONFIG ▸ Portal users (= PORTALS ▸ Supplier ▸ Users): rows sorted by supplier then email, with a heading row per supplier showing its user count (and how many are active when not all). Edit / Delete / Magic link per row unchanged. Client only (supply/inject.html).
+
 ## v28.576 (29-Oct-26) PORTALS ▸ Supplier ▸ Open portal: dropdown and button on one line
 - Ben: "put supplier dropdown and open portal on the same line. so supplier drop is not full width".
 - The supplier dropdown is 380px (a CONFIG theme rule made selects block and 100% wide), with Open portal beside it; it still wraps on a phone. Client only (supply/inject.html).

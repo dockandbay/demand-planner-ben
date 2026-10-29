@@ -9054,7 +9054,12 @@
       // .pu-act (open-actions) is wired after the async signal load below.
     }
     function portalUsersTbl(rows){ PU_ROWS={}; PU_EDIT={}; (rows||[]).forEach(function(u){ PU_ROWS[u.id]=u; });
-      var body=(rows||[]).map(puRow).join('');
+      // v28.577 (Ben: "group by supplier so it's clearer to see"): rows sorted by supplier then email, a heading row per supplier (count, active)
+      var _srt=(rows||[]).slice().sort(function(a,b){ var x=String(a.supplier_name||'~').toLowerCase(), y=String(b.supplier_name||'~').toLowerCase(); return x<y?-1:x>y?1:String(a.email||'').localeCompare(String(b.email||'')); });
+      var body='', _g=null; _srt.forEach(function(u,i){ var g=u.supplier_name||'';
+        if(i===0||g!==_g){ _g=g; var grp=_srt.filter(function(x){ return (x.supplier_name||'')===g; }), act=grp.filter(function(x){ return x.active; }).length;
+          body+='<tr class="pu-grp"><td colspan="8" style="background:var(--l3-bg,#f0f6ff);font-weight:700;font-size:12.5px;padding:8px 10px;border-top:1px solid var(--line)">'+esc(g||'No supplier')+' <span class="mut tiny" style="font-weight:600;margin-left:6px">'+grp.length+' user'+(grp.length===1?'':'s')+(act<grp.length?' · '+act+' active':'')+'</span></td></tr>'; }
+        body+=puRow(u); });
       return lookupDatalists()+PU_CSS
         +'<div class="sect-h">Portal users <span class="mut tiny">(approved supplier logins — each email is mapped to one supplier and sees only that supplier\'s data in the portal)</span> <button class="tool-badge bg-blue" id="pu-new" style="cursor:pointer;border:none;margin-left:8px">+ Portal user</button></div>'
         +'<div class="pu-tw"><table class="pu-tbl"><thead><tr><th class="l pu-c1">Email</th><th class="l">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l" title="Receive a payment-confirmed notification (RECENTS + email) when a payment is confirmed as paid">Pay notify</th><th class="l">Sessions</th><th class="l">Actions</th><th class="l">Login</th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="8" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
