@@ -5447,8 +5447,10 @@ function hzSendAsset(req, res, name, type, src, opts) {
 const hzVerOk = (req) => String(req.query.v || '') === String(APP_VERSION);
 app.get('/hz-theme.css', (req, res) => hzSendAsset(req, res, 'hz-theme.css', 'text/css; charset=utf-8', DEV ? loadTheme() : HZ_THEME, { immutable: !DEV && hzVerOk(req) }));   // v28.189: compressed + ETag (was raw, a day's cache)
 // v28.189 (Ben): the supplier portal's icon as a cached file (the portal page embedded the same base64 image twice). Gate-exempt like /portal.
-app.get('/portal-icon.png', (req, res) => { try { res.set('Content-Type', 'image/png').set('Cache-Control', hzVerOk(req) ? 'public, max-age=31536000, immutable' : 'public, max-age=86400');
-  res.end(readFileSync(new URL('./supply/assets/portal-icon.png', import.meta.url))); } catch (e) { res.status(404).end(); } });
+function sendPortalIcon(req, res) { try { res.set('Content-Type', 'image/png').set('Cache-Control', hzVerOk(req) ? 'public, max-age=31536000, immutable' : 'public, max-age=86400');
+  res.end(readFileSync(new URL('./supply/assets/portal-icon.png', import.meta.url))); } catch (e) { res.status(404).end(); } }
+app.get('/portal-icon.png', sendPortalIcon);
+app.get('/api/portal/icon.png', sendPortalIcon);   // v28.579: the suppliers' host forwards only /api/portal/* (see /api/portal/health.js)
 app.get('/fonts/:name', (req, res) => {
   const files = { 'hanken-grotesk-latin.woff2': 1, 'hanken-grotesk-latin-ext.woff2': 1 };
   if (!files[req.params.name]) return res.status(404).end();
@@ -30443,7 +30445,11 @@ app.get('/api/config/health-check/runs/:id', async (req, res) => {
 
 // ── v28.159 (Ben): HEALTH LOG (migration 328): browser capture endpoints, the weekly report, the Health log UI data and the
 // weekly health email. Server-side capture lives in the perf middleware (hzHealthNote / hzHealthFlush).
-app.get('/hz-health.js', (req, res) => hzSendAsset(req, res, 'hz-health.js', 'application/javascript; charset=utf-8', hzHealthJs() || '/* hz-health.js missing */', { immutable: !!req.query.v }));   // v28.189: + brotli / gzip + ETag (immutable rule unchanged)
+// v28.579: also /api/portal/health.js. supplier.dockandbay.com (real suppliers) is a Caddy front that forwards only /portal, /portal-view.js and
+// /api/portal/*; /hz-health.js was answered with a 302 to /portal there, so no real supplier ever sent a health beacon. Static script, no data.
+function sendHzHealthJs(req, res) { return hzSendAsset(req, res, 'hz-health.js', 'application/javascript; charset=utf-8', hzHealthJs() || '/* hz-health.js missing */', { immutable: !!req.query.v }); }
+app.get('/hz-health.js', sendHzHealthJs);
+app.get('/api/portal/health.js', sendHzHealthJs);   // v28.189: + brotli / gzip + ETag (immutable rule unchanged)
 // Browser events: one shared handler behind three AUTHENTICATED routes, never an anonymous write. Staff = the normal /api gate
 // (planner key cookie under PLANNER_KEY; identity via authUser); supplier portal = portalAuth (psid); client portal = cpAuth
 // (csid). Trade-off: errors on the portal LOGIN screens (no session yet) are not captured, which is acceptable vs an open

@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<script src="/hz-health.js?v=__APP_VERSION__" data-hz-src="portal" data-hz-ver="__APP_VERSION__"></script><!-- v28.159 (Ben): browser health capture -> /api/portal/health/client-events (psid session) -->
+<script src="/api/portal/health.js?v=__APP_VERSION__" data-hz-src="portal" data-hz-ver="__APP_VERSION__"></script><!-- v28.159 (Ben): browser health capture -> /api/portal/health/client-events (psid session) -->
 <meta name="viewport" content="width=device-width, initial-scale=1"><!-- v28.190 (Ben, deep dive M11): pinch-zoom allowed (was maximum-scale=1, user-scalable=no) -->
 <title>Dock &amp; Bay — Supplier Portal</title>
-<link rel="icon" type="image/png" href="/portal-icon.png?v=__APP_VERSION__"><!-- v28.189 (Ben, M4): one cached icon file (the page embedded the same 13 KB base64 image twice) -->
-<link rel="apple-touch-icon" href="/portal-icon.png?v=__APP_VERSION__">
+<link rel="icon" type="image/png" href="/api/portal/icon.png?v=__APP_VERSION__"><!-- v28.579: served under /api/portal/ because the suppliers' host forwards only that prefix. v28.189 (Ben, M4): one cached icon file (the page embedded the same 13 KB base64 image twice) -->
+<link rel="apple-touch-icon" href="/api/portal/icon.png?v=__APP_VERSION__">
 <style>
   /* v27.668 (Ben): FALLBACK design tokens baked into the portal shell so it renders correctly even when the
      external /hz-theme.css stylesheet doesn't reach the portal (e.g. the theme <link> not injected on the live
