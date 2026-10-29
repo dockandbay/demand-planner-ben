@@ -1,6 +1,6 @@
 # Deploy package v28.569 to v28.570 (29-Oct-26)
 
-Ben source HEAD: 9856978b (9856978b377e8389ae18a2d5137be495f4015655). Live before this deploy: /api/version = v28.568 (read 29-Oct-26). Status: PENDING (port branch port/v28.570, PR to dockandbayteam/dock-bay-demand-planner)
+Ben source HEAD: 9856978b (9856978b377e8389ae18a2d5137be495f4015655). Live before this deploy: /api/version = v28.568 (read 29-Oct-26). Status: LIVE (PR #41 merged 9fb6f468; deploy run 40816706732 green; /api/version read back v28.570 29-Oct-26)
 
 ## What changed
 - v28.569: Supplier portal: CUSTOM is its own top-menu section, right after ORDERS (定制 for China-based suppliers), with the to-do count on the pill. Same gate as before: only suppliers the Customiser reports as linked see it. New address #/custom; old #/orders/custom links still land on it. The staff CONFIG > Portal preview matches. DBPortalView.addTab gains secAfter and badge.
@@ -17,7 +17,7 @@ None.
 None.
 
 ## Checks (port branch)
-See the PR.
+sync-ben.cjs clean port (.ben-port.json to 00f09daf); run-all.cjs, npm test, prebuild-race all passed; PR checks green.
 
 ## After merge
 Read back https://horizon.dockandbay.com/api/version = v28.570, then open the staff Portal preview as Lixin: menu reads ORDERS, CUSTOM, FINANCE, SAMPLES, PRODUCT, and the Custom orders tables are left-aligned. As Jinma: no CUSTOM.
