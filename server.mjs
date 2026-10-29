@@ -34219,6 +34219,28 @@ app.all(/^\/api\/supply\/custom-portal\/([^/]+)\/(.+)$/, staffOnly, (req, res) =
   const name = decodeURIComponent(req.params[0] || '').slice(0, 200);
   return custProxy(req, res, [name], 'staff preview (' + (authUser(req) || 'staff') + ')', req.params[1]);
 });
+// v28.581 (Ben 29-Oct-26): supplier portal HOME (the page the portal opens on): POs that arrived for this supplier in the last 14 days
+// (the page keeps only the ones the portal shows) and the profile prompts (onboarding not approved / returned, warehouse rules to
+// acknowledge, certificates expiring within 60 days or expired). Open actions, unread messages and payments come from the bootstrap.
+app.get('/api/portal/home', portalAuth, async (req, res) => {
+  try {
+    const names = req.portal.suppliers || [], sid = (req.portal.supplierIds || [])[0] || null, out = { new_pos: [], profile: [] };
+    if (names.length) out.new_pos = (await pool.query(`SELECT po, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD') created
+        FROM planner.purchase_orders WHERE supplier_name = ANY($1) AND created_at > now() - interval '14 days' ORDER BY created_at DESC LIMIT 50`, [names])).rows;
+    if (sid) { try { const L = await onbPortalLoad(sid);
+      if (L && L.profile) { const P = [], today = new Date().toISOString().slice(0, 10), soon = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
+        if (L.open && L.open.status === 'returned') P.push({ kind: 'returned', note: String(L.open.return_note || '').slice(0, 300) });
+        else if (L.open && /submitted|review/i.test(String(L.open.status || ''))) P.push({ kind: 'in_review' });
+        else if (L.open && L.open.status === 'draft') P.push({ kind: 'draft', type: L.open.type || '' });
+        else if (!L.profile.profile_approved_at) P.push({ kind: 'incomplete' });
+        const rules = (L.rules || []).filter(r => r.active);
+        if (rules.length && !(L.ack && L.ack.rules_version === onbRulesVersion(rules))) P.push({ kind: 'warehouse' });
+        (L.profile.certificates || []).forEach(c => { if (!c.valid_to) return; const v = String(c.valid_to).slice(0, 10);
+          if (v < today) P.push({ kind: 'cert_expired', cert: c.kind, valid_to: v }); else if (v <= soon) P.push({ kind: 'cert_expiring', cert: c.kind, valid_to: v }); });
+        out.profile = P; } } catch (e) { out.profile = []; } }
+    res.set('Cache-Control', 'no-store').json(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/portal/me', portalAuth, async (req, res) => {
   // zh_enabled (v27.508): the EN/中文 toggle is offered only when one of the user's suppliers is based in China (planner.suppliers.country).
   let zh = false;

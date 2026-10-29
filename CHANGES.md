@@ -1,3 +1,12 @@
+## v28.581 (29-Oct-26) Supplier portal HOME (the page the portal opens on)
+- Ben: "build home page for suppliers which you start page load on. Highlights open actions. Unread messages. New items like new payments in the last days, prompts to update profile, new POs allocated to them".
+- New first menu item HOME (`#/home`); the supplier portal now opens on it (deep links still open their page; the staff Portal preview keeps Purchase Orders first).
+- **Needs your attention**: unread messages (opens the Inbox), POs to confirm, other open PO actions (top POs with counts), shipment, sample, product development and production approval actions, and CUSTOM batches waiting / lines ready to batch. The counts are the same ones the menu badges use.
+- **New for you** (last 14 days): POs allocated to them (only ones the portal shows) and payments (grouped by payment run).
+- **Your profile**: profile sent back (with Dock & Bay's note), draft not submitted, under review, profile not completed, warehouse requirements to acknowledge, certificates expired or expiring within 60 days. Each opens PROFILE.
+- **Go to** quick links. Draft 中文 labels for the new headings.
+- New API `GET /api/portal/home` (new POs + profile prompts; session scoped). No migration, no env vars, no cron routes.
+
 ## v28.580 (29-Oct-26) HOME (logo) and a personal To do list
 - Ben: "Start building a home page for each user on admin accessed by clicking logo ... what they need to know about current status" and "a new feature to do list where user can manage their to do list items for themselves. Add, edit, delete, mark done, a list of done items. Access drawer of to do from top menu next to inbox".
 - HOME (`#/home`, click the HORIZON logo at the top of the left rail): greeting; **Needs you** (only what this person can act on: overdue / due-today to dos, unread Inbox, SUPPLY high-priority actions and order plan exceptions for SUPPLY editors, open sample actions, unread client messages for CLIENT users, stale uncoded statement uploads per org for ACCOUNTS users, failed jobs and server errors for admins); **To do** (quick add, tick done); **Your most visited** (own page views, last 30 days, from the health log); **Status by area** cards marked "Your area" (edit rights) or "View only"; **Recent supply changes**. Demand / product / client numbers marked "to come" wait for Ben's content per role. Landing page settings are unchanged.
