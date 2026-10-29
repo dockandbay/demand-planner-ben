@@ -20851,9 +20851,9 @@
   function todoPatch(id,o,cb){ todoReq('PATCH','/api/todos/'+id,o,cb); }
   function todoDel(id){ TODO.del=null; todoReq('DELETE','/api/todos/'+id,null); }
   function todoBadge(){ var c=document.getElementById('todo-count'); if(!c)return; var n=(TODO.open||[]).length, t=hmToday(), over=(TODO.open||[]).some(function(x){ return x.due_date&&x.due_date<t; });
-    c.textContent=n>99?'99+':String(n); c.className=n?('on'+(over?' over':'')):''; var b=document.getElementById('todo-btn'); if(b)b.title='To do: '+n+' open'+(over?', some overdue':''); }
+    c.textContent=n>99?'99+':String(n); c.className=n?('on'+(over?' over':'')):''; var b=document.getElementById('todo-btn'); if(b)b.title='To do: your personal list, only you can see it. '+n+' open'+(over?', some overdue':'')+'.'; }
   function ensureTodoButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('todo-btn'))return;
-    var b=document.createElement('button'); b.id='todo-btn'; b.className='tl-bell'; b.title='To do'; b.setAttribute('aria-label','To do');
+    var b=document.createElement('button'); b.id='todo-btn'; b.className='tl-bell'; b.title='To do: your personal list, only you can see it'; b.setAttribute('aria-label','To do (your personal list)');
     b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg><span id="todo-count"></span>';
     var bell=document.getElementById('tl-bell'); if(bell&&bell.parentNode===row)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
     b.onclick=function(e){ e.stopPropagation(); var dr=document.getElementById('todo-dr'); if(dr&&dr.classList.contains('open'))todoClose(); else todoOpen(); };
@@ -20881,7 +20881,8 @@
   function todoRender(){ var dr=document.getElementById('todo-dr'); if(!dr)return; var today=hmToday(), o=TODO.open||[], dn=TODO.done||[];
     var keep=document.getElementById('td-new'), kv=keep?keep.value:'', kd=document.getElementById('td-new-due'), kdv=kd?kd.value:'', fo=document.activeElement&&document.activeElement.id;
     var onDone=TODO.tab==='done';
-    dr.innerHTML='<div class="td-hd"><h2>To do</h2><button class="td-x" data-td="close" aria-label="Close">×</button></div>'
+    dr.innerHTML='<div class="td-hd"><h2>To do</h2><span class="hz-i" title="Your personal to do list. Only you can see it; nobody else in HORIZON can read or change your items." style="cursor:help">i</span><button class="td-x" data-td="close" aria-label="Close">×</button></div>'
+      +'<div style="padding:0 16px 8px;color:var(--muted);font-size:12px">Your personal list: only you can see it.</div>'
       +'<div class="td-tabs" role="tablist"><button role="tab" class="td-tab'+(onDone?'':' on')+'" data-td="tab" data-t="open" aria-selected="'+(!onDone)+'">Open <span class="td-tc">'+o.length+'</span></button><button role="tab" class="td-tab'+(onDone?' on':'')+'" data-td="tab" data-t="done" aria-selected="'+onDone+'">Done <span class="td-tc">'+dn.length+'</span></button></div>'
       +(onDone?'':'<div class="td-add"><div class="td-row"><input type="text" id="td-new" maxlength="300" placeholder="What needs doing?" aria-label="New item" value="'+esc(kv)+'"><button class="td-btn" data-td="add"'+(TODO.busy?' disabled':'')+'>Add</button></div>'
       +'<div class="td-row"><label for="td-new-due" style="color:var(--muted);font-size:12px">Due (optional)</label><input type="date" id="td-new-due" value="'+esc(kdv)+'"></div></div>')

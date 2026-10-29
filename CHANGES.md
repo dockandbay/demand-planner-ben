@@ -1,3 +1,7 @@
+## v28.586 (29-Oct-26) To do: "your personal list" note
+- Ben: "add a tooltip note about this being your personal to do list".
+- The To do button's tooltip and the drawer (an "i" tip plus one line under the title) say it is your personal list and only you can see it. Client only.
+
 ## v28.585 (29-Oct-26) B2B allocation REQUESTS
 - Ben: "a new submissions process. SKU, quantity, market, dates, notes. When user submits it notifies Kathryn and Sarah via email ... analysis of the request, stock on hand, inbound, forecast demand ... open requests and closed requests with approved, rejected or cancelled ... tabbed view in a pop-out drawer ... who created and when, who accepted/rejected and when. Each request keeps a history of the analysis". Then: submit from the analysis with the same information; required-by date only (no ship window); Kathryn, Sarah, Abi and admins approve; the creator can cancel; one email with the full analysis; requester, Kathryn, Sarah and Ben emailed on a decision; notify list managed in admin.
 - SCENARIO ▸ B2B Allocation: after Analyse order, **Submit for approval** (same client, market, required-by date and SKU lines, plus notes). The server re-runs the analysis, saves the request (B2B-0001 ...) and a snapshot, emails the notify list ONE message with the full analysis (on hand, inbound by date with next arrival, forecast to date, can allocate, cover after, verdict), and the requester gets a WhatsApp summary with a direct link (#/demand/scenario/b2b/<ref>) and a Copy button.
