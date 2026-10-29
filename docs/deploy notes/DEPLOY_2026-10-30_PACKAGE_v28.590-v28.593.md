@@ -1,6 +1,6 @@
 # Deploy package v28.590 to v28.593 (30-Oct-26)
 
-Ben source HEAD (code): c527b796 (c527b79648ee). Live before this deploy: /api/version = v28.589 (read 30-Oct-26). Status: PACKAGED (port PR pending)
+Ben source HEAD (code): 8d665009 (8d6650090818af741c28da438b611673eac82926). Live before this deploy: /api/version = v28.589 (read 30-Oct-26). Status: PACKAGED (port PR pending)
 
 ## What changed
 All 11 of Kathryn's "B2B allocation requests: suggested improvements", on SCENARIO ▸ B2B Allocation ▸ REQUESTS. Files: server.mjs, supply/inject.html, package.json, lib/ai-logic/b2b-allocation.md, CHANGES.md.
@@ -18,10 +18,10 @@ None new (the chaser uses the existing N8N_WEBHOOK_SECRET).
 Both are required: the request list reads their columns.
 
 ## New cron routes
-- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). For Diviyaj: allow it through the prod login gate and schedule it in n8n (hourly is fine; each request is chased at most once a day). `?dry=1` lists without emailing. Until scheduled, no chaser emails go out; everything else works.
+- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). Already added to the prod login gate's SECRET-GATED list in this port (login-gate check: 24 cron paths proved). For Diviyaj: schedule it in n8n (hourly is fine; each request is chased at most once a day). `?dry=1` lists without emailing. Until scheduled, no chaser emails go out; everything else works.
 
 ## Checks (port branch)
-To be filled after sync-ben.cjs, run-all.cjs, npm test, prebuild-race.
+sync-ben.cjs port (.ben-port.json to 8d665009); one server.mjs conflict in the login gate, resolved keeping production's gate and adding /api/cron/b2b-chase inside the secret-gated bracket. run-all.cjs (login-gate 24 cron paths), npm test, prebuild-race passed. Migrations 404 + 405 read back on live before the PR.
 
 ## After merge
 /api/version = v28.593.
