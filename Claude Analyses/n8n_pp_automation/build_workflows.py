@@ -158,8 +158,10 @@ for (const it of $('Read recent orders').all()) {
   const created = Date.parse(String(s.create_date && s.create_date.iso_string || s.create_date) + 'Z');
   if (isNaN(created) || now - created < graceMs) continue;
   let reason = null;
+  // Quotation with no channel reference = a quote raised in Fulfil awaiting the customer, not a stuck import (29-Oct-26)
+  if (s.state === 'quotation' && !s.reference) continue;
   if (['draft', 'quotation', 'failed'].includes(s.state)) reason = s.state;
-  else if (s.state === 'confirmed' && !(s.shipments || []).length) reason = 'confirmed, no shipment';
+  else if (s.state === 'confirmed' && !(s.shipments || []).length && now - created <= S.lookbackHours * 3600000) reason = 'confirmed, no shipment';
   if (excBySale[s.id] && !reason) reason = 'open exception';
   if (!reason) continue;
   const warehouse = whs[s.warehouse] || '';
@@ -225,10 +227,13 @@ for (const p of remaining) {
 store.seen = current;
 const keep = {}; for (const p of fp.problems) if (store.retries[p.id]) keep[p.id] = store.retries[p.id];
 store.retries = keep;
-const sendEmail = fresh > 0 || S.emailWhenClean;
+// Morning summary (Diviyaj review 28-Oct-26): once a day list everything still outstanding, new or not.
+let isSummary = false;
+try { isSummary = $(S.summaryTrigger).isExecuted; } catch (e) { isSummary = false; }
+const sendEmail = fresh > 0 || S.emailWhenClean || (isSummary && remaining.length > 0);
 const fixed = store.fixed.slice(-50);
 if (sendEmail) store.fixed = [];
-return [{ json: { tenant: S.tenant, problems: remaining, fresh, outstanding: remaining.length, fixed, sendEmail } }];
+return [{ json: { tenant: S.tenant, problems: remaining, fresh, outstanding: remaining.length, fixed, sendEmail, isSummary } }];
 """
 
 A_HTML = r"""
@@ -242,10 +247,14 @@ const P = {
 };
 const counts = { 1: 0, 2: 0, 3: 0 };
 d.problems.forEach(p => counts[p.priority]++);
+// Hourly emails show only NEW problems so the same orders aren't re-sent every time (Ben 29-Oct-26); the summary shows all.
+const shown = d.isSummary ? d.problems : d.problems.filter(p => p.isNew);
+const nc = { 1: 0, 2: 0, 3: 0 };
+shown.forEach(p => nc[p.priority]++);
 const th = 'style="text-align:left;background:#f2f2f2"';
 let body = '';
 for (const k of [1, 2, 3]) {
-  const list = d.problems.filter(p => p.priority === k);
+  const list = shown.filter(p => p.priority === k);
   if (!list.length) continue;
   const rows = list.map(p => `<tr><td><a href="${p.link}">${esc(p.reference || p.number || p.id)}</a>${p.isNew ? ' <b style="color:#c62828">NEW</b>' : ''}</td><td>${esc(p.channel)}</td><td>${esc(p.warehouse)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.action)}</td><td style="color:#666">${esc(p.exception)}</td></tr>`).join('');
   body += `<h3 style="color:${P[k].colour};margin:18px 0 4px">${P[k].label} (${list.length})</h3><p style="margin:0 0 6px">${P[k].note}</p>
@@ -253,15 +262,18 @@ for (const k of [1, 2, 3]) {
 }
 const fixedHtml = (d.fixed || []).length ? `<h3 style="color:#2e7d32;margin:18px 0 4px">Fixed automatically since the last email (${d.fixed.length})</h3><p style="margin:0 0 6px">Amazon tax-mismatch imports, re-imported by the flow. No action needed.</p><p style="font-size:12px">` + d.fixed.map(f => `<a href="${f.link}">${esc(f.reference)}</a> ${esc(f.channel)}, ${esc(f.warehouse)}: now ${esc(f.number)} ${esc(f.state)}, total ${esc(f.total)} (${esc(f.at)})`).join('<br>') + '</p>' : '';
 const pre = S.approvalMode ? '<p style="background:#fff3cd;padding:6px"><b>PREVIEW for approval</b>: sent to Ben only. Once approved it goes to the ops team.</p>' : '';
-const html = `<div style="font-family:Arial;font-size:13px">${pre}<p><b>${d.outstanding} order(s) need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low. ${d.fresh} new since the last email. Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}${fixedHtml}<p style="color:#666;font-size:11px">Hourly check, emails only when something new needs a person. Amazon orders that failed only because Fulfil left out Amazon's tax are retried automatically (up to ${S.maxRetries} times) and drop off this list once they import. Tenant ${esc(d.tenant)}.</p></div>`;
-const subject = `${counts[1] ? 'URGENT ' : ''}Orders need action: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low (${d.fresh} new)`;
+const html = `<div style="font-family:Arial;font-size:13px">${pre}<p>${d.isSummary ? `<b>${d.outstanding} order(s) still need action</b>: ${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low.` : `<b>${d.fresh} new order(s) need action</b>. ${d.outstanding - d.fresh} others already emailed are still open (full list in the 07:47 morning summary).`} Orders on Shopify, Amazon, Faire and TikTok older than ${S.graceMinutes} minutes that failed to import, are stuck in draft/quotation, are confirmed with no shipment, or have an open exception. Click the order to open it in Fulfil.</p>${body}${fixedHtml}<p style="color:#666;font-size:11px">Hourly check, emails when something new needs a person, plus a morning summary of everything still open. Amazon orders that failed only because Fulfil left out Amazon's tax are retried automatically (up to ${S.maxRetries} times) and drop off this list once they import. Tenant ${esc(d.tenant)}.</p></div>`;
+const subject = d.isSummary
+  ? `Morning summary: ${counts[1] ? 'URGENT ' : ''}${d.outstanding} order(s) still need action (${counts[1]} urgent, ${counts[2]} today, ${counts[3]} low)`
+  : `${nc[1] ? 'URGENT ' : ''}New order problem(s): ${d.fresh} (${nc[1]} urgent, ${nc[2]} today, ${nc[3]} low)`;
 return [{ json: { subject: (S.approvalMode ? '[PREVIEW] ' : '') + subject, html } }];
 """
 
 A_SETTINGS = {
     "tenant": "SANDBOX",
     "baseUrl": "https://dockandbay-sandbox.fulfil.io/api/v2",
-    "lookbackHours": 48,
+    "lookbackHours": 48,  # confirmed with no shipment: only recent ones (older confirmed wholesale/preorders are normal)
+    "stuckLookbackDays": 14,  # draft / quotation / failed / open exception (Diviyaj review 28-Oct-26: 48h let stuck orders drop off)
     "graceMinutes": 30,
     "integratedSources": ["cms_shopify", "amazon_mws", "faire", "tiktok"],
     "alertEmailTo": "ben@dockandbay.com",
@@ -271,18 +283,21 @@ A_SETTINGS = {
     "autoRetry": True,
     "maxRetries": 2,
     "allowProdWrite": False,
+    "summaryTrigger": "Morning summary (07:47)",
 }
 
-A_SINCE = "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')]%s]) }}"
+A_SINCE = "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({days: $('Settings').first().json.stuckLookbackDays}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')]%s]) }}"
 
 
 A_CRON_NAME, A_CRON = "Hourly (:52)", "52 * * * *"
+A_SUMMARY_CRON = "47 7 * * *"  # daily morning summary of all outstanding orders (instance time zone)
 
 
 def build_a():
     nodes = [
         sticky("About", "## Order health check (hourly)\nFlags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent). Auto-fix (Ben 28-Oct-26): Amazon orders failed with 'Order total mismatch' where Fulfil left out Amazon's tax are retried via Retry Order Import (guarded sub-workflow, max `maxRetries`), then dropped from the email once imported. Only write: retry_order_import.\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.", -40, -300),
         schedule(A_CRON_NAME, A_CRON, 0, 0),
+        schedule(A_SETTINGS["summaryTrigger"], A_SUMMARY_CRON, 0, 160),
         settings(A_SETTINGS, 220, 0),
         fulfil_get("Read channels", "sale.channel", "name,source", None, 440, 0),
         fulfil_get("Read warehouses", "stock.location", "name", "={{ JSON.stringify([[\"type\",\"=\",\"warehouse\"]]) }}", 550, 160),
@@ -307,9 +322,10 @@ def build_a():
                         "Find problems", "Amazon tax retries?"),
                   if_branches("Amazon tax retries?", "Split retries", "Final decide"),
                   chain("Split retries", "Retry import (guarded)", "Wait 30s", "Read back retried", "Final decide", "New problems?"),
-                  if_branches("New problems?", "Build email"), chain("Build email", "Email unprocessed orders"))
+                  if_branches("New problems?", "Build email"), chain("Build email", "Email unprocessed orders"),
+                  chain(A_SETTINGS["summaryTrigger"], "Settings"))
     return {"name": "Ops | Order health check (hourly) [SANDBOX]", "nodes": nodes, "connections": conns,
-            "settings": {"executionOrder": "v1", "errorWorkflow": ERROR_WORKFLOW_ID}}
+            "settings": {"executionOrder": "v1", "errorWorkflow": ERROR_WORKFLOW_ID, "timezone": "Europe/London"}}
 
 
 # ---------------------------------------------------------------------------------------------------------

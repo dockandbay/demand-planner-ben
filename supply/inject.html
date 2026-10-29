@@ -20688,7 +20688,7 @@
     var rHtml=rc.length?'<ul class="hm-q">'+rc.map(function(x){ return '<li><span class="hm-sev"></span><div style="min-width:0"><div class="hm-t" style="font-weight:500">'+esc(x.label||'')+'</div><div class="hm-s">'+esc(typeof actWhen==='function'?actWhen(x.at):(x.at||''))+'</div></div><span></span></li>'; }).join('')+'</ul>'
       :'<div class="hm-empty">'+(HOME.recent?'No recent supply changes.':'Loading…')+'</div>';
     // status cards
-    var K=function(v,l,c){ return '<div class="hm-kpi '+(v==null?'mut':(c||''))+'"><b>'+(v==null?'–':esc(String(v)))+'</b><span>'+esc(l)+'</span></div>'; };
+    var K=function(v,l,c){ return '<div class="hm-kpi '+(v==null?'mut':(c||''))+'"><b>'+(v==null?'-':esc(String(v)))+'</b><span>'+esc(l)+'</span></div>'; };
     var L=function(arr){ return '<div class="hm-foot">'+arr.map(function(a){ return '<a class="hm-lk" href="'+a[1]+'" data-hm="go" data-h="'+a[1]+'">'+esc(a[0])+' →</a>'; }).join('')+'</div>'; };
     var C=function(area,ed,kp,lines,links){ return '<article class="hm-card"><div class="hm-ch"><h3>'+esc(area)+'</h3><span class="hm-mode'+(ed?' edit':'')+'">'+(ed?'Your area':'View only')+'</span></div><div class="hm-kpis">'+kp+'</div>'
       +(lines&&lines.length?'<div class="hm-lines">'+lines.map(function(l){ return '<div><span>'+esc(l[0])+'</span><em>'+esc(l[1])+'</em></div>'; }).join('')+'</div>':'')+L(links)+'</article>'; };
