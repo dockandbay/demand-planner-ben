@@ -16264,7 +16264,8 @@ app.post('/api/product/item/:ref/component', async (req, res) => {
     if (b.id) { await pool.query(`UPDATE planner.product_dev_components SET name=$2, supplier=$3, sampling_mode=$4, spec_id=$5, sort=$6, component_type_id=coalesce($7, component_type_id) WHERE id=$1::bigint`, [b.id, name, sup, mode, specId, sort, ctid]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.product_dev_components (item_ref, component_type_id, name, supplier, sampling_mode, spec_id, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT (item_ref, name) DO UPDATE SET supplier=excluded.supplier, sampling_mode=excluded.sampling_mode, spec_id=excluded.spec_id, sort=excluded.sort RETURNING id`, [ref, ctid, name, sup, mode, specId, sort]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e && e.code === '23505') return res.status(400).json({ error: 'This product already has a component called "' + name + '".' });   // v28.582: rename onto an existing name
+    log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/component/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_components WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

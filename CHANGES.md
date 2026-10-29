@@ -1,3 +1,9 @@
+## v28.582 (29-Oct-26) PRODUCT: more than one of the same component (e.g. 3 x Core Product)
+- Libby: "Just went to add in the 3 xmas tea towel brief sheets. I still can't seem to add more than one core component".
+- Cause: "+ Add component" hid every catalogue type already on the product, and a product can hold only one component per name, so a second "Core Product" could not be added (or merged into the first).
+- Fix: the picker lists every catalogue type with a count box (and "N on this product"); repeats are named "Core Product 2", "Core Product 3". A new type typed in the box gets the same numbering. Any component can be renamed in place with the pencil (e.g. "Tea towel: Robin"); a name already on the product is refused with a clear message (server too).
+- No migration, no env vars, no cron routes.
+
 ## v28.581 (29-Oct-26) Supplier portal HOME (the page the portal opens on)
 - Ben: "build home page for suppliers which you start page load on. Highlights open actions. Unread messages. New items like new payments in the last days, prompts to update profile, new POs allocated to them".
 - New first menu item HOME (`#/home`); the supplier portal now opens on it (deep links still open their page; the staff Portal preview keeps Purchase Orders first).
