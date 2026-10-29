@@ -8860,7 +8860,7 @@
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
-    if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
+    if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portalopen','Open portal'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
     else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); else L2.unshift(['data-health','Data health']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
@@ -10368,6 +10368,25 @@
           document.getElementById('wr-add').onclick=function(){ RULES.push({title:'',detail:'',warehouse:'All',active:true}); paint(); var last=b.querySelectorAll('input[data-k="title"]'); if(last.length)last[last.length-1].focus(); };
           document.getElementById('wr-save').onclick=function(){ var sb=document.getElementById('wr-save'); sb.disabled=true; sb.textContent='Saving…'; shipPost('/api/supply/onb/rules',{rules:RULES},function(j){ sb.disabled=false; sb.textContent='Save'; if(j&&j.error){ alert(j.error); return; } RULES=j.rules||RULES; paint(); alert('Saved · version '+(j.version||'')); }); }; }
         fetch('/api/supply/onb/rules').then(function(r){return r.json();}).then(function(j){ RULES=(j.rules||[]).map(function(r){ return {id:r.id,title:r.title,detail:r.detail,warehouse:r.warehouse,active:r.active}; }); paint(); }).catch(function(e){ b.innerHTML='<div class="count">Could not load: '+esc(e.message)+'</div>'; }); };
+      // v28.575 (Ben: "internal users of supplier and client portals, choose the supplier we want a magic link into"): PORTALS ▸ Supplier ▸
+      // Open portal (also SUPPLY ▸ CONFIG ▸ Open portal, same page). Opens the REAL supplier portal in a new tab, signed in as you (staff) for
+      // one supplier, 8 hours. You can edit only with SUPPLY edit rights (or admin); everything you do is logged under your own email.
+      SUBS['portalopen']=function(){ b.innerHTML='<div class="count">Loading suppliers…</div>';
+        fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){ sups=(Array.isArray(sups)?sups:(sups&&sups.rows)||[]).filter(function(x){ return x&&x.id!=null&&x.name; }).sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+          var canEd=!ME||!ME.live||!!(ME.is_admin||ME.supply_edit), last=''; try{ last=localStorage.getItem('hzPortalOpenSup')||''; }catch(e){}
+          b.innerHTML='<div class="annot" style="max-width:760px;margin-bottom:12px"><b>Open a supplier portal as staff.</b> Pick a supplier and open its real portal in a new tab, signed in as you, not as one of the supplier\'s users. The session lasts 8 hours in this browser. '
+            +(canEd?'You have SUPPLY edit rights, so you can act in the portal; everything you do is logged under your own email.':'Your account has no SUPPLY edit rights, so the portal opens read only.')+'</div>'
+            +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select id="po-open-sup" class="fci" style="min-width:260px;min-height:36px;text-align:left">'
+            +'<option value="">Choose a supplier…</option>'+sups.map(function(x){ return '<option value="'+esc(String(x.id))+'"'+(String(x.id)===last?' selected':'')+'>'+esc(x.name)+'</option>'; }).join('')+'</select>'
+            +'<button class="save-btn" id="po-open-go" style="min-height:36px">Open portal ↗</button><span id="po-open-msg" class="tiny mut"></span></div>';
+          var sel=document.getElementById('po-open-sup'), go=document.getElementById('po-open-go'), msg=document.getElementById('po-open-msg');
+          go.onclick=function(){ var id=sel.value; if(!id){ msg.style.color='var(--neg)'; msg.textContent='Choose a supplier first.'; return; }
+            try{ localStorage.setItem('hzPortalOpenSup',id); }catch(e){}
+            var w=window.open('about:blank','_blank'); go.disabled=true; msg.style.color='var(--muted)'; msg.textContent='Opening…';   // opened inside the click so the browser allows it
+            fetch('/api/supply/portal-staff/'+encodeURIComponent(id),{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||!j.url)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+              .then(function(j){ if(w)w.location=j.url; else location.href=j.url; go.disabled=false; msg.style.color='var(--pos)'; msg.textContent='Opened '+j.supplier+' ('+(j.can_edit?'can edit':'read only')+', '+j.hours+' h).'; })
+              .catch(function(e){ try{ if(w)w.close(); }catch(_){} go.disabled=false; msg.style.color='var(--neg)'; msg.textContent=e.message; }); };
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); };
       SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
           var supById={}; sups.forEach(function(s){supById[s.name]=s.id;});
@@ -15900,7 +15919,7 @@
     selectSection('config'); }
   // SUPPLY ▸ CONFIG (Option B native embed): reuse the config machinery but keep the SUPPLY sub-nav visible
   // (no config-mode) and scope the groups to Supply chain / Key accounts / Portal users / Portal.
-  var _SUPCFG_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen','keyaccounts','portalusers','portal','onboarding','warehouse','xero'];   // v28.138: + xero (in the menu but missing here, so its deep link fell back to Suppliers; still admin-only, see CONFIG_SUB==='xero' gate)   // v27.895: + onboarding / warehouse rules
+  var _SUPCFG_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen','keyaccounts','portalusers','portal','portalopen','onboarding','warehouse','xero'];   // v28.138: + xero (in the menu but missing here, so its deep link fell back to Suppliers; still admin-only, see CONFIG_SUB==='xero' gate)   // v27.895: + onboarding / warehouse rules
   function enterSupplyConfig(sub){ CONFIG_CTX='supply'; showSupply(true);
     var app=document.getElementById('app'); if(app)app.classList.remove('config-mode');
     var cb=document.getElementById('config-btn'); if(cb)cb.classList.remove('active');
@@ -22398,7 +22417,7 @@
       PAY_SUBS.forEach(function(t){ add('Supply ▸ Payments ▸ '+tc(t[1]),'#/supply/payments/'+t[0]); });
       REPORT_SECTIONS.forEach(function(t){ add('Supply ▸ BI & reports ▸ '+tc(t[1]),'#/supply/reports/'+t[0]); });
       SECTIONS.forEach(function(t){ if(['purchase-orders','reports','payments','config'].indexOf(t[0])<0)add('Supply ▸ '+tc(t[1]),'#/supply/'+t[0]); }); }catch(e){}
-    var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
+    var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portalopen:'Open portal',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
     Object.keys(SCL).forEach(function(k){ add('Supply ▸ Config ▸ '+SCL[k],'#/supply/config/'+k); });
     var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
@@ -22501,6 +22520,7 @@
     truck:'<rect x="1" y="4" width="14" height="12" rx="1.5"/><path d="M15 8h4l4 4v4h-8z"/><circle cx="6" cy="18.5" r="1.6"/><circle cx="18" cy="18.5" r="1.6"/>',
     doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>',
     grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    portal:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/>',   // v28.575 PORTALS
     users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>',
     ledger:'<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="12" y2="16"/>',
     gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4 15a2 2 0 0 1 0-4a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4a2 2 0 0 1 4 0a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 20 11a2 2 0 0 1 0 4z"/>'
@@ -22513,6 +22533,7 @@
     {k:'reports',label:'Reports',icon:'doc',go:function(){ _railView('exec'); }},
     {k:'product',label:'Product',icon:'grid',go:function(){ _railId('product-btn'); }},
     {k:'client',label:'Client',icon:'users',go:function(){ _railId('client-btn'); }},
+    {k:'portals',label:'Portals',icon:'portal',go:function(){ window._hzPortals=true; location.hash='#/supply/config/portalopen'; }},   // v28.575 (Ben): PORTALS ▸ Supplier | Client
     {k:'accounts',label:'Accounts',icon:'ledger',go:function(){ _railId('accounts-btn'); }},
     {k:'config',label:'Config',icon:'gear',go:function(){ _railId('config-btn'); }}
   ];
@@ -22520,6 +22541,11 @@
   function _railId(id){ var b=document.getElementById(id); if(b)b.click(); }
   function _railInitials(){ try{ var e=(typeof ME!=='undefined'&&ME&&ME.email)||''; var p=e.split('@')[0].split(/[._-]/); return ((p[0]||'')[0]||'')+((p[1]||'')[0]||''); }catch(e){} return 'DB'; }
   function railActiveKey(){ var h=(location.hash||'').toLowerCase().replace(/^#\/?/,'');
+    // v28.575 (Ben: "PORTALS in the top level menu, under that SUPPLIER and CLIENT ... portal users managed there and also under supply>config,
+    // same link/page"): PORTALS pages ARE the existing pages (same links). They light PORTALS when reached through PORTALS (window._hzPortals),
+    // else their own module. Open portal (supplier) always lights PORTALS.
+    if(/^supply\/config\/portalopen(\/|$)/.test(h)){ window._hzPortals=true; return 'portals'; }
+    if(window._hzPortals){ if(/^supply\/config\/(portal|portalusers)(\/|$)/.test(h)||/^client\/(portal|clients|notices)(\/|$)/.test(h))return 'portals'; window._hzPortals=false; }
     if(/^supply/.test(h))return 'supply'; if(/^config/.test(h))return 'config'; if(/^product/.test(h))return 'product';
     if(/^client/.test(h))return 'client'; if(/^accounts/.test(h))return 'accounts'; if(/^(buy|buy-move)/.test(h))return 'buy'; if(/^(exec|reports)/.test(h))return 'reports';
     if(/^(demand|planning|scenario|fba)/.test(h))return 'demand';
@@ -22544,10 +22570,18 @@
   // tab's own badge (the .ex-badge red pill each sub-nav already paints), so the rail always matches the content.
   function _railCount(el){ try{ /* v28.235 (Ben): + .ik-badge intake deadline alerts (were glued onto the label) */ var b=el.querySelector('.ex-badge,.rtab-count,.stab-count,.nav-badge,.ik-badge'); if(!b)return 0; var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10); return isFinite(n)?n:0; }catch(e){ return 0; } }
   function _railBadgeHtml(n){ n=Number(n)||0; return n>0?('<span class="rl-badge">'+(n>99?'99+':n)+'</span>'):''; }
-  function _railL2items(mod){ var cfg=RAIL_L2[mod]; if(!cfg)return null; var cont=document.querySelector(cfg.sel); if(!cont)return null;
+  // v28.575: PORTALS has no module of its own, so its level 2 / 3 are a fixed list of links to the canonical pages
+  function _railPortalsL2(){ var h=(location.hash||'').toLowerCase().replace(/^#\/?/,'').split('/');
+    function on(href){ var t=href.replace(/^#\//,'').split('/'); for(var i=0;i<t.length;i++){ if(h[i]!==t[i])return false; } return true; }
+    function go(href){ return { click:function(){ window._hzPortals=true; location.hash=href; } }; }
+    var G=[['Supplier',[['Open portal','#/supply/config/portalopen'],['Users','#/supply/config/portalusers'],['Preview','#/supply/config/portal']]]];
+    if(typeof clientCan!=='function'||clientCan())G.push(['Client',[['Open portal','#/client/portal'],['Users','#/client/clients'],['Notices','#/client/notices']]]);
+    return G.map(function(g){ var sub=g[1].map(function(x){ return {label:x[0],active:on(x[1]),el:go(x[1]),count:0}; });
+      return {label:g[0],active:sub.some(function(x){return x.active;}),el:go(g[1][0][1]),count:0,sub:sub}; }); }
+  function _railL2items(mod){ if(mod==='portals')return _railPortalsL2(); var cfg=RAIL_L2[mod]; if(!cfg)return null; var cont=document.querySelector(cfg.sel); if(!cont)return null;
     var els=cont.querySelectorAll(cfg.item); if(!els.length)return null; var out=[];
     Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el,count:_railCount(el)}); }); return out.length?out:null; }
-  function _railL3items(mod){ var sels=RAIL_L3MAP[mod]; if(!sels)return null;
+  function _railL3items(mod){ if(mod==='portals'){ var a=_railPortalsL2().filter(function(x){return x.active;})[0]; return a?{items:a.sub,el:null}:null; } var sels=RAIL_L3MAP[mod]; if(!sels)return null;
     for(var i=0;i<sels.length;i++){ var cont=document.querySelector(sels[i]); if(!cont)continue;   // selectors read even when the content L3 is hidden
       var els=cont.querySelectorAll('.rtab,.stab,.d3tab,.dnav3'); if(!els.length)continue; var out=[];
       Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el,count:_railCount(el)}); }); if(out.length)return {items:out,el:cont}; } return null; }
@@ -22568,7 +22602,7 @@
     // hide ONLY the content L3 nav we actually mirrored (so a section whose L3 we can't read never loses its tabs)
     if(window._railL3hidden && window._railL3hidden!==l3hide){ try{window._railL3hidden.classList.remove('hz-l3-mirrored');}catch(e){} }
     if(l3hide){ l3hide.classList.add('hz-l3-mirrored'); window._railL3hidden=l3hide; } else window._railL3hidden=null;
-    list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){try{m.go();}catch(e){}} _railSoon(); }; });
+    list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ if(b.dataset.k!=='portals')window._hzPortals=false; var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){try{m.go();}catch(e){}} _railSoon(); }; });
     list.querySelectorAll('.rl2').forEach(function(b){ b.onclick=function(){ var it=(window._railL2c||[])[+b.dataset.l2]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
     list.querySelectorAll('.rl3').forEach(function(b){ b.onclick=function(){ var it=(window._railL3c||[])[+b.dataset.l3]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
   }

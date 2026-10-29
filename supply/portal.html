@@ -231,6 +231,12 @@
         lg.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ window.DBPortalView.setLang(b.dataset.lang); }; });
         var cur=(window.ppGetLang&&window.ppGetLang())||'en'; if(cur==='zh')window.DBPortalView.setLang('zh'); else lg.querySelector('[data-lang="en"]').classList.add('on'); } }
       ppRail(sup);   // v28.573: HORIZON-style left rail on desktop
+      // v28.575: staff signed in through HORIZON > PORTALS > Open portal: say so in the top bar (who, which supplier, read only or not)
+      if(me.staff){ var tb=document.querySelector('.pv-top'); if(tb&&!document.getElementById('pv-staff')){ var sb=document.createElement('span'); sb.id='pv-staff';
+        sb.title='You are signed in as Dock & Bay staff, not as one of the supplier\'s users. '+(me.staff_edit?'Changes you make are saved and logged under your email.':'Read only: your HORIZON account has no SUPPLY edit rights.');
+        sb.style.cssText='display:inline-flex;align-items:center;gap:6px;background:#f5b83d;color:#0f172a;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap';
+        sb.textContent='Staff view · '+String(me.email||'').split('@')[0]+' · '+((me.suppliers||[])[0]||'')+' · '+(me.staff_edit?'can edit':'read only');
+        var sp2=tb.querySelector('.sp'); if(sp2&&sp2.nextSibling)tb.insertBefore(sb,sp2.nextSibling); else tb.appendChild(sb); } }
     }).catch(function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; });
   }
 

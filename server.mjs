@@ -1459,6 +1459,7 @@ function requiredCap(method, p) {
   if (p === '/api/supply/fulfil/import-pos') return null;     // n8n Fulfil-PO import (webhook-secret gated in the handler)
 
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
+  if (method === 'POST' && /^\/api\/supply\/portal-staff\/[^/]+$/.test(p)) return null;   // v28.575: staff "Open portal": any signed-in staff may VIEW; edit rights are decided in the handler (permsFor)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/demand/cache/invalidate') return null;   // in-app "refresh" button — rebuild-only, harmless, no data write (ungated sibling of the secret-gated /api/data-cache/invalidate)
@@ -13884,6 +13885,29 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(token), u.email, PORTAL_LINK_HOURS]);   // v28.186 (Ben): 24 h link life (was 7 days). v28.210 (Ben, H2): stored hashed
     const base = portalLinkBase(req);   // v28.151 (review B5)
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_hours: PORTAL_LINK_HOURS, expires_days: Math.round(PORTAL_LINK_HOURS / 24 * 10) / 10 });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// v28.575 (Ben 29-Oct-26: "internal users of supplier and client portals, choose the supplier we want a magic link into ... we don't need
+// to access as a user"): PORTALS ▸ Supplier ▸ Open portal. Signs the STAFF member into the real supplier portal for one supplier, in this
+// browser, for 8 hours, without a supplier_portal_users row. The session row carries supplier_id (existing column) and the staff email; its
+// raw token is prefixed pstfw_ (may edit) or pstfr_ (read only). The prefix is inside the stored hash, so it cannot be added to a supplier's
+// own cookie. Edit = HORIZON SUPPLY edit or admin (Ben: "follow HORIZON rights"); everything a staff session writes is logged as the staff email.
+app.post('/api/supply/portal-staff/:sid', async (req, res) => {
+  try {
+    const me = await permsFor(req);
+    if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    if (me.live && !me.email) return res.status(403).json({ error: 'sign in to HORIZON with your own account first' });
+    const sid = String(req.params.sid || '').trim(); if (!/^\d+$/.test(sid)) return res.status(400).json({ error: 'choose a supplier' });
+    const sup = (await pool.query(`SELECT id::text id, name FROM planner.suppliers WHERE id=$1`, [sid])).rows[0];
+    if (!sup || !sup.name) return res.status(404).json({ error: 'that supplier was not found' });
+    const canEdit = !me.live || !!(me.is_admin || me.supply_edit);
+    const who = me.email || 'staff (sandbox)';
+    const psid = 'pstf' + (canEdit ? 'w' : 'r') + '_' + portalToken();
+    await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '8 hours')`, [tokHash(psid), who, sup.id]);
+    res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=28800; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
+    console.log('[portal-staff] ' + who + ' opened the supplier portal as ' + sup.name + (canEdit ? ' (can edit)' : ' (read only)'));
+    res.json({ ok: true, url: '/portal', supplier: sup.name, can_edit: canEdit, hours: 8 });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -33878,16 +33902,34 @@ async function portalSessionLookup(psid) {
   }
   return (await pool.query(`${_PS_SELECT} FROM planner.portal_sessions s WHERE ${tokMatchSql('s.token', 1)} AND s.expires_at>now()`, tokArgs(psid))).rows[0] || null;
 }
+// v28.575: a read-only staff session may look but not change anything (sign-out and the browser health beacon still work)
+function portalStaffGuard(req, res, next) {
+  if (!req.portal || !req.portal.staff || req.portal.staffEdit) return next();
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const seg = String(req.path || '').split('/')[3] || '';
+  if (seg === 'logout' || seg === 'health') return next();
+  return res.status(423).json({ error: 'Staff view is read only: your HORIZON account has no SUPPLY edit rights.', staff_read_only: true });
+}
 async function portalAuth(req, res, next) {
   try {
     const psid = cookieVal(req, 'psid');
     if (!psid) return res.status(401).json({ error: 'not signed in' });
     const hit = _portalAuthMemo.get(psid);
-    if (hit && Date.now() - hit.t < PORTAL_AUTH_TTL_MS) { req.portal = hit.v; return next(); }
+    if (hit && Date.now() - hit.t < PORTAL_AUTH_TTL_MS) { req.portal = hit.v; return hit.v.staff ? portalStaffGuard(req, res, next) : next(); }
     // v28.188 (Ben): ONE round trip (was 2 serial: session, then its suppliers; /me added a 3rd for the China flag). The same statement
     // stamps portal_sessions.last_seen_at (migration 332) at most once per 5 minutes per session (the WHERE guard makes repeat calls
     // and other instances no-ops), for "who is using the portal" in CONFIG > App health log. Until 332 is applied (column missing,
     // 42703) it falls back to the read-only form, so the code can deploy first.
+    // v28.575: a STAFF session (PORTALS > Supplier > Open portal) is scoped to the one supplier on the row, not to supplier_portal_users
+    if (/^pstf[rw]_/.test(psid)) {
+      const st = (await pool.query(`SELECT s.email, s.supplier_id::text supplier_id, x.name supplier_name, upper(nullif(x.default_currency,'')) ccy,
+          (coalesce(x.country,'') ILIKE '%china%' OR upper(coalesce(x.country,''))='CN' OR coalesce(x.country,'') LIKE '%中国%') zh
+        FROM planner.portal_sessions s JOIN planner.suppliers x ON x.id=s.supplier_id WHERE ${tokMatchSql('s.token', 1)} AND s.expires_at>now()`, tokArgs(psid))).rows[0];
+      if (!st) { _portalAuthMemo.delete(psid); return res.status(401).json({ error: 'session expired' }); }
+      req.portal = { email: st.email, suppliers: [st.supplier_name], supplierIds: [st.supplier_id], zh: !!st.zh, ccy: st.ccy || null, staff: true, staffEdit: psid[4] === 'w' };
+      _portalAuthMemo.set(psid, { t: Date.now(), v: req.portal });
+      return portalStaffGuard(req, res, next);
+    }
     const s = await portalSessionLookup(psid);
     if (!s) { _portalAuthMemo.delete(psid); return res.status(401).json({ error: 'session expired' }); }
     const sups = s.sups || [];
@@ -34106,7 +34148,7 @@ app.get('/api/portal/me', portalAuth, async (req, res) => {
   let zh = false;
   if (req.portal.zh !== undefined) zh = req.portal.zh;   // v27.879: computed once per memoised session (see portalAuth)
   else try { const r = await pool.query(`SELECT bool_or(coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR country LIKE '%中国%') z FROM planner.suppliers WHERE name = ANY($1)`, [req.portal.suppliers || []]); zh = !!(r.rows[0] && r.rows[0].z); req.portal.zh = zh; } catch (e) { zh = false; }
-  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh, currency: req.portal.ccy || 'USD' });   // v28.190: + currency
+  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh, currency: req.portal.ccy || 'USD', staff: !!req.portal.staff, staff_edit: !!req.portal.staffEdit });   // v28.575: + staff view flags   // v28.190: + currency
 });
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
