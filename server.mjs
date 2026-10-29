@@ -1526,7 +1526,7 @@ const RESP_CACHE = {
   '/api/supply/action-metrics/pos': 600000, '/api/supply/fulfil/date-sync-preview': 600000, '/api/supply/fulfil/drift': 600000,
   '/api/supply/fba-transfers/list': 600000, '/api/supply/barcodes': 600000, '/api/supply/po-delays': 600000,
   '/api/supply/inventory-awd/status': 600000, '/api/supply/email-log': 600000, '/api/supply/flexport/status': 300000,
-  '/api/trading-calendar': 600000, '/api/buy-extra-stock': 600000, '/api/scenario/slow-moving': 600000,
+  '/api/buy-extra-stock': 600000, '/api/scenario/slow-moving': 600000,   // v28.584 (Kathryn: deleted calendar lines came back): /api/trading-calendar removed; its delete / create / import never cleared this cache, so the list stayed stale up to 10 min. It is a tiny table, read live.
   '/api/config/channels': 600000, '/api/klaviyo-bis/status': 600000,
   // product reference/config (edited in PRODUCT, no supply-epoch link) → 2min bound
   '/api/product/component-types': 120000, '/api/product/config': 120000, '/api/product/reports': 120000,

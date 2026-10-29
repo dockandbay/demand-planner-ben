@@ -1,3 +1,8 @@
+## v28.584 (29-Oct-26) DEMAND ▸ Inputs ▸ Trading calendar: deleted lines came back
+- Kathryn: "when I have deleted some lines they are reappearing, when I refresh it's glitching back to what it was".
+- Cause: GET /api/trading-calendar sat in the 10-minute server response cache. Field edits cleared it, but deleting an event, adding one ("+ Event") or importing a CSV did not, so the page reloaded the old list (deleted rows back, new rows missing) until the cache expired, on each server instance. The blank event on live (id 34) is most likely a "+ Event" press that seemed to do nothing.
+- Fix: the calendar list is no longer cached (3 rows, one small query). A failed delete now says so instead of silently reloading. Server + DEMAND page; no migration.
+
 ## v28.583 (29-Oct-26) To do drawer: Open and Done tabs
 - Ben: "can this have 2 tabs, open and done in the drawer".
 - The drawer has two tabs, **Open** (add box + open items) and **Done** (ticked items, newest first; untick to reopen, or delete), each with its count. Replaces the collapsible "Done (n)" list. Client only.
