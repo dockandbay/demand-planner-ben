@@ -173,7 +173,7 @@
       // v28.504 (Ben 27-Oct-26): ORDERS ▸ Custom orders, only for suppliers linked in the Customiser (Customiser custom towel batches).
       // v28.569 (Ben 29-Oct-26): its own top-menu section CUSTOM (after ORDERS), still only when the Customiser says this supplier is linked; to-do count = badge.
       if(window.DBPortalView&&window.DBPortalView.addTab){ var cs=document.createElement('script'); cs.src='/portal-custom.js?v=__APP_VERSION__'; cs.onload=function(){
-        window.HZCustomOrders.status('/api/portal/custom/',function(st){ window.DBPortalView.addTab({pt:'custom',label:'Custom orders',badge:st.todo||0,sec:'custom',secLabel:'CUSTOM',secAfter:'orders',render:function(host){ window.HZCustomOrders.render(host,{base:'/api/portal/custom/',canWrite:true}); }}); }); };
+        window.HZCustomOrders.register(window.DBPortalView,'/api/portal/custom/',function(){ return true; });   /* v28.572: CUSTOM level-2 tabs + deep links */ };
         document.head.appendChild(cs); }
       // v27.895 (Ben): PROFILE — supplier onboarding / profile changes (approval-gated). Always on for signed-in suppliers.
       if(window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'profile',label:'Profile',sec:'profile',secLabel:'PROFILE',render:function(host){ ppProfile(me,host); }}); }

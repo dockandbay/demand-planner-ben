@@ -43,15 +43,21 @@
 
   // opts: { base: '/api/portal/custom/' (ends with /), canWrite: bool, onCount: fn(n) }
   function render(host, opts) {
+    // v28.572 (Ben: "for custom show a level 2 menu for all key pages and deep links"): opts.page ('ready' | 'batches' | 'samples') renders just
+    // that page (the portal's own level-2 tabs replace the in-page pills); opts.ref opens a batch by PO ref or id; opts.setRef(ref) records the
+    // open batch in the address; opts.go(pt, ref) moves to another tab (false where the page does not own the address, e.g. the staff preview).
     var base = opts.base, ST = { list: null, open: null, flagLabel: {}, waiting: null, wpick: {}, files: null, done: {}, fst: {}, ferr: {}, pick: {}, running: false, stop: false };
     if (!document.getElementById('hzc-css')) { var st = document.createElement('style'); st.id = 'hzc-css'; st.textContent = CSS; document.head.appendChild(st); }
     function api(path, body) {
       return fetch(base + path, body === undefined ? { headers: { accept: 'application/json' } } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); return j; }); });
     }
+    if (opts.page) ST.sub = opts.page;
     function loadList() {
       host.innerHTML = '<div class="hzc"><div class="hzc-msg">Loading custom orders…</div></div>';
-      Promise.all([api('batches'), api('waiting').catch(function () { return { lines: [] }; }), api('samples').catch(function () { return { files: [] }; })]).then(function (r) { var j = r[0]; ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; ST.waiting = r[1].lines || []; ST.samples = r[2].files || []; ST.wpick = {}; drawList(); })
+      Promise.all([api('batches'), api('waiting').catch(function () { return { lines: [] }; }), api('samples').catch(function () { return { files: [] }; })]).then(function (r) { var j = r[0]; ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; ST.waiting = r[1].lines || []; ST.samples = r[2].files || []; ST.wpick = {};
+          if (opts.ref) { var want = opts.ref; opts.ref = ''; var hit = ST.list.filter(function (b) { return b.po_ref === want || b.id === want; })[0]; if (hit) { openBatch(hit.id); return; } ST.miss = want; }
+          drawList(); })
         .catch(function (e) { host.innerHTML = '<div class="hzc"><div class="hzc-msg err">' + esc(e.message) + '</div></div>'; });
     }
     function drawList() {
@@ -60,12 +66,13 @@
       var h = '<div class="hzc"><div class="hzc-card"><h3>Custom orders</h3><div class="hzc-mut2">Personalised towels from the Dock &amp; Bay Customiser. Make a batch from the lines ready to batch (or accept one Dock &amp; Bay sends you), make it within the week, then enter the cartons with their DHL AWB.' + (ST.example ? ' <b>These are example batches for testing.</b>' : '') + '</div></div>';
       // v28.571 (Ben 29-Oct-26: "sub pages for a start. a page for batches"): Ready to batch | Batches | Sample files
       var W = ST.waiting || [], S = ST.samples || [];
-      if (!ST.sub || (ST.sub === 'samples' && !S.length)) ST.sub = W.length ? 'ready' : 'batches';
+      if (!opts.page && (!ST.sub || (ST.sub === 'samples' && !S.length))) ST.sub = W.length ? 'ready' : 'batches';
       function sb(k, t, n) { return '<button class="hzc-sub' + (ST.sub === k ? ' on' : '') + '" data-sub="' + k + '">' + t + (n != null ? '<b>' + n + '</b>' : '') + '</button>'; }
-      h += '<div class="hzc-subs">' + sb('ready', 'Ready to batch', W.length) + sb('batches', 'Batches', L.length) + (S.length ? sb('samples', 'Sample files', S.length) : '') + '</div>';
+      if (ST.miss) { h += '<div class="hzc-msg err">Batch ' + esc(ST.miss) + ' was not found. It may belong to another supplier or have been removed.</div>'; ST.miss = ''; }
+      if (!opts.page) h += '<div class="hzc-subs">' + sb('ready', 'Ready to batch', W.length) + sb('batches', 'Batches', L.length) + (S.length ? sb('samples', 'Sample files', S.length) : '') + '</div>';
       function fin(x) { host.innerHTML = x + '</div>'; host.querySelectorAll('[data-sub]').forEach(function (bt) { bt.onclick = function () { ST.sub = bt.dataset.sub; drawList(); }; }); }
       if (ST.sub === 'ready') { fin(h + waitingCard()); wireWaiting(); return; }
-      if (ST.sub === 'samples') { fin(h + samplesCard()); return; }
+      if (ST.sub === 'samples') { fin(h + (S.length ? samplesCard() : '<div class="hzc-card"><div class="hzc-mut2">No sample print files yet.</div></div>')); return; }
       if (!L.length) { fin(h + '<div class="hzc-card"><div class="hzc-mut2">No custom order batches yet. Create one from Ready to batch.</div></div>'); return; }
       h += '<div class="hzc-card hzc-scroll"><table><thead><tr><th>PO</th><th>Tuesday</th><th>Accept by</th><th>Made by</th><th>Lines</th><th>Towels</th><th>Progress</th><th>Cartons</th><th>Status</th></tr></thead><tbody>';
       L.forEach(function (b) {
@@ -106,14 +113,14 @@
       host.querySelectorAll('[data-wpick]').forEach(function (c) { c.onchange = function () { ST.wpick[c.dataset.wpick] = c.checked; drawList(); }; });
       function create(body, btn) { var m = q('[data-wm]'); if (!opts.canWrite) { m.className = 'hzc-msg err'; m.textContent = 'Read only: SUPPLY edit rights are needed to change this in the preview.'; return; }
         btn.disabled = true; m.className = 'hzc-msg'; m.textContent = 'Creating the batch…';
-        api('batches/create', body).then(function (j) { var bs = j.batches || []; if (bs.length === 1) openBatch(bs[0].batch_id); else loadList(); })
+        api('batches/create', body).then(function (j) { var bs = j.batches || []; if (opts.go && opts.go('batches', bs.length === 1 ? bs[0].batch_id : '')) return; if (bs.length === 1) openBatch(bs[0].batch_id); else loadList(); })
           .catch(function (e) { btn.disabled = false; m.className = 'hzc-msg err'; m.textContent = e.message; }); }
       var a = q('[data-wall]'); if (a) a.onclick = function () { create({ all: true }, a); };
       var t = q('[data-wtick]'); if (t) t.onclick = function () { create({ line_ids: W.filter(function (l) { return ST.wpick[l.id]; }).map(function (l) { return l.id; }) }, t); };
     }
     function openBatch(id) {
       host.innerHTML = '<div class="hzc"><div class="hzc-msg">Loading the batch…</div></div>';
-      api('batches/' + id).then(function (j) { ST.open = j.batch; ST.stages = j.stages || ['cut', 'stitched', 'packed']; ST.flagLabel = j.flag_label || ST.flagLabel; drawBatch(); })
+      api('batches/' + id).then(function (j) { ST.open = j.batch; if (opts.setRef) opts.setRef(j.batch.po_ref || id); ST.stages = j.stages || ['cut', 'stitched', 'packed']; ST.flagLabel = j.flag_label || ST.flagLabel; drawBatch(); })
         .catch(function (e) { host.innerHTML = '<div class="hzc"><button class="hzc-btn" data-back>Back to custom orders</button><div class="hzc-msg err">' + esc(e.message) + '</div></div>'; host.querySelector('[data-back]').onclick = loadList; });
     }
     function act(path, body, btn, msgEl) {
@@ -250,7 +257,7 @@
     }
     function q(sel) { return host.querySelector(sel); }
     function wire() {
-      q('[data-back]').onclick = function () { ST.sub = 'batches'; loadList(); };
+      q('[data-back]').onclick = function () { ST.sub = 'batches'; if (opts.setRef) opts.setRef(''); loadList(); };
       var a = q('[data-accept]'); if (a) a.onclick = function () { act('respond', { decision: 'accept' }, a, q('[data-m1]')); };
       var p = q('[data-problem]'); if (p) p.onclick = function () { var r = (q('[data-reason]').value || '').trim(); if (r.length < 3) { var m = q('[data-m1]'); m.className = 'hzc-msg err'; m.textContent = 'Say what the problem is.'; return; } act('respond', { decision: 'problem', note: r }, p, q('[data-m1]')); };
       host.querySelectorAll('[data-stage]').forEach(function (bt) { bt.onclick = function () { act('lines', { line_id: bt.dataset.line, stage: bt.dataset.stage }, bt, q('[data-m2]')); }; });
@@ -266,5 +273,24 @@
   }
   // Ask whether this supplier has custom orders; cb(status) only when linked.
   function status(base, cb) { fetch(base + 'status', { headers: { accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && j.linked) cb(j); }).catch(function () {}); }
-  window.HZCustomOrders = { render: render, status: status };
+  // v28.572: register CUSTOM's level-2 tabs (Ready to batch | Batches | Sample files) on a DBPortalView. Used by the portal and the staff
+  // preview. Deep links: #/custom/ready, #/custom/batches, #/custom/batches/<PO ref>, #/custom/printfiles. Old #/orders/custom and
+  // #/custom/custom (v28.504-v28.571) land on Batches. guard() lets the preview drop a late answer for another supplier.
+  function register(DV, base, canWrite, guard) {
+    if (!DV || !DV.addTab) return;
+    status(base, function (st) {
+      fetch(base + 'waiting', { headers: { accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : { lines: [] }; }).catch(function () { return { lines: [] }; }).then(function (w) {
+        if (guard && !guard()) return;
+        var portal = /^\/portal/.test(location.pathname);
+        if (portal && /^#\/(orders\/custom|custom\/custom)(\/|$)/.test(location.hash || '')) { try { history.replaceState(null, '', '#/custom/batches'); } catch (e) {} }
+        function go(pt, ref) { if (!portal) return false; location.hash = '#/custom/' + pt + (ref ? '/' + encodeURIComponent(ref) : ''); return true; }
+        function mk(page, pt) { return function (host, ref) { render(host, { base: base, canWrite: canWrite(), page: page, ref: ref || '', go: go, setRef: function (r) { if (DV.setRef) DV.setRef(pt, r); } }); }; }
+        var nw = (w.lines || []).length;
+        DV.addTab({ pt: 'ready', label: 'Ready to batch', badge: nw, sec: 'custom', secLabel: 'CUSTOM', secAfter: 'orders', render: mk('ready', 'ready') });
+        DV.addTab({ pt: 'batches', label: 'Batches', badge: st.todo || 0, sec: 'custom', render: mk('batches', 'batches') });
+        DV.addTab({ pt: 'printfiles', label: 'Sample files', sec: 'custom', render: mk('samples', 'printfiles') });
+      });
+    });
+  }
+  window.HZCustomOrders = { render: render, status: status, register: register };
 })();

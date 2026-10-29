@@ -1035,7 +1035,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
         if(!tab)return false;
       } else { tab=parts[0]; ref=parts[1]?decodeURIComponent(parts[1]):''; }   // legacy #/<tab>[/<ref>]
       if(PP_TABS.indexOf(tab)<0)return false;
-      PORTAL_TAB=tab; _ppOpenPO=null; _ppOpenProd=null;
+      PORTAL_TAB=tab; _ppOpenPO=null; _ppOpenProd=null; PP_EXTRA_REF=PP_EXTRA[tab]?ref:'';   // v28.572: host tabs get their deep-link ref (#/custom/batches/<PO>)
       if(ref){ if(tab==='pos'){ _ppOpenPO=ref; PORTAL_PO_Q=ref; } else if(tab==='shipmentplan'){ PORTAL_SP_PO=ref; } else if(tab==='product'){ _ppOpenProd=ref; } else if(tab==='samples'){ PORTAL_SAMP_Q=ref; } }
       if(_ppData)renderPP();
       return true; }
@@ -1095,7 +1095,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     }catch(e){}
     // Host-registered tabs (e.g. Price List from portal.html): pt → {label, sec, render(bodyEl)}. Placed last in their section,
     // routable (#/<sec>/<pt>), standard click + active handling. v27.503
-    var PP_EXTRA={};
+    var PP_EXTRA={}, PP_EXTRA_REF='';
     function ppAddTab(def){ if(!def||!def.pt||PP_EXTRA[def.pt])return; PP_EXTRA[def.pt]=def; if(PP_TABS.indexOf(def.pt)<0)PP_TABS.push(def.pt); var sec=def.sec||PP_SEC[def.pt]||'orders'; PP_SEC[def.pt]=sec;
       // v27.895 (Ben): a host tab may introduce a NEW level-1 section (PROFILE) — add its pill to the section row if it isn't one of the built-ins
       // v28.569 (Ben: CUSTOM to the top menu): def.secAfter places the new pill right after that section (else last); the section is routable as #/<sec>
@@ -1103,9 +1103,11 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       var t=document.createElement('span'); t.className='rtab'; t.dataset.pt=def.pt; t.dataset.sec=sec; t.textContent=def.label||def.pt;
       if(def.badge>0){ var bd=document.createElement('span'); bd.className='ex-badge'; bd.textContent=def.badge; t.appendChild(bd); }   // v28.569: counted into the section pill by ppSyncSec
       var same=tabsEl.querySelectorAll('.rtab[data-sec="'+sec+'"]'), last=same.length?same[same.length-1]:null; if(last&&last.nextSibling)tabsEl.insertBefore(t,last.nextSibling); else tabsEl.appendChild(t);
-      t.onclick=function(){ ppHealthWatch(); PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);
-      try{ var _h=(location.hash||'').replace(/^#\/?/,''); if(new RegExp('(^|/)'+def.pt+'(/|$)').test(_h)){ PORTAL_TAB=def.pt; if(_h.split('/')[0]!==sec)ppSetHash(def.pt); if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed; an old slug (#/orders/custom) is rewritten to the tab's section (v28.569)
-    try{ window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; window.DBPortalView.setBilingualNav=ppSetBilingualNav; }catch(e){}
+      t.onclick=function(){ ppHealthWatch(); PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; PP_EXTRA_REF=''; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);
+      try{ var _h=(location.hash||'').replace(/^#\/?/,''); if(new RegExp('(^|/)'+def.pt+'(/|$)').test(_h)){ var _hp=_h.split('/'), _ri=_hp.indexOf(def.pt); PORTAL_TAB=def.pt; PP_EXTRA_REF=_hp[_ri+1]?decodeURIComponent(_hp[_ri+1]):''; if(_hp[0]!==sec)ppSetHash(def.pt, PP_EXTRA_REF); if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed; an old slug (#/orders/custom) is rewritten to the tab's section (v28.569)
+    // v28.572 (Ben: CUSTOM level-2 menu + deep links): a host tab records its open record in the address (#/<sec>/<pt>/<ref>) without a re-render
+    function ppSetExtraRef(pt, ref){ PP_EXTRA_REF=ref||''; if(PORTAL_TAB===pt)ppSetHash(pt, ref||''); }
+    try{ window.DBPortalView.setRef=ppSetExtraRef; window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; window.DBPortalView.setBilingualNav=ppSetBilingualNav; }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec);
         var n=0; tabsEl.querySelectorAll('.rtab[data-sec="'+sb.dataset.sec+'"] .ex-badge').forEach(function(b){ if(b.classList.contains('done'))return; var v=parseInt(b.textContent,10); if(v>0)n+=v; });   // action count per section (v27.506)
@@ -2787,7 +2789,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             try{ var _dc=ppDrawerReset(); if(_dc&&_dc.kind==='po'&&PORTAL_TAB==='pos'&&!_ppOpenPO)_ppOpenPO=_dc.ref; }catch(e){}   // v28.516: the list is rebuilt; an open PO drawer reopens
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ setProdnBadge(); }catch(e){} try{ renderPortalNotif(); }catch(e){} ppSyncSec(); if(PP_LANG==='zh')try{ ppTranslate(document.body); }catch(e){}   // re-sync after the badges are set (section counts, v27.506)
-            if(PP_EXTRA[PORTAL_TAB]){ body.innerHTML=''; try{ PP_EXTRA[PORTAL_TAB].render(body); }catch(e){ body.innerHTML='<div class="count">Could not load this page.</div>'; } return; }   // host-registered tab (Price List)
+            if(PP_EXTRA[PORTAL_TAB]){ body.innerHTML=''; try{ PP_EXTRA[PORTAL_TAB].render(body, PP_EXTRA_REF); }catch(e){ body.innerHTML='<div class="count">Could not load this page.</div>'; } return; }   // host-registered tab (Price List)
             if(PORTAL_TAB==='specs'){ body.innerHTML=ppSpecs(); wireSpecs(); return; }
             if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }

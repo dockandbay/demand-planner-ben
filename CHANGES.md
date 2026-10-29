@@ -1,3 +1,12 @@
+## v28.572 (29-Oct-26) Supplier portal ▸ CUSTOM: level-2 menu and deep links
+- Ben: "for custom show a level 2 menu for all key pages and deep links".
+- CUSTOM's pages are now real level-2 tabs in the portal menu (like ORDERS / FINANCE): Ready to batch (count of waiting lines) | Batches (to-do count) | Sample files. The v28.571 in-page pills are gone where the portal menu is present.
+- Deep links: #/custom/ready, #/custom/batches, #/custom/batches/<PO ref> (opens that batch; the address follows when a batch is opened and on Back), #/custom/printfiles. #/custom opens Ready to batch. Old #/orders/custom and #/custom/custom land on Batches. An unknown batch ref shows "not found" over the list.
+- Creating a batch from Ready to batch moves to Batches with the new batch open.
+- Portal routing (portal-view.js): host-registered tabs now receive their deep-link ref (render(body, ref)) and can record one with DBPortalView.setRef(pt, ref). hz-theme.css: the level-2 show rule now includes section custom (it was missing, so no CUSTOM tab row showed).
+- One register helper (HZCustomOrders.register) used by the portal and the staff CONFIG ▸ Portal preview; the preview keeps HORIZON's own address untouched.
+- Client only: no new env vars, migrations or cron routes.
+
 ## v28.571 (29-Oct-26) Supplier portal ▸ CUSTOM: sub-pages and a 3-step batch page
 - Ben: "sub pages for a start. a page for batches, much clearer step 1,2,3 parts of the process with green ticks when done"; "Create batch with all should be on the right hand side and a different colour. Create batch from ticked should be blue when items are selected". Picked mockup A (stepper).
 - CUSTOM has three sub-pages: Ready to batch (n) | Batches (n) | Sample files (n, only when there are samples). Opens on Ready to batch when lines are waiting, else Batches; Back from a batch returns to Batches.
