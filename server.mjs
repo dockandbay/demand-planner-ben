@@ -1434,6 +1434,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
   if (p.startsWith('/api/config/channel') || p.startsWith('/api/config/countr')) return null;  // channel registry — reads open; writes self-check admin
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
+  if (p === '/api/todos' || p.startsWith('/api/todos/')) return null;   // v28.580: personal To do list; every query is scoped to the caller's own email
   if (p.startsWith('/api/accounts/')) return null;           // v28.247 ACCOUNTS: accountsGate checks every method (reads too)
   if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
@@ -16934,6 +16935,75 @@ app.post('/api/me/favourites', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ ok: false, error: e.message }); }
 });
 // What the client asks on load to decide what to enable (read-only UI otherwise).
+// ── v28.580 (Ben 29-Oct-26): personal To do list (top bar drawer next to Inbox) + HOME (logo) summary ─────────────────────────────────
+// To do: one list per signed-in email (planner.user_todos, migration 401). Any staff member manages their own items; no edit grant needed and
+// nobody sees anyone else's. Sandbox (no auth proxy) uses one shared owner. HOME: the caller's most visited pages (their own page_view rows,
+// last 30 days) plus the ACCOUNTS upload ages for admins / ACCOUNTS users and the 24 h health numbers for admins.
+async function todoOwner(req) { const me = await permsFor(req); if (me.email) return String(me.email).toLowerCase().trim(); return me.live === false ? 'sandbox@local' : null; }
+const TODO_COLS = `id::int id, title, coalesce(notes,'') notes, to_char(due_date,'YYYY-MM-DD') due_date, to_char(done_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') done_at, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at`;
+const todoDate = v => (v == null || v === '') ? null : (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : undefined);
+app.get('/api/todos', async (req, res) => {
+  try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
+    const open = (await pool.query(`SELECT ${TODO_COLS} FROM planner.user_todos WHERE email=$1 AND done_at IS NULL ORDER BY due_date NULLS LAST, created_at`, [who])).rows;
+    const done = (await pool.query(`SELECT ${TODO_COLS} FROM planner.user_todos WHERE email=$1 AND done_at IS NOT NULL ORDER BY done_at DESC LIMIT 200`, [who])).rows;
+    res.set('Cache-Control', 'no-store').json({ open, done });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/todos', async (req, res) => {
+  try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
+    const b = req.body || {}; const title = String(b.title || '').trim().slice(0, 300); if (!title) return res.status(400).json({ error: 'Type what needs doing first.' });
+    const due = todoDate(b.due_date); if (due === undefined) return res.status(400).json({ error: 'The due date is not a valid date.' });
+    const notes = String(b.notes || '').trim().slice(0, 2000) || null;
+    const n = (await pool.query(`SELECT count(*)::int n FROM planner.user_todos WHERE email=$1 AND done_at IS NULL`, [who])).rows[0].n;
+    if (n >= 500) return res.status(400).json({ error: 'Your list has 500 open items. Finish or delete some first.' });
+    const r = (await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,$4) RETURNING ${TODO_COLS}`, [who, title, notes, due])).rows[0];
+    res.json({ ok: true, item: r });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.patch('/api/todos/:id', async (req, res) => {
+  try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
+    const id = Number(req.params.id); if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    const b = req.body || {}, sets = [], args = [id, who];
+    if (b.title !== undefined) { const t = String(b.title || '').trim().slice(0, 300); if (!t) return res.status(400).json({ error: 'The item needs some text.' }); args.push(t); sets.push('title=$' + args.length); }
+    if (b.notes !== undefined) { args.push(String(b.notes || '').trim().slice(0, 2000) || null); sets.push('notes=$' + args.length); }
+    if (b.due_date !== undefined) { const d = todoDate(b.due_date); if (d === undefined) return res.status(400).json({ error: 'The due date is not a valid date.' }); args.push(d); sets.push('due_date=$' + args.length); }
+    if (b.done !== undefined) sets.push(b.done ? 'done_at=coalesce(done_at, now())' : 'done_at=NULL');
+    if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
+    const r = (await pool.query(`UPDATE planner.user_todos SET ${sets.join(', ')}, updated_at=now() WHERE id=$1 AND email=$2 RETURNING ${TODO_COLS}`, args)).rows[0];
+    if (!r) return res.status(404).json({ error: 'That item is not on your list.' });
+    res.json({ ok: true, item: r });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/todos/:id', async (req, res) => {
+  try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
+    const id = Number(req.params.id); if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    const r = await pool.query(`DELETE FROM planner.user_todos WHERE id=$1 AND email=$2`, [id, who]);
+    if (!r.rowCount) return res.status(404).json({ error: 'That item is not on your list.' });
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/home', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    const em = me.email ? String(me.email).toLowerCase().trim() : null, out = { email: em, visits: [] };
+    try { out.visits = (await pool.query(`SELECT path, sum(count)::int n FROM planner.app_health_events
+        WHERE kind='page_view' AND source='staff' AND ts > now() - interval '30 days' AND ${em ? 'lower(user_email)=$1' : 'user_email IS NULL'}
+          AND path LIKE '#/%' AND path NOT LIKE '%:id%' AND path NOT LIKE '#/home%'
+        GROUP BY path ORDER BY n DESC LIMIT 8`, em ? [em] : [])).rows; } catch (e) { out.visits = []; }
+    if (me.is_admin || me.accounts_access || me.live === false) {
+      try { out.accounts = (await pool.query(`SELECT org, to_char(max(uploaded_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD') last_upload,
+          ((now() AT TIME ZONE 'Europe/London')::date - max(uploaded_at AT TIME ZONE 'Europe/London')::date)::int days
+          FROM planner.accounts_stmt_uploads WHERE source='uncoded' GROUP BY org ORDER BY org`)).rows; } catch (e) { out.accounts = null; }
+    }
+    if (me.is_admin || me.live === false) {
+      try { const h = (await pool.query(`SELECT coalesce(sum(count) FILTER (WHERE kind='server_error'),0)::int server_errors,
+            coalesce(sum(count) FILTER (WHERE kind='slow_view'),0)::int slow_views,
+            count(DISTINCT path) FILTER (WHERE kind='cron_run' AND status >= 400)::int failed_jobs,
+            coalesce(sum(count) FILTER (WHERE kind='client_error'),0)::int browser_errors
+          FROM planner.app_health_events WHERE ts > now() - interval '24 hours'`)).rows[0]; out.health = h; } catch (e) { out.health = null; }
+    }
+    res.set('Cache-Control', 'no-store').json(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });   // v28.297: never hand the client zero rights on a DB blip
   // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path

@@ -94,6 +94,95 @@
 #app.accounts-active > *:not(#dab-navwrap):not(#accounts-root):not(.hz-drawer-overlay){display:none!important}
 #app.accounts-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.accounts-active #view-tabs-row .tool-bar{display:none!important}
+/* v28.580 (Ben 29-Oct-26): HOME (logo) + personal To do drawer (top bar, next to Inbox) */
+#app.home-active > *:not(#dab-navwrap):not(#home-root):not(.hz-drawer-overlay){display:none!important}
+#app.home-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
+#app.home-active #view-tabs-row .tool-bar{display:none!important}
+#home-root{display:none;padding:20px 22px 48px;max-width:1320px;font-family:var(--font,inherit);color:var(--ink)}
+#home-root .hm-hello{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 18px;margin-bottom:16px}
+#home-root .hm-hello h1{font-size:24px;line-height:1.15;margin:0;font-weight:800;letter-spacing:-.01em}
+#home-root .hm-meta{color:var(--muted);font-size:12.5px;margin-top:3px}
+#home-root .hm-pulse{display:flex;flex-wrap:wrap;gap:6px}
+#home-root .hm-pill{font-size:11.5px;font-weight:700;border-radius:999px;padding:3px 9px;background:var(--card);border:1px solid var(--line);color:var(--ink-soft);white-space:nowrap}
+#home-root .hm-pill.neg{background:var(--neg-bg);color:var(--neg);border-color:transparent}
+#home-root .hm-pill.amb{background:var(--amber-bg);color:var(--amber);border-color:transparent}
+#home-root .hm-pill.pos{background:var(--pos-bg);color:var(--pos);border-color:transparent}
+#home-root .hm-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:18px;align-items:start}
+@media (max-width:1000px){#home-root .hm-grid{grid-template-columns:minmax(0,1fr)}}
+#home-root .hm-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+#home-root .hm-panel{background:var(--card);border:1px solid var(--line);border-radius:12px;min-width:0}
+#home-root .hm-ph{display:flex;align-items:center;gap:8px;padding:12px 14px 6px}
+#home-root .hm-ph h2{margin:0;font-size:12.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink)}
+#home-root .hm-ph .hm-n{font-size:11px;font-weight:800;background:var(--neg);color:#fff;border-radius:999px;padding:1px 7px}
+#home-root .hm-ph .hm-hint{margin-left:auto;font-size:11.5px;color:var(--faint)}
+#home-root .hm-q{list-style:none;margin:0;padding:0 6px 8px}
+#home-root .hm-q li{display:grid;grid-template-columns:4px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border-radius:8px}
+#home-root .hm-q li:hover{background:var(--hover)}
+#home-root .hm-sev{align-self:stretch;border-radius:2px;background:var(--line)}
+#home-root .hm-sev.neg{background:var(--neg)}#home-root .hm-sev.amb{background:var(--amber)}#home-root .hm-sev.blue{background:var(--blue)}
+#home-root .hm-t{font-weight:600;font-size:13.5px}#home-root .hm-s{color:var(--muted);font-size:12px}
+#home-root .hm-area{font-size:9.5px;font-weight:800;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-right:6px}
+#home-root .hm-act{border:1px solid var(--blue);color:var(--blue);background:none;font-weight:700;font-size:12px;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap}
+#home-root .hm-act:hover{background:var(--blue-soft)}
+#home-root .hm-empty{padding:10px 16px 16px;color:var(--muted);font-size:13px}
+#home-root .hm-sec{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin:2px 2px -6px}
+#home-root .hm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+#home-root .hm-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+#home-root .hm-ch{display:flex;align-items:center;gap:8px}
+#home-root .hm-ch h3{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+#home-root .hm-mode{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--line2);color:var(--muted)}
+#home-root .hm-mode.edit{background:var(--blue-soft);color:var(--blue-ink)}
+#home-root .hm-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+#home-root .hm-kpi b{display:block;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+#home-root .hm-kpi span{font-size:11.5px;color:var(--muted)}
+#home-root .hm-kpi.neg b{color:var(--neg)}#home-root .hm-kpi.amb b{color:var(--amber)}#home-root .hm-kpi.pos b{color:var(--pos)}#home-root .hm-kpi.mut b{color:var(--faint)}
+#home-root .hm-lines{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-soft);border-top:1px solid var(--line2);padding-top:8px}
+#home-root .hm-lines div{display:flex;gap:8px;justify-content:space-between}#home-root .hm-lines em{font-style:normal;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+#home-root .hm-foot{display:flex;gap:12px;flex-wrap:wrap}
+#home-root a.hm-lk{color:var(--blue);font-weight:600;font-size:12.5px;text-decoration:none}#home-root a.hm-lk:hover{text-decoration:underline}
+#home-root .hm-short{display:flex;flex-wrap:wrap;gap:8px;padding:2px 14px 14px}
+#home-root .hm-short a{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-weight:600;font-size:12.5px;color:var(--ink-soft);text-decoration:none;background:var(--bg);display:inline-flex;gap:8px;align-items:baseline}
+#home-root .hm-short a:hover{border-color:var(--blue);color:var(--blue)}
+#home-root .hm-short small{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+#home-root .hm-tadd{display:flex;gap:6px;padding:2px 14px 8px}
+#home-root .hm-tadd input{flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px;background:var(--bg);color:var(--ink)}
+/* To do drawer */
+#todo-ov{position:fixed;inset:0;background:rgba(15,23,42,.28);z-index:100060;display:none}
+#todo-ov.open{display:block}
+#todo-dr{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100vw;background:var(--card);color:var(--ink);border-left:1px solid var(--line);box-shadow:-18px 0 44px -18px rgba(16,24,40,.35);z-index:100061;display:flex;flex-direction:column;transform:translateX(102%);transition:transform .18s ease;font-size:13px}
+#todo-dr.open{transform:none}
+@media (prefers-reduced-motion:reduce){#todo-dr{transition:none}}
+#todo-dr .td-hd{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+#todo-dr .td-hd h2{margin:0;font-size:15px;font-weight:800}
+#todo-dr .td-hd .td-x{margin-left:auto;border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px}
+#todo-dr .td-add{display:flex;flex-direction:column;gap:6px;padding:12px 16px;border-bottom:1px solid var(--line2)}
+#todo-dr .td-row{display:flex;gap:6px;align-items:center}
+#todo-dr input[type=text],#todo-dr input[type=date],#todo-dr textarea{border:1px solid var(--line);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px;background:var(--bg);color:var(--ink);min-width:0}
+#todo-dr input[type=text]{flex:1}#todo-dr textarea{width:100%;resize:vertical;min-height:52px}
+#todo-dr .td-btn{border:1px solid var(--blue);background:var(--blue);color:#fff;font-weight:700;font-size:12.5px;border-radius:7px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+#todo-dr .td-btn.ghost{background:none;color:var(--blue)}
+#todo-dr .td-btn.danger{border-color:var(--neg);background:var(--neg)}
+#todo-dr .td-body{flex:1;overflow-y:auto;padding:6px 8px 20px}
+#todo-dr .td-sec{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:12px 8px 4px;cursor:default;background:none;border:0;width:100%;text-align:left}
+#todo-dr button.td-sec{cursor:pointer}
+#todo-dr .td-it{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px;border-radius:8px}
+#todo-dr .td-it:hover{background:var(--hover)}
+#todo-dr .td-it input[type=checkbox]{margin:3px 0 0;width:16px;height:16px;accent-color:var(--blue);cursor:pointer}
+#todo-dr .td-ti{font-weight:600;cursor:text;word-break:break-word}
+#todo-dr .td-it.done .td-ti{text-decoration:line-through;color:var(--muted);font-weight:500}
+#todo-dr .td-sub{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px;font-size:11.5px;color:var(--muted)}
+#todo-dr .td-due{border-radius:999px;padding:0 7px;background:var(--line2);color:var(--ink-soft);font-weight:600}
+#todo-dr .td-due.over{background:var(--neg-bg);color:var(--neg)}#todo-dr .td-due.today{background:var(--amber-bg);color:var(--amber)}
+#todo-dr .td-notes{white-space:pre-wrap;color:var(--muted);font-size:12px;margin-top:3px}
+#todo-dr .td-ops{display:flex;gap:2px;opacity:.55}#todo-dr .td-it:hover .td-ops,#todo-dr .td-it:focus-within .td-ops{opacity:1}
+#todo-dr .td-op{border:0;background:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 5px;border-radius:5px}
+#todo-dr .td-op:hover{background:var(--line2);color:var(--ink)}
+#todo-dr .td-edit{grid-column:2 / span 2;display:flex;flex-direction:column;gap:6px}
+#todo-dr .td-empty{padding:14px 10px;color:var(--muted)}
+#todo-dr .td-err{color:var(--neg);font-size:12px;padding:0 16px 8px}
+#app #view-tabs-row #todo-count{background:var(--amber);color:#fff;font-size:10px;font-weight:800;line-height:1.4;padding:1px 6px;border-radius:999px;display:none}
+#app #view-tabs-row #todo-count.on{display:inline-block}#app #view-tabs-row #todo-count.over{background:#e5484d}
+#hz-leftrail .rl-brand.hm-link{cursor:pointer}
 #acdrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease;display:none}#acdrawer-bg.show{display:block}#acdrawer-bg.open{background:rgba(15,23,42,.32)}
 #acdrawer{position:absolute;top:0;right:0;height:100%;width:min(680px,100vw);background:var(--card);color:var(--ink);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);text-align:left}#acdrawer-bg.open #acdrawer{transform:translateX(0)}   /* v28.280 Reconcile review drawer */
 #acdrawer,#acdrawer div,#acdrawer td,#acdrawer th,#acdrawer label{text-align:left}#acdrawer table{border-collapse:collapse}#acdrawer td{padding:5px 10px 5px 0;vertical-align:top}#accounts-root #acdrawer .save-btn.ac-blue,#acdrawer .ac-blue{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}#accounts-root #acdrawer .save-btn.ac-blue:hover,#acdrawer .ac-blue:hover{background:#1d4ed8;border-color:#1d4ed8}   /* v28.284 (Ben): fully left aligned, blue primary button */
@@ -14404,6 +14493,8 @@
     if(seg[0]!=='client'&&typeof hideClient==='function')hideClient();   // v28.008: leaving CLIENT
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
+    if(seg[0]!=='home'&&typeof hideHome==='function')hideHome();   // v28.580: leaving HOME
+    if(seg[0]==='home'){ if(!ME){ if(!window._hmWaitAt)window._hmWaitAt=Date.now(); if(Date.now()-window._hmWaitAt<10000){ setTimeout(applyRoute,250); return; } } showHome(); return; }   // v28.580: HOME (logo)
     if(seg[0]==='accounts'){ if(!ME){ if(!window._acWaitAt)window._acWaitAt=Date.now(); if(Date.now()-window._acWaitAt<10000){ setTimeout(applyRoute,250); return; } }   /* permissions not loaded yet: wait up to 10s (v28.251: by time, reset in fetchMe, so a slow /api/me never poisons later routes) */
       if(!accountsCan()){ location.replace('#/supply/purchase-orders'); return; } showAccounts(); var _as=(AC_SLUG_IN[seg[1]]||seg[1])||ACCOUNTS_SUB||'bank'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='bank'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if(_cs==='config'&&seg[2]==='preview'){ _cs='portal'; seg=seg.slice(0,2); }   /* v28.463: old Config ▸ Portal preview link */ if({clients:1,orders:1,commission:1,messages:1,notices:1,portal:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
@@ -20514,6 +20605,180 @@
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showAccounts(); selectAccountsSub(ACCOUNTS_SUB||'payables'); };
     row.querySelectorAll('.view-toggle:not(.accounts-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideAccounts(); }); }); }
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ── v28.580 (Ben 29-Oct-26): HOME, opened by the HORIZON logo (#/home). What this person needs to know now, by their permissions:
+  // "Needs you" (items only they can act on), status cards per area (Your area = edit rights, View only = read), their most visited
+  // pages (own page views, last 30 days), their To do list and recent supply changes. Counts reuse what the app already computes
+  // (ACTIONS, order plan exceptions, sample actions, Inbox, client messages); /api/home adds visits, ACCOUNTS upload ages and health.
+  // Personal To do list: top bar drawer next to Inbox (/api/todos, one list per person, migration 401).
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  var HOME={d:null,acts:null,opx:null,samp:null,cl:null,recent:null,at:0};
+  var TODO={open:[],done:[],loaded:false,showDone:false,edit:null,del:null,err:'',busy:false};
+  function hmCan(k){ var m=ME||null; if(!m)return false; if(m.live===false||m.is_admin)return true; return !!m[k]; }
+  function hmToday(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function ensureHomeRoot(){ if(document.getElementById('home-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
+    var el=document.createElement('div'); el.id='home-root'; app.appendChild(el);
+    el.addEventListener('click',function(e){ var t=e.target.closest('[data-hm]'); if(!t)return; var a=t.getAttribute('data-hm');
+      if(a==='inbox'){ e.preventDefault(); e.stopPropagation(); if(typeof toggleTlDropdown==='function')toggleTlDropdown(); return; }
+      if(a==='todo'){ e.preventDefault(); todoOpen(); return; }
+      if(a==='tdone'){ var id=+t.getAttribute('data-id'); todoPatch(id,{done:true}); return; }
+      if(a==='go'){ e.preventDefault(); var h=t.getAttribute('data-h'); if(h){ if(location.hash===h)applyRoute(); else location.hash=h; } } });
+    el.addEventListener('keydown',function(e){ if(e.key==='Enter'&&e.target.id==='hm-tadd-in'){ var v=e.target.value.trim(); if(!v)return; todoAdd({title:v},function(){ var i=document.getElementById('hm-tadd-in'); if(i){ i.value=''; i.focus(); } }); } }); }
+  function showHome(){ ensureHomeRoot(); if(typeof hideClient==='function')hideClient(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideProduct==='function')hideProduct(); if(typeof hideAccounts==='function')hideAccounts();
+    var app=document.getElementById('app'); if(app){ app.classList.add('home-active'); ['supply-active','config-mode','product-active','client-active','accounts-active'].forEach(function(c){ app.classList.remove(c); }); }
+    document.body.classList.add('supply-on'); var r=document.getElementById('home-root'); if(r)r.style.display='block';
+    document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); try{ hzSyncDemandPills(); }catch(e){}
+    renderHome(); if(Date.now()-HOME.at>20000)loadHome(); }
+  function hideHome(){ var app=document.getElementById('app'); var r=document.getElementById('home-root'); if(r)r.style.display='none';
+    if(app&&app.classList.contains('home-active')){ app.classList.remove('home-active'); document.body.classList.remove('supply-on'); } }
+  function homeOn(){ var app=document.getElementById('app'); return !!(app&&app.classList.contains('home-active')); }
+  function hmRe(){ if(homeOn())renderHome(); }
+  function loadHome(){ HOME.at=Date.now(); var J=function(u){ return fetch(u,{cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); };
+    J('/api/home').then(function(d){ HOME.d=d; hmRe(); });
+    todoLoad();
+    if(typeof loadTlNotifs==='function')loadTlNotifs(hmRe);
+    (typeof cache!=='undefined'&&cache['actions']!==undefined?Promise.resolve(cache['actions']):J('/api/supply/actions')).then(function(a){ if(Array.isArray(a)){ HOME.acts=a; try{ if(typeof cache!=='undefined')cache['actions']=a; }catch(e){} } hmRe(); });
+    J('/api/supply/order-plan-exceptions').then(function(d){ HOME.opx=d&&!d.error?(d.count||0):null; hmRe(); });
+    (typeof cache!=='undefined'&&Array.isArray(cache['samples'])?Promise.resolve(cache['samples']):J('/api/supply/samples')).then(function(rows){ if(Array.isArray(rows)){ try{ HOME.samp=rows.reduce(function(a,r){ return a+((typeof sampActions==='function'?sampActions(r):[])||[]).length; },0); }catch(e){ HOME.samp=null; } } hmRe(); });
+    if(typeof clientCan==='function'&&clientCan())J('/api/client/threads').then(function(j){ HOME.cl=j&&j.threads?j.threads.reduce(function(s,t){ return s+(t.unread_ops||0); },0):null; hmRe(); });
+    J('/api/supply/recent-activity').then(function(rows){ HOME.recent=Array.isArray(rows)?rows:[]; hmRe(); }); }
+  var HM_SEG={'supply':'Supply','purchase-orders':'Purchase orders','orderplan':'Order plan','plan':'Plan','demand':'Demand','buy-move':'Buy & Move','fba':'FBA','inventory':'Inventory','status':'Status','reports':'Reports','sa':'Sales analysis','ex':'Executive',
+    'dtc2':'DTC mismatch 2.0','dtc-mismatch':'DTC mismatch','payreport':'Payments report','payments-due':'Payments due','xeropayments':'Xero payments','erp-compare':'ERP compare','wssi':'WSSI','crossmarket':'Cross market','keyaccounts':'Key accounts','klaviyobis':'Klaviyo BIS',
+    'salesplan':'Sales plan','b2b':'B2B','directclient':'Direct to client','edi-labels':'EDI labels','accounts':'Accounts','bank-statement':'Bank statement','config':'Config','portalusers':'Portal users','portalopen':'Open portal','health-log':'Health log','product':'Product','client':'Client'};
+  function hmLabel(path){ var seg=String(path||'').replace(/^#\/?/,'').split('/').filter(Boolean).map(function(x){ try{ x=decodeURIComponent(x); }catch(e){} return HM_SEG[x]||(x.charAt(0).toUpperCase()+x.slice(1).replace(/-/g,' ')); });
+    if(seg.length>2)seg=seg.slice(-2); return seg.join(' · ')||'Home'; }
+  function hmItem(area,sev,t,s,btn,href,kind){ return {area:area,sev:sev,t:t,s:s,btn:btn,href:href,kind:kind||'go'}; }
+  function renderHome(){ var r=document.getElementById('home-root'); if(!r||r.style.display==='none')return;
+    var m=ME||{}, d=HOME.d||{}, today=hmToday(), name=(m.email||'').split('@')[0].split(/[._-]/)[0]||'';
+    name=name?name.charAt(0).toUpperCase()+name.slice(1):''; var hr=new Date().getHours(), g=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
+    var sup=hmCan('supply_edit'), dem=hmCan('demand_edit'), prod=hmCan('product_edit'), cli=(typeof clientCan==='function'&&clientCan()), acc=(typeof accountsCan==='function'&&accountsCan()), adm=!!(m.is_admin||m.live===false);
+    var actHigh=Array.isArray(HOME.acts)?HOME.acts.filter(function(x){ return (x.severity==='high'||x.type==='Required field missing')&&(!x.status||x.status==='open'); }).length:null;
+    var inboxN=(typeof TL_NOTIFS!=='undefined'&&Array.isArray(TL_NOTIFS))?TL_NOTIFS.length:null;
+    var tOpen=TODO.open||[], tOver=tOpen.filter(function(t){ return t.due_date&&t.due_date<today; }), tToday=tOpen.filter(function(t){ return t.due_date===today; });
+    var stale=(d.accounts||[]).filter(function(a){ return a.days>5; });
+    // Needs you: only what this person can act on
+    var N=[];
+    if(tOver.length)N.push(hmItem('To do','neg',tOver.length+' to do item'+(tOver.length>1?'s':'')+' overdue',tOver.slice(0,3).map(function(t){ return t.title; }).join(' · '),'Open list','','todo'));
+    if(tToday.length)N.push(hmItem('To do','amb',tToday.length+' to do item'+(tToday.length>1?'s':'')+' due today',tToday.slice(0,3).map(function(t){ return t.title; }).join(' · '),'Open list','','todo'));
+    if(inboxN)N.push(hmItem('Inbox','amb',inboxN+' unread message'+(inboxN>1?'s':''),'Supplier and team messages in your Inbox','Open inbox','','inbox'));
+    if(sup&&actHigh)N.push(hmItem('Supply','neg',actHigh+' high-priority action'+(actHigh>1?'s':'')+' open','SUPPLY ▸ Reports ▸ Actions','Review','#/supply/reports/actions'));
+    if(sup&&HOME.opx)N.push(hmItem('Supply','amb',HOME.opx+' PO'+(HOME.opx>1?'s':'')+' with order plan exceptions','Unapproved partials, supplier or country risk, discontinued SKUs','Review','#/supply/purchase-orders/orderplan'));
+    if((prod||sup)&&HOME.samp)N.push(hmItem('Samples','amb',HOME.samp+' open sample action'+(HOME.samp>1?'s':''),'Shipped by supplier, overdue, charges or unread notes','Open','#/supply/samples'));
+    if(cli&&HOME.cl)N.push(hmItem('Client','amb',HOME.cl+' unread client message'+(HOME.cl>1?'s':''),'CLIENT ▸ Messages','Reply','#/client/messages'));
+    if(acc)stale.forEach(function(a){ N.push(hmItem('Accounts','neg',String(a.org).toUpperCase()+' uncoded statement lines not uploaded for '+a.days+' days','Last upload '+fd(a.last_upload)+' · stale after 5 days','Upload','#/accounts/bank-statement')); });
+    if(adm&&d.health&&d.health.failed_jobs)N.push(hmItem('System','amb',d.health.failed_jobs+' scheduled job'+(d.health.failed_jobs>1?'s':'')+' failed in the last 24 hours','CONFIG ▸ Health log','Open','#/config/health-log'));
+    if(adm&&d.health&&d.health.server_errors)N.push(hmItem('System','neg',d.health.server_errors+' server error'+(d.health.server_errors>1?'s':'')+' in the last 24 hours','CONFIG ▸ Health log','Open','#/config/health-log'));
+    var neg=N.filter(function(x){ return x.sev==='neg'; }).length, amb=N.filter(function(x){ return x.sev==='amb'; }).length;
+    var loading=!HOME.d;
+    var qHtml=N.length?N.map(function(x){ return '<li><span class="hm-sev '+x.sev+'"></span><div style="min-width:0"><div class="hm-t"><span class="hm-area">'+esc(x.area)+'</span>'+esc(x.t)+'</div><div class="hm-s">'+esc(x.s)+'</div></div>'
+        +(x.kind==='go'?'<a class="hm-act" href="'+esc(x.href)+'" data-hm="go" data-h="'+esc(x.href)+'">'+esc(x.btn)+'</a>':'<button class="hm-act" data-hm="'+x.kind+'">'+esc(x.btn)+'</button>')+'</li>'; }).join('')
+      :'<li style="display:block"><div class="hm-empty">'+(loading?'Checking…':'Nothing needs you right now.')+'</div></li>';
+    // To do panel (top open items)
+    var tHtml='<div class="hm-tadd"><input id="hm-tadd-in" type="text" maxlength="300" placeholder="Add a to do and press Enter" aria-label="Add a to do"></div>'
+      +(tOpen.length?'<ul class="hm-q">'+tOpen.slice(0,6).map(function(t){ var cls=t.due_date&&t.due_date<today?'neg':(t.due_date===today?'amb':'');
+          return '<li style="grid-template-columns:18px minmax(0,1fr) auto"><input type="checkbox" data-hm="tdone" data-id="'+t.id+'" aria-label="Mark done" style="margin:0;accent-color:var(--blue);cursor:pointer"><div style="min-width:0"><div class="hm-t" style="font-weight:600">'+esc(t.title)+'</div>'
+            +(t.due_date?'<div class="hm-s" style="'+(cls==='neg'?'color:var(--neg)':cls==='amb'?'color:var(--amber)':'')+'">Due '+esc(fd(t.due_date))+'</div>':'')+'</div><span></span></li>'; }).join('')+'</ul>'
+        :'<div class="hm-empty" style="padding-top:2px">'+(TODO.loaded?'Your list is empty. Add your first item above.':'Loading…')+'</div>');
+    // most visited
+    var vis=(d.visits||[]);
+    var vHtml=vis.length?'<div class="hm-short">'+vis.slice(0,8).map(function(v){ return '<a href="'+esc(v.path)+'" data-hm="go" data-h="'+esc(v.path)+'">'+esc(hmLabel(v.path))+'<small>'+v.n+'</small></a>'; }).join('')+'</div>'
+      :'<div class="hm-empty">'+(loading?'Loading…':'Your most visited pages will show here once you have used HORIZON for a while.')+'</div>';
+    // recent changes
+    var rc=(HOME.recent||[]).slice(0,6);
+    var rHtml=rc.length?'<ul class="hm-q">'+rc.map(function(x){ return '<li><span class="hm-sev"></span><div style="min-width:0"><div class="hm-t" style="font-weight:500">'+esc(x.label||'')+'</div><div class="hm-s">'+esc(typeof actWhen==='function'?actWhen(x.at):(x.at||''))+'</div></div><span></span></li>'; }).join('')+'</ul>'
+      :'<div class="hm-empty">'+(HOME.recent?'No recent supply changes.':'Loading…')+'</div>';
+    // status cards
+    var K=function(v,l,c){ return '<div class="hm-kpi '+(v==null?'mut':(c||''))+'"><b>'+(v==null?'–':esc(String(v)))+'</b><span>'+esc(l)+'</span></div>'; };
+    var L=function(arr){ return '<div class="hm-foot">'+arr.map(function(a){ return '<a class="hm-lk" href="'+a[1]+'" data-hm="go" data-h="'+a[1]+'">'+esc(a[0])+' →</a>'; }).join('')+'</div>'; };
+    var C=function(area,ed,kp,lines,links){ return '<article class="hm-card"><div class="hm-ch"><h3>'+esc(area)+'</h3><span class="hm-mode'+(ed?' edit':'')+'">'+(ed?'Your area':'View only')+'</span></div><div class="hm-kpis">'+kp+'</div>'
+      +(lines&&lines.length?'<div class="hm-lines">'+lines.map(function(l){ return '<div><span>'+esc(l[0])+'</span><em>'+esc(l[1])+'</em></div>'; }).join('')+'</div>':'')+L(links)+'</article>'; };
+    var cards=[];
+    cards.push(C('Supply',sup,K(actHigh,'High-priority actions',actHigh?'neg':'pos')+K(HOME.opx,'Order plan exceptions',HOME.opx?'amb':'pos')+K(inboxN,'Unread messages',inboxN?'amb':'pos'),null,[['Purchase orders','#/supply/purchase-orders/plan'],['Actions','#/supply/reports/actions'],['Payments due','#/supply/payments/payments-due']]));
+    cards.push(C('Demand',dem,K(null,'Exceptions (to come)')+K(null,'Actions (to come)')+K(null,'Accuracy (to come)'),null,[['Plan','#/demand/plan'],['Exceptions','#/demand/exceptions'],['Actions','#/demand/actions']]));
+    cards.push(C('Product',prod,K(HOME.samp,'Open sample actions',HOME.samp?'amb':'pos')+K(null,'Development (to come)')+K(null,'Range (to come)'),null,[['Samples','#/supply/samples'],['Products','#/product/products']]));
+    if(cli)cards.push(C('Client',true,K(HOME.cl,'Unread client messages',HOME.cl?'amb':'pos')+K(null,'Orders (to come)')+K(null,'Line sheets (to come)'),null,[['Messages','#/client/messages'],['Orders','#/client/orders']]));
+    if(acc){ var ac=d.accounts||[], byO={}; ac.forEach(function(a){ byO[a.org]=a; });
+      var kA=function(o){ var a=byO[o]; return a?K(a.days+'d','Since '+o.toUpperCase()+' uncoded upload',a.days>5?'neg':'pos'):K(d.accounts?'never':null,'Since '+o.toUpperCase()+' uncoded upload',d.accounts?'neg':''); };
+      cards.push(C('Accounts',true,kA('uk')+kA('au')+K(null,'Bank lines (to come)'),ac.map(function(a){ return [a.org.toUpperCase()+' last upload',fd(a.last_upload)]; }),[['Upload uncoded lines','#/accounts/bank-statement'],['Reconcile','#/accounts/reconcile'],['Payments','#/accounts/payments-report']])); }
+    if(adm&&d.health){ var h=d.health; cards.push(C('System',true,K(h.server_errors,'Server errors (24h)',h.server_errors?'neg':'pos')+K(h.failed_jobs,'Failed jobs (24h)',h.failed_jobs?'amb':'pos')+K(h.slow_views,'Slow views (24h)',h.slow_views>20?'amb':''),[['Browser errors (24h)',String(h.browser_errors||0)],['Version','__APP_VERSION__']],[['Health log','#/config/health-log'],['Permissions','#/config/permissions']])); }
+    r.innerHTML='<div class="hm-hello"><div><h1>'+esc(g+(name?', '+name:''))+'</h1><div class="hm-meta">'+esc(fd(today))+(m.email?' · '+esc(m.email):'')+'</div></div><div class="hm-pulse">'
+        +(neg?'<span class="hm-pill neg">'+neg+' urgent</span>':'')+(amb?'<span class="hm-pill amb">'+amb+' to do soon</span>':'')+(!neg&&!amb&&!loading?'<span class="hm-pill pos">All clear</span>':'')+'</div></div>'
+      +'<div class="hm-grid"><div class="hm-col">'
+        +'<section class="hm-panel"><div class="hm-ph"><h2>Needs you</h2>'+(N.length?'<span class="hm-n">'+N.length+'</span>':'')+'</div><ul class="hm-q">'+qHtml+'</ul></section>'
+        +'<section class="hm-panel"><div class="hm-ph"><h2>To do</h2><span class="hm-hint">'+tOpen.length+' open</span><a class="hm-lk" href="#" data-hm="todo" style="margin-left:8px">Open list →</a></div>'+tHtml+'</section>'
+        +'<section class="hm-panel"><div class="hm-ph"><h2>Your most visited</h2><span class="hm-hint">last 30 days</span></div>'+vHtml+'</section>'
+      +'</div><div class="hm-col"><div class="hm-sec">Status by area</div><div class="hm-cards">'+cards.join('')+'</div>'
+        +'<section class="hm-panel"><div class="hm-ph"><h2>Recent supply changes</h2></div>'+rHtml+'</section>'
+      +'</div></div>'; }
+  // ── To do drawer ──
+  function todoLoad(cb){ fetch('/api/todos',{cache:'no-store'}).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ TODO.open=j.open||[]; TODO.done=j.done||[]; TODO.loaded=true; TODO.err=''; todoBadge(); todoRender(); hmRe(); if(cb)cb(); })
+      .catch(function(e){ TODO.loaded=true; TODO.err=e.message||'Could not load your list.'; todoRender(); hmRe(); }); }
+  function todoReq(method,url,body,cb){ TODO.busy=true; fetch(url,{method:method,headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ TODO.busy=false; TODO.err=''; todoLoad(function(){ if(cb)cb(j); }); })
+      .catch(function(e){ TODO.busy=false; TODO.err=e.message||'That did not save. Try again.'; todoRender(); }); }
+  function todoAdd(o,cb){ todoReq('POST','/api/todos',o,cb); }
+  function todoPatch(id,o,cb){ todoReq('PATCH','/api/todos/'+id,o,cb); }
+  function todoDel(id){ TODO.del=null; todoReq('DELETE','/api/todos/'+id,null); }
+  function todoBadge(){ var c=document.getElementById('todo-count'); if(!c)return; var n=(TODO.open||[]).length, t=hmToday(), over=(TODO.open||[]).some(function(x){ return x.due_date&&x.due_date<t; });
+    c.textContent=n>99?'99+':String(n); c.className=n?('on'+(over?' over':'')):''; var b=document.getElementById('todo-btn'); if(b)b.title='To do: '+n+' open'+(over?', some overdue':''); }
+  function ensureTodoButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('todo-btn'))return;
+    var b=document.createElement('button'); b.id='todo-btn'; b.className='tl-bell'; b.title='To do'; b.setAttribute('aria-label','To do');
+    b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg><span id="todo-count"></span>';
+    var bell=document.getElementById('tl-bell'); if(bell&&bell.parentNode===row)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
+    b.onclick=function(e){ e.stopPropagation(); var dr=document.getElementById('todo-dr'); if(dr&&dr.classList.contains('open'))todoClose(); else todoOpen(); };
+    if(!document.getElementById('todo-dr')){ var ov=document.createElement('div'); ov.id='todo-ov'; document.body.appendChild(ov); ov.onclick=todoClose;
+      var dr=document.createElement('aside'); dr.id='todo-dr'; dr.setAttribute('aria-label','To do list'); document.body.appendChild(dr); todoWire(dr); }
+    // a top menu press leaves HOME (the hash may stay #/home when a module button opens without routing)
+    if(!row._hmWired){ row._hmWired=true; row.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('.view-toggle'))hideHome(); },true); }
+    todoLoad(); }
+  function todoOpen(){ var dr=document.getElementById('todo-dr'), ov=document.getElementById('todo-ov'); if(!dr)return; dr.classList.add('open'); if(ov)ov.classList.add('open'); todoRender(); todoLoad();
+    setTimeout(function(){ var i=document.getElementById('td-new'); if(i)i.focus(); },60); document.addEventListener('keydown',todoEsc); }
+  function todoClose(){ var dr=document.getElementById('todo-dr'), ov=document.getElementById('todo-ov'); if(dr)dr.classList.remove('open'); if(ov)ov.classList.remove('open'); TODO.edit=null; TODO.del=null; document.removeEventListener('keydown',todoEsc); }
+  function todoEsc(e){ if(e.key==='Escape'){ if(TODO.edit!=null){ TODO.edit=null; todoRender(); } else todoClose(); } }
+  function todoItemHtml(t,done,today){ var cls=t.due_date&&!done?(t.due_date<today?' over':(t.due_date===today?' today':'')):'';
+    if(TODO.edit===t.id&&!done)return '<div class="td-it"><span></span><div class="td-edit"><input type="text" id="td-e-title" maxlength="300" value="'+esc(t.title)+'" aria-label="Item">'
+      +'<div class="td-row"><label class="hm-s" for="td-e-due" style="color:var(--muted);font-size:12px">Due</label><input type="date" id="td-e-due" value="'+esc(t.due_date||'')+'"></div>'
+      +'<textarea id="td-e-notes" maxlength="2000" placeholder="Notes (optional)" aria-label="Notes">'+esc(t.notes||'')+'</textarea>'
+      +'<div class="td-row"><button class="td-btn" data-td="save" data-id="'+t.id+'">Save</button><button class="td-btn ghost" data-td="cancel">Cancel</button></div></div></div>';
+    var ops=TODO.del===t.id?'<span class="td-sub" style="margin:0">Delete?</span><button class="td-op" data-td="delyes" data-id="'+t.id+'" style="color:var(--neg);font-weight:700">Delete</button><button class="td-op" data-td="delno">Keep</button>'
+      :(done?'':'<button class="td-op" data-td="edit" data-id="'+t.id+'" title="Edit">Edit</button>')+'<button class="td-op" data-td="del" data-id="'+t.id+'" title="Delete">Delete</button>';
+    return '<div class="td-it'+(done?' done':'')+'"><input type="checkbox" data-td="tick" data-id="'+t.id+'"'+(done?' checked':'')+' aria-label="'+(done?'Mark not done':'Mark done')+'">'
+      +'<div style="min-width:0"><div class="td-ti" data-td="'+(done?'':'edit')+'" data-id="'+t.id+'">'+esc(t.title)+'</div>'
+      +'<div class="td-sub">'+(t.due_date&&!done?'<span class="td-due'+cls+'">'+(cls===' over'?'Overdue · ':cls===' today'?'Today · ':'Due ')+esc(fd(t.due_date))+'</span>':'')
+      +(done&&t.done_at?'<span>Done '+esc(fd(t.done_at))+'</span>':'')+'</div>'+(t.notes?'<div class="td-notes">'+esc(t.notes)+'</div>':'')+'</div>'
+      +'<div class="td-ops">'+ops+'</div></div>'; }
+  function todoRender(){ var dr=document.getElementById('todo-dr'); if(!dr)return; var today=hmToday(), o=TODO.open||[], dn=TODO.done||[];
+    var keep=document.getElementById('td-new'), kv=keep?keep.value:'', kd=document.getElementById('td-new-due'), kdv=kd?kd.value:'', fo=document.activeElement&&document.activeElement.id;
+    dr.innerHTML='<div class="td-hd"><h2>To do</h2><span class="hm-s" style="color:var(--muted)">'+o.length+' open</span><button class="td-x" data-td="close" aria-label="Close">×</button></div>'
+      +'<div class="td-add"><div class="td-row"><input type="text" id="td-new" maxlength="300" placeholder="What needs doing?" aria-label="New item" value="'+esc(kv)+'"><button class="td-btn" data-td="add"'+(TODO.busy?' disabled':'')+'>Add</button></div>'
+      +'<div class="td-row"><label for="td-new-due" style="color:var(--muted);font-size:12px">Due (optional)</label><input type="date" id="td-new-due" value="'+esc(kdv)+'"></div></div>'
+      +(TODO.err?'<div class="td-err">'+esc(TODO.err)+'</div>':'')
+      +'<div class="td-body">'+(o.length?o.map(function(t){ return todoItemHtml(t,false,today); }).join(''):'<div class="td-empty">'+(TODO.loaded?'Nothing open. Add an item above.':'Loading…')+'</div>')
+      +(dn.length?'<button class="td-sec" data-td="toggledone" aria-expanded="'+(TODO.showDone?'true':'false')+'">'+(TODO.showDone?'▾':'▸')+' Done ('+dn.length+')</button>'+(TODO.showDone?dn.map(function(t){ return todoItemHtml(t,true,today); }).join(''):''):'')
+      +'</div>';
+    if(fo){ var f=document.getElementById(fo); if(f){ f.focus(); if(f.setSelectionRange&&f.type==='text'){ try{ f.setSelectionRange(f.value.length,f.value.length); }catch(e){} } } } }
+  function todoWire(dr){ dr.addEventListener('click',function(e){ var t=e.target.closest('[data-td]'); if(!t)return; var a=t.getAttribute('data-td'), id=+t.getAttribute('data-id');
+      if(a==='close'){ todoClose(); return; }
+      if(a==='add'){ todoSubmitNew(); return; }
+      if(a==='edit'&&id){ TODO.edit=id; TODO.del=null; todoRender(); var i=document.getElementById('td-e-title'); if(i){ i.focus(); i.select(); } return; }
+      if(a==='cancel'){ TODO.edit=null; todoRender(); return; }
+      if(a==='save'){ todoSaveEdit(id); return; }
+      if(a==='del'){ TODO.del=id; TODO.edit=null; todoRender(); return; }
+      if(a==='delno'){ TODO.del=null; todoRender(); return; }
+      if(a==='delyes'){ todoDel(id); return; }
+      if(a==='toggledone'){ TODO.showDone=!TODO.showDone; todoRender(); return; } });
+    dr.addEventListener('change',function(e){ var t=e.target; if(t.getAttribute&&t.getAttribute('data-td')==='tick'){ todoPatch(+t.getAttribute('data-id'),{done:t.checked}); } });
+    dr.addEventListener('keydown',function(e){ if(e.key!=='Enter')return; if(e.target.id==='td-new'||e.target.id==='td-new-due'){ e.preventDefault(); todoSubmitNew(); }
+      else if(e.target.id==='td-e-title'||e.target.id==='td-e-due'){ e.preventDefault(); todoSaveEdit(TODO.edit); } }); }
+  function todoSubmitNew(){ var i=document.getElementById('td-new'), d=document.getElementById('td-new-due'); var v=i?i.value.trim():''; if(!v){ TODO.err='Type what needs doing first.'; todoRender(); return; }
+    todoAdd({title:v,due_date:(d&&d.value)||null},function(){ var i2=document.getElementById('td-new'), d2=document.getElementById('td-new-due'); if(i2){ i2.value=''; i2.focus(); } if(d2)d2.value=''; }); }
+  function todoSaveEdit(id){ if(!id)return; var ti=document.getElementById('td-e-title'), du=document.getElementById('td-e-due'), no=document.getElementById('td-e-notes');
+    var v=ti?ti.value.trim():''; if(!v){ TODO.err='The item needs some text.'; todoRender(); return; }
+    todoPatch(id,{title:v,due_date:(du&&du.value)||null,notes:no?no.value:''},function(){ TODO.edit=null; todoRender(); }); }
+  function homeBrandWire(){ var br=document.querySelector('#hz-leftrail .rl-brand'); if(!br||br._hm)return; br._hm=true; br.classList.add('hm-link'); br.title='Home';
+    br.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('#hz-rl-min'))return; if(location.hash==='#/home')showHome(); else location.hash='#/home'; }); }
   // ── v28.249 ACCOUNTS > Bank ageing (interim): Xero items entered on a bank account but not reconciled, UK + AU, from the background job
   // (hourly; Refresh now runs it). Grouped by bank account, aged by transaction date. Statement lines need Xero bank statement access (pending).
   var AC_BK={org:'all',kind:'all',q:'',open:{},d:null,busy:false,run:false,err:'',up:null,upBusy:false,help:false};
@@ -22395,7 +22660,7 @@
     }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
 
   function hzSyncDemandPills(){ try{ var app=document.getElementById('app'); if(!app)return;
-    var nonDemand=app.classList.contains('supply-active')||app.classList.contains('product-active')||app.classList.contains('client-active')||app.classList.contains('accounts-active')||app.classList.contains('scenario-active')||app.classList.contains('config-mode');
+    var nonDemand=app.classList.contains('supply-active')||app.classList.contains('product-active')||app.classList.contains('client-active')||app.classList.contains('accounts-active')||app.classList.contains('home-active')||app.classList.contains('scenario-active')||app.classList.contains('config-mode');
     var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
     var onDemand=!nonDemand && pb && pb.classList.contains('active');
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
@@ -22546,6 +22811,7 @@
   function _railId(id){ var b=document.getElementById(id); if(b)b.click(); }
   function _railInitials(){ try{ var e=(typeof ME!=='undefined'&&ME&&ME.email)||''; var p=e.split('@')[0].split(/[._-]/); return ((p[0]||'')[0]||'')+((p[1]||'')[0]||''); }catch(e){} return 'DB'; }
   function railActiveKey(){ var h=(location.hash||'').toLowerCase().replace(/^#\/?/,'');
+    if(/^home(\/|$)/.test(h))return 'home';   // v28.580: HOME (logo) lights no menu item
     // v28.575 (Ben: "PORTALS in the top level menu, under that SUPPLIER and CLIENT ... portal users managed there and also under supply>config,
     // same link/page"): PORTALS pages ARE the existing pages (same links). They light PORTALS when reached through PORTALS (window._hzPortals),
     // else their own module. Open portal (supplier) always lights PORTALS.
@@ -22666,7 +22932,7 @@
     }
     railSync(); _railSoon(); }
 
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureAccountsButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureTodoButton(); homeBrandWire(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureAccountsButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client|accounts)(\/|$)/.test(location.hash)) applyRoute();   /* v28.251: + accounts (reload / deep link / Gmail return) */
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
