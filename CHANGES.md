@@ -1,3 +1,10 @@
+## v28.571 (29-Oct-26) Supplier portal ▸ CUSTOM: sub-pages and a 3-step batch page
+- Ben: "sub pages for a start. a page for batches, much clearer step 1,2,3 parts of the process with green ticks when done"; "Create batch with all should be on the right hand side and a different colour. Create batch from ticked should be blue when items are selected". Picked mockup A (stepper).
+- CUSTOM has three sub-pages: Ready to batch (n) | Batches (n) | Sample files (n, only when there are samples). Opens on Ready to batch when lines are waiting, else Batches; Back from a batch returns to Batches.
+- Ready to batch: "Create batch with all" sits on the right in green; "Create batch from ticked" turns blue once a line is ticked.
+- A batch page has a stepper 1 Accept & download, 2 Make, 3 Ship with green ticks when done, and the same three as sections. Done steps fold to a one-line green summary (click to reopen); the current step is open. 1 = accept or flag a problem, documents, production files; 2 = line progress, first unit photo, mark made; 3 = cartons and DHL AWB. Data, buttons and their actions are unchanged.
+- Client only (supply/portal-custom.js): no new env vars, migrations or cron routes.
+
 ## v28.570 (29-Oct-26) Supplier portal ▸ CUSTOM: tables left-aligned
 - Ben: "yes fix" (Custom orders tables were right-aligned on the real portal).
 - Cause: the portal's general table rule (`#supply-root thead th` / `tbody td`, text-align right) out-ranked the Custom tab's own `.hzc th/td` left rule. Fix: the `.hzc` rule also carries `#supply-root .hzc th/td`, so every Custom orders table (batches, print files, lines, progress) is left-aligned. Scoped to `.hzc`; no other portal table changes.

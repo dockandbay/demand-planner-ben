@@ -24,7 +24,20 @@
     + '.hzc-btn{border:1px solid var(--line,#e5e9f0);background:var(--card,#fff);border-radius:7px;padding:5px 11px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink,#101828);text-decoration:none}'
     + '.hzc-btn.pri{background:var(--blue,#2361d8);border-color:var(--blue,#2361d8);color:#fff}.hzc-btn:disabled{opacity:.5;cursor:default}.hzc input,.hzc textarea{font:inherit;font-size:13px;border:1px solid var(--line,#e5e9f0);border-radius:6px;padding:4px 6px;background:var(--card,#fff);color:var(--ink,#101828)}'
     + '.hzc-msg{font-size:12px;color:var(--muted,#5b6b83)}.hzc-msg.err{color:var(--neg,#d23227)}.hzc-step{font-size:11px;font-weight:700;color:var(--faint,#8b98ad);letter-spacing:.05em;text-transform:uppercase}.hzc-scroll{overflow-x:auto}'
-    + '.hzc-done{color:var(--pos,#118a4e);font-weight:600}.hzc-mut2{color:var(--muted,#5b6b83);font-size:12px}';
+    + '.hzc-done{color:var(--pos,#118a4e);font-weight:600}.hzc-mut2{color:var(--muted,#5b6b83);font-size:12px}'
+    // v28.571 (Ben 29-Oct-26): sub-pages, green Create-with-all on the right, 3-step stepper with green ticks on a batch
+    + '.hzc-btn.go{background:var(--pos,#118a4e);border-color:var(--pos,#118a4e);color:#fff}.hzc-push{margin-left:auto}'
+    + '.hzc-subs{display:flex;gap:6px;flex-wrap:wrap}.hzc-sub{border:1px solid var(--line,#e5e9f0);background:var(--card,#fff);color:var(--ink-soft,#344054);border-radius:999px;padding:5px 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}'
+    + '.hzc-sub.on{background:var(--blue,#2361d8);border-color:var(--blue,#2361d8);color:#fff}.hzc-sub b{display:inline-block;min-width:18px;margin-left:6px;padding:0 6px;border-radius:999px;background:var(--line2,#eef1f6);color:var(--ink-soft,#344054);font-size:11px}.hzc-sub.on b{background:rgba(255,255,255,.25);color:#fff}'
+    + '.hzc-steps{display:flex;align-items:flex-start;gap:0;padding:6px 4px 2px}.hzc-st{flex:0 0 auto;display:grid;justify-items:center;gap:4px;text-align:center;min-width:96px;cursor:pointer;background:none;border:0;font:inherit;color:inherit;padding:0}'
+    + '.hzc-ln{flex:1 1 auto;height:2px;background:var(--line,#e5e9f0);margin-top:14px;min-width:16px}.hzc-ln.ok{background:var(--pos,#118a4e)}'
+    + '.hzc-dot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;border:2px solid var(--line,#e5e9f0);color:var(--faint,#8b98ad);background:var(--card,#fff)}'
+    + '.hzc-st.ok .hzc-dot{background:var(--pos,#118a4e);border-color:var(--pos,#118a4e);color:#fff}.hzc-st.cur .hzc-dot{border-color:var(--blue,#2361d8);color:var(--blue,#2361d8)}'
+    + '.hzc-stt{font-size:13px;font-weight:700;color:var(--ink,#101828)}.hzc-sts{font-size:11.5px;color:var(--muted,#5b6b83)}.hzc-st.ok .hzc-sts{color:var(--pos,#118a4e)}'
+    + '.hzc-sec{padding:0;gap:0}.hzc-sech{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;background:none;border:0;width:100%;font:inherit;color:inherit;text-align:left}'
+    + '.hzc-sech .hzc-dot{width:24px;height:24px;font-size:12px}.hzc-sec.ok .hzc-sech .hzc-dot{background:var(--pos,#118a4e);border-color:var(--pos,#118a4e);color:#fff}.hzc-sec.cur .hzc-sech .hzc-dot{border-color:var(--blue,#2361d8);color:var(--blue,#2361d8)}'
+    + '.hzc-sech h3{margin:0;font-size:14px}.hzc-sech .hzc-sum{color:var(--muted,#5b6b83);font-size:12.5px}.hzc-sec.ok .hzc-sum{color:var(--pos,#118a4e);font-weight:600}.hzc-car{margin-left:auto;color:var(--faint,#8b98ad);font-size:12px}'
+    + '.hzc-secb{display:grid;gap:12px;padding:0 14px 14px}.hzc-secb[hidden]{display:none}.hzc-secb h4{margin:0;font-size:13px}';
   function pill(cls, t) { return '<span class="hzc-pill hzc-' + cls + '">' + esc(t) + '</span>'; }
   function statusPill(b) { if (b.supplier_status === 'problem') return pill('neg', 'Problem flagged'); var s = STATUS[b.status] || [b.status, 'mut']; return pill(s[1], s[0]); }
 
@@ -45,8 +58,15 @@
       var L = ST.list, todo = L.filter(function (b) { return b.status === 'sent' || b.status === 'confirmed' || (b.status === 'made' && b.n_awb < Math.max(1, b.n_cartons)); }).length;
       if (opts.onCount) opts.onCount(todo);
       var h = '<div class="hzc"><div class="hzc-card"><h3>Custom orders</h3><div class="hzc-mut2">Personalised towels from the Dock &amp; Bay Customiser. Make a batch from the lines ready to batch (or accept one Dock &amp; Bay sends you), make it within the week, then enter the cartons with their DHL AWB.' + (ST.example ? ' <b>These are example batches for testing.</b>' : '') + '</div></div>';
-      h += waitingCard() + samplesCard();
-      if (!L.length) { host.innerHTML = h + '<div class="hzc-msg">No custom order batches yet.</div></div>'; wireWaiting(); return; }
+      // v28.571 (Ben 29-Oct-26: "sub pages for a start. a page for batches"): Ready to batch | Batches | Sample files
+      var W = ST.waiting || [], S = ST.samples || [];
+      if (!ST.sub || (ST.sub === 'samples' && !S.length)) ST.sub = W.length ? 'ready' : 'batches';
+      function sb(k, t, n) { return '<button class="hzc-sub' + (ST.sub === k ? ' on' : '') + '" data-sub="' + k + '">' + t + (n != null ? '<b>' + n + '</b>' : '') + '</button>'; }
+      h += '<div class="hzc-subs">' + sb('ready', 'Ready to batch', W.length) + sb('batches', 'Batches', L.length) + (S.length ? sb('samples', 'Sample files', S.length) : '') + '</div>';
+      function fin(x) { host.innerHTML = x + '</div>'; host.querySelectorAll('[data-sub]').forEach(function (bt) { bt.onclick = function () { ST.sub = bt.dataset.sub; drawList(); }; }); }
+      if (ST.sub === 'ready') { fin(h + waitingCard()); wireWaiting(); return; }
+      if (ST.sub === 'samples') { fin(h + samplesCard()); return; }
+      if (!L.length) { fin(h + '<div class="hzc-card"><div class="hzc-mut2">No custom order batches yet. Create one from Ready to batch.</div></div>'); return; }
       h += '<div class="hzc-card hzc-scroll"><table><thead><tr><th>PO</th><th>Tuesday</th><th>Accept by</th><th>Made by</th><th>Lines</th><th>Towels</th><th>Progress</th><th>Cartons</th><th>Status</th></tr></thead><tbody>';
       L.forEach(function (b) {
         var flags = (b.flags || []).map(function (f) { return pill('neg', ST.flagLabel[f] || f); }).join(' ');
@@ -54,9 +74,8 @@
           + '<td>' + (b.n_lines || 0) + '</td><td>' + (b.n_units || 0) + '</td><td>' + (b.n_lines_packed || 0) + ' of ' + (b.n_lines || 0) + ' packed' + (b.photo_id ? ' · photo' : '') + '</td>'
           + '<td>' + (b.n_cartons ? b.n_cartons + ' (' + (b.n_awb || 0) + ' with AWB)' : '') + '</td><td>' + statusPill(b) + (flags ? '<div>' + flags + '</div>' : '') + '</td></tr>';
       });
-      host.innerHTML = h + '</tbody></table></div></div>';
+      fin(h + '</tbody></table></div>');
       host.querySelectorAll('tr.hzc-row').forEach(function (tr) { tr.onclick = function () { openBatch(tr.dataset.id); }; });
-      wireWaiting();
     }
     // ── ready to batch (v28.518) ──
     // v28.568 (Ben 29-Oct-26: "create him some sample files to download in supplier portal"): print sheets in the factory's own layout
@@ -74,7 +93,8 @@
       var n = W.filter(function (l) { return ST.wpick[l.id]; }).length, towels = W.reduce(function (a, l) { return a + (l.qty || 0); }, 0);
       var h = '<div class="hzc-card hzc-scroll"><h3>Ready to batch: ' + W.length + ' line' + (W.length === 1 ? '' : 's') + ', ' + towels + ' towel' + (towels === 1 ? '' : 's') + '</h3>'
         + '<div class="hzc-mut2">Make a batch from the lines you choose, or all of them. It starts accepted and in production; download the files from the batch.</div>'
-        + '<div class="hzc-row2"><button class="hzc-btn pri" data-wall' + (ro ? ' disabled' : '') + '>Create batch with all (' + W.length + ')</button><button class="hzc-btn" data-wtick' + (ro || !n ? ' disabled' : '') + '>Create batch from ticked (' + n + ')</button><span class="hzc-msg" data-wm></span></div>'
+        // v28.571 (Ben): "with all" on the right in green; "from ticked" turns blue once something is ticked
+        + '<div class="hzc-row2"><button class="hzc-btn' + (n ? ' pri' : '') + '" data-wtick' + (ro || !n ? ' disabled' : '') + '>Create batch from ticked (' + n + ')</button><span class="hzc-msg" data-wm></span><button class="hzc-btn go hzc-push" data-wall' + (ro ? ' disabled' : '') + '>Create batch with all (' + W.length + ')</button></div>'
         + '<table><thead><tr><th><input type="checkbox" data-wallpick aria-label="Tick all"' + (n === W.length ? ' checked' : '') + '></th><th>Order</th><th>Ordered</th><th>Towel</th><th>Design</th><th>Qty</th><th>Goes to</th></tr></thead><tbody>';
       W.forEach(function (l) { h += '<tr><td><input type="checkbox" data-wpick="' + esc(l.id) + '" aria-label="Tick ' + esc(l.external_ref) + '"' + (ST.wpick[l.id] ? ' checked' : '') + '></td><td>' + esc(l.external_ref || '') + '<div class="hzc-mut2">' + esc(l.market || '') + '</div></td><td>' + fd(l.ordered_at) + '</td>'
         + '<td>' + esc(l.product_name || l.product_code) + '</td><td>' + esc(l.design || l.kind || '') + '</td><td>' + (l.qty || 0) + '</td><td class="hzc-mut2">' + esc(l.via_node ? 'carton to ' + l.via_node : l.node === 'CHINA_DIRECT' ? 'DHL direct to the customer' : '') + '</td></tr>'; });
@@ -102,55 +122,79 @@
       api('batches/' + ST.open.id + '/' + path, body || {}).then(function () { openBatch(ST.open.id); })
         .catch(function (e) { if (btn) btn.disabled = false; if (msgEl) { msgEl.className = 'hzc-msg err'; msgEl.textContent = e.message; } });
     }
+    // v28.571 (Ben 29-Oct-26: "much clearer step 1,2,3 parts of the process with green ticks when done"; picked mockup A):
+    // a stepper (1 Accept & download, 2 Make, 3 Ship) with green ticks, and the same three as sections. Done steps fold to a one-line
+    // green summary (click to reopen); the current step is open. The old steps 1-5 live inside: 1 = accept/problem + documents +
+    // production files, 2 = line progress + first unit photo + mark made, 3 = cartons + DHL AWB. Data, buttons and wiring unchanged.
     function drawBatch() {
       var b = ST.open, accepted = b.supplier_status === 'accepted', made = ['made', 'shipped', 'closed'].indexOf(b.status) >= 0, prog = b.progress || {}, ro = !opts.canWrite;
+      var shipped = b.status === 'shipped' || b.status === 'closed';
       var dl = base + 'batches/' + b.id;
-      var h = '<div class="hzc"><div class="hzc-row2"><button class="hzc-btn" data-back>Back to custom orders</button><b>' + esc(b.po_ref) + '</b>' + statusPill(b)
+      var live = (b.lines || []).filter(function (l) { return l.status !== 'cancelled'; }), nPacked = live.filter(function (l) { return prog[l.id] === 'packed'; }).length;
+      var cAll = (b.cartons || []).length, cAwb = (b.cartons || []).filter(function (c) { return c.awb; }).length;
+      var photos = (b.files || []).filter(function (f) { return f.kind === 'first_unit_photo'; });
+      var done = [accepted || made, made, shipped], cur = done.indexOf(false);   // -1 = all done
+      var sum = [accepted ? 'Accepted ' + fdt(b.accepted_at).split(' ')[0] : made ? 'Done' : (b.supplier_status === 'problem' ? 'Problem flagged' : 'Accept by ' + fd(b.accept_by)),
+        nPacked + ' of ' + live.length + ' packed' + (photos.length ? ' · photo' : '') + (made ? ' · made ' + fdt(b.made_at).split(' ')[0] : ''),
+        shipped ? 'Shipped · ' + cAwb + ' carton' + (cAwb === 1 ? '' : 's') : cAll ? cAwb + ' of ' + cAll + ' AWB' : 'Cartons and AWB'];
+      var names = ['Accept & download', 'Make', 'Ship'];
+      ST.openSec = ST.openSec && ST.openSec.id === b.id ? ST.openSec : { id: b.id, s: {} };
+      function isOpen(i) { return ST.openSec.s[i] != null ? ST.openSec.s[i] : (i === cur || (cur < 0 && i === 2)); }
+      var h = '<div class="hzc"><div class="hzc-row2"><button class="hzc-btn" data-back>&lsaquo; Batches</button><b>' + esc(b.po_ref) + '</b>' + statusPill(b)
         + (b.flags || []).map(function (f) { return pill('neg', ST.flagLabel[f] || f); }).join(' ') + '<span class="hzc-mut2">Tuesday ' + fd(b.batch_date) + ' · accept by ' + fd(b.accept_by) + ' · made by ' + fd(b.due_date) + '</span></div>';
-      h += '<div class="hzc-card"><h3>Documents</h3><div class="hzc-row2"><a class="hzc-btn" href="' + dl + '/po">PO (PDF)</a>'
-        + (b.lines || []).map(function (l, i) { return '<a class="hzc-btn" href="' + dl + '/artwork?line=' + encodeURIComponent(l.id) + '">Artwork line ' + (i + 1) + '</a>'; }).join('') + '</div></div>';
-      h += '<div class="hzc-card"><h3>Production files</h3><div class="hzc-mut2">The print-ready file for every towel (true size, bleed, margin QR), pouch labels and the manifest. Files are made one at a time; a large file can take a minute. If the browser asks to allow several downloads, allow it once.</div><div data-files><div class="hzc-msg">Loading the file list…</div></div></div>';
-      // 1 accept / problem
-      h += '<div class="hzc-card"><div class="hzc-step">Step 1</div><h3>Accept the batch</h3>';
-      if (accepted) h += '<div class="hzc-done">Accepted ' + fdt(b.accepted_at) + (b.accepted_by ? ' by ' + esc(b.accepted_by) : '') + '</div>';
-      else if (['sent', 'confirmed'].indexOf(b.status) >= 0) h += (b.supplier_status === 'problem' ? '<div class="hzc-msg err">Problem flagged: ' + esc(b.problem_reason) + '</div>' : '')
+      // stepper
+      h += '<div class="hzc-card"><div class="hzc-steps">' + names.map(function (nm, i) {
+        var cls = done[i] ? ' ok' : i === cur ? ' cur' : '';
+        return (i ? '<div class="hzc-ln' + (done[i - 1] ? ' ok' : '') + '"></div>' : '') + '<button class="hzc-st' + cls + '" data-go="' + i + '"><span class="hzc-dot">' + (done[i] ? '&#10003;' : (i + 1)) + '</span><span class="hzc-stt">' + nm + '</span><span class="hzc-sts">' + esc(sum[i]) + '</span></button>';
+      }).join('') + '</div></div>';
+      function sec(i, body) {
+        var cls = done[i] ? ' ok' : i === cur ? ' cur' : '', o = isOpen(i);
+        return '<div class="hzc-card hzc-sec' + cls + '" data-sec="' + i + '"><button class="hzc-sech" data-tog="' + i + '" aria-expanded="' + o + '"><span class="hzc-dot">' + (done[i] ? '&#10003;' : (i + 1)) + '</span><h3>' + (i + 1) + ' ' + names[i] + '</h3><span class="hzc-sum">' + esc(sum[i]) + '</span><span class="hzc-car">' + (o ? '&#9662;' : '&#9656;') + '</span></button>'
+          + '<div class="hzc-secb hzc-scroll"' + (o ? '' : ' hidden') + '>' + body + '</div></div>';
+      }
+      // 1 accept & download
+      var s1 = '<div><h4>Accept the batch</h4>';
+      if (accepted) s1 += '<div class="hzc-done">Accepted ' + fdt(b.accepted_at) + (b.accepted_by ? ' by ' + esc(b.accepted_by) : '') + '</div>';
+      else if (['sent', 'confirmed'].indexOf(b.status) >= 0) s1 += (b.supplier_status === 'problem' ? '<div class="hzc-msg err">Problem flagged: ' + esc(b.problem_reason) + '</div>' : '')
         + '<div class="hzc-row2"><button class="hzc-btn pri" data-accept' + (ro ? ' disabled' : '') + '>Accept</button><input data-reason placeholder="Or describe a problem" style="flex:1;min-width:200px"><button class="hzc-btn" data-problem' + (ro ? ' disabled' : '') + '>Flag a problem</button></div><div class="hzc-msg" data-m1></div>';
-      else h += '<div class="hzc-mut2">Nothing to accept.</div>';
-      h += '</div>';
-      // 2 lines
-      h += '<div class="hzc-card hzc-scroll"><div class="hzc-step">Step 2</div><h3>Line progress</h3><table><thead><tr><th>#</th><th>Order</th><th>Towel</th><th>Design</th><th>Qty</th><th>Unit refs</th><th>Stage</th></tr></thead><tbody>';
+      else s1 += '<div class="hzc-mut2">Nothing to accept.</div>';
+      s1 += '</div><div><h4>Documents</h4><div class="hzc-row2"><a class="hzc-btn" href="' + dl + '/po">PO (PDF)</a>'
+        + (b.lines || []).map(function (l, i) { return '<a class="hzc-btn" href="' + dl + '/artwork?line=' + encodeURIComponent(l.id) + '">Artwork line ' + (i + 1) + '</a>'; }).join('') + '</div></div>';
+      s1 += '<div><h4>Production files</h4><div class="hzc-mut2">The print-ready file for every towel (true size, bleed, margin QR), pouch labels and the manifest. Files are made one at a time; a large file can take a minute. If the browser asks to allow several downloads, allow it once.</div><div data-files><div class="hzc-msg">Loading the file list…</div></div></div>';
+      // 2 make: line progress, first unit photo, mark made
+      var s2 = '<div><h4>Line progress</h4><table><thead><tr><th>#</th><th>Order</th><th>Towel</th><th>Design</th><th>Qty</th><th>Unit refs</th><th>Stage</th></tr></thead><tbody>';
       (b.lines || []).forEach(function (l, i) {
-        var cur = prog[l.id] || '', ix = ST.stages.indexOf(cur), next = ST.stages[ix + 1];
+        var st = prog[l.id] || '', ix = ST.stages.indexOf(st), next = ST.stages[ix + 1];
         var gone = l.status === 'cancelled';   // v28.517: cancelled by the customer in Shopify (the Customiser takes it out of the files and the made check)
         var btn = (!made && accepted && next && !ro && !gone) ? '<button class="hzc-btn" data-stage="' + esc(next) + '" data-line="' + esc(l.id) + '">Mark ' + esc(next) + '</button>' : '';
-        h += '<tr><td>' + (i + 1) + '</td><td>' + esc(l.external_ref || '') + '<div class="hzc-mut2">' + esc(l.market || '') + (l.via_node ? ' via ' + esc(l.via_node) : '') + '</div></td><td>' + esc(l.product_name || l.product_code) + '</td><td>' + esc(l.design || '') + '</td><td>' + (l.qty || 0) + '</td>'
-          + '<td class="hzc-mut2">' + esc((l.units || []).map(function (u) { return u.ref; }).join(' ')) + '</td><td>' + (gone ? pill('neg', 'Cancelled: do not make') : cur ? '<span class="' + (cur === 'packed' ? 'hzc-done' : '') + '">' + esc(cur) + '</span> ' : '<span class="hzc-mut2">not started</span> ') + btn + '</td></tr>';
+        s2 += '<tr><td>' + (i + 1) + '</td><td>' + esc(l.external_ref || '') + '<div class="hzc-mut2">' + esc(l.market || '') + (l.via_node ? ' via ' + esc(l.via_node) : '') + '</div></td><td>' + esc(l.product_name || l.product_code) + '</td><td>' + esc(l.design || '') + '</td><td>' + (l.qty || 0) + '</td>'
+          + '<td class="hzc-mut2">' + esc((l.units || []).map(function (u) { return u.ref; }).join(' ')) + '</td><td>' + (gone ? pill('neg', 'Cancelled: do not make') : st ? '<span class="' + (st === 'packed' ? 'hzc-done' : '') + '">' + (st === 'packed' ? '&#10003; ' : '') + esc(st) + '</span> ' : '<span class="hzc-mut2">not started</span> ') + btn + '</td></tr>';
       });
-      h += '</tbody></table>' + (accepted ? '' : '<div class="hzc-mut2">Accept the batch first.</div>') + '<div class="hzc-msg" data-m2></div></div>';
-      // 3 photo
-      h += '<div class="hzc-card"><div class="hzc-step">Step 3</div><h3>Photo of the first unit</h3>';
-      var photos = (b.files || []).filter(function (f) { return f.kind === 'first_unit_photo'; });
-      if (photos.length) h += '<div class="hzc-row2">' + photos.map(function (f) { return '<a href="' + base + 'files/' + esc(f.id) + '" target="_blank" rel="noopener"><img src="' + base + 'files/' + esc(f.id) + '" alt="first unit photo" style="height:90px;border-radius:6px;border:1px solid var(--line,#e5e9f0)"></a>'; }).join('') + '</div>';
-      if (!made && accepted && !ro) h += '<div class="hzc-row2"><input type="file" accept="image/jpeg,image/png,image/webp" data-photo><input data-uref placeholder="Unit ref (optional)" style="width:130px"><button class="hzc-btn" data-upload>Upload</button></div><div class="hzc-mut2">JPEG, PNG or WebP, under 8 MB.</div>';
-      h += '<div class="hzc-msg" data-m3></div></div>';
-      // 4 made
-      h += '<div class="hzc-card"><div class="hzc-step">Step 4</div><h3>Mark made</h3>';
-      if (made) h += '<div class="hzc-done">Made ' + fdt(b.made_at) + (b.made_by ? ' by ' + esc(b.made_by) : '') + '</div>';
-      else h += '<div class="hzc-row2"><button class="hzc-btn pri" data-made' + ((!accepted || ro) ? ' disabled' : '') + '>Mark the batch made</button><span class="hzc-mut2">Needs every line packed and the first unit photo.</span></div>';
-      h += '<div class="hzc-msg" data-m4></div></div>';
-      // 5 cartons
+      s2 += '</tbody></table>' + (accepted ? '' : '<div class="hzc-mut2">Accept the batch first (step 1).</div>') + '<div class="hzc-msg" data-m2></div></div>';
+      s2 += '<div><h4>Photo of the first unit' + (photos.length ? ' <span class="hzc-done">&#10003;</span>' : '') + '</h4>';
+      if (photos.length) s2 += '<div class="hzc-row2">' + photos.map(function (f) { return '<a href="' + base + 'files/' + esc(f.id) + '" target="_blank" rel="noopener"><img src="' + base + 'files/' + esc(f.id) + '" alt="first unit photo" style="height:90px;border-radius:6px;border:1px solid var(--line,#e5e9f0)"></a>'; }).join('') + '</div>';
+      if (!made && accepted && !ro) s2 += '<div class="hzc-row2"><input type="file" accept="image/jpeg,image/png,image/webp" data-photo><input data-uref placeholder="Unit ref (optional)" style="width:130px"><button class="hzc-btn" data-upload>Upload</button></div><div class="hzc-mut2">JPEG, PNG or WebP, under 8 MB.</div>';
+      s2 += '<div class="hzc-msg" data-m3></div></div><div><h4>Mark made</h4>';
+      if (made) s2 += '<div class="hzc-done">&#10003; Made ' + fdt(b.made_at) + (b.made_by ? ' by ' + esc(b.made_by) : '') + '</div>';
+      else s2 += '<div class="hzc-row2"><button class="hzc-btn pri" data-made' + ((!accepted || ro) ? ' disabled' : '') + '>Mark the batch made</button><span class="hzc-mut2">Needs every line packed and the first unit photo.</span></div>';
+      s2 += '<div class="hzc-msg" data-m4></div></div>';
+      // 3 ship: cartons + DHL AWB
       var cs = (b.cartons || []).length ? b.cartons.map(function (c) { return { weight_kg: c.weight_kg, length_cm: c.length_cm, width_cm: c.width_cm, height_cm: c.height_cm, awb: c.awb || '' }; }) : [{ weight_kg: '', length_cm: '', width_cm: '', height_cm: '', awb: '' }];
       ST.cartons = cs;
-      h += '<div class="hzc-card hzc-scroll"><div class="hzc-step">Step 5</div><h3>Cartons and DHL AWB</h3>';
-      if (!made) h += '<div class="hzc-mut2">Mark the batch made first.</div>';
+      var s3 = '<div><h4>Cartons and DHL AWB</h4>';
+      if (!made) s3 += '<div class="hzc-mut2">Mark the batch made first (step 2).</div>';
       else {
-        h += '<table><thead><tr><th>#</th><th>Weight (kg)</th><th>Length (cm)</th><th>Width (cm)</th><th>Height (cm)</th><th>DHL AWB (10 digits)</th></tr></thead><tbody data-ctn>' + cartonRows(cs, b.status === 'closed' || ro) + '</tbody></table>';
-        if (b.status !== 'closed' && !ro) h += '<div class="hzc-row2"><button class="hzc-btn" data-addc>Add a carton</button><button class="hzc-btn pri" data-savec>Save cartons</button><span class="hzc-mut2">When every carton has an AWB the batch is shipped and the customers are told.</span></div>';
+        s3 += '<table><thead><tr><th>#</th><th>Weight (kg)</th><th>Length (cm)</th><th>Width (cm)</th><th>Height (cm)</th><th>DHL AWB (10 digits)</th></tr></thead><tbody data-ctn>' + cartonRows(cs, b.status === 'closed' || ro) + '</tbody></table>';
+        if (b.status !== 'closed' && !ro) s3 += '<div class="hzc-row2"><button class="hzc-btn" data-addc>Add a carton</button><button class="hzc-btn pri" data-savec>Save cartons</button><span class="hzc-mut2">When every carton has an AWB the batch is shipped and the customers are told.</span></div>';
       }
-      h += '<div class="hzc-msg" data-m5></div></div>';
+      s3 += '<div class="hzc-msg" data-m5></div></div>';
+      h += sec(0, s1) + sec(1, s2) + sec(2, s3);
       // timeline
       if ((b.timeline || []).length) h += '<div class="hzc-card"><h3>Timeline</h3>' + b.timeline.slice(0, 30).map(function (t) { return '<div class="hzc-mut2">' + fdt(t.at) + ' · ' + esc(t.type) + (t.actor ? ' · ' + esc(t.actor) : '') + '</div>'; }).join('') + '</div>';
       host.innerHTML = h + '</div>';
+      function setOpen(i, o) { ST.openSec.s[i] = o; var c = q('[data-sec="' + i + '"]'); if (!c) return; c.querySelector('.hzc-secb').hidden = !o; c.querySelector('.hzc-car').innerHTML = o ? '&#9662;' : '&#9656;'; c.querySelector('[data-tog]').setAttribute('aria-expanded', o); }
+      host.querySelectorAll('[data-tog]').forEach(function (bt) { bt.onclick = function () { var i = +bt.dataset.tog; setOpen(i, !isOpen(i)); }; });
+      host.querySelectorAll('[data-go]').forEach(function (bt) { bt.onclick = function () { var i = +bt.dataset.go; setOpen(i, true); var c = q('[data-sec="' + i + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
       wire(); loadFiles();
     }
     // ── production files (v28.517) ──
@@ -206,7 +250,7 @@
     }
     function q(sel) { return host.querySelector(sel); }
     function wire() {
-      q('[data-back]').onclick = loadList;
+      q('[data-back]').onclick = function () { ST.sub = 'batches'; loadList(); };
       var a = q('[data-accept]'); if (a) a.onclick = function () { act('respond', { decision: 'accept' }, a, q('[data-m1]')); };
       var p = q('[data-problem]'); if (p) p.onclick = function () { var r = (q('[data-reason]').value || '').trim(); if (r.length < 3) { var m = q('[data-m1]'); m.className = 'hzc-msg err'; m.textContent = 'Say what the problem is.'; return; } act('respond', { decision: 'problem', note: r }, p, q('[data-m1]')); };
       host.querySelectorAll('[data-stage]').forEach(function (bt) { bt.onclick = function () { act('lines', { line_id: bt.dataset.line, stage: bt.dataset.stage }, bt, q('[data-m2]')); }; });
