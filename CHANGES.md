@@ -1,3 +1,6 @@
+## v28.588 (29-Oct-26) B2B Allocation: REQUESTS on the toolbar row
+- Ben chose option A of mockups/b2b-requests-layout-options.html: the purple REQUESTS button (with its open count) moves onto the Client / Required by / Market toolbar row, pinned to the right end, so it no longer takes its own line. Client only.
+
 ## v28.587 (29-Oct-26) B2B requests: SKUs and quantities, market badges, recommendation
 - Ben: "in the requests you must show what SKUs and quantities are".
 - Ben: "can UK and US countries have a coloured badge". The market shows as a coloured badge on each card (UK blue, US red, EU purple, AU green, CA amber).
