@@ -1,6 +1,6 @@
 # Deploy package v28.578-v28.579 (29-Oct-26)
 
-Ben source HEAD: a11ebaa5 (a11ebaa51878c7f69c18304739bc6a0a1764e5ae). Live before this deploy: /api/version = v28.577 (read 29-Oct-26). Status: PENDING PR
+Ben source HEAD: a11ebaa5 (a11ebaa51878c7f69c18304739bc6a0a1764e5ae). Live before this deploy: /api/version = v28.577 (read 29-Oct-26). Status: LIVE (PR #46 merged 7d8c2b61; deploy run 40843655083 green; /api/version read back v28.579 29-Oct-26; supplier.dockandbay.com/api/portal/custom.js, health.js, icon.png all 200)
 
 ## What changed
 - v28.578: Supplier portal CUSTOM section missing for real suppliers. The CUSTOM script was answered with a 302 to /portal on supplier.dockandbay.com (Caddy forwards only /portal, /portal-view.js and /api/portal/*) and was not on the planner-key gate's public list either; staff on horizon.dockandbay.com carried the key so it loaded for them. Fix: the script is also served at /api/portal/custom.js (same handler, static, no data) and the portal page loads it from there; /portal-custom.js added to the gate's public list; the loader logs a load failure instead of throwing silently. Files: server.mjs, supply/portal.html, package.json, CHANGES.md.
@@ -21,7 +21,7 @@ None.
 No Caddy change is needed now. If the supplier host's forward list is ever revisited, /vendor/* is the remaining path it blocks (not used by the supplier portal today).
 
 ## Checks (port branch)
-(filled in after the port)
+sync-ben.cjs: v28.578 ported with one server.mjs gate conflict (resolved keeping the prod login gate), v28.579 clean port (.ben-port.json to 72783c63); run-all.cjs, npm test, prebuild-race all passed for both; PR checks green.
 
 ## After merge
 Read back https://horizon.dockandbay.com/api/version = v28.579; as a real supplier on https://supplier.dockandbay.com/portal, CUSTOM shows in the top menu and https://supplier.dockandbay.com/api/portal/custom.js returns JavaScript (200), not a 302; so do https://supplier.dockandbay.com/api/portal/health.js and /api/portal/icon.png.
