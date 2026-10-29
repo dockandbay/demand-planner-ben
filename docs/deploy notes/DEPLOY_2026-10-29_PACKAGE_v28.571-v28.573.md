@@ -1,6 +1,6 @@
 # Deploy package v28.571 to v28.573 (29-Oct-26)
 
-Ben source HEAD: 9360cbdc (9360cbdcc21200e43d7b781a1091276d975797e7). Live before this deploy: /api/version = v28.570 (read 29-Oct-26). Status: PENDING (port branch port/v28.573, PR to dockandbayteam/dock-bay-demand-planner)
+Ben source HEAD: 9360cbdc (9360cbdcc21200e43d7b781a1091276d975797e7). Live before this deploy: /api/version = v28.570 (read 29-Oct-26). Status: LIVE (PR #42 merged 81e5aa27; deploy run 40824928497 green; /api/version read back v28.573 29-Oct-26)
 
 ## What changed
 - v28.571: Supplier portal > CUSTOM: "Create batch with all" on the right in green, "Create batch from ticked" blue once ticked; a batch page has a 3-step stepper (1 Accept & download, 2 Make, 3 Ship) with green ticks, done steps fold to a one-line summary.
@@ -18,7 +18,7 @@ None.
 None.
 
 ## Checks (port branch)
-See the PR.
+sync-ben.cjs clean port (.ben-port.json to da1c2047); run-all.cjs, npm test, prebuild-race all passed; PR checks green.
 
 ## After merge
 Read back https://horizon.dockandbay.com/api/version = v28.573. Supplier portal on desktop shows the left rail; CUSTOM > Batches opens a batch with the stepper; #/custom/batches/<PO> deep link opens that batch.
