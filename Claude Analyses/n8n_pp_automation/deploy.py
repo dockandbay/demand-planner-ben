@@ -10,7 +10,7 @@ def req(method, path, body=None):
 H = os.path.dirname(os.path.abspath(__file__))
 ids = json.load(open(os.path.join(H, "n8n_ids.json")))
 if __name__ == "__main__":
-    T = next((t for t in ("A", "B", "F", "G") if t in sys.argv[1:]), "C")
+    T = next((t for t in ("A", "B") if t in sys.argv[1:]), "C")
     wf = json.load(open(os.path.join(H, f"workflow_{T}.json")))
     if ids.get(T):
         out = req("PUT", f"/workflows/{ids[T]}", wf)
