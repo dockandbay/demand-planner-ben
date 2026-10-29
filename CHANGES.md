@@ -1,3 +1,8 @@
+## v28.570 (29-Oct-26) Supplier portal ▸ CUSTOM: tables left-aligned
+- Ben: "yes fix" (Custom orders tables were right-aligned on the real portal).
+- Cause: the portal's general table rule (`#supply-root thead th` / `tbody td`, text-align right) out-ranked the Custom tab's own `.hzc th/td` left rule. Fix: the `.hzc` rule also carries `#supply-root .hzc th/td`, so every Custom orders table (batches, print files, lines, progress) is left-aligned. Scoped to `.hzc`; no other portal table changes.
+- Client only: no new env vars, migrations or cron routes.
+
 ## v28.569 (29-Oct-26) Supplier portal: CUSTOM is its own top-menu section
 - Ben: "move CUSTOM in supplier portal to the top menu for those approved for it".
 - Custom orders moves out of ORDERS into a new top-level section CUSTOM (定制 for China-based suppliers), placed right after ORDERS, with the to-do count as the section badge. Same gate as before: it appears only when the Customiser says the supplier is linked (`/api/portal/custom/status` → `linked: true`); every other supplier sees no CUSTOM.

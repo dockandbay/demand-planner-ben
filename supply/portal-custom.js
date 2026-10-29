@@ -15,7 +15,7 @@
   function fd(v) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || '')); return m ? m[3] + '-' + MON[+m[2] - 1] + '-' + m[1].slice(2) : ''; }
   function fdt(v) { var d = new Date(v); if (!v || isNaN(d.getTime())) return fd(v); function p(n) { return (n < 10 ? '0' : '') + n; } return p(d.getDate()) + '-' + MON[d.getMonth()] + '-' + String(d.getFullYear()).slice(2) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
   var STATUS = { sent: ['To accept', 'amber'], confirmed: ['In production', 'blue'], made: ['Made: enter cartons', 'violet'], shipped: ['Shipped', 'pos'], closed: ['Closed', 'mut'] };
-  var CSS = '.hzc{display:grid;gap:12px}.hzc table{border-collapse:collapse;width:100%;font-size:13px}.hzc th,.hzc td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line,#e5e9f0);vertical-align:top}'
+  var CSS = '.hzc{display:grid;gap:12px}.hzc table{border-collapse:collapse;width:100%;font-size:13px}.hzc th,.hzc td,#supply-root .hzc th,#supply-root .hzc td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line,#e5e9f0);vertical-align:top}'
     + '.hzc th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted,#5b6b83);font-weight:600}.hzc tr.hzc-row{cursor:pointer}.hzc tr.hzc-row:hover td{background:var(--hover,#f7f9fc)}'
     + '.hzc-card{background:var(--card,#fff);border:1px solid var(--line,#e5e9f0);border-radius:10px;padding:12px 14px;display:grid;gap:8px}.hzc-card h3{margin:0;font-size:14px}'
     + '.hzc-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}.hzc-amber{background:var(--amber-bg,#fdf3d7);color:var(--amber,#b45309)}'
