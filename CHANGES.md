@@ -1,3 +1,10 @@
+## v28.592 (30-Oct-26) B2B requests: route per line, price + margin after freight, offer an alternative
+- Kathryn's improvements 2, 10 and 3 (phase B), inside the Decide panel. Decide now re-analyses first so the numbers are today's.
+- **Route per line:** Stock / Expedite PO / Air order / Transfer (default from the analysis). On approval, non-stock routes add a **To do** for the approver (e.g. "Expedite PO-57UKLX1 for B2B-0007: 30 x SKU", "Raise air order ...", with est. air freight and link), due on the required-by date. No PO lines or Fulfil writes.
+- **Price and margin:** wholesale price per line (default 50% of retail, ex VAT for UK / EU; editable); air freight (units not from stock x kg x $10/kg) and margin after freight per line and in total.
+- **Offer alternative:** on a reduced line, add a substitute SKU + qty, Analyse it, approve a qty with its own route. Original line's reason = Substitute offered (missed demand kept). Alternative units are held like any approved units.
+- Closed cards and emails show route, price and the alternative. No migration (decisions jsonb), no env vars, no cron routes.
+
 ## v28.591 (30-Oct-26) B2B requests: Reopen within 7 days, then Request again
 - Ben: "add a feature to take it from CLOSED to open within 1 week of the decision" and "if cannot reopen have a button to request again".
 - Closed cards show **Reopen** (with "until dd-mmm-yy") for 7 days after the decision: approvers / admins for any request, the creator for one they cancelled. It goes back to Open, the decision, reasons and any held stock are cleared, a "Reopened" snapshot is stored and the requester plus notify list are emailed.

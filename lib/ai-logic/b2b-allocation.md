@@ -20,17 +20,17 @@ fingerprints:
   server.mjs::b2bScenarioRows: a4460ae3a15f
   server.mjs::/api/scenario/b2b: 8e896d52de7c
   supply/inject.html::b2bRender: 1752faebe4e1
-  server.mjs::b2bReqAnalyse: c7b2941b3310
+  server.mjs::b2bReqAnalyse: e396096116c0
   server.mjs::b2bReqList: 0ef35c999672
   server.mjs::b2bReqWhatsApp: 6c52cacd67ef
-  server.mjs::b2bReqEmailHtml: 39ab078e8850
+  server.mjs::b2bReqEmailHtml: d94b08353852
   server.mjs::/api/scenario/b2b/requests: a87c5a4dc02b
-  server.mjs::/api/scenario/b2b/requests/:ref/:act: 7febe0b7d777
+  server.mjs::/api/scenario/b2b/requests/:ref/:act: ad8a57e467c0
   server.mjs::/api/scenario/b2b/request-settings: 207686102f90
   supply/inject.html::b2bReqSubmitBox: 253faa69a6b3
-  supply/inject.html::b2bReqDrawer: 1c57d2d8b824
+  supply/inject.html::b2bReqDrawer: 8ec049c12245
   migrations/402_b2b_requests.sql::file: 5807986fcf10
-verified_version: v28.591
+verified_version: v28.592
 ---
 
 ## What it is
@@ -56,6 +56,9 @@ verified_version: v28.591
 - Status after a decision: any approved units = approved (shown "part approved" when any line is below its requested qty); nothing approved = rejected. The older whole-request approve / reject actions still work (every line in full, or every line at 0). Cancel: the person who created it (or an admin). Only open requests can be decided; the first decision wins.
 - HELD stock (b2bHeld): approved units of approved requests in the same market are held until hold_until = required-by date + 14 days (B2B_HOLD_DAYS), or until an approver / admin presses Release hold (hold_until cleared, a "released" snapshot stored). Every later analysis (the page and requests) takes held units off stock on the date first; held units beyond that stock come off the feasible in-production qty, so the same production cannot be promised twice. A request never holds against itself. Open (undecided) requests are shown as "pending" against the SKU but NOT deducted.
 - Reopen (v28.591, Ben): a closed request (approved, rejected or cancelled) can be put back to Open for 7 days after its decision (B2B_REOPEN_DAYS; the card shows "Reopen until dd-mmm-yy"). Approvers and admins can reopen any; the creator can reopen one they cancelled. Reopening clears the decision, per-line decisions, reason and any hold (held stock is released), stores a "reopened" snapshot and emails the requester plus the notify list. After 7 days the card shows "Request again" instead: it loads the client, market and lines back onto the B2B Allocation page (required-by date left blank to set), and the submit notes start "Request again of B2B-...". That creates a NEW request; the old one stays closed.
+- Route, price and margin (v28.592, Kathryn's improvements 2 and 10): pressing Decide first re-analyses the request, then each approved line gets a ROUTE (B2B_ROUTES: Stock, Expedite PO, Air order, Transfer; default = Stock when the approved qty fits in from-stock, Expedite PO when it fits in stock + feasible production, else Air order) and a wholesale PRICE per unit (default b2bWholesale: 50% of retail, retail / 1.2 first for UK and EU; editable). Air freight (b2bFreightUsd) = units not given from stock x unit weight (prod_weight_uk) x USD 10/kg (B2B_AIR_USD_KG), for the Air order and Expedite PO routes only. Margin after freight = (price - cost) x approved qty - freight converted to the market currency (b2bUsdPer: UK uses app_settings usd_gbp_rate; EU / AU / CA use fx_rates for the year; shown "n/a" when a rate, price or cost is missing). Cost = market COGS (3PL final), else the average PO cost price (same as the page). Stored per line as route and price in decisions.
+- Follow-up actions (b2bReqTodos): on approval, every approved line (or alternative) on a route other than Stock adds a To do for the approver, due on the required-by date: "Expedite <feasible in-market POs> for B2B-x: N x SKU", "Raise air order for B2B-x: N x SKU" or "Transfer N x SKU into <market> for B2B-x", with the client, date, estimated air freight and a link. Nothing is written to POs, Fulfil or other systems.
+- Offer alternative (v28.592, Kathryn's improvement 3): on a line approved below its requested qty the approver can add a substitute SKU and qty, press Analyse (POST /api/scenario/b2b/requests/:ref/analyse-sku, the same analysis for that SKU, market and date) and approve a qty of it with its own route. The original line's reason becomes "Substitute offered", so the unfilled original qty is kept as missed demand. Stored on the line as sub_sku, sub_qty, sub_approved_qty, sub_route; approved alternative units count as approved units and are HELD like any other (b2bHeld includes sub_sku). The alternative must exist in PRODUCT.
 - Seasonality flag (b2bReqAnalyse): a line is flagged "(!)" when forecast to date is at least 1.5x the own-channel sales estimate (3-month velocity x days) and at least 20 units more (B2B_SEASON_RATIO, B2B_SEASON_MIN), meaning the 9-week reserve, based on recent sales, may be too low. It is a warning only; the allocation still uses velocity.
 - Each decision re-runs the analysis and stores a snapshot named after the decision, then emails the requester plus the notify list with the analysis, the approved qty and reason per line, who decided it, when and why, and the hold-until date.
 - Re-analyse (open requests) stores a "reanalysed" snapshot so the history shows how the numbers moved (e.g. a PO slipping).

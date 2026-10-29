@@ -24963,6 +24963,20 @@ const B2B_KEEP_WEEKS = 9;   // own-channel cover reserved before allocating (the
 const B2B_HOLD_DAYS = 14;   // approved units stay held until the required-by date + this many days (or an approver releases them)
 const B2B_REOPEN_DAYS = 7;   // v28.591 (Ben 30-Oct-26): a closed request can be put back to Open for this many days after its decision
 const B2B_REASONS = { no_stock: 'No stock', timing: 'Timing', margin: 'Margin', customer_declined: 'Customer declined', substitute: 'Substitute offered', other: 'Other' };
+// v28.592 (Kathryn's improvements 2, 3, 10, phase B): each decided line has a ROUTE (stock / expedite PO / air order / transfer), a
+// wholesale PRICE (default = the page's rule, 50% of retail, ex VAT for UK / EU) and an optional SUBSTITUTE SKU. Routes other than stock
+// create To do items for the approver (never PO lines). Freight = units not given from stock x unit weight x USD/kg (page default).
+const B2B_ROUTES = { stock: 'Stock', expedite: 'Expedite PO', air: 'Air order', transfer: 'Transfer' };
+const B2B_AIR_USD_KG = 10;
+const B2B_CUR = { UK: 'GBP', US: 'USD', EU: 'EUR', AU: 'AUD', CA: 'CAD' };
+const b2bWholesale = (mk, retail) => (retail == null || retail === '' || !(Number(retail) > 0)) ? null : Math.round((mk === 'UK' || mk === 'EU' ? Number(retail) / 1.2 : Number(retail)) * 0.5 * 100) / 100;
+// USD per one unit of the market's currency (UK: app_settings usd_gbp_rate; others from fx_rates, stored per GBP); null when unknown
+async function b2bUsdPer(mk) {
+  if (mk === 'US') return 1; const g = await gbpRate().catch(() => null); if (mk === 'UK') return g || null;
+  try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; const o = fr && fr.value ? JSON.parse(fr.value) : {};
+    const now = new Date(), fy = now.getMonth() + 1 >= 3 ? now.getFullYear() : now.getFullYear() - 1, per = o[fy] && o[fy][B2B_CUR[mk]];
+    return g && per > 0 ? g / per : null; } catch (e) { return null; }
+}
 const B2B_SEASON_RATIO = 1.5, B2B_SEASON_MIN = 20;   // flag a line when forecast to date is 1.5x+ the sales-rate estimate and at least 20 units more
 // Held = approved lines of approved requests in this market whose hold has not expired; pending = lines of open requests (shown, not
 // deducted). excludeId leaves one request out (its own analysis). Before migration 404 there are no decisions: nothing is held.
@@ -24971,10 +24985,11 @@ async function b2bHeld(skus, market, excludeId) {
   const get = k => (out[k] = out[k] || { held: 0, held_refs: [], pending: 0, pending_refs: [] });
   if (!S.length) return out;
   try {
-    (await pool.query(`SELECT r.ref, upper(d->>'sku') sku, (d->>'approved_qty')::int q, to_char(r.hold_until,'YYYY-MM-DD') until
-        FROM planner.b2b_requests r, jsonb_array_elements(r.decisions) d
-        WHERE r.status='approved' AND r.hold_until >= CURRENT_DATE AND upper(r.market)=$1 AND upper(d->>'sku')=ANY($2)
-          AND coalesce((d->>'approved_qty')::int,0) > 0 AND r.id IS DISTINCT FROM $3::bigint ORDER BY r.ref`, [mk, S, excludeId])).rows
+    (await pool.query(`SELECT r.ref, upper(x.sku) sku, x.q, to_char(r.hold_until,'YYYY-MM-DD') until
+        FROM planner.b2b_requests r, jsonb_array_elements(r.decisions) d,
+          LATERAL (VALUES (d->>'sku', coalesce((d->>'approved_qty')::int,0)), (d->>'sub_sku', coalesce((d->>'sub_approved_qty')::int,0))) x(sku, q)   -- v28.592: substitutes hold too
+        WHERE r.status='approved' AND r.hold_until >= CURRENT_DATE AND upper(r.market)=$1 AND upper(x.sku)=ANY($2)
+          AND x.q > 0 AND r.id IS DISTINCT FROM $3::bigint ORDER BY r.ref`, [mk, S, excludeId])).rows
       .forEach(x => { const o = get(x.sku); o.held += x.q; o.held_refs.push({ ref: x.ref, qty: x.q, until: x.until }); });
   } catch (e) { if (!e || e.code !== '42703') throw e; }
   (await pool.query(`SELECT r.ref, upper(l->>'sku') sku, (l->>'qty')::int q FROM planner.b2b_requests r, jsonb_array_elements(r.lines) l
@@ -25011,18 +25026,20 @@ async function b2bReqAnalyse(lines, market, date, selfId) {
     if (!d) return { sku: l.sku, qty, found: false, verdict: 'Unknown SKU', can_allocate: 0, short: qty };
     const avail = d.available || 0, vel = (d.recent_units || 0) / 90, inbBy = d.inbound_by_date || 0, h = held[l.sku] || { held: 0, held_refs: [], pending: 0, pending_refs: [] };
     const expSold = Math.round(vel * daysUntil), raw = Math.max(0, avail - expSold + inbBy), proj = Math.max(0, raw - h.held), heldOver = Math.max(0, h.held - raw), reserve = Math.ceil(vel * 7 * B2B_KEEP_WEEKS), giveable = Math.max(0, proj - reserve);
-    let prodFeas = 0; (d.production || []).forEach(pp => { const q = Number(pp.qty) || 0, land = pp.exped_land || ''; if (q > 0 && (pp.po_market || '') === mk && (!date || (land && land <= date))) prodFeas += q; });
+    let prodFeas = 0; const expPos = []; (d.production || []).forEach(pp => { const q = Number(pp.qty) || 0, land = pp.exped_land || ''; if (q > 0 && (pp.po_market || '') === mk && (!date || (land && land <= date))) { prodFeas += q; expPos.push({ po: pp.po, qty: q, land }); } });
     prodFeas = Math.max(0, prodFeas - heldOver);   // v28.590: held units that stock on the date cannot cover come out of in-production
     const fromStock = Math.min(qty, giveable), fromProd = Math.min(Math.max(0, qty - fromStock), prodFeas), ful = fromStock + fromProd, short = Math.max(0, qty - ful);
     const coverAfter = vel > 0 ? Math.round((proj - fromStock) / vel / 7 * 10) / 10 : null, fcd = Math.round(fc[l.sku] || 0);
     const season = !!date && fcd >= B2B_SEASON_RATIO * expSold && fcd - expSold >= B2B_SEASON_MIN;   // forecast well above the sales rate: the reserve may be too low
     return { sku: l.sku, name: d.name || '', qty, found: true, on_hand: avail, inbound_by_date: inbBy, next_inbound_date: d.next_inbound_date || null, next_inbound_qty: d.next_inbound_qty || 0,
       forecast_to_date: fcd, own_sales_to_date: expSold, held: h.held, held_refs: h.held_refs, pending: h.pending, pending_refs: h.pending_refs,
-      season_flag: season, season_ratio: season ? (expSold > 0 ? Math.round(fcd / expSold * 10) / 10 : null) : undefined, stock_on_date: proj, reserve, can_allocate: ful, from_stock: fromStock, from_production: fromProd, short,
+      season_flag: season, season_ratio: season ? (expSold > 0 ? Math.round(fcd / expSold * 10) / 10 : null) : undefined,
+      wholesale: b2bWholesale(mk.toUpperCase(), d.retail), cost: Number(d.cogs) > 0 ? Number(d.cogs) : (Number(d.avg_cost) > 0 ? Number(d.avg_cost) : null),   // v28.592: price + margin
+      weight: d.weight == null || d.weight === '' ? null : Number(d.weight), exped_pos: expPos, stock_on_date: proj, reserve, can_allocate: ful, from_stock: fromStock, from_production: fromProd, short,
       cover_after_wk: coverAfter, verdict: short === 0 ? 'Yes' : (ful > 0 ? 'Partial' : 'Short') };
   });
   const summary = { requested: rows.reduce((a, r) => a + r.qty, 0), can_allocate: rows.reduce((a, r) => a + (r.can_allocate || 0), 0), short: rows.reduce((a, r) => a + (r.short || 0), 0),
-    skus: rows.length, skus_short: rows.filter(r => r.verdict !== 'Yes').length, held: rows.reduce((a, r) => a + (r.held || 0), 0), keep_weeks: B2B_KEEP_WEEKS, market: mk.toUpperCase(), required_by: date || null };
+    skus: rows.length, skus_short: rows.filter(r => r.verdict !== 'Yes').length, held: rows.reduce((a, r) => a + (r.held || 0), 0), currency: B2B_CUR[mk.toUpperCase()], usd_per: await b2bUsdPer(mk.toUpperCase()), air_usd_kg: B2B_AIR_USD_KG, keep_weeks: B2B_KEEP_WEEKS, market: mk.toUpperCase(), required_by: date || null };
   return { summary, rows };
 }
 const b2bFd = d => { if (!d) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : String(d); };
@@ -25043,7 +25060,9 @@ function b2bReqEmailHtml(r, a, head, extra) {
     + '<td style="' + td + ';text-align:right">' + b2bN(x.on_hand) + '</td><td style="' + td + ';text-align:right">' + b2bN(x.inbound_by_date) + (x.next_inbound_date ? '<div style="color:#5b6b83">next ' + b2bN(x.next_inbound_qty) + ' ' + b2bFd(x.next_inbound_date) + '</div>' : '') + '</td>'
     + '<td style="' + td + ';text-align:right">' + b2bN(x.forecast_to_date) + '</td><td style="' + td + ';text-align:right">' + b2bN(x.can_allocate) + '</td><td style="' + td + ';text-align:right">' + (x.cover_after_wk == null ? '-' : x.cover_after_wk + ' wk') + '</td>'
     + '<td style="' + td + ';font-weight:700;color:' + (V[x.verdict] || '#5b6b83') + '">' + b2bEsc(x.verdict) + (x.season_flag ? '<div style="color:#b45309;font-weight:400">Forecast well above recent sales</div>' : '') + '</td>'
-    + (hasDec ? '<td style="' + td + ';text-align:right;font-weight:700">' + (dec[x.sku] ? b2bN(dec[x.sku].approved_qty) + (dec[x.sku].reason ? '<div style="color:#5b6b83;font-weight:400">' + b2bEsc(B2B_REASONS[dec[x.sku].reason] || dec[x.sku].reason) + '</div>' : '') : '-') + '</td>' : '') + '</tr>').join('');
+    + (hasDec ? '<td style="' + td + ';text-align:right;font-weight:700">' + (dec[x.sku] ? b2bN(dec[x.sku].approved_qty) + (dec[x.sku].reason ? '<div style="color:#5b6b83;font-weight:400">' + b2bEsc(B2B_REASONS[dec[x.sku].reason] || dec[x.sku].reason) + '</div>' : '')
+      + (dec[x.sku].route ? '<div style="color:#5b6b83;font-weight:400">' + b2bEsc(B2B_ROUTES[dec[x.sku].route]) + (dec[x.sku].price != null ? ' @ ' + b2bEsc(B2B_CUR[r.market] || '') + ' ' + dec[x.sku].price.toFixed(2) : '') + '</div>' : '')
+      + (dec[x.sku].sub_sku ? '<div style="color:#2361d8;font-weight:400">Alternative: ' + b2bN(dec[x.sku].sub_approved_qty) + ' x ' + b2bEsc(dec[x.sku].sub_sku) + ' (' + b2bEsc(B2B_ROUTES[dec[x.sku].sub_route] || '') + ')</div>' : '') : '-') + '</td>' : '') + '</tr>').join('');
   return '<div style="font-family:Arial,sans-serif;color:#101828;max-width:760px">'
     + '<h2 style="margin:0 0 4px;font-size:18px">' + b2bEsc(head) + '</h2>'
     + '<div style="color:#5b6b83;font-size:13px;margin-bottom:12px">' + b2bEsc(r.ref) + ' · ' + b2bEsc(r.client || 'no client') + ' · ' + b2bEsc(r.market) + (r.required_by ? ' · required by ' + b2bFd(r.required_by) : '') + ' · from ' + b2bEsc(r.created_by || '') + '</div>'
@@ -25062,6 +25081,25 @@ const B2B_REQ_COLS = `r.id, r.ref, coalesce(r.client,'') client, r.market, to_ch
   r.decisions, to_char(r.hold_until,'YYYY-MM-DD') hold_until, coalesce(r.reason,'') reason,   -- v28.590: migration 404
   (r.status <> 'open' AND r.decided_at > now() - interval '${B2B_REOPEN_DAYS} days') reopenable,   -- v28.591: closed requests can be reopened for 7 days
   to_char((r.decided_at + interval '${B2B_REOPEN_DAYS} days') AT TIME ZONE 'Europe/London','YYYY-MM-DD') reopen_until`;
+// v28.592: approved lines routed through expedite / air / transfer become To do items for the approver (due on the required-by date).
+// Freight per line = units not given from stock x unit weight x B2B_AIR_USD_KG (USD), shown on the air and expedite items.
+function b2bFreightUsd(ar, units, route) { if (route !== 'air' && route !== 'expedite') return null; const w = ar && ar.weight; if (!(w > 0)) return null;
+  return Math.round(Math.max(0, units - Math.min(units, ar.from_stock || 0)) * w * B2B_AIR_USD_KG); }
+async function b2bReqTodos(r, a, decisions, by) {
+  const items = [], due = r.required_by || null;
+  for (const d of decisions || []) {
+    for (const [sku, q, route] of [[d.sku, d.approved_qty, d.route], [d.sub_sku, d.sub_approved_qty, d.sub_route]]) {
+      if (!sku || !(q > 0) || !route || route === 'stock') continue;
+      const ar = a.rows.find(y => y.sku === sku) || {}, fr = b2bFreightUsd(ar, q, route);
+      const pos = (ar.exped_pos || []).map(p => p.po).join(', ');
+      const title = route === 'expedite' ? 'Expedite ' + (pos || 'production') + ' for ' + r.ref + ': ' + q + ' x ' + sku
+        : route === 'air' ? 'Raise air order for ' + r.ref + ': ' + q + ' x ' + sku : 'Transfer ' + q + ' x ' + sku + ' into ' + r.market + ' for ' + r.ref;
+      items.push([title.slice(0, 300), (r.client || 'no client') + ', ' + r.market + (due ? ', needed by ' + b2bFd(due) : '') + (fr != null ? '. Est. air freight $' + b2bN(fr) + '.' : '') + ' ' + b2bReqLink(r.ref)]);
+    }
+  }
+  for (const it of items) await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,$4)`, [String(by).toLowerCase(), it[0], it[1].slice(0, 2000), due]);
+  return items.length;
+}
 async function b2bReqGet(ref) { return (await pool.query(`SELECT ${B2B_REQ_COLS} FROM planner.b2b_requests r WHERE r.ref=$1`, [ref])).rows[0] || null; }
 async function b2bReqSnap(id, kind, a, by) { await pool.query(`INSERT INTO planner.b2b_request_analyses (request_id, kind, summary, rows, created_by) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)`, [id, kind, JSON.stringify(a.summary), JSON.stringify(a.rows), by]); }
 function b2bReqLines(raw) { const m = {}, order = []; (Array.isArray(raw) ? raw : []).forEach(l => { const sku = String((l && l.sku) || '').trim().toUpperCase(), q = parseInt(l && l.qty, 10) || 0; if (!sku || q <= 0) return; if (!(sku in m)) { m[sku] = 0; order.push(sku); } m[sku] += q; }); return order.slice(0, 200).map(s => ({ sku: s, qty: m[s] })); }
@@ -25100,6 +25138,17 @@ app.post('/api/scenario/b2b/requests', async (req, res) => {
       html: b2bReqEmailHtml(r, a, 'New B2B allocation request'), kind: 'b2b-request', ref, by: email }); emailed = !!process.env.RESEND_API_KEY; } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); } }
     res.json({ ok: true, ref, link: b2bReqLink(ref), whatsapp: b2bReqWhatsApp(r, a), notified: emailed ? notify : [], summary: s });
   } catch (e) { if (e && e.code === '42P01') return res.status(503).json({ error: 'B2B requests are not set up on this server yet (migration 402).' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.592: analyse one alternative SKU against a request's market and date (decision panel "Offer alternative"); read only
+app.post('/api/scenario/b2b/requests/:ref/analyse-sku', async (req, res) => {
+  try { const { email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
+    const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
+    const sku = String((req.body && req.body.sku) || '').trim().toUpperCase(), qty = parseInt(req.body && req.body.qty, 10) || 0;
+    if (!sku || qty <= 0) return res.status(400).json({ error: 'Enter the alternative SKU and a quantity.' });
+    const a = await b2bReqAnalyse([{ sku, qty }], r.market, r.required_by, r.id), row = a.rows[0];
+    if (!row || row.found === false) return res.status(404).json({ error: sku + ' is not in PRODUCT.' });
+    res.json({ ok: true, row, summary: a.summary });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
@@ -25142,13 +25191,24 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
       decisions = lines.map(l => { const x = inMap[l.sku] || {}, qty = Number(l.qty) || 0;
         let q = act === 'approve' ? qty : act === 'reject' ? 0 : parseInt(x.approved_qty, 10);
         if (!Number.isFinite(q)) q = NaN; const rs = B2B_REASONS[x.reason] ? x.reason : (q < qty ? reason : null);
-        return { sku: l.sku, qty, approved_qty: q, reason: q < qty ? rs : null }; });
+        const ar = a.rows.find(y => y.sku === l.sku) || {}, fs = ar.from_stock || 0, fp = ar.from_production || 0;
+        const route = B2B_ROUTES[x.route] ? x.route : (q <= fs ? 'stock' : q <= fs + fp ? 'expedite' : 'air');   // v28.592: default from the analysis
+        const pr = x.price === '' || x.price == null ? ar.wholesale : Number(x.price);
+        const o = { sku: l.sku, qty, approved_qty: q, reason: q < qty ? rs : null, route: q > 0 ? route : null, price: Number.isFinite(pr) && pr >= 0 ? Math.round(pr * 100) / 100 : null };
+        const ss = String(x.sub_sku || '').trim().toUpperCase(), sq = parseInt(x.sub_qty, 10), sa = parseInt(x.sub_approved_qty, 10);
+        if (ss && sq > 0) Object.assign(o, { sub_sku: ss, sub_qty: sq, sub_approved_qty: Number.isFinite(sa) ? sa : NaN, sub_route: B2B_ROUTES[x.sub_route] ? x.sub_route : 'stock' });
+        return o; });
+      const badSub = decisions.find(d => d.sub_sku && (!Number.isInteger(d.sub_approved_qty) || d.sub_approved_qty < 0 || d.sub_approved_qty > d.sub_qty));
+      if (badSub) return res.status(400).json({ error: badSub.sku + ' alternative ' + badSub.sub_sku + ': approved quantity must be a whole number from 0 to ' + badSub.sub_qty + '.' });
+      const subSkus = decisions.filter(d => d.sub_sku).map(d => d.sub_sku);
+      if (subSkus.length) { const known = new Set((await pool.query(`SELECT upper(sku) s FROM planner.products WHERE upper(sku)=ANY($1)`, [subSkus])).rows.map(z => z.s));
+        const unk = subSkus.find(s => !known.has(s)); if (unk) return res.status(400).json({ error: 'Alternative SKU ' + unk + ' is not in PRODUCT.' }); }
       const bad = decisions.find(d => !Number.isInteger(d.approved_qty) || d.approved_qty < 0 || d.approved_qty > d.qty);
       if (bad) return res.status(400).json({ error: bad.sku + ': approved quantity must be a whole number from 0 to ' + bad.qty + '.' });
       const noWhy = decisions.find(d => d.approved_qty < d.qty && !d.reason && !note);
       if (noWhy) return res.status(400).json({ error: noWhy.sku + ': choose a reason for approving less than requested.' });
     }
-    const approvedUnits = decisions ? decisions.reduce((s, d) => s + d.approved_qty, 0) : 0;
+    const approvedUnits = decisions ? decisions.reduce((s, d) => s + d.approved_qty + (d.sub_approved_qty || 0), 0) : 0;   // v28.592: substitutes count as approved units
     const st = act === 'cancel' ? 'cancelled' : approvedUnits > 0 ? 'approved' : 'rejected';
     const holdUntil = st === 'approved' && r.required_by ? new Date(Date.parse(r.required_by + 'T00:00:00Z') + B2B_HOLD_DAYS * 864e5).toISOString().slice(0, 10) : null;
     let up;
@@ -25157,6 +25217,9 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
     catch (e) { if (e && e.code === '42703') return res.status(503).json({ error: 'Per-line decisions need migration 404 on this server.' }); throw e; }
     if (!up.rowCount) return res.status(409).json({ error: 'Someone else has just decided this request. Refresh.' });
     await b2bReqSnap(r.id, st, a, email);
+    const subL = (decisions || []).filter(d => d.sub_sku && d.sub_approved_qty > 0).map(d => ({ sku: d.sub_sku, qty: d.sub_qty }));
+    const aT = subL.length ? { rows: a.rows.concat((await b2bReqAnalyse(subL, r.market, r.required_by, r.id)).rows) } : a;   // substitutes' own analysis for their To dos
+    let todos = 0; if (st === 'approved') todos = await b2bReqTodos(r, aT, decisions, email).catch(e => { console.warn('[b2b-request] todos ' + (e && e.message)); return 0; });
     const r2 = await b2bReqGet(r.ref), notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT);
     const to = [...new Set([String(r.created_by || '').toLowerCase()].concat(notify).filter(x => /@/.test(x)))];
     const reqUnits = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0), part = st === 'approved' && approvedUnits < reqUnits;
@@ -25164,7 +25227,7 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
     const why = (reason ? B2B_REASONS[reason] : '') + (reason && note ? '. ' : '') + note;
     try { if (to.length) await sendResendEmail({ to, subject: 'B2B request ' + r.ref + ' ' + stTxt + ': ' + (r.client || 'no client') + ', ' + r.market + (part ? ', ' + b2bN(approvedUnits) + ' of ' + b2bN(reqUnits) + ' units' : ''),
       html: b2bReqEmailHtml(r2, a, 'B2B request ' + stTxt, '<p style="font-size:14px;margin:0 0 12px"><b>' + word + '</b> by ' + b2bEsc(email) + (part ? ' (' + b2bN(approvedUnits) + ' of ' + b2bN(reqUnits) + ' units)' : '') + (why ? ': ' + b2bEsc(why) : '') + '</p>'), kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
-    res.json({ ok: true, status: st, notified: process.env.RESEND_API_KEY ? to : [] });
+    res.json({ ok: true, status: st, todos, notified: process.env.RESEND_API_KEY ? to : [] });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/scenario/b2b/request-settings', async (req, res) => {
