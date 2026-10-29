@@ -611,6 +611,15 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
 #supply-root #bc-dlall-prod,#supply-root #bc-dlall-cart{float:right;margin-left:8px}   /* sit top-right, above the grid's "labels" column */
 #supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
 #supply-root .pp-filt-wrap{display:contents}   /* v27.801: desktop — transparent wrapper, filters lay out exactly as before */
+/* v28.574 (Ben: "the search box and buttons on PURCHASE ORDERS have no space, add more space so easier to use"): desktop toolbar gets room:
+   wider search, 38px controls, 10px gaps, status pills on their own row under a hairline. Phones keep the v27.801 Filter pop-down. */
+@media (min-width:641px){
+  #supply-root .pp-po-bar{gap:10px!important;padding:6px 0 14px;row-gap:10px!important}
+  #supply-root .pp-po-bar .pp-po-q{width:280px!important;min-height:38px;padding:7px 12px;font-size:13px;box-sizing:border-box}
+  #supply-root .pp-po-bar select.fci{min-height:38px;padding:7px 10px;font-size:13px;max-width:220px!important;box-sizing:border-box}
+  #supply-root .pp-po-bar .pill:not(.pp-filt-btn){padding:8px 13px;font-size:12px;min-height:38px;box-sizing:border-box;display:inline-flex;align-items:center}
+  #supply-root .pp-po-bar .pp-st-row{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-top:12px;border-top:1px solid var(--line,#e5e9f0)}
+}
 #supply-root .pp-filt-btn{display:none}        /* v27.801: the phone-only Filter toggle */
 #supply-root .pill:hover{background:#f5f5f5;color:#333}
 #supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
@@ -3004,8 +3013,8 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:var(--neg);color:#fff;border-color:var(--neg)':'color:var(--neg)')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
               +'<span class="pill pp-arch'+(window.__ppInclArch?' active':'')+'" data-pparch="1" title="Archived = completed POs before the production cutoff, hidden by default to keep the portal fast. Toggle to include them." style="'+(window.__ppInclArch?'background:var(--ink-soft);color:#fff;border-color:var(--ink-soft)':'')+'">🗄 '+(window.__ppInclArch?'Hide archived':'Show archived')+'</span>'
-              +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
-              +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div></div>';   // closes .pp-filt-wrap then .pp-po-bar
+              +'<div class="pp-st-row">'+(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
+              +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div></div></div>';   // closes .pp-st-row (v28.574), .pp-filt-wrap, then .pp-po-bar
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
             var shown=_ppData.pos.filter(function(p){
               if(/future/i.test(p.status||'')) return false;   // never show FUTURE POs in the portal

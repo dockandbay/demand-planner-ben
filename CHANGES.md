@@ -1,3 +1,8 @@
+## v28.574 (29-Oct-26) Supplier portal ▸ Purchase Orders: roomier toolbar
+- Ben: "the search box and buttons on PURCHASE ORDERS have no space, add more space so easier to use the top section".
+- Desktop (641px and wider): search 280px wide, filters and toggles 38px tall with 10px gaps, and the status pills (PRODUCTION, READY TO SHIP, SHIPPING, DELIVERED, COMPLETE) on their own row under a hairline. Phones keep the Filter pop-down unchanged.
+- Client only (supply/portal-view.js): no new env vars, migrations or cron routes.
+
 ## v28.573 (29-Oct-26) Supplier portal: HORIZON-style left menu (desktop)
 - Ben: "portal should have side navigation as well like horizon" (supplier portal, left, picked mockup).
 - Desktop (900px and wider): a left rail in the HORIZON look. HORIZON logo + supplier name at the top; sections (ORDERS, CUSTOM, FINANCE, SAMPLES, PRODUCT, PROFILE) with icons and their counts; the active section's pages nested underneath with their counts (e.g. CUSTOM: Ready to batch, Batches, Sample files); version + shrink button at the foot (shrinks to icons, remembered per browser). The top bar keeps EN/中文, Inbox and Sign out; the old section pills and level-2 row are hidden on desktop.
