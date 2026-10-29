@@ -217,8 +217,12 @@
       if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
       // v28.504 (Ben 27-Oct-26): ORDERS ▸ Custom orders, only for suppliers linked in the Customiser (Customiser custom towel batches).
       // v28.569 (Ben 29-Oct-26): its own top-menu section CUSTOM (after ORDERS), still only when the Customiser says this supplier is linked; to-do count = badge.
-      if(window.DBPortalView&&window.DBPortalView.addTab){ var cs=document.createElement('script'); cs.src='/portal-custom.js?v=__APP_VERSION__'; cs.onload=function(){
-        window.HZCustomOrders.register(window.DBPortalView,'/api/portal/custom/',function(){ return true; });   /* v28.572: CUSTOM level-2 tabs + deep links */ };
+      // v28.578: loaded from /api/portal/custom.js (the suppliers' host only forwards /portal, /portal-view.js and /api/portal/*; /portal-custom.js
+      // was redirected to /portal there, so real suppliers never got CUSTOM). A load failure is logged instead of throwing silently.
+      if(window.DBPortalView&&window.DBPortalView.addTab){ var cs=document.createElement('script'); cs.src='/api/portal/custom.js?v=__APP_VERSION__';
+        cs.onerror=function(){ try{ console.error('[portal] custom orders script did not load'); }catch(e){} };
+        cs.onload=function(){ if(!window.HZCustomOrders||!window.HZCustomOrders.register){ try{ console.error('[portal] custom orders script loaded but HZCustomOrders is missing'); }catch(e){} return; }
+          window.HZCustomOrders.register(window.DBPortalView,'/api/portal/custom/',function(){ return true; }); };   /* v28.572: CUSTOM level-2 tabs + deep links */
         document.head.appendChild(cs); }
       // v27.895 (Ben): PROFILE — supplier onboarding / profile changes (approval-gated). Always on for signed-in suppliers.
       if(window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'profile',label:'Profile',sec:'profile',secLabel:'PROFILE',render:function(host){ ppProfile(me,host); }}); }

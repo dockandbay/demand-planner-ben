@@ -1,3 +1,9 @@
+## v28.578 (29-Oct-26) Supplier portal: CUSTOM missing for real suppliers
+- Ben: "on horizon.dockandbay.com/portal I see CUSTOM; magic link into Lixin Jack and I do not see it".
+- Cause (two layers, both only on live): the CUSTOM script `/portal-custom.js` (v28.504) was (1) not on the planner-key gate's public list in `server.mjs`, and (2) real suppliers use `https://supplier.dockandbay.com/portal`, a Caddy front that only forwards `/portal`, `/portal-view.js` and `/api/portal/*`; it answered `/portal-custom.js` with a 302 to `/portal`. The `<script>` got a page instead of code, `HZCustomOrders` never existed and the section never registered, with no error logged. Staff open `horizon.dockandbay.com/portal` carrying the planner key, so it loaded for them. The server answers (`/api/portal/custom/status` linked:true) were identical for both. Sandbox has no gate or Caddy, so it never showed.
+- Fix: the script is also served at `/api/portal/custom.js` (same handler, static, no data) and the portal page loads it from there; `/portal-custom.js` stays for the staff preview and is now on the gate's public list too. The loader logs a load failure instead of throwing silently.
+- **Diviyaj:** the same Caddy front also 302s `/hz-health.js` and `/portal-icon.png` on supplier.dockandbay.com, so no real supplier has ever sent a health beacon or seen the icon. Please forward those two paths (static, no data) as well. Not needed for this fix.
+
 ## v28.577 (29-Oct-26) Portal users grouped by supplier
 - Ben: "portalusers group by supplier so it's clearer to see".
 - SUPPLY ▸ CONFIG ▸ Portal users (= PORTALS ▸ Supplier ▸ Users): rows sorted by supplier then email, with a heading row per supplier showing its user count (and how many are active when not all). Edit / Delete / Magic link per row unchanged. Client only (supply/inject.html).

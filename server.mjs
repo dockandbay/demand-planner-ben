@@ -1303,7 +1303,7 @@ function cookieVal(req, name) {
 }
 app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
-  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/portal-icon.png' || req.path === '/api/version' || req.path.startsWith('/api/portal/')   // v28.189: + /portal-icon.png (static icon, no data)
+  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/portal-custom.js' || req.path === '/portal-icon.png' || req.path === '/api/version' || req.path.startsWith('/api/portal/')   // v28.578: + /portal-custom.js (static script; without it real suppliers got the key page instead of CUSTOM, staff carried the key so they saw it)   // v28.189: + /portal-icon.png (static icon, no data)
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
@@ -34320,10 +34320,15 @@ function portalViewAsset() {
 }
 // v28.504: the Custom orders tab (Customiser batches), loaded by the supplier portal and the staff Portal preview.
 const PORTAL_CUSTOM_JS = (() => { try { return readFileSync(new URL('./supply/portal-custom.js', import.meta.url), 'utf8'); } catch { return '/* portal-custom.js missing */'; } })();
-app.get('/portal-custom.js', (req, res) => {
+// v28.578: also served as /api/portal/custom.js. The real suppliers' host (supplier.dockandbay.com) is a Caddy front that only forwards
+// /portal, /portal-view.js and /api/portal/*; /portal-custom.js was answered with a 302 to /portal there, so CUSTOM never registered for
+// them (staff open horizon.dockandbay.com/portal with the planner key, where it loaded). Static script, no data; the portal page loads this path.
+function sendPortalCustomJs(req, res) {
   const src = DEV ? (() => { try { return readFileSync(new URL('./supply/portal-custom.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : PORTAL_CUSTOM_JS;
   return hzSendAsset(req, res, 'portal-custom.js', 'application/javascript; charset=utf-8', src, { immutable: hzVerOk(req) });
-});
+}
+app.get('/portal-custom.js', sendPortalCustomJs);
+app.get('/api/portal/custom.js', sendPortalCustomJs);
 app.get('/portal-view.js', (req, res) => {
   const a = portalViewAsset();
   return hzSendAsset(req, res, 'portal-view.js', 'application/javascript; charset=utf-8', a.src, { immutable: hzVerOk(req) });   // v28.189 (Ben, M4): + brotli (was gzip only); same versioned immutable rule
