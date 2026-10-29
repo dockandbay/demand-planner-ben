@@ -1,3 +1,7 @@
+## v28.576 (29-Oct-26) PORTALS ▸ Supplier ▸ Open portal: dropdown and button on one line
+- Ben: "put supplier dropdown and open portal on the same line. so supplier drop is not full width".
+- The supplier dropdown is 380px (a CONFIG theme rule made selects block and 100% wide), with Open portal beside it; it still wraps on a phone. Client only (supply/inject.html).
+
 ## v28.575 (29-Oct-26) PORTALS top-level menu + staff "Open portal" for the supplier portal
 - Ben: "create internal users of supplier and client portals and we choose the supplier we want a magic link into, it means we don't need to access as a user ... bring PORTALS out into the top level menu and under that is SUPPLIER and CLIENT ... portal users managed there and also under supply>config. same link/page". Picked: layout A (Open + Users), staff rights follow HORIZON, client admin in both places.
 - Left menu: new PORTALS section. Supplier: Open portal (#/supply/config/portalopen, new), Users (#/supply/config/portalusers), Preview (#/supply/config/portal). Client: Open portal (#/client/portal, has Open in new tab), Users (#/client/clients), Notices (#/client/notices). These are the SAME pages and links as SUPPLY ▸ CONFIG and CLIENT; they light PORTALS when reached through PORTALS. SUPPLY ▸ CONFIG also lists Open portal.

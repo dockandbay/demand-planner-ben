@@ -10376,7 +10376,7 @@
           var canEd=!ME||!ME.live||!!(ME.is_admin||ME.supply_edit), last=''; try{ last=localStorage.getItem('hzPortalOpenSup')||''; }catch(e){}
           b.innerHTML='<div class="annot" style="max-width:760px;margin-bottom:12px"><b>Open a supplier portal as staff.</b> Pick a supplier and open its real portal in a new tab, signed in as you, not as one of the supplier\'s users. The session lasts 8 hours in this browser. '
             +(canEd?'You have SUPPLY edit rights, so you can act in the portal; everything you do is logged under your own email.':'Your account has no SUPPLY edit rights, so the portal opens read only.')+'</div>'
-            +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select id="po-open-sup" class="fci" style="min-width:260px;min-height:36px;text-align:left">'
+            +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select id="po-open-sup" class="fci" style="display:inline-block!important;width:380px!important;max-width:100%!important;flex:0 1 380px;min-height:36px;text-align:left">'   /* v28.576 (Ben): dropdown + Open portal on one line; a CONFIG theme rule made selects block / 100% wide */
             +'<option value="">Choose a supplier…</option>'+sups.map(function(x){ return '<option value="'+esc(String(x.id))+'"'+(String(x.id)===last?' selected':'')+'>'+esc(x.name)+'</option>'; }).join('')+'</select>'
             +'<button class="save-btn" id="po-open-go" style="min-height:36px">Open portal ↗</button><span id="po-open-msg" class="tiny mut"></span></div>';
           var sel=document.getElementById('po-open-sup'), go=document.getElementById('po-open-go'), msg=document.getElementById('po-open-msg');
