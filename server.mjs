@@ -24860,14 +24860,9 @@ app.get('/api/buy-extra-stock', async (req, res) => {
 
 // B2B Allocation — per requested SKU: available stock in the market, recent velocity (cover),
 // per-unit weight (airfreight rush), wholesale price (50% of ex-VAT retail) and avg cost (margin).
-app.post('/api/scenario/b2b', async (req, res) => {
-  const b = req.body || {};
-  const skus = (Array.isArray(b.skus) ? b.skus : []).filter(Boolean).map(s => s.trim().toUpperCase());
-  const market = (b.market || 'UK').toLowerCase();
-  const date = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? b.date : null;   // required-by date for the B2B order
-  if (!skus.length) return res.json({ rows: [] });
-  try {
-    const { rows } = await pool.query(`
+// v28.585: the B2B Allocation SQL as a function, shared by the scenario route and B2B REQUESTS (same numbers in both).
+async function b2bScenarioRows(skus, market, date) {
+  return (await pool.query(`
       SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
         (coalesce((SELECT sum(available) FROM planner.v_product_inventory pi WHERE pi.sku=p.sku AND pi.warehouse LIKE $2||'\\_%'),0)
          + CASE WHEN $2='us' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int available,
@@ -24911,7 +24906,16 @@ app.post('/api/scenario/b2b', async (req, res) => {
            WHERE l2.sku=p.sku AND coalesce(l2.qty,0)>0 AND coalesce(po2.status,'') ILIKE 'production%'
              AND coalesce(po2.branch,'') NOT ILIKE '%direct to client%'
              AND coalesce(po2.branch,'') NOT ILIKE '%jlew%' AND coalesce(po2.branch,'') NOT ILIKE '%next%'), '[]'::json) production
-      FROM planner.products p WHERE upper(p.sku) = ANY($1)`, [skus, market, date]);
+      FROM planner.products p WHERE upper(p.sku) = ANY($1)`, [skus, market, date])).rows;
+}
+app.post('/api/scenario/b2b', async (req, res) => {
+  const b = req.body || {};
+  const skus = (Array.isArray(b.skus) ? b.skus : []).filter(Boolean).map(s => s.trim().toUpperCase());
+  const market = (b.market || 'UK').toLowerCase();
+  const date = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? b.date : null;   // required-by date for the B2B order
+  if (!skus.length) return res.json({ rows: [] });
+  try {
+    const rows = await b2bScenarioRows(skus, market, date);
     res.json({ market: market.toUpperCase(), date, rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -24942,6 +24946,155 @@ app.get('/api/scenario/b2b/open/:id', async (req, res) => {
       FROM planner.b2b_analysis WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     res.set('Cache-Control', 'no-store').json({ ok: true, ...r });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v28.585 (Ben 29-Oct-26): B2B allocation REQUESTS (migration 402). Submitted from SCENARIO ▸ B2B Allocation with the same inputs
+// as the analysis (client, market, required-by date, SKU lines) plus notes. One email with the full analysis to the notify list
+// (app_settings b2b_request_notify, default kathryn@, sarah@, ben@); approvers (app_settings b2b_request_approvers, default kathryn@,
+// sarah@, abi@) and admins approve or reject; the creator (or an admin) can cancel. On a decision the requester and the notify list are
+// emailed. Every analysis (submit, re-analyse, decision) is stored against the request. Rules: lib/ai-logic (b2b-allocation).
+const B2B_REQ_NOTIFY_DEFAULT = ['kathryn@dockandbay.com', 'sarah@dockandbay.com', 'ben@dockandbay.com'];
+const B2B_REQ_APPROVERS_DEFAULT = ['kathryn@dockandbay.com', 'sarah@dockandbay.com', 'abi@dockandbay.com'];
+const B2B_KEEP_WEEKS = 9;   // own-channel cover reserved before allocating (the Analyse order default)
+async function b2bReqList(key, dflt) {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0];
+    if (r && r.value != null) { const a = String(r.value).split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); return [...new Set(a)]; } } catch (e) { /* default */ }
+  return dflt.slice();
+}
+async function b2bReqWho(req) { const me = await permsFor(req); return { me, email: me.email ? String(me.email).toLowerCase() : (me.live === false ? 'ben@dockandbay.com' : null) }; }
+// Per-line allocation, the server copy of the B2B Allocation page's rule (keep cover 9 weeks, fulfil from on-hand + inbound + feasible
+// in-production): stock you can ship on the date = on hand - own-channel sales until then (3-month velocity) + inbound landing by then.
+// Forecast = the demand plan (latest SKU run) for this market from today to the required-by date, prorated by day.
+async function b2bReqAnalyse(lines, market, date) {
+  const mk = String(market || 'UK').toLowerCase(), skus = lines.map(l => l.sku);
+  const data = await b2bScenarioRows(skus, mk, date);
+  const by = {}; data.forEach(d => { by[String(d.sku).toUpperCase()] = d; });
+  let fc = {};
+  try { const end = date || new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10);
+    const fr = (await pool.query(`WITH lr AS (SELECT max(run_id) rid FROM planner.forecasts WHERE level='sku')
+        SELECT f.sku, to_char(f.month,'YYYY-MM-DD') m, sum(f.units)::numeric u FROM planner.forecasts f, lr
+        WHERE f.run_id=lr.rid AND f.level='sku' AND upper(f.sku)=ANY($1) AND split_part(f.warehouse,'_',1)=$2
+          AND f.month >= date_trunc('month', now()) AND f.month <= date_trunc('month', $3::date) GROUP BY f.sku, f.month`, [skus, mk, end])).rows;
+    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z'), endD = new Date(end + 'T00:00:00Z');
+    fr.forEach(r => { const ms = new Date(r.m + 'T00:00:00Z'), me2 = new Date(Date.UTC(ms.getUTCFullYear(), ms.getUTCMonth() + 1, 1)), days = (me2 - ms) / 864e5;
+      const a = Math.max(ms, today), b = Math.min(me2, new Date(endD.getTime() + 864e5)); const part = Math.max(0, (b - a) / 864e5) / days;
+      const k = String(r.sku).toUpperCase(); fc[k] = (fc[k] || 0) + Number(r.u) * part; }); } catch (e) { fc = {}; }
+  const todayS = new Date().toISOString().slice(0, 10);
+  const daysUntil = date ? Math.max(0, Math.floor((new Date(date + 'T00:00:00Z') - new Date(todayS + 'T00:00:00Z')) / 864e5)) : 0;
+  const rows = lines.map(l => { const d = by[l.sku], qty = Number(l.qty) || 0;
+    if (!d) return { sku: l.sku, qty, found: false, verdict: 'Unknown SKU', can_allocate: 0, short: qty };
+    const avail = d.available || 0, vel = (d.recent_units || 0) / 90, inbBy = d.inbound_by_date || 0;
+    const expSold = Math.round(vel * daysUntil), proj = Math.max(0, avail - expSold + inbBy), reserve = Math.ceil(vel * 7 * B2B_KEEP_WEEKS), giveable = Math.max(0, proj - reserve);
+    let prodFeas = 0; (d.production || []).forEach(pp => { const q = Number(pp.qty) || 0, land = pp.exped_land || ''; if (q > 0 && (pp.po_market || '') === mk && (!date || (land && land <= date))) prodFeas += q; });
+    const fromStock = Math.min(qty, giveable), fromProd = Math.min(Math.max(0, qty - fromStock), prodFeas), ful = fromStock + fromProd, short = Math.max(0, qty - ful);
+    const coverAfter = vel > 0 ? Math.round((proj - fromStock) / vel / 7 * 10) / 10 : null;
+    return { sku: l.sku, name: d.name || '', qty, found: true, on_hand: avail, inbound_by_date: inbBy, next_inbound_date: d.next_inbound_date || null, next_inbound_qty: d.next_inbound_qty || 0,
+      forecast_to_date: Math.round(fc[l.sku] || 0), own_sales_to_date: expSold, stock_on_date: proj, reserve, can_allocate: ful, from_stock: fromStock, from_production: fromProd, short,
+      cover_after_wk: coverAfter, verdict: short === 0 ? 'Yes' : (ful > 0 ? 'Partial' : 'Short') };
+  });
+  const summary = { requested: rows.reduce((a, r) => a + r.qty, 0), can_allocate: rows.reduce((a, r) => a + (r.can_allocate || 0), 0), short: rows.reduce((a, r) => a + (r.short || 0), 0),
+    skus: rows.length, skus_short: rows.filter(r => r.verdict !== 'Yes').length, keep_weeks: B2B_KEEP_WEEKS, market: mk.toUpperCase(), required_by: date || null };
+  return { summary, rows };
+}
+const b2bFd = d => { if (!d) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : String(d); };
+const b2bN = v => (v == null ? '' : Number(v).toLocaleString('en-GB'));
+const b2bEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function b2bReqLink(ref) { return PLANNER_URL + '/#/demand/scenario/b2b/' + encodeURIComponent(ref); }
+function b2bReqWhatsApp(r, a) {
+  const L = (a && a.rows || r.lines || []).map(x => '- ' + x.sku + ' x' + x.qty + (x.verdict ? ' (' + (x.verdict === 'Yes' ? 'can allocate' : x.verdict === 'Partial' ? x.can_allocate + ' of ' + x.qty : x.verdict.toLowerCase()) + ')' : ''));
+  return 'B2B request ' + r.ref + ': ' + (r.client || 'no client') + ', ' + r.market + (r.required_by ? ', required by ' + b2bFd(r.required_by) : '') + '\n' + L.join('\n')
+    + (r.notes ? '\nNotes: ' + String(r.notes).slice(0, 300) : '') + '\nReview: ' + b2bReqLink(r.ref);
+}
+function b2bReqEmailHtml(r, a, head, extra) {
+  const s = a.summary || {}, V = { Yes: '#118a4e', Partial: '#b45309', Short: '#d23227' };
+  const td = 'padding:6px 8px;border-bottom:1px solid #eef1f6;font-size:12px', th = 'padding:6px 8px;border-bottom:1px solid #e5e9f0;font-size:11px;color:#5b6b83;text-align:left';
+  const rows = (a.rows || []).map(x => '<tr><td style="' + td + ';font-family:monospace">' + b2bEsc(x.sku) + (x.name ? '<div style="color:#5b6b83;font-family:Arial">' + b2bEsc(x.name) + '</div>' : '') + '</td><td style="' + td + ';text-align:right">' + b2bN(x.qty) + '</td>'
+    + '<td style="' + td + ';text-align:right">' + b2bN(x.on_hand) + '</td><td style="' + td + ';text-align:right">' + b2bN(x.inbound_by_date) + (x.next_inbound_date ? '<div style="color:#5b6b83">next ' + b2bN(x.next_inbound_qty) + ' ' + b2bFd(x.next_inbound_date) + '</div>' : '') + '</td>'
+    + '<td style="' + td + ';text-align:right">' + b2bN(x.forecast_to_date) + '</td><td style="' + td + ';text-align:right">' + b2bN(x.can_allocate) + '</td><td style="' + td + ';text-align:right">' + (x.cover_after_wk == null ? '-' : x.cover_after_wk + ' wk') + '</td>'
+    + '<td style="' + td + ';font-weight:700;color:' + (V[x.verdict] || '#5b6b83') + '">' + b2bEsc(x.verdict) + '</td></tr>').join('');
+  return '<div style="font-family:Arial,sans-serif;color:#101828;max-width:760px">'
+    + '<h2 style="margin:0 0 4px;font-size:18px">' + b2bEsc(head) + '</h2>'
+    + '<div style="color:#5b6b83;font-size:13px;margin-bottom:12px">' + b2bEsc(r.ref) + ' · ' + b2bEsc(r.client || 'no client') + ' · ' + b2bEsc(r.market) + (r.required_by ? ' · required by ' + b2bFd(r.required_by) : '') + ' · from ' + b2bEsc(r.created_by || '') + '</div>'
+    + (extra || '')
+    + '<table style="border-collapse:collapse;margin-bottom:12px"><tr>' + [['Units requested', b2bN(s.requested)], ['Can allocate', b2bN(s.can_allocate)], ['Short', b2bN(s.short)], ['SKUs short or partial', (s.skus_short || 0) + ' of ' + (s.skus || 0)]]
+      .map(k => '<td style="border:1px solid #e5e9f0;border-radius:8px;padding:8px 12px"><div style="font-size:18px;font-weight:700">' + k[1] + '</div><div style="font-size:11px;color:#5b6b83">' + k[0] + '</div></td>').join('<td style="width:8px"></td>') + '</tr></table>'
+    + '<table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">SKU</th><th style="' + th + ';text-align:right">Req</th><th style="' + th + ';text-align:right">On hand</th><th style="' + th + ';text-align:right">Inbound by date</th><th style="' + th + ';text-align:right">Forecast to date</th><th style="' + th + ';text-align:right">Can allocate</th><th style="' + th + ';text-align:right">Cover after</th><th style="' + th + '">Verdict</th></tr>' + rows + '</table>'
+    + (r.notes ? '<p style="font-size:13px"><b>Notes:</b> ' + b2bEsc(r.notes) + '</p>' : '')
+    + '<p><a href="' + b2bReqLink(r.ref) + '" style="background:#2361d8;color:#fff;padding:9px 14px;border-radius:7px;text-decoration:none;font-weight:700;font-size:13px">Open in HORIZON</a></p>'
+    + '<p style="font-size:11px;color:#8b98ad">Market ' + b2bEsc(s.market || r.market) + '. On hand = available in the market\'s warehouses. Inbound = shipments landing on or before the required-by date. Forecast = demand plan from today to the required-by date. Can allocate keeps ' + (s.keep_weeks || B2B_KEEP_WEEKS) + ' weeks of own-channel cover (3-month sales rate) and counts in-production POs that can land in time.</p></div>';
+}
+const B2B_REQ_COLS = `r.id, r.ref, coalesce(r.client,'') client, r.market, to_char(r.required_by,'YYYY-MM-DD') required_by, r.lines, coalesce(r.notes,'') notes, r.status,
+  coalesce(r.created_by,'') created_by, to_char(r.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at, coalesce(r.decided_by,'') decided_by,
+  to_char(r.decided_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') decided_at, coalesce(r.decision_note,'') decision_note`;
+async function b2bReqGet(ref) { return (await pool.query(`SELECT ${B2B_REQ_COLS} FROM planner.b2b_requests r WHERE r.ref=$1`, [ref])).rows[0] || null; }
+async function b2bReqSnap(id, kind, a, by) { await pool.query(`INSERT INTO planner.b2b_request_analyses (request_id, kind, summary, rows, created_by) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)`, [id, kind, JSON.stringify(a.summary), JSON.stringify(a.rows), by]); }
+function b2bReqLines(raw) { const m = {}, order = []; (Array.isArray(raw) ? raw : []).forEach(l => { const sku = String((l && l.sku) || '').trim().toUpperCase(), q = parseInt(l && l.qty, 10) || 0; if (!sku || q <= 0) return; if (!(sku in m)) { m[sku] = 0; order.push(sku); } m[sku] += q; }); return order.slice(0, 200).map(s => ({ sku: s, qty: m[s] })); }
+app.get('/api/scenario/b2b/requests', async (req, res) => {
+  try { const { me, email } = await b2bReqWho(req); const approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT);
+    const rows = (await pool.query(`SELECT ${B2B_REQ_COLS}, (SELECT count(*)::int FROM planner.b2b_request_analyses a WHERE a.request_id=r.id) n_analyses,
+        (SELECT a.summary FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_summary
+      FROM planner.b2b_requests r ORDER BY (r.status='open') DESC, coalesce(r.decided_at, r.created_at) DESC LIMIT 300`)).rows;
+    const out = { me: email, can_decide: !!(me.is_admin || me.live === false || (email && approvers.includes(email))), is_admin: !!(me.is_admin || me.live === false),
+      open: rows.filter(r => r.status === 'open'), closed: rows.filter(r => r.status !== 'open') };
+    if (out.is_admin) out.settings = { notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers };
+    res.set('Cache-Control', 'no-store').json(out);
+  } catch (e) { if (e && e.code === '42P01') return res.json({ open: [], closed: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/scenario/b2b/requests/:ref', async (req, res) => {
+  try { const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
+    const an = (await pool.query(`SELECT kind, summary, rows, coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at FROM planner.b2b_request_analyses WHERE request_id=$1 ORDER BY created_at, id`, [r.id])).rows;
+    res.set('Cache-Control', 'no-store').json({ request: r, analyses: an, whatsapp: b2bReqWhatsApp(r, an[an.length - 1]), link: b2bReqLink(r.ref) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/b2b/requests', async (req, res) => {
+  try { const { email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in to submit a request' });
+    const b = req.body || {}, lines = b2bReqLines(b.lines), market = String(b.market || '').toUpperCase();
+    if (!lines.length) return res.status(400).json({ error: 'Add at least one SKU line with a quantity.' });
+    if (!['UK', 'US', 'EU', 'AU', 'CA'].includes(market)) return res.status(400).json({ error: 'Choose a market.' });
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? b.date : null; if (!date) return res.status(400).json({ error: 'Choose the required-by date.' });
+    const a = await b2bReqAnalyse(lines, market, date);
+    const ins = (await pool.query(`INSERT INTO planner.b2b_requests (client, market, required_by, lines, notes, created_by) VALUES ($1,$2,$3,$4::jsonb,$5,$6) RETURNING id`,
+      [String(b.client || '').trim().slice(0, 200) || null, market, date, JSON.stringify(lines), String(b.notes || '').trim().slice(0, 4000) || null, email])).rows[0];
+    const ref = 'B2B-' + String(ins.id).padStart(4, '0'); await pool.query(`UPDATE planner.b2b_requests SET ref=$2 WHERE id=$1`, [ins.id, ref]);
+    await b2bReqSnap(ins.id, 'submitted', a, email);
+    const r = await b2bReqGet(ref), notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT);
+    const s = a.summary; let emailed = false;
+    if (notify.length) { try { await sendResendEmail({ to: notify, subject: 'B2B request ' + ref + ': ' + (r.client || 'no client') + ', ' + market + ', ' + b2bN(s.requested) + ' units, required by ' + b2bFd(date),
+      html: b2bReqEmailHtml(r, a, 'New B2B allocation request'), kind: 'b2b-request', ref, by: email }); emailed = !!process.env.RESEND_API_KEY; } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); } }
+    res.json({ ok: true, ref, link: b2bReqLink(ref), whatsapp: b2bReqWhatsApp(r, a), notified: emailed ? notify : [], summary: s });
+  } catch (e) { if (e && e.code === '42P01') return res.status(503).json({ error: 'B2B requests are not set up on this server yet (migration 402).' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
+  try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
+    const act = req.params.act; if (!['reanalyse', 'approve', 'reject', 'cancel'].includes(act)) return res.status(404).json({ error: 'not found' });
+    const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
+    if (r.status !== 'open') return res.status(409).json({ error: 'This request is already ' + r.status + '.' });
+    const isAdmin = !!(me.is_admin || me.live === false), approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT);
+    if ((act === 'approve' || act === 'reject') && !(isAdmin || approvers.includes(email))) return res.status(403).json({ error: 'Only Kathryn, Sarah, Abi or an admin can approve or reject (CONFIG list).' });
+    if (act === 'cancel' && !(isAdmin || email === String(r.created_by).toLowerCase())) return res.status(403).json({ error: 'Only the person who created this request can cancel it.' });
+    const note = String((req.body && req.body.note) || '').trim().slice(0, 2000);
+    if (act === 'reject' && !note) return res.status(400).json({ error: 'Add a short reason for rejecting.' });
+    const a = await b2bReqAnalyse(Array.isArray(r.lines) ? r.lines : [], r.market, r.required_by);
+    if (act === 'reanalyse') { await b2bReqSnap(r.id, 'reanalysed', a, email); return res.json({ ok: true, summary: a.summary }); }
+    const st = act === 'approve' ? 'approved' : act === 'reject' ? 'rejected' : 'cancelled';
+    const up = await pool.query(`UPDATE planner.b2b_requests SET status=$2, decided_by=$3, decided_at=now(), decision_note=$4 WHERE id=$1 AND status='open'`, [r.id, st, email, note || null]);
+    if (!up.rowCount) return res.status(409).json({ error: 'Someone else has just decided this request. Refresh.' });
+    await b2bReqSnap(r.id, st, a, email);
+    const r2 = await b2bReqGet(r.ref), notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT);
+    const to = [...new Set([String(r.created_by || '').toLowerCase()].concat(notify).filter(x => /@/.test(x)))];
+    const word = st.charAt(0).toUpperCase() + st.slice(1);
+    try { if (to.length) await sendResendEmail({ to, subject: 'B2B request ' + r.ref + ' ' + st + ': ' + (r.client || 'no client') + ', ' + r.market,
+      html: b2bReqEmailHtml(r2, a, 'B2B request ' + st, '<p style="font-size:14px;margin:0 0 12px"><b>' + word + '</b> by ' + b2bEsc(email) + (note ? ': ' + b2bEsc(note) : '') + '</p>'), kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
+    res.json({ ok: true, status: st, notified: process.env.RESEND_API_KEY ? to : [] });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/b2b/request-settings', async (req, res) => {
+  try { const { me, email } = await b2bReqWho(req); if (!(me.is_admin || me.live === false)) return res.status(403).json({ error: 'admin only' });
+    const clean = v => [...new Set(String(Array.isArray(v) ? v.join(',') : (v || '')).split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)))].join(', ');
+    const b = req.body || {};
+    for (const [k, v] of [['b2b_request_notify', b.notify], ['b2b_request_approvers', b.approvers]]) { if (v === undefined) continue;
+      await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [k, clean(v)]); }
+    res.json({ ok: true, notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers: await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), by: email });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // settings USD→GBP rate (app_settings.usd_gbp_rate; USD per GBP) for the B2B air-rush £ bracket

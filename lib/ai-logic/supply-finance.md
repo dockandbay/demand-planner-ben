@@ -109,7 +109,7 @@ fingerprints:
   supply/inject.html::runCmd: d0195899403f
   supply/inject.html::gotoPO: 3a92dc2c4023
   supply/inject.html::gotoPOFilter: 0775f59112be
-  supply/inject.html::hzCmdPages: 9029a8d3a9e6
+  supply/inject.html::hzCmdPages: 2b6fbc5fd6be
   supply/inject.html::fillErpFulfil: 6bfb8bb869f8
   server.mjs::/api/client/commission/orders/search: dff873219789
   server.mjs::/api/client/commission/orders/fulfil-tag: 237f8471b12a
@@ -132,7 +132,7 @@ fingerprints:
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
   server.mjs::custProxy: c704f024a1b8
-  supply/portal-custom.js::render: 7a9f817160d8
+  supply/portal-custom.js::render: 238e21745365
   server.mjs::/api/cp/sku-lists: 46aae4ce8a74
   server.mjs::/api/cp/catalogue/images: 889145721611
   server.mjs::cpSkuFamily: 75397661bb6d
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.555
+verified_version: v28.585
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -601,7 +601,7 @@ verified_version: v28.555
 - Supplier submissions (completion date, invoice value, tracking, production status, confirmation) are checked before anything is saved; if a later step fails after something was saved, the supplier is told exactly what was saved (409) and the caches are refreshed. (source: server.mjs :: /api/portal/submit)
 - A supplier can remove a PO document it uploaded itself while it is a draft or was rejected; once sent for approval (or approved) it stays. The document type chosen at upload is stored. (source: server.mjs :: /api/portal/doc-remove, /api/portal/upload)
 - Dock & Bay's shipment messages are read per supplier: opening a shipment card marks the notes shown read for that supplier only; other suppliers on the same shipment still see them unread. shipment_notes.read_at still means "a supplier has read it" for Dock & Bay. (source: server.mjs :: /api/portal/shipment-notes-read, shipNoteUnreadSql)
-- Custom orders tab (v28.504, Ben 27-Oct-26): suppliers that make Customiser custom towels see ORDERS ▸ Custom orders: the weekly Tuesday batches with accept / flag a problem, line progress (cut, stitched, packed, forward only), first unit photo, Mark made (needs every line packed and the photo), cartons with the 10 digit DHL AWB (every carton with an AWB = batch shipped, customers told), and the PO PDF, production zip and artwork downloads. HORIZON keeps none of this data: every call goes server to server to the Customiser (CUSTOMISER_API_URL, key CUSTOMISER_API_KEY) with the supplier names from the signed-in portal session, never from the browser; the Customiser maps them to its suppliers (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own rules, so the two portals cannot disagree. Only listed paths and methods pass (CUST_PATH_RE / CUST_POST_RE). Lines reach the supplier without prices, customer names or addresses. The tab shows only when the supplier is linked (status call after the portal loads; a down Customiser just hides it), with the count of batches waiting on them. Staff see it in CONFIG ▸ Portal preview; changes there need SUPPLY edit. (source: server.mjs :: custProxy; supply/portal-custom.js :: render)
+- Custom orders tab (v28.504, Ben 27-Oct-26): suppliers that make Customiser custom towels see ORDERS ▸ Custom orders: the weekly Tuesday batches with accept / flag a problem, line progress (cut, stitched, packed, forward only), first unit photo, Mark made (needs every line packed and the photo), cartons with the 10 digit DHL AWB (every carton with an AWB = batch shipped, customers told), and the PO PDF, production zip and artwork downloads. HORIZON keeps none of this data: every call goes server to server to the Customiser (CUSTOMISER_API_URL, key CUSTOMISER_API_KEY) with the supplier names from the signed-in portal session, never from the browser; the Customiser maps them to its suppliers (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own rules, so the two portals cannot disagree. Only listed paths and methods pass (CUST_PATH_RE / CUST_POST_RE). Lines reach the supplier without prices, customer names or addresses. The tab shows only when the supplier is linked (status call after the portal loads; a down Customiser just hides it), with the count of batches waiting on them. Staff see it in CONFIG ▸ Portal preview; changes there need SUPPLY edit. (source: server.mjs :: custProxy; supply/portal-custom.js :: render) Since v28.569 to v28.572 (29-Oct-26) Custom orders is its own top-menu section CUSTOM (after ORDERS, only for suppliers linked in the Customiser; the to-do count is its badge) with level-2 pages Ready to batch | Batches | Sample files and deep links #/custom/ready, #/custom/batches[/<PO ref>], #/custom/printfiles (old #/orders/custom lands on Batches); a batch shows a 3-step stepper (1 Accept & download, 2 Make, 3 Ship) with collapsible sections. Since v28.578 the portal loads the CUSTOM script from /api/portal/custom.js (the suppliers' host, supplier.dockandbay.com, forwards only /portal, /portal-view.js and /api/portal/*).
 - Custom orders, production files and supplier batches (v28.517 / v28.518, Ben 27-Oct-26): the batch view lists every production file (front / back TIFF or PDF, pouch labels, manifest) with Downloaded (date) or Not downloaded from the Customiser's own record; Download remaining, Download ticked or one file, one at a time, each through a short signed storage link (?file=&link=1) so nothing large passes through HORIZON (production requests up to 280 s). A line the customer cancelled shows "Cancelled: do not make". A Ready to batch card lists the lines waiting for the supplier (no prices or customer details); Create batch from ticked or with all makes the batch in the Customiser (accepted, in production) and opens it; the staff preview stays read only. custProxy allows GET waiting and POST batches/create. (source: custProxy, supply/portal-custom.js :: render)
 - Portal "Amount due" = final invoice − milestones with a paid date, + credit_amount. It is 0 until a final invoice exists. Amounts show in the supplier's own currency (suppliers.default_currency, USD when unset; v28.190), 2 decimals, unit costs up to 4. (source: supply/portal-view.js :: PAYMENTS tab)
 

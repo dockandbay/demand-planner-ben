@@ -16546,9 +16546,9 @@
       +'<div class="bar" style="align-items:flex-start"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
         +'<div style="display:flex;flex-direction:column;gap:6px">'
           +'<div style="position:relative"><input class="fci txt" id="b2b-skq" placeholder="search SKU to add…" style="width:250px" autocomplete="off"><div id="b2b-skres" style="display:none;position:absolute;z-index:30;left:0;top:26px;width:340px;max-height:260px;overflow:auto;background:var(--card);border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.18)"></div></div>'
-          +'<div style="display:flex;gap:6px"><button class="pill active" id="b2b-run" style="background:var(--nav);color:#fff">Analyse order</button><button class="pill" id="b2b-save" style="display:none">💾 Save &amp; share</button><button class="pill" id="b2b-pdf" style="display:none">⤓ PDF</button></div>'
+          +'<div style="display:flex;gap:6px"><button class="pill active" id="b2b-run" style="background:var(--nav);color:#fff">Analyse order</button><button class="pill" id="b2b-save" style="display:none">💾 Save &amp; share</button><button class="pill" id="b2b-pdf" style="display:none">⤓ PDF</button><button class="pill" id="b2b-req" style="display:none;background:var(--blue);color:#fff;border-color:var(--blue)">Submit for approval</button><button class="pill" id="b2b-reqs">Requests<span id="b2b-reqn"></span></button></div>'
         +'</div></div>'
-      +'<div id="b2b-recent" style="margin-bottom:10px"></div>'
+      +'<div id="b2b-reqbox"></div><div id="b2b-recent" style="margin-bottom:10px"></div>'
       +'<div id="b2b-out"></div>';
     function parseLines(){ var raw=(document.getElementById('b2b-lines').value||'').split(/\n/).map(function(l){var m=l.trim().split(/[\s,]+/).filter(Boolean); if(!m.length)return null; return {sku:m[0].toUpperCase(), qty:parseInt(m[m.length-1],10)||0};}).filter(function(x){return x&&x.sku;});
       var map={}, order=[]; raw.forEach(function(x){ if(!Object.prototype.hasOwnProperty.call(map,x.sku)){ map[x.sku]={sku:x.sku,qty:0}; order.push(x.sku); } map[x.sku].qty+=x.qty; });   // dedupe: a SKU listed twice is analysed once (quantities summed)
@@ -16561,7 +16561,7 @@
       fetch('/api/scenario/b2b',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:st.co,date:dt,skus:lines.map(function(l){return l.sku;})})})
         .then(function(r){return r.json();}).then(function(d){ var by={}; (d.rows||[]).forEach(function(r){by[(r.sku||'').toUpperCase()]=r;});
           var data=lines.map(function(l){ return {qty:l.qty, d:by[l.sku]||{sku:l.sku,name:'(not found)',available:0,recent_units:0,weight:null,retail:null,cogs:null,avg_cost:null,inbound_by_date:0,inbound_total:0,next_inbound_date:null,next_inbound_qty:0,production:[]}}; });
-          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; var _pd=document.getElementById('b2b-pdf'); if(_pd){_pd.style.display=''; _pd.onclick=function(){ b2bPDF(st); };} })
+          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; var _rq0=document.getElementById('b2b-req'); if(_rq0)_rq0.style.display=''; var _pd=document.getElementById('b2b-pdf'); if(_pd){_pd.style.display=''; _pd.onclick=function(){ b2bPDF(st); };} })
         .catch(function(e){document.getElementById('b2b-out').innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co; runB2B(false);};});
     // Air rush rate: USD input; show the £ equivalent (from the settings USD→GBP rate) in brackets.
@@ -16601,7 +16601,7 @@
       document.getElementById('b2b-lines').value=((d.lines)||[]).map(function(l){ return l.sku+', '+(l.qty||''); }).join('\n');
       if(d.result&&d.result.length){ _b2bLast={data:d.result,co:d.market,date:d.required_by}; b2bRender(_b2bLast,st);
         var out=document.getElementById('b2b-out'); if(out){ out.insertAdjacentHTML('afterbegin','<div class="mut tiny" style="margin:2px 0 8px;padding:6px 9px;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:6px">Saved analysis by <b>'+esc((typeof shortUser==='function'?shortUser(d.created_by):d.created_by)||'?')+'</b>'+(d.created_at?' on '+esc(fd(String(d.created_at).slice(0,10))):'')+' — shown as run. <button class="pill" id="b2b-rerun" style="margin-left:6px">↻ Re-run live</button></div>'); var rr=document.getElementById('b2b-rerun'); if(rr)rr.onclick=function(){ runB2B(true); }; }
-        var sv=document.getElementById('b2b-save'); if(sv)sv.style.display=''; }
+        var sv=document.getElementById('b2b-save'); if(sv)sv.style.display=''; var _rq1=document.getElementById('b2b-req'); if(_rq1)_rq1.style.display=''; }
     }).catch(function(){}); }
     var saveBtn=document.getElementById('b2b-save');
     if(saveBtn)saveBtn.onclick=function(){ if(!_b2bLast||!_b2bLast.data||!_b2bLast.data.length){ alert('Run an analysis first.'); return; }
@@ -16611,7 +16611,114 @@
         .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.ok){ btn.textContent='✓ Shared'; loadRecent(); setTimeout(function(){btn.textContent=o;},1500); } else { btn.textContent=o; alert('Save failed'); } })
         .catch(function(){ btn.disabled=false; btn.textContent=o; alert('Save failed'); }); };
     loadRecent();
+    // v28.585: B2B requests
+    var _rqb=document.getElementById('b2b-req'); if(_rqb)_rqb.onclick=function(){ b2bReqSubmitBox(st); };
+    var _rqs=document.getElementById('b2b-reqs'); if(_rqs)_rqs.onclick=function(){ b2bReqDrawer(''); };
+    b2bqCount(); try{ var _rqm=/\/scenario\/b2b\/(B2B-\d+)/i.exec(location.hash||''); if(_rqm)b2bReqDrawer(_rqm[1].toUpperCase()); }catch(e){}
   }
+  // ── v28.585 (Ben 29-Oct-26): B2B allocation REQUESTS. "Submit for approval" next to Analyse order sends the same inputs (client,
+  // market, required-by date, SKU lines) plus notes; the Requests drawer lists Open / Closed (and Settings for admins), with who created
+  // and decided each one and when, actions, a WhatsApp summary and the analysis history saved against each request.
+  var B2BQ={d:null,tab:'open',open:{},det:{},act:null,busy:false,focus:''};
+  function b2bqCss(){ if(document.getElementById('b2bq-css'))return; var st=document.createElement('style'); st.id='b2bq-css';
+    st.textContent='#b2bq-ov{position:fixed;inset:0;background:rgba(15,23,42,.28);z-index:100060}'
+      +'#b2bq-dr{position:fixed;top:0;right:0;bottom:0;width:600px;max-width:100vw;background:var(--card);color:var(--ink);border-left:1px solid var(--line);box-shadow:-18px 0 44px -18px rgba(16,24,40,.35);z-index:100061;display:flex;flex-direction:column;font-size:13px;text-align:left}'
+      +'#b2bq-dr .q-h{display:flex;align-items:center;gap:8px;padding:14px 16px 0}#b2bq-dr .q-h h2{margin:0;font-size:15px;font-weight:800}#b2bq-dr .q-x{margin-left:auto;border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}'
+      +'#b2bq-dr .q-tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--line)}#b2bq-dr .q-tab{border:0;background:none;color:var(--muted);font:inherit;font-weight:700;padding:9px 12px 8px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}'
+      +'#b2bq-dr .q-tab.on{color:var(--ink);border-bottom-color:var(--blue)}#b2bq-dr .q-tc{font-size:11px;background:var(--line2);color:var(--muted);border-radius:999px;padding:0 7px;margin-left:5px}'
+      +'#b2bq-dr .q-b{flex:1;overflow-y:auto;padding:10px 12px 24px;display:flex;flex-direction:column;gap:10px}'
+      +'#b2bq-dr .q-c{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:7px}#b2bq-dr .q-c.focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-soft)}'
+      +'#b2bq-dr .q-top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}#b2bq-dr .q-st{margin-left:auto;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:2px 8px}'
+      +'#b2bq-dr .q-st.open{background:var(--blue-soft);color:var(--blue-ink)}#b2bq-dr .q-st.approved{background:var(--pos-bg);color:var(--pos)}#b2bq-dr .q-st.rejected{background:var(--neg-bg);color:var(--neg)}#b2bq-dr .q-st.cancelled{background:var(--line2);color:var(--muted)}'
+      +'#b2bq-dr .q-who{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12px;color:var(--muted)}#b2bq-dr .q-who .k{color:var(--faint);text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;padding-top:1px}'
+      +'#b2bq-dr .q-btns{display:flex;gap:6px;flex-wrap:wrap}#b2bq-dr .q-btn{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font:inherit;font-weight:700;font-size:12px;border-radius:7px;padding:4px 10px;cursor:pointer}'
+      +'#b2bq-dr .q-btn.ok{background:var(--pos);border-color:var(--pos);color:#fff}#b2bq-dr .q-btn.no{background:var(--neg);border-color:var(--neg);color:#fff}#b2bq-dr .q-btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}'
+      +'#b2bq-dr textarea,#b2bq-dr input.q-in{width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;background:var(--bg);color:var(--ink);box-sizing:border-box}'
+      +'#b2bq-dr .q-snap{border:1px solid var(--line2);border-radius:8px;padding:8px;background:var(--bg);margin-top:6px}#b2bq-dr .q-snap table{border-collapse:collapse;width:100%;font-size:11.5px;font-variant-numeric:tabular-nums}'
+      +'#b2bq-dr .q-snap th{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:3px 5px;border-bottom:1px solid var(--line)}#b2bq-dr .q-snap td{padding:3px 5px;border-bottom:1px solid var(--line2);white-space:nowrap}'
+      +'#b2bq-dr .v-Yes{color:var(--pos);font-weight:700}#b2bq-dr .v-Partial{color:var(--amber);font-weight:700}#b2bq-dr .v-Short,#b2bq-dr .v-Unknown{color:var(--neg);font-weight:700}'
+      +'#b2bq-dr .q-err{color:var(--neg);font-size:12px}#b2bq-dr .q-wa{white-space:pre-wrap;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:8px}'
+      +'.b2bq-note{border:1px solid var(--pos);background:var(--pos-bg);border-radius:10px;padding:12px 14px;margin:0 0 10px;display:flex;flex-direction:column;gap:8px;text-align:left;max-width:760px}'
+      +'.b2bq-note pre{white-space:pre-wrap;font:12.5px/1.5 inherit;font-family:inherit;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin:0;color:var(--ink)}';
+    document.head.appendChild(st); }
+  function b2bqJ(method,url,body){ return fetch(url,{method:method,cache:'no-store',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }); }
+  function b2bqCopy(text,msgEl){ try{ navigator.clipboard.writeText(text).then(function(){ if(msgEl)msgEl.textContent='Copied, paste into WhatsApp'; },function(){ if(msgEl)msgEl.textContent='Select the text and copy it'; }); }catch(e){ if(msgEl)msgEl.textContent='Select the text and copy it'; } }
+  function b2bqCount(){ fetch('/api/scenario/b2b/requests',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ B2BQ.d=d; if(d&&B2BQ.focus&&!B2BQ._ft){ var _inC=(d.closed||[]).some(function(r){ return r.ref===B2BQ.focus; }), _inO=(d.open||[]).some(function(r){ return r.ref===B2BQ.focus; }); if(_inC||_inO){ B2BQ._ft=true; B2BQ.tab=_inC?'closed':'open'; } } var n=(d&&d.open||[]).length, el=document.getElementById('b2b-reqn'); if(el)el.innerHTML=n?' <span class="ex-badge">'+n+'</span>':''; if(document.getElementById('b2bq-dr'))b2bqDraw(); }).catch(function(){}); }
+  function b2bqSnapHtml(a){ var s=a.summary||{}, K={submitted:'Submitted',reanalysed:'Re-analysed',approved:'Approved',rejected:'Rejected',cancelled:'Cancelled'};
+    return '<div class="q-snap"><div style="font-weight:700;font-size:12px;margin-bottom:4px">'+esc(K[a.kind]||a.kind)+' '+esc(fd(a.created_at))+' '+esc(String(a.created_at||'').slice(11))+' · '+esc(shortUser?shortUser(a.created_by):a.created_by)+' <span class="mut tiny" style="font-weight:400">· '+units(s.can_allocate||0)+' of '+units(s.requested||0)+' can allocate'+(s.short?', '+units(s.short)+' short':'')+'</span></div>'
+      +'<div style="overflow-x:auto"><table><thead><tr><th>SKU</th><th style="text-align:right">Req</th><th style="text-align:right">On hand</th><th style="text-align:right">Inbound</th><th style="text-align:right">Forecast</th><th style="text-align:right">Can alloc</th><th style="text-align:right">Cover</th><th>Verdict</th></tr></thead><tbody>'
+      +(a.rows||[]).map(function(x){ return '<tr><td style="font-family:ui-monospace,Menlo,monospace">'+esc(x.sku)+'</td><td style="text-align:right">'+units(x.qty||0)+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.on_hand||0))+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.inbound_by_date||0))+'</td><td style="text-align:right">'+(x.found===false?'-':units(x.forecast_to_date||0))+'</td><td style="text-align:right">'+units(x.can_allocate||0)+'</td><td style="text-align:right">'+(x.cover_after_wk==null?'-':esc(String(x.cover_after_wk))+' wk')+'</td><td class="v-'+esc(String(x.verdict||'').split(' ')[0])+'">'+esc(x.verdict||'')+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>'; }
+  function b2bqCard(r){ var d=B2BQ.d||{}, me=String(d.me||'').toLowerCase(), closed=r.status!=='open', s=r.last_summary||{}, nL=(r.lines||[]).length, uq=(r.lines||[]).reduce(function(a,l){ return a+(Number(l.qty)||0); },0);
+    var who='<div class="q-who"><span class="k">Created</span><span>'+esc(shortUser?shortUser(r.created_by):r.created_by)+' · '+esc(fd(r.created_at))+' '+esc(String(r.created_at||'').slice(11))+'</span>'
+      +(closed?'<span class="k">'+esc(r.status.charAt(0).toUpperCase()+r.status.slice(1))+'</span><span>'+esc(shortUser?shortUser(r.decided_by):r.decided_by)+' · '+esc(fd(r.decided_at))+' '+esc(String(r.decided_at||'').slice(11))+'</span>':'')
+      +(r.decision_note?'<span class="k">Note</span><span>'+esc(r.decision_note)+'</span>':'')+(r.notes?'<span class="k">Request</span><span>'+esc(r.notes)+'</span>':'')+'</div>';
+    var act='';
+    if(B2BQ.act&&B2BQ.act.ref===r.ref){ var A=B2BQ.act, lbl={approve:'Approve',reject:'Reject',cancel:'Cancel request'}[A.kind];
+      act='<div style="display:flex;flex-direction:column;gap:6px"><textarea id="b2bq-note" rows="2" placeholder="'+(A.kind==='reject'?'Reason (required)':'Note (optional)')+'"></textarea><div class="q-btns"><button class="q-btn '+(A.kind==='approve'?'ok':A.kind==='reject'?'no':'pri')+'" data-q="confirm" data-ref="'+esc(r.ref)+'"'+(B2BQ.busy?' disabled':'')+'>'+(B2BQ.busy?'Saving…':esc(lbl))+'</button><button class="q-btn" data-q="actx">Back</button></div>'+(A.err?'<div class="q-err">'+esc(A.err)+'</div>':'')+'</div>'; }
+    else if(!closed){ act='<div class="q-btns">'+(d.can_decide?'<button class="q-btn ok" data-q="approve" data-ref="'+esc(r.ref)+'">Approve</button><button class="q-btn no" data-q="reject" data-ref="'+esc(r.ref)+'">Reject</button>':'')
+      +'<button class="q-btn" data-q="reanalyse" data-ref="'+esc(r.ref)+'">Re-analyse</button>'+((d.is_admin||String(r.created_by).toLowerCase()===me)?'<button class="q-btn" data-q="cancel" data-ref="'+esc(r.ref)+'">Cancel</button>':'')
+      +'<button class="q-btn" data-q="wa" data-ref="'+esc(r.ref)+'">Copy for WhatsApp</button><span class="mut tiny q-msg" data-ref="'+esc(r.ref)+'"></span></div>'; }
+    else act='<div class="q-btns"><button class="q-btn" data-q="wa" data-ref="'+esc(r.ref)+'">Copy for WhatsApp</button><span class="mut tiny q-msg" data-ref="'+esc(r.ref)+'"></span></div>';
+    var det=B2BQ.det[r.ref], op=!!B2BQ.open[r.ref];
+    return '<div class="q-c'+(B2BQ.focus===r.ref?' focus':'')+'" data-card="'+esc(r.ref)+'"><div class="q-top"><b>'+esc(r.ref)+'</b><span>'+esc(r.client||'no client')+' · '+esc(r.market)+'</span><span class="q-st '+esc(r.status)+'">'+esc(r.status)+'</span></div>'
+      +'<div class="mut tiny">'+units(uq)+' units · '+nL+' SKU'+(nL===1?'':'s')+' · required by '+esc(fd(r.required_by))+(s.requested!=null?' · latest: '+units(s.can_allocate||0)+' can allocate'+(s.short?', '+units(s.short)+' short':''):'')+'</div>'
+      +who+act
+      +'<div><button class="q-btn" data-q="hist" data-ref="'+esc(r.ref)+'" aria-expanded="'+op+'">'+(op?'▾':'▸')+' Analysis history ('+(r.n_analyses||0)+')</button>'
+      +(op?(det?(det.analyses||[]).slice().reverse().map(b2bqSnapHtml).join(''):'<div class="mut tiny" style="padding:6px">Loading…</div>'):'')+'</div></div>'; }
+  function b2bqDraw(){ var dr=document.getElementById('b2bq-dr'); if(!dr)return; var d=B2BQ.d;
+    if(!d){ dr.querySelector('.q-b').innerHTML='<div class="mut">Loading…</div>'; return; }
+    if(d.missing){ dr.querySelector('.q-b').innerHTML='<div class="mut">B2B requests are not set up on this server yet (migration 402).</div>'; return; }
+    var tabs=[['open','Open',(d.open||[]).length],['closed','Closed',(d.closed||[]).length]].concat(d.is_admin?[['settings','Settings',null]]:[]);
+    dr.querySelector('.q-tabs').innerHTML=tabs.map(function(t){ return '<button class="q-tab'+(B2BQ.tab===t[0]?' on':'')+'" data-q="tab" data-t="'+t[0]+'">'+t[1]+(t[2]!=null?'<span class="q-tc">'+t[2]+'</span>':'')+'</button>'; }).join('');
+    var b=dr.querySelector('.q-b');
+    if(B2BQ.tab==='settings'){ var S=d.settings||{notify:[],approvers:[]};
+      b.innerHTML='<div class="q-c"><b>Who is emailed</b><div class="mut tiny">One email with the full analysis on every new request, and again when a request is approved, rejected or cancelled (the requester is added then).</div><textarea id="b2bq-s-n" rows="3">'+esc((S.notify||[]).join(', '))+'</textarea>'
+        +'<b style="margin-top:6px">Who can approve or reject</b><div class="mut tiny">Admins always can.</div><textarea id="b2bq-s-a" rows="2">'+esc((S.approvers||[]).join(', '))+'</textarea>'
+        +'<div class="q-btns"><button class="q-btn pri" data-q="saveset">Save</button><span class="mut tiny" id="b2bq-s-msg"></span></div></div>'; return; }
+    var list=B2BQ.tab==='open'?(d.open||[]):(d.closed||[]);
+    b.innerHTML=list.length?list.map(b2bqCard).join(''):'<div class="mut" style="padding:8px">'+(B2BQ.tab==='open'?'No open requests.':'No closed requests yet.')+'</div>';
+    if(B2BQ.focus){ var fc=b.querySelector('[data-card="'+B2BQ.focus+'"]'); if(fc)fc.scrollIntoView({block:'nearest'}); } }
+  function b2bqLoadDet(ref){ b2bqJ('GET','/api/scenario/b2b/requests/'+encodeURIComponent(ref)).then(function(j){ B2BQ.det[ref]=j; b2bqDraw(); }).catch(function(){ B2BQ.det[ref]={analyses:[]}; b2bqDraw(); }); }
+  function b2bqClose(){ ['b2bq-dr','b2bq-ov'].forEach(function(id){ var e=document.getElementById(id); if(e)e.remove(); }); B2BQ.act=null; document.removeEventListener('keydown',b2bqEsc); }
+  function b2bqEsc(e){ if(e.key==='Escape')b2bqClose(); }
+  function b2bReqDrawer(focusRef){ b2bqCss(); b2bqClose(); B2BQ.focus=focusRef||''; B2BQ.act=null; B2BQ._ft=false;
+    var ov=document.createElement('div'); ov.id='b2bq-ov'; ov.onclick=b2bqClose; document.body.appendChild(ov);
+    var dr=document.createElement('aside'); dr.id='b2bq-dr'; dr.setAttribute('aria-label','B2B requests');
+    dr.innerHTML='<div class="q-h"><h2>B2B requests</h2><button class="q-x" data-q="close" aria-label="Close">×</button></div><div class="q-tabs"></div><div class="q-b"></div>'; document.body.appendChild(dr);
+    document.addEventListener('keydown',b2bqEsc);
+    dr.addEventListener('click',function(e){ var t=e.target.closest('[data-q]'); if(!t)return; var q=t.getAttribute('data-q'), ref=t.getAttribute('data-ref');
+      if(q==='close'){ b2bqClose(); return; }
+      if(q==='tab'){ B2BQ.tab=t.getAttribute('data-t'); B2BQ.act=null; b2bqDraw(); return; }
+      if(q==='hist'){ B2BQ.open[ref]=!B2BQ.open[ref]; if(B2BQ.open[ref])b2bqLoadDet(ref); b2bqDraw(); return; }
+      if(q==='approve'||q==='reject'||q==='cancel'){ B2BQ.act={ref:ref,kind:q}; b2bqDraw(); var n=document.getElementById('b2bq-note'); if(n)n.focus(); return; }
+      if(q==='actx'){ B2BQ.act=null; b2bqDraw(); return; }
+      if(q==='confirm'){ var A=B2BQ.act; if(!A)return; var note=(document.getElementById('b2bq-note')||{}).value||''; B2BQ.busy=true; b2bqDraw(); var keep=document.getElementById('b2bq-note'); if(keep)keep.value=note;
+        b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(A.ref)+'/'+A.kind,{note:note}).then(function(){ B2BQ.busy=false; B2BQ.act=null; delete B2BQ.det[A.ref]; B2BQ.tab='closed'; B2BQ.focus=A.ref; b2bqCount(); })
+          .catch(function(err){ B2BQ.busy=false; A.err=err.message; b2bqDraw(); var k2=document.getElementById('b2bq-note'); if(k2)k2.value=note; }); return; }
+      if(q==='reanalyse'){ t.disabled=true; t.textContent='Re-analysing…'; b2bqJ('POST','/api/scenario/b2b/requests/'+encodeURIComponent(ref)+'/reanalyse',{}).then(function(){ delete B2BQ.det[ref]; B2BQ.open[ref]=true; b2bqLoadDet(ref); b2bqCount(); }).catch(function(err){ t.disabled=false; t.textContent='Re-analyse'; alert(err.message); }); return; }
+      if(q==='wa'){ var m=dr.querySelector('.q-msg[data-ref="'+ref+'"]'); var go=function(j){ b2bqCopy(j.whatsapp||'',m); }; if(B2BQ.det[ref]&&B2BQ.det[ref].whatsapp)go(B2BQ.det[ref]); else b2bqJ('GET','/api/scenario/b2b/requests/'+encodeURIComponent(ref)).then(function(j){ B2BQ.det[ref]=j; go(j); }).catch(function(err){ if(m)m.textContent=err.message; }); return; }
+      if(q==='saveset'){ var msg=document.getElementById('b2bq-s-msg'); msg.textContent='Saving…'; b2bqJ('POST','/api/scenario/b2b/request-settings',{notify:document.getElementById('b2bq-s-n').value,approvers:document.getElementById('b2bq-s-a').value}).then(function(j){ B2BQ.d.settings={notify:j.notify,approvers:j.approvers}; msg.textContent='Saved'; b2bqDraw(); var m2=document.getElementById('b2bq-s-msg'); if(m2)m2.textContent='Saved'; }).catch(function(err){ msg.textContent=err.message; }); return; } });
+    if(focusRef){ var all=((B2BQ.d&&B2BQ.d.open)||[]).concat((B2BQ.d&&B2BQ.d.closed)||[]); var f=all.filter(function(r){ return r.ref===focusRef; })[0]; B2BQ.tab=f&&f.status!=='open'?'closed':'open'; }
+    b2bqDraw(); b2bqCount(); }
+  function b2bReqSubmitBox(st){ b2bqCss(); var box=document.getElementById('b2b-reqbox'); if(!box)return;
+    if(!_b2bLast||!_b2bLast.data||!_b2bLast.data.length){ box.innerHTML='<div class="b2bq-note" style="border-color:var(--amber);background:var(--amber-bg)">Analyse the order first, then submit it.</div>'; return; }
+    var cl=(document.getElementById('b2b-client')||{}).value||'', dt=_b2bLast.date||'';
+    var lines=_b2bLast.data.map(function(x){ return {sku:(x.d&&x.d.sku)||x.sku||'', qty:x.qty||0}; }).filter(function(l){ return l.sku&&l.qty>0; });
+    box.innerHTML='<div class="b2bq-note" style="border-color:var(--blue);background:var(--blue-soft)"><b>Submit for approval: '+esc(cl||'no client')+' · '+esc(_b2bLast.co)+' · '+(dt?'required by '+esc(fd(dt)):'<span style="color:var(--neg)">no required-by date</span>')+' · '+lines.length+' SKU'+(lines.length===1?'':'s')+'</b>'
+      +'<div class="mut tiny">Same lines as the analysis above. The notify list (Kathryn, Sarah, Ben) gets one email with the full analysis; you get a WhatsApp summary to share.</div>'
+      +'<textarea id="b2b-req-notes" rows="2" placeholder="Notes for the approvers (optional)" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;box-sizing:border-box"></textarea>'
+      +'<div style="display:flex;gap:6px;align-items:center"><button class="pill active" id="b2b-req-go" style="background:var(--blue);color:#fff;border-color:var(--blue)"'+(dt?'':' disabled')+'>Submit</button><button class="pill" id="b2b-req-x">Cancel</button><span class="tiny" id="b2b-req-msg" style="color:var(--neg)">'+(dt?'':'Set the Required by date and analyse again.')+'</span></div></div>';
+    document.getElementById('b2b-req-x').onclick=function(){ box.innerHTML=''; };
+    document.getElementById('b2b-req-go').onclick=function(){ var btn=this, msg=document.getElementById('b2b-req-msg'); btn.disabled=true; btn.textContent='Submitting…'; msg.textContent='';
+      b2bqJ('POST','/api/scenario/b2b/requests',{client:cl,market:_b2bLast.co,date:dt,lines:lines,notes:(document.getElementById('b2b-req-notes')||{}).value||''}).then(function(j){
+        box.innerHTML='<div class="b2bq-note"><div><b>Request '+esc(j.ref)+' submitted.</b> <span class="mut">'+((j.notified||[]).length?'Emailed '+esc(j.notified.map(function(e){ return e.split('@')[0]; }).join(', '))+'.':'')+' Copy the summary below into WhatsApp.</span></div>'
+          +'<pre id="b2b-req-wa">'+esc(j.whatsapp||'')+'</pre><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="pill active" id="b2b-req-copy" style="background:#128c4a;color:#fff;border-color:#128c4a">Copy for WhatsApp</button><span class="tiny mut" id="b2b-req-cmsg"></span>'
+          +'<span class="tiny mut">Direct link:</span><span class="tiny" style="font-family:ui-monospace,Menlo,monospace;user-select:all;word-break:break-all">'+esc(j.link||'')+'</span><button class="pill" id="b2b-req-open">Open request</button></div></div>';
+        document.getElementById('b2b-req-copy').onclick=function(){ b2bqCopy(j.whatsapp||'',document.getElementById('b2b-req-cmsg')); };
+        document.getElementById('b2b-req-open').onclick=function(){ b2bReqDrawer(j.ref); };
+        b2bqCount(); })
+      .catch(function(err){ btn.disabled=false; btn.textContent='Submit'; msg.textContent=err.message; }); }; }
   function b2bRender(last,st){ var data=last.data, co=last.co, orderDate=last.date;
     var rate=Number(st.rushUsd)||10, sym='$';   // air rush cost per kg — USD input (£ equivalent shown in the toolbar)
     var csym=(co==='US'?'$':co==='EU'?'€':co==='AU'?'A$':co==='CA'?'C$':'£'), keepW=(st.keep==null?6:st.keep);

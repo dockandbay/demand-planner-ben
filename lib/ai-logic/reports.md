@@ -104,10 +104,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: c84e609a731b
+  supply/inject.html::renderSampleCosts: 94260d4d7248
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
-  supply/inject.html::renderApprovalStats: 79ae356a19f2
-verified_version: v28.552
+  supply/inject.html::renderApprovalStats: 8b05799a9531
+verified_version: v28.585
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
