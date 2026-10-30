@@ -1,3 +1,9 @@
+## v28.598 (31-Oct-26) Campaigns phase 4: campaign SKUs on the DEMAND plan (filters, flag, uplift shown in the launch cell)
+- DEMAND ▸ Plan: a SKU in a campaign for the market shown carries "◆ <campaign> · <tier>" under its code (+N if in several; faded italic when all Draft; hover lists status, launch, markets, channels, uplift range).
+- New ◆ Campaign dropdown on the plan bar (off / all campaign SKUs / one campaign in this market). More filters ▸ Campaign adds launch month, campaign tier (Hero / Supporting / Cross-sell) and status (Confirmed / Draft). Shows as a chip; Reset all clears it. Behaves like the Release filter (SKUs listed under each sub-category, Smooth blocked).
+- Launch-month cell of each campaign channel shows "◆+N camp": the cell's forecast x the midpoint of the SKU's uplift low / high % (else the campaign's tier %); "◆ camp, no %" when none is set. Display only: not in the forecast, totals, Smooth or the buy (phase 5). Checked: buy identical with the filter on (7,160 SKU x market rows).
+- Client only (artifact_v16.7.html). No server change, no migration, no env var, no cron route.
+
 ## v28.597 (31-Oct-26) Campaigns phase 3: Campaign priority for Zera, ◆ badges, portal intake date, ETA alert
 - SUPPLY ▸ Purchase orders ▸ Campaign priority (new sub-tab, count = Red + Amber lines): every open PO / transfer line feeding a confirmed campaign SKU, plus "No PO" rows for Red / Amber lines with nothing inbound. Columns: supplier, PO, SKU, campaign, tier, where, launch, intake, ETA, days late, qty at risk, RAG, why. Hero first, then days late, then launch. Filters: At risk only, supplier, Include Draft campaigns. CSV.
 - Chase on a row adds a team-only note to that PO (existing PO notes), prefilled with SKU, campaign, intake and ETA.

@@ -113,8 +113,8 @@ fingerprints:
   artifact_v16.7.html::contribResolve: 482025c09b56
   artifact_v16.7.html::tierMix: c2167e52701b
   artifact_v16.7.html::skuHasAnyActivity: e319e553da16
-  artifact_v16.7.html::filteredSkus: 77e32b0b2afc
-  artifact_v16.7.html::insertInlineSkuRows: ea778ffcfec8
+  artifact_v16.7.html::filteredSkus: f196b17a9652
+  artifact_v16.7.html::insertInlineSkuRows: 17dad36563ea
   artifact_v16.7.html::subcatSkuEffTotals: 86ce56a71691
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderSkuView: caf284ab5888
@@ -145,7 +145,7 @@ fingerprints:
   artifact_v16.7.html::getASP: c70881d04bde
   artifact_v16.7.html::priceUpliftFactor: f95d1b427cac
   artifact_v16.7.html::aspAdjFactor: 719869ba1e05
-  artifact_v16.7.html::buildBody: a3c6886499b1
+  artifact_v16.7.html::buildBody: 0dab4aec79e2
   artifact_v16.7.html::_makeCatTotRow: 5d3d82f1593e
   artifact_v16.7.html::renderKeyAccountsView: 436578739eeb
   artifact_v16.7.html::kafPkaRefresh: 49573b9de89e
@@ -153,7 +153,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.491
+verified_version: v28.598
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -261,6 +261,7 @@ verified_version: v28.491
 - The SKU subtotal and "gap vs subcat" line covers ALL SKUs in the subcategory regardless of row filters. For non-overridden SKUs it uses subcat x share, not the chained last-year rule, so it can differ from the sum of the visible rows. (source: subcatSkuEffTotals)
 - Views that can disagree with the inline plan rows: the separate SKU view computes shares over the FILTERED SKU list and does not apply the chained last-year rule. The old filtered download (buildPlanDownload) is no longer reachable; since v28.217 the download builder uses the whole sub-category share pool like the grid. (source: renderSkuView, buildPlanDownload, skuMonthlyMap, _pdxBuild)
 - Filter Rules only filter which SKU rows show; they do not change numbers. Exceptions / Actions, the forecast import and anomaly fixes change numbers only when you apply a value, which becomes a saved SKU override. (source: filteredSkus, skuOvSet)
+- The ◆ Campaign filter (v28.598; plan bar dropdown + More filters ▸ Campaign) also only hides SKU rows: it keeps SKUs in a matching campaign for the market shown. The "◆+N camp" uplift in a launch-month cell is display only and never enters the forecast, totals, Smooth or the buy (see reports: Marketing campaigns). (source: filteredSkus, insertInlineSkuRows, buildBody)
 
 ## Auto Forecast (SUPPLY ▸ Payments)
 - Auto Forecast does not write forecasts. It reads the buy plan's per-SKU buys (3PL + FBA, excluding the actuals slot), aggregates them to subcategory x market x arrival month, and the server phases them into cash. Optional "future-SKU gap" = max(0, subcategory forecast - known SKU forecasts). (source: afBuildBuyFeed, computeAutoForecastFromFeed)

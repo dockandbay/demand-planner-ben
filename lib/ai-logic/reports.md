@@ -15,6 +15,7 @@ sources:
   - server.mjs :: campaignPriority, campaignEtaAlert, campaignIntakeByPo
   - server.mjs :: /api/campaigns/priority, /api/cron/campaign-eta
   - supply/inject.html :: renderCampPriority, campDecorate, campPriLoad
+  - artifact_v16.7.html :: campIdx, campFMatch, campFlagHtml, campCellHtml, fillPlanCampSel
   - artifact_v16.7.html :: renderReportView
   - artifact_v16.7.html :: renderExecView
   - artifact_v16.7.html :: buildExecData
@@ -84,6 +85,11 @@ fingerprints:
   supply/inject.html::renderCampPriority: 8487fccdaa7f
   supply/inject.html::campDecorate: 4dd500991eed
   supply/inject.html::campPriLoad: 0f203d6ecdc4
+  artifact_v16.7.html::campIdx: 6be115d09a48
+  artifact_v16.7.html::campFMatch: 5cb5fe8bc16e
+  artifact_v16.7.html::campFlagHtml: e3c4fabbd5b2
+  artifact_v16.7.html::campCellHtml: 4bd6ccfb21cd
+  artifact_v16.7.html::fillPlanCampSel: fde888af65f9
   artifact_v16.7.html::renderReportView: ccfa229ffa43
   artifact_v16.7.html::renderExecView: 255e38a51f5e
   artifact_v16.7.html::buildExecData: 279a59ce1aeb
@@ -138,7 +144,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: ae5bd1769d61
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: 5bbb05e2ccf8
-verified_version: v28.597
+verified_version: v28.598
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -536,6 +542,8 @@ verified_version: v28.597
 - Chase adds a team-only note on that PO (the existing PO notes, not shown to the supplier). (source: renderCampPriority; server.mjs :: /api/supply/portal-note)
 - Supplier portal: a PO feeding a confirmed campaign shows "need by <intake date>" under its ship date and "Required in our warehouse by <date>" on the PO (date only, never the campaign name; earliest intake if it feeds several). FUTURE POs stay hidden from the portal. (source: server.mjs :: campaignIntakeByPo, portalBootstrapBuild)
 - ETA alert: n8n calls POST /api/cron/campaign-eta daily. Every confirmed-campaign line whose ETA is after its intake date, and was not alerted at that ETA before (planner.app_settings campaign_eta_alerted), gives each address in campaign_alert_emails (set by an admin on the Campaign priority page) a To do, plus one digest email. A line that slips further alerts again. Nothing is sent or marked while the list is empty. (source: server.mjs :: campaignEtaAlert)
+- DEMAND plan (v28.598, phase 4): a SKU in a campaign for the market shown carries "◆ <campaign> · <tier>" under its code (+N when it is in several; faded italic when every one is Draft; hover lists each campaign, status, launch, markets, channels and uplift range). The ◆ Campaign dropdown on the plan bar shows only the SKUs in one campaign, or in any campaign, for that market; More filters ▸ Campaign narrows by launch month, campaign tier (Hero / Supporting / Cross-sell) and status (Confirmed / Draft). Like the Release filter, it lists the matching SKUs under each sub-category and blocks Smooth. (source: campFMatch, campFlagHtml, fillPlanCampSel; filteredSkus)
+- Uplift on the plan: in the launch-month cell of each campaign channel (DTC or Amazon) the SKU shows "◆+N camp", where N = that cell's forecast x the midpoint of the SKU's own low / high uplift % if set, else the campaign's % for its tier (one value set = that value). "◆ camp, no %" means no uplift is set. Display only: it is not in the forecast, the sub-category totals or the buy (phase 5). (source: campCellHtml, campMid)
 - Q: Why is a campaign SKU Amber when a PO is coming? A: Only inbound landing by the intake date counts; a later top-up is listed with its ETA but does not count toward stock at launch.
 - Q: Why does an Intake deadlines row show a campaign name? A: A confirmed campaign set that SKU's intake date at that location (launch minus 7 days unless overridden).
 
