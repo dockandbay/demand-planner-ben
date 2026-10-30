@@ -1,6 +1,6 @@
 # Deploy package v28.590 to v28.593 (30-Oct-26)
 
-Ben source HEAD (code): 8d665009 (8d6650090818af741c28da438b611673eac82926). Live before this deploy: /api/version = v28.589 (read 30-Oct-26). Status: PACKAGED (port PR pending)
+Ben source HEAD (code): 8d665009 (8d6650090818af741c28da438b611673eac82926). Live before this deploy: /api/version = v28.589 (read 30-Oct-26). Status: LIVE (PR #53 squash-merged 78f215b5; deploy run 40977967298 green; /api/version read back v28.593 30-Oct-26)
 
 ## What changed
 All 11 of Kathryn's "B2B allocation requests: suggested improvements", on SCENARIO ▸ B2B Allocation ▸ REQUESTS. Files: server.mjs, supply/inject.html, package.json, lib/ai-logic/b2b-allocation.md, CHANGES.md.
@@ -18,7 +18,7 @@ None new (the chaser uses the existing N8N_WEBHOOK_SECRET).
 Both are required: the request list reads their columns.
 
 ## New cron routes
-- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). Already added to the prod login gate's SECRET-GATED list in this port (login-gate check: 24 cron paths proved). Scheduled by Ben / Claude 30-Oct-26 in n8n: flow fabJ23JWzlkTrYaM "Horizon | B2B request chaser" (hourly 08:00 to 18:00 London, Mon to Fri, tag Horizon). Created INACTIVE; it is switched on after the merge once a live `?dry=1` call returns ok. No action for Diviyaj. Each request is chased at most once a day; `?dry=1` lists without emailing.
+- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). Already added to the prod login gate's SECRET-GATED list in this port (login-gate check: 24 cron paths proved). Scheduled by Ben / Claude 30-Oct-26 in n8n: flow fabJ23JWzlkTrYaM "Horizon | B2B request chaser" (hourly 08:00 to 18:00 London, Mon to Fri, tag Horizon). Created inactive, then switched ON 30-Oct-26 after the live `?dry=1` call returned 200 ok (wrong secret 401). No action for Diviyaj. Each request is chased at most once a day; `?dry=1` lists without emailing.
 
 ## Checks (port branch)
 sync-ben.cjs port (.ben-port.json to 8d665009); one server.mjs conflict in the login gate, resolved keeping production's gate and adding /api/cron/b2b-chase inside the secret-gated bracket. run-all.cjs (login-gate 24 cron paths), npm test, prebuild-race passed. Migrations 404 + 405 read back on live before the PR.
