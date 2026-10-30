@@ -53,7 +53,7 @@ fingerprints:
   server.mjs::/api/cron/workflows: cbfc60a675d0
   server.mjs::applySupplierSubmission: d5d27be8069b
   server.mjs::fulfilDateWrite: b1c7c99f9fab
-  supply/inject.html::wfDrawer: 12d7ccddd80b
+  supply/inject.html::wfDrawer: 2b405af7ed4b
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
   artifact_v16.7.html::renderExceptionsView: ba470f4fee51
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
@@ -92,7 +92,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.599
+verified_version: v28.600
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -397,6 +397,6 @@ verified_version: v28.599
 - Recipients (emails on the workflow) get one To do and one email per run, only about changes that are new that run; never in Dry run. (source: wfRun)
 - Supplier completion date -> PO production end: each pending supplier completion-date submission (supplier portal) becomes a change; applying it is the same as pressing Apply on the submission (PO production end set, logged on the PO). Auto applies it only when the date moves by at most N days (default 14); bigger moves wait. (source: WF_TEMPLATES.supplier_completion, applySupplierSubmission)
 - Completion date moved -> update Fulfil: every open PO / shipment whose HORIZON completion date (from Flexport, or the PO's production end) differs from Fulfil by at least N days (default 1) becomes a change: the internal shipment's planned receiving (IS), else the PO's requested delivery, as in Sync Fulfil Dates. POs with no date in Fulfil yet are left out unless "Also fill" is ticked. Live Fulfil writes stay behind FULFIL_LIVE_WRITES; when it is off the change fails with that reason. (source: WF_TEMPLATES.fulfil_dates, fulfilDateSyncPreview, fulfilDateWrite)
-- Runs: n8n calls POST /api/cron/workflows hourly (enabled workflows, supplier dates first so the Fulfil check sees them); admins can Run now or Run now (dry run) in the drawer. Only admins can change, run, approve or skip. (source: wfRunAll; /api/cron/workflows)
+- Runs: n8n calls POST /api/cron/workflows hourly (enabled workflows, supplier dates first so the Fulfil check sees them); admins can Run now or Run now (dry run) in the drawer. Only admins can change, run, approve or skip. Other users see Workflows as its own CONFIG tab, view only: the cards, the drawer's Setup (greyed out), Waiting (no tick boxes or buttons) and Log. HOME's Workflows line and card stay admin only. (source: wfRunAll; /api/cron/workflows; renderConfig L2; wfDrawer)
 - Q: Why didn't a supplier's new date apply on its own in Auto? A: It moved the production end by more than the workflow's limit (default 14 days), so it waits for approval.
 

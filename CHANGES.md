@@ -1,3 +1,7 @@
+## v28.600 (31-Oct-26) Workflows view only for non-admins
+- Non-admin users get Workflows as its own CONFIG tab (next to Data health), view only: cards, drawer Setup greyed out, Waiting without tick boxes or buttons, Log. Change, run, approve and skip stay admin only (server already enforced). HOME Workflows line and card stay admin only.
+- Files: supply/inject.html, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.599 (31-Oct-26) WORKFLOWS (basics) with the first two supply workflows
 - CONFIG ▸ Admin ▸ Workflows: one card per workflow (state, waiting, applied and failed in 7 days, last run); Open slides out a drawer with Setup (When / If / Then / Guardrails: On, Dry run / Ask first / Auto, at most N changes per run, who to tell), Waiting (tick, Approve or Skip) and Log (changes and runs).
 - Supplier completion date → PO production end: a supplier's completion date from the portal is applied as if Apply were pressed (logged on the PO). In Auto only moves of up to 14 days (setting) apply on their own; bigger ones wait.
