@@ -18,7 +18,7 @@ None new (the chaser uses the existing N8N_WEBHOOK_SECRET).
 Both are required: the request list reads their columns.
 
 ## New cron routes
-- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). Already added to the prod login gate's SECRET-GATED list in this port (login-gate check: 24 cron paths proved). For Diviyaj: schedule it in n8n (hourly is fine; each request is chased at most once a day). `?dry=1` lists without emailing. Until scheduled, no chaser emails go out; everything else works.
+- POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET). Already added to the prod login gate's SECRET-GATED list in this port (login-gate check: 24 cron paths proved). Scheduled by Ben / Claude 30-Oct-26 in n8n: flow fabJ23JWzlkTrYaM "Horizon | B2B request chaser" (hourly 08:00 to 18:00 London, Mon to Fri, tag Horizon). Created INACTIVE; it is switched on after the merge once a live `?dry=1` call returns ok. No action for Diviyaj. Each request is chased at most once a day; `?dry=1` lists without emailing.
 
 ## Checks (port branch)
 sync-ben.cjs port (.ben-port.json to 8d665009); one server.mjs conflict in the login gate, resolved keeping production's gate and adding /api/cron/b2b-chase inside the secret-gated bracket. run-all.cjs (login-gate 24 cron paths), npm test, prebuild-race passed. Migrations 404 + 405 read back on live before the PR.
