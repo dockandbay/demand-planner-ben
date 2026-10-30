@@ -1,0 +1,7 @@
+{
+ "campaign_eta": "V279wpnGWdQE1ICA",
+ "name": "Horizon | Campaign ETA-past-intake alert (weekdays 08:00 London)",
+ "created": "2026-10-31",
+ "calls": "POST https://horizon.dockandbay.com/api/cron/campaign-eta (x-webhook-secret)",
+ "note": "Created inactive; activate after v28.597 is live and a ?dry=1 call returns ok"
+}
