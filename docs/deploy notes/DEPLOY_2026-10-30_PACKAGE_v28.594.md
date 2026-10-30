@@ -15,7 +15,7 @@ None. (The 76-row xero_fx backfill was run on live by Ben earlier on 30-Oct-26: 
 None.
 
 ## Checks (port branch)
-To be filled after sync-ben.cjs, run-all.cjs, npm test, prebuild-race.
+sync-ben.cjs clean port (.ben-port.json to 7ad3e54f); run-all.cjs (login-gate 24 cron paths), npm test, prebuild-race passed.
 
 ## After merge
 /api/version = v28.594.
