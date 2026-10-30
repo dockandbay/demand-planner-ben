@@ -12,6 +12,9 @@ sources:
   - server.mjs :: campaignReadiness
   - server.mjs :: /api/trading-calendar/readiness
   - artifact_v16.7.html :: campReadinessOpen, campRdBody, campRdDecorate
+  - server.mjs :: campaignPriority, campaignEtaAlert, campaignIntakeByPo
+  - server.mjs :: /api/campaigns/priority, /api/cron/campaign-eta
+  - supply/inject.html :: renderCampPriority, campDecorate, campPriLoad
   - artifact_v16.7.html :: renderReportView
   - artifact_v16.7.html :: renderExecView
   - artifact_v16.7.html :: buildExecData
@@ -62,17 +65,25 @@ sources:
   - server.mjs :: /api/product/reports/approval-stats
   - supply/inject.html :: renderApprovalStats
 fingerprints:
-  artifact_v16.7.html::campOpenEditor: 1ce0c97537da
+  artifact_v16.7.html::campOpenEditor: 1c39af14bfea
   artifact_v16.7.html::renderCalendarView: 0da0b1d88889
   artifact_v16.7.html::intakeRows: 007306b7a9d4
   server.mjs::campaignIntakeDeadlines: 1f202cbcacc9
   server.mjs::/api/trading-calendar/:id/skus: c9b87262f691
   migrations/403_campaigns.sql::file: 24814647902f
-  server.mjs::campaignReadiness: 198498bc3a64
+  server.mjs::campaignReadiness: f481180e9a8c
   server.mjs::/api/trading-calendar/readiness: ef6cad1ca852
-  artifact_v16.7.html::campReadinessOpen: 2aef12b3407a
+  artifact_v16.7.html::campReadinessOpen: abd295eeeee5
   artifact_v16.7.html::campRdBody: 91d242ee0687
   artifact_v16.7.html::campRdDecorate: 57b1e71520fa
+  server.mjs::campaignPriority: 71d3d3f99c62
+  server.mjs::campaignEtaAlert: 142e5e8f4f05
+  server.mjs::campaignIntakeByPo: 04a4cae468fe
+  server.mjs::/api/campaigns/priority: 3c8787ebd812
+  server.mjs::/api/cron/campaign-eta: d3adb53e13aa
+  supply/inject.html::renderCampPriority: 8487fccdaa7f
+  supply/inject.html::campDecorate: 4dd500991eed
+  supply/inject.html::campPriLoad: 0f203d6ecdc4
   artifact_v16.7.html::renderReportView: ccfa229ffa43
   artifact_v16.7.html::renderExecView: 255e38a51f5e
   artifact_v16.7.html::buildExecData: 279a59ce1aeb
@@ -127,7 +138,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: ae5bd1769d61
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: 5bbb05e2ccf8
-verified_version: v28.596
+verified_version: v28.597
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -519,6 +530,12 @@ verified_version: v28.596
 - At launch = on hand at the location (a negative counts as 0) + open inbound to it (planner.inbound_shipments) with an ETA on or before the campaign's intake date (a passed ETA still counts and is flagged) − forecast from today to the day before launch (latest SKU forecast run, months pro-rated by day). Inbound after the intake date or with no ETA is listed but not counted. Cover = at launch ÷ the launch month's weekly forecast (units ÷ (days in month ÷ 7)). (source: server.mjs :: campaignReadiness)
 - Target = the campaign's target cover, else the SKU's target cover at that location (products.target_cover_weeks_<loc>). RAG: Red = not sold there (PRODUCT availability), nothing left at launch, or under 2 weeks of cover; Amber = below target, or no launch-month forecast to measure cover; Green = at or above target. The reason is shown on each line. Uplift is not applied. (source: server.mjs :: campaignReadiness)
 - The calendar timeline chip of each upcoming campaign shows its worst RAG and the count of lines at that RAG. (source: campRdDecorate)
+- Campaign priority (v28.597, phase 3, for Zera): SUPPLY ▸ Purchase orders ▸ Campaign priority. One row per open inbound line (PO or transfer, planner.inbound_shipments) feeding a campaign SKU at a campaign location, plus one "No PO" row for each Red / Amber campaign line with nothing inbound. Confirmed campaigns only unless "Include Draft campaigns" is ticked. Sorted Hero, Supporting, Cross-sell, then most days late (No PO first, then no ETA), then launch date. (source: server.mjs :: campaignPriority; renderCampPriority)
+- Days late = ETA minus the campaign intake date (negative = early). Qty at risk = the line's qty when it lands after intake or has no ETA; for a No PO row, the units short of target cover at launch (target x launch-month weekly forecast minus stock at launch). RAG and Why are the Launch readiness values for that SKU x location. "At risk only" keeps Red / Amber rows and rows landing after intake. The sub-tab count = Red + Amber rows. (source: server.mjs :: campaignPriority)
+- ◆ badge: on the PLAN (PO) and Shipments grids beside the PO / shipment ref when it feeds a confirmed campaign SKU; red when any line is Red / Amber or late, else violet; hover lists SKU, campaign, tier, intake, ETA and RAG. The PO grid's exceptions list has "◆ Campaign at risk". (source: campDecorate, campDia; supply/inject.html :: excMatch)
+- Chase adds a team-only note on that PO (the existing PO notes, not shown to the supplier). (source: renderCampPriority; server.mjs :: /api/supply/portal-note)
+- Supplier portal: a PO feeding a confirmed campaign shows "need by <intake date>" under its ship date and "Required in our warehouse by <date>" on the PO (date only, never the campaign name; earliest intake if it feeds several). FUTURE POs stay hidden from the portal. (source: server.mjs :: campaignIntakeByPo, portalBootstrapBuild)
+- ETA alert: n8n calls POST /api/cron/campaign-eta daily. Every confirmed-campaign line whose ETA is after its intake date, and was not alerted at that ETA before (planner.app_settings campaign_eta_alerted), gives each address in campaign_alert_emails (set by an admin on the Campaign priority page) a To do, plus one digest email. A line that slips further alerts again. Nothing is sent or marked while the list is empty. (source: server.mjs :: campaignEtaAlert)
 - Q: Why is a campaign SKU Amber when a PO is coming? A: Only inbound landing by the intake date counts; a later top-up is listed with its ETA but does not count toward stock at launch.
 - Q: Why does an Intake deadlines row show a campaign name? A: A confirmed campaign set that SKU's intake date at that location (launch minus 7 days unless overridden).
 

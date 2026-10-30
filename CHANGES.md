@@ -1,3 +1,12 @@
+## v28.597 (31-Oct-26) Campaigns phase 3: Campaign priority for Zera, ◆ badges, portal intake date, ETA alert
+- SUPPLY ▸ Purchase orders ▸ Campaign priority (new sub-tab, count = Red + Amber lines): every open PO / transfer line feeding a confirmed campaign SKU, plus "No PO" rows for Red / Amber lines with nothing inbound. Columns: supplier, PO, SKU, campaign, tier, where, launch, intake, ETA, days late, qty at risk, RAG, why. Hero first, then days late, then launch. Filters: At risk only, supplier, Include Draft campaigns. CSV.
+- Chase on a row adds a team-only note to that PO (existing PO notes), prefilled with SKU, campaign, intake and ETA.
+- ◆ beside the PO ref (PLAN grid) and shipment ref (Shipments grid) when it feeds a campaign; red if at risk; hover shows campaign, tier, intake, ETA, RAG. New "◆ Campaign at risk" option in the PO grid's exceptions list.
+- Supplier portal: POs feeding a confirmed campaign show "need by <intake>" under the ship date and "Required in our warehouse by <date>" on the PO (date only, no campaign name).
+- ETA alert: POST /api/cron/campaign-eta (x-webhook-secret, NEW CRON ROUTE: n8n daily). Lines whose ETA moved past intake give each recipient a To do and one digest email; each line once per ETA. Recipients: admin box on the Campaign priority page (app_settings campaign_alert_emails). Nothing is sent while the list is empty.
+- Readiness / editor overlays now close when you navigate away.
+- Readiness lines carry the units short of target ("short"). New: GET /api/campaigns/priority, POST /api/campaigns/priority/settings. No migration, no env var.
+
 ## v28.596 (31-Oct-26) Campaigns phase 2: launch READINESS one-pager (Kathryn's Launch Readiness spec)
 - DEMAND ▸ Inputs ▸ Calendar ▸ Readiness (or Readiness on a campaign): one page per launch month, every campaign SKU per market x channel location (DTC = <market>_3pl, Amazon = <market>_fba), as in the approved mockup. Filters: month, campaign, tier. Tiles: lines, Green, Amber, Red. ⬇ CSV and Print / PDF (A4 landscape).
 - Per line: on hand there (negative shown red, counted as 0), the other pool for info, inbound by the intake date and after it (each PO with qty and ETA; after-intake and no-ETA legs in amber), forecast from today to launch (pro-rated by day), stock at launch, the launch month forecast, cover vs target, RAG and the reason.

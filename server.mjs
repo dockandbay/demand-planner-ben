@@ -1318,6 +1318,7 @@ app.use((req, res, next) => {
       || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
+      || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
       || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
@@ -26970,7 +26971,7 @@ async function campaignReadiness(opts = {}) {
   const lastLaunch = camps.reduce((a, c) => c.launch > a ? c.launch : a, today);
   const [prod, inb, fc] = await Promise.all([
     pool.query(`SELECT * FROM planner.products WHERE sku = ANY($1)`, [skus]),
-    pool.query(`SELECT sku, lower(destination_warehouse) wh, reference ref, (quantity-received_quantity)::int qty, to_char(estimated_delivery_date,'YYYY-MM-DD') eta
+    pool.query(`SELECT sku, lower(destination_warehouse) wh, reference ref, source_location src, (quantity-received_quantity)::int qty, to_char(estimated_delivery_date,'YYYY-MM-DD') eta
       FROM planner.inbound_shipments WHERE sku = ANY($1) AND (quantity-received_quantity) > 0 ORDER BY estimated_delivery_date NULLS LAST`, [skus]),
     pool.query(`WITH lr AS (SELECT max(run_id) rid FROM planner.forecasts WHERE level='sku')
       SELECT f.sku, lower(f.warehouse) wh, to_char(f.month,'YYYY-MM') ym, sum(f.units)::numeric units FROM planner.forecasts f, lr
@@ -26993,7 +26994,7 @@ async function campaignReadiness(opts = {}) {
       const rows = (c.skus || []).map(s => {
         const p = P[s.sku] || {}, sold = p['available_' + m + '_' + (ch === 'FBA' ? 'fba' : 'dtc')];
         const ohRaw = num(p['inventory_' + loc]), oh = Math.max(0, ohRaw), ohOther = num(p['inventory_' + other]) + (loc === 'us_fba' ? num(p.inventory_us_awd) : 0);
-        const legs = (IN[s.sku + '|' + loc] || []).map(x => ({ ref: x.ref, qty: x.qty, eta: x.eta, by: !!(x.eta && x.eta <= c.intake), late: !!(x.eta && x.eta < today) }));
+        const legs = (IN[s.sku + '|' + loc] || []).map(x => ({ ref: x.ref, src: x.src || null, qty: x.qty, eta: x.eta, by: !!(x.eta && x.eta <= c.intake), late: !!(x.eta && x.eta < today) }));
         const inBy = legs.filter(x => x.by).reduce((a, x) => a + x.qty, 0), inAfter = legs.filter(x => !x.by).reduce((a, x) => a + x.qty, 0), noEta = legs.filter(x => !x.eta).reduce((a, x) => a + x.qty, 0);
         let pre = 0;   // forecast from today to the day before launch, months pro-rated by day
         for (let ym = today.slice(0, 7); ym <= lym; ym = addM(ym, 1)) {
@@ -27013,7 +27014,8 @@ async function campaignReadiness(opts = {}) {
         else { rag = 'g'; why = 'Covered'; }
         if (legs.some(x => x.by && x.late)) why += '; ETA passed, counted as in';
         counts[rag]++;
-        return { sku: s.sku, name: p.product_name || '', tier: s.tier, sold: sold == null ? null : !!sold, on_hand: ohRaw, other_pool: ohOther, in_by: inBy, in_after: inAfter,
+        const short = (target != null && wk > 0) ? Math.max(0, Math.ceil(target * wk - at)) : (at <= 0 ? null : 0);   // v28.597: units short of target cover at launch
+        return { short, sku: s.sku, name: p.product_name || '', tier: s.tier, sold: sold == null ? null : !!sold, on_hand: ohRaw, other_pool: ohOther, in_by: inBy, in_after: inAfter,
           legs, sales_to_launch: Math.round(pre), at_launch: Math.round(at), launch_fc: Math.round(launchFc), cover: cover == null ? null : Math.round(cover * 10) / 10, target, rag, why };
       });
       groups.push({ market: M, channel: ch, loc, rows });
@@ -27028,6 +27030,83 @@ app.get('/api/trading-calendar/readiness', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : null, id = parseInt(req.query.id, 10) || null;
   try { res.set('Cache-Control', 'no-store').json(await campaignReadiness({ month, id })); }
   catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.597 (Ben 31-Oct-26, Kathryn's spec phase 3): campaign PRIORITY for Zera. One row per open inbound leg (PO or transfer) feeding a
+// campaign SKU at a campaign location, plus one "no PO" row for each Red / Amber campaign line with nothing inbound. Confirmed campaigns
+// only unless drafts=1. Days late = ETA minus intake date (no ETA = treated as latest). Qty at risk = a leg's qty when it lands after
+// intake (or has no ETA); for a no-PO line, the units short of target cover at launch. Sorted Hero first, then days late, then launch.
+// byPo / byShipment feed the ◆ badge on the PO and shipment grids. campaignEtaAlert(): daily cron, To-do + email to the
+// campaign_alert_emails list when a leg's ETA moves past its campaign intake date (each leg once per ETA; app_settings.campaign_eta_alerted).
+const CAMP_TIER_ORD = { Hero: 0, Supporting: 1, 'Cross-sell': 2 };
+const CAMP_ALERT_DEFAULT = [];
+async function campaignPriority(opts = {}) {
+  const d = await campaignReadiness({}), rows = [];
+  const dayMs = 86400000, dd = (a, b) => Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / dayMs);
+  for (const c of d.campaigns) {
+    if (!opts.drafts && c.status !== 'confirmed') continue;
+    for (const g of c.groups) for (const r of g.rows) {
+      const base = { campaign: c.title, campaign_id: c.id, status: c.status, tier: r.tier, launch: c.launch, intake: c.intake, market: g.market, channel: g.channel, loc: g.loc,
+        sku: r.sku, name: r.name, rag: r.rag, why: r.why, at_launch: r.at_launch, cover: r.cover, target: r.target };
+      if (r.legs.length) r.legs.forEach(x => rows.push(Object.assign({}, base, { ref: x.ref, src: x.src, qty: x.qty, eta: x.eta, late_days: x.eta ? dd(x.eta, c.intake) : null,
+        at_risk: x.by ? 0 : x.qty })));
+      else if (r.rag !== 'g') rows.push(Object.assign({}, base, { ref: null, qty: 0, eta: null, late_days: null, at_risk: r.short }));
+    }
+  }
+  const refs = [...new Set(rows.map(r => r.ref).filter(Boolean))];
+  const po = refs.length ? (await pool.query(`SELECT po, supplier_name, shipment_ref FROM planner.purchase_orders WHERE po = ANY($1)`, [refs])).rows : [];
+  const P = {}; po.forEach(p => { P[p.po] = p; });
+  rows.forEach(r => { const p = r.ref && P[r.ref]; r.supplier = p ? p.supplier_name : (r.src || null); r.shipment = p ? p.shipment_ref : null; r.is_po = !!p; });
+  const lateKey = r => r.ref == null ? 1e6 : r.late_days == null ? 1e5 : r.late_days;
+  rows.sort((a, b) => (CAMP_TIER_ORD[a.tier] - CAMP_TIER_ORD[b.tier]) || (lateKey(b) - lateKey(a)) || (a.launch < b.launch ? -1 : a.launch > b.launch ? 1 : 0) || (a.sku < b.sku ? -1 : 1));
+  // badge maps: per PO / shipment, every campaign line it feeds (worst first)
+  const byPo = {}, byShipment = {}, rk = { r: 0, a: 1, g: 2 };
+  for (const r of rows) { if (!r.ref) continue;
+    const b = { campaign: r.campaign, tier: r.tier, intake: r.intake, sku: r.sku, eta: r.eta, late_days: r.late_days, rag: r.rag };
+    (byPo[r.ref] = byPo[r.ref] || []).push(b); if (r.shipment) (byShipment[r.shipment] = byShipment[r.shipment] || []).push(Object.assign({ po: r.ref }, b)); }
+  for (const m of [byPo, byShipment]) for (const k in m) m[k].sort((a, b) => (rk[a.rag] - rk[b.rag]) || ((b.late_days || 0) - (a.late_days || 0)));
+  return { as_of: d.as_of, drafts: !!opts.drafts, rows, byPo, byShipment, counts: { r: rows.filter(r => r.rag === 'r').length, a: rows.filter(r => r.rag === 'a').length, late: rows.filter(r => r.at_risk > 0).length } };
+}
+let _campIntakeByPo = null;   // portal: PO -> earliest confirmed-campaign intake date it feeds (10-min memo)
+async function campaignIntakeByPo() {
+  if (_campIntakeByPo && Date.now() - _campIntakeByPo.at < 10 * 60000) return _campIntakeByPo.m;
+  const m = {}; try { const d = await campaignPriority({}); d.rows.forEach(r => { if (r.ref && (!m[r.ref] || r.intake < m[r.ref])) m[r.ref] = r.intake; }); } catch (e) { if (!_campMissing(e)) console.warn('[campaign-intake] ' + e.message); }
+  _campIntakeByPo = { at: Date.now(), m }; return m;
+}
+app.get('/api/campaigns/priority', async (req, res) => {
+  try { const out = await campaignPriority({ drafts: req.query.drafts === '1' });
+    const me = await permsFor(req).catch(() => ({}));
+    if (me && (me.is_admin || me.live === false)) out.settings = { alert_emails: await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT) };
+    res.set('Cache-Control', 'no-store').json(out); }
+  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/campaigns/priority/settings', async (req, res) => {   // admin: who gets the ETA-past-intake alert
+  try { const me = await permsFor(req); if (!(me && (me.is_admin || me.live === false))) return res.status(403).json({ error: 'Admins only' });
+    const list = String((req.body && req.body.alert_emails) || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s));
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('campaign_alert_emails',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [[...new Set(list)].join(', ')]);
+    res.json({ ok: true, alert_emails: [...new Set(list)] }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+async function campaignEtaAlert(dry) {
+  const d = await campaignPriority({}), to = await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT);
+  const late = d.rows.filter(r => r.ref && r.eta && r.late_days > 0);
+  let seen = {}; try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='campaign_eta_alerted'`)).rows[0]; seen = s && s.value ? (typeof s.value === 'string' ? JSON.parse(s.value) : s.value) : {}; } catch (e) {}
+  const key = r => r.campaign_id + '|' + r.ref + '|' + r.sku + '|' + r.loc;
+  const fresh = late.filter(r => !seen[key(r)] || seen[key(r)] < r.eta);   // new slip, or slipped further
+  if (!fresh.length || dry || !to.length) return { alerted: 0, no_recipients: !to.length || undefined, would_alert: fresh.length, late: late.length, to, dry: !!dry, lines: fresh.slice(0, 50).map(r => r.ref + ' ' + r.sku + ' ' + r.late_days + 'd') };
+  const line = r => r.ref + ' ' + r.sku + ', ' + r.campaign + ' (' + r.tier + ', ' + r.market + ' ' + (r.channel === 'FBA' ? 'Amazon' : 'DTC') + '): ETA ' + ddMonYy(r.eta) + ', intake ' + ddMonYy(r.intake) + ', ' + r.late_days + ' day' + (r.late_days === 1 ? '' : 's') + ' late, ' + r.at_risk + ' units';
+  const link = (process.env.APP_BASE_URL || 'https://horizon.dockandbay.com') + '/#/supply/purchase-orders/campaigns';
+  for (const em of to) for (const r of fresh) await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,$4)`,
+    [em, ('Campaign ETA past intake: ' + r.ref + ' ' + r.sku).slice(0, 300), (line(r) + '. ' + link).slice(0, 2000), r.intake]);
+  if (to.length) { try { await sendResendEmail({ to, subject: fresh.length + ' campaign line' + (fresh.length === 1 ? '' : 's') + ' slipped past intake',
+      html: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828"><p>These PO lines now land after their campaign intake date:</p><ul>' + fresh.map(r => '<li style="margin-bottom:6px">' + b2bEsc(line(r)) + '</li>').join('')
+        + '</ul><p><a href="' + link + '">Open Campaign priority in HORIZON</a></p></div>' }); } catch (e) { console.warn('[campaign-eta] email ' + (e && e.message)); } }
+  fresh.forEach(r => { seen[key(r)] = r.eta; });
+  await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('campaign_eta_alerted',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(seen)]);
+  return { alerted: fresh.length, late: late.length, to };
+}
+app.post('/api/cron/campaign-eta', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await campaignEtaAlert(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};
@@ -35683,6 +35762,7 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     const [_cutoff, _allPos, _allLines] = await Promise.all([pCutoff, _lcGet(_portalPosSt), _lcGet(_portalLinesSt)]);
     const _nameSet = new Set(names);
     const pos = _allPos.filter(r => _nameSet.has(r.supplier_name) && !(_cutoff && !_inclArch && portalPoArchived(r, _cutoff))).map(r => Object.assign({}, r));
+    { const ci = await campaignIntakeByPo(); pos.forEach(r => { if (ci[r.po]) r.required_intake = ci[r.po]; }); }   // v28.597: confirmed-campaign intake date the supplier must meet (date only, no campaign name)
     // v28.189 (Ben, deep dive H2): COMPLETED POs go as a light row: every field the list views read (grid, filters, action counts, Shipment
     // Plan, Productions, Deposits) but not the detail-only ones (PORTAL_PO_DETAIL_FIELDS), and without their lines, costs, extra costs,
     // approved snapshot, documents and barcode projects. __slim marks them; the MANAGE card / a batch's order plan fetch the rest from

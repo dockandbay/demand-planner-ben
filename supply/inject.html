@@ -3460,7 +3460,7 @@
     function shippedNoXeroInvoice(r){ var st=String(r.status||'').toUpperCase(); if(st!=='SHIPPING'&&st!=='DELIVERED'&&st!=='COMPLETE')return false;
       if(r.xero_linked)return false; var pn=parseFloat(r.prod_no); return !isNaN(pn)&&pn>=50; }
     function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
-    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='shipped_no_xero')return shippedNoXeroInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; if(k==='reqfields')return poMissingReq(r).length>0; var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
+    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='shipped_no_xero')return shippedNoXeroInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; if(k==='reqfields')return poMissingReq(r).length>0; if(k==='campaign')return !!(_campPri&&campAtRisk(_campPri.byPo[r.po])); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function _hideCount(){ return (!_poShowSnoozed?1:0)+(_hidePayDue?1:0)+(_hideTimelineUnread?1:0)+(_hideSupApproval?1:0); }   // active Hide toggles → dropdown badge
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
@@ -3521,6 +3521,7 @@
         +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
         +'<option value="timeline_unread"'+(state.act.timeline_unread?' selected':'')+'>Timeline unread ('+rows.filter(function(r){return Number(r.unread_notes)>0;}).length+')</option>'
         +'<option value="reqfields"'+(state.act.reqfields?' selected':'')+'>Master data missing ('+rows.filter(function(r){return poMissingReq(r).length>0;}).length+')</option>'
+        +'<option value="campaign"'+(state.act.campaign?' selected':'')+'>◆ Campaign at risk ('+rows.filter(function(r){return !!(_campPri&&campAtRisk(_campPri.byPo[r.po]));}).length+')</option>'
       +'</select></span>'
       +'<span class="po-filt-item" style="position:relative;white-space:nowrap">'
         +'<button type="button" id="po-hide-btn" class="flt" style="cursor:pointer;text-align:left;width:auto" title="hide categories from the ACTION ITEMS count, red badges + filter">Hide'+(_hideCount()?' ('+_hideCount()+')':'')+' ▾</button>'
@@ -6693,7 +6694,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['orderplan','Order plan'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport'],['pricelists','Price Lists']];   // Order plan moved here from the L2 menu (next to PLAN). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
+  var PO_SUBS=[['plan','PLAN'],['orderplan','Order plan'],['campaigns','Campaign priority'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport'],['pricelists','Price Lists']];   // Order plan moved here from the L2 menu (next to PLAN). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
   var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['xeropayments','Xero payments'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['drawdown','Deposits Drawdown'],['af','Auto Forecast']];   // PAYMENTS umbrella; Xero payments = the manual push queue + live reconciliation (replaces the old Xero Compare upload). Cash Flow + Auto Forecast moved here from BI & REPORTS.
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
@@ -6702,7 +6703,7 @@
   function subListFor(tab){ return subUmbrella(tab)==='payments'?PAY_SUBS:PO_SUBS; }
   // Sub-menu action counters: rows-needing-action count per sub-tab (open = snooze-excluded). Populated as each
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
-  var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due',pricelists:'Price Lists',xeropayments:'Xero payments'}, _NAVNOUN={paydue:'overdue payment',xeropayments:'Xero exception'};
+  var _navCounts={}, _allShips=[], _NAVLBL={campaigns:'Campaign priority',plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due',pricelists:'Price Lists',xeropayments:'Xero payments'}, _NAVNOUN={campaigns:'campaign line at risk',paydue:'overdue payment',xeropayments:'Xero exception'};
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
   function plNavBadge(n){ n=Number(n)||0; return n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' price approval'+(n>1?'s':'')+' required">'+n+'</span>':''; }   // red = unapproved price changes
   function _navBd(k){ return k==='pricelists'?plNavBadge(_navCounts.pricelists):navBadge(_navCounts[k],_NAVNOUN[k]); }
@@ -6717,6 +6718,76 @@
   function actionsNavBadge(n){ _actHi=Number(n)||0; try{ paintReportsL2Badge(); }catch(e){} }   // Actions folded into BI & REPORTS → count feeds the combined L2 counter + the ACTIONS L3 tab
   function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
   var _poSubActSum={directclient:0,customorders:0};   // summed open Timeline + Client/FBA actions per report → sub-tab badge (persists across tabs once a report has rendered)
+  // ─── v28.597 (Ben 31-Oct-26, Kathryn's spec phase 3): CAMPAIGN PRIORITY for Zera + ◆ campaign badges ──────────────────────
+  // /api/campaigns/priority: one row per open PO / transfer line feeding a campaign SKU (plus Red / Amber lines with nothing inbound),
+  // Hero first, then days late vs intake, then launch. byPo / byShipment feed the ◆ icon (hover = campaign, tier, intake, ETA) on the
+  // PO and shipment grids and the "Campaign at risk" filter in the PO grid's exceptions list. Chase = a team-only PO note.
+  var _campPri=null, _campPriAt=0, _campPriP=null;
+  var CP_RAG={r:['Red','var(--neg)','var(--neg-bg)'],a:['Amber','var(--amber)','var(--amber-bg)'],g:['Green','var(--pos)','var(--pos-bg)']};
+  function campPriLoad(force,drafts){ if(!force&&!drafts&&_campPri&&Date.now()-_campPriAt<5*60000)return Promise.resolve(_campPri);
+    if(!drafts&&_campPriP&&!force)return _campPriP;
+    var p=fetch('/api/campaigns/priority'+(drafts?'?drafts=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error)throw new Error((d&&d.error)||'failed');
+      if(!drafts){ _campPri=d; _campPriAt=Date.now(); _navCounts.campaigns=(d.counts.r||0)+(d.counts.a||0); try{ updateNavBadges(); }catch(e){} campDecorate(); } return d; });
+    if(!drafts){ _campPriP=p.then(function(d){ _campPriP=null; return d; },function(e){ _campPriP=null; throw e; }); return _campPriP; } return p; }
+  function campAtRisk(list){ return (list||[]).some(function(b){ return b.rag==='r'||b.rag==='a'||(b.late_days>0); }); }
+  function campDiaTitle(list,isShip){ return (list||[]).slice(0,8).map(function(b){ return (isShip?b.po+' ':'')+b.sku+': '+b.campaign+', '+b.tier+', intake '+fd(b.intake)+(b.eta?', ETA '+fd(b.eta)+(b.late_days>0?' ('+b.late_days+'d late)':''):', no ETA')+' · '+(CP_RAG[b.rag]||[''])[0]; }).join('\n')+((list||[]).length>8?'\n+ '+(list.length-8)+' more':''); }
+  function campDia(list,isShip){ if(!list||!list.length)return ''; var bad=campAtRisk(list);
+    return ' <span class="camp-dia" title="Campaign\n'+esc(campDiaTitle(list,isShip))+'" style="color:'+(bad?'var(--neg)':'var(--violet,#7a3fd1)')+';font-size:12px;cursor:help">◆</span>'; }
+  function campDecorate(){ if(!_campPri)return; var root=document.getElementById('supply-content'); if(!root)return;
+    root.querySelectorAll('.po-numcell[data-po]').forEach(function(td){ if(td.querySelector('.camp-dia'))return; var l=_campPri.byPo[td.dataset.po]; if(l){ var b=td.querySelector('b'); if(b)b.insertAdjacentHTML('afterend',campDia(l)); } });
+    root.querySelectorAll('.sh-refcell').forEach(function(td){ if(td.querySelector('.camp-dia'))return; var b=td.querySelector('b'); var l=b&&_campPri.byShipment[b.textContent.trim()]; if(l)b.insertAdjacentHTML('afterend',campDia(l,true)); }); }
+  (function(){ var t=null; try{ new MutationObserver(function(){ if(!_campPri)return; clearTimeout(t); t=setTimeout(campDecorate,150); }).observe(document.body,{childList:true,subtree:true}); }catch(e){} })();
+  function renderCampPriority(d,el,st){ st=st||{risk:false,sup:'',drafts:false};
+    var rows=d.rows.filter(function(r){ return (!st.risk||r.rag!=='g'||r.at_risk>0)&&(!st.sup||(r.supplier||'—')===st.sup); });
+    var sups=[]; d.rows.forEach(function(r){ var s=r.supplier||'—'; if(sups.indexOf(s)<0)sups.push(s); }); sups.sort();
+    var nRisk=d.rows.filter(function(r){ return r.rag!=='g'||r.at_risk>0; }).length, n=function(v){ return v==null?'':Math.round(v).toLocaleString('en-GB'); };
+    var pill=function(r){ var x=CP_RAG[r]; return x?'<span style="font-size:10px;font-weight:800;text-transform:uppercase;border-radius:999px;padding:1px 7px;background:'+x[2]+';color:'+x[1]+'">'+x[0]+'</span>':''; };
+    var th=function(t,num){ return '<th class="'+(num?'r':'l')+'" style="white-space:nowrap">'+t+'</th>'; };
+    var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px">'
+      +'<b style="font-size:14px">Campaign priority</b><span class="mut tiny">PO and transfer lines feeding campaign SKUs'+(st.drafts?' (incl. Draft campaigns)':' (Confirmed campaigns)')+'. Hero first, then days late vs intake, then launch.</span><span style="flex:1"></span>'
+      +'<span class="pill'+(st.risk?' pill-danger':'')+'" id="cp-risk" style="cursor:pointer" title="Red / Amber lines and lines landing after intake">At risk only ('+nRisk+')</span>'
+      +'<select class="flt" id="cp-sup" style="width:auto"><option value="">All suppliers</option>'+sups.map(function(s){ return '<option'+(s===st.sup?' selected':'')+'>'+esc(s)+'</option>'; }).join('')+'</select>'
+      +'<label class="tiny" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="cp-drafts"'+(st.drafts?' checked':'')+'>Include Draft campaigns</label>'
+      +'<button class="save-btn light" id="cp-csv">⬇ CSV</button></div>'
+      +'<style>#cp-tbl{table-layout:auto!important}#cp-tbl td,#cp-tbl th{max-width:none!important;overflow:visible!important;text-overflow:clip!important}</style>'
+      +'<div class="tw"><table class="grid" id="cp-tbl" style="width:100%"><thead><tr>'+th('Supplier')+th('PO / ref')+th('SKU')+th('Campaign')+th('Tier')+th('Where')+th('Launch')+th('Intake')+th('ETA')+th('Late',1)+th('At risk',1)+th('RAG')+th('Why')+th('')+'</tr></thead><tbody>'
+      +(rows.length?rows.map(function(r,i){ return '<tr>'
+        +'<td class="l">'+esc(r.supplier||'—')+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+(r.ref?(r.is_po?'<a href="#/supply/purchase-orders/'+encodeURIComponent(r.ref)+'"><b>'+esc(r.ref)+'</b></a>':'<b>'+esc(r.ref)+'</b>')+'<div class="mut tiny">'+n(r.qty)+' units</div>':'<span style="color:var(--neg);font-weight:700">No PO</span>')+'</td>'
+        +'<td class="l"><b style="white-space:nowrap">'+esc(r.sku)+'</b><div class="mut tiny" style="max-width:220px;white-space:normal">'+esc(r.name||'')+'</div></td>'
+        +'<td class="l">'+esc(r.campaign)+(r.status!=='confirmed'?' <span class="mut tiny">(Draft)</span>':'')+'</td><td class="l">'+esc(r.tier)+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+esc(r.market+' '+(r.channel==='FBA'?'Amazon':'DTC'))+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+fd(r.launch)+'</td><td class="l" style="white-space:nowrap">'+fd(r.intake)+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+(r.ref?(r.eta?fd(r.eta):'<span style="color:var(--amber)">no ETA</span>'):'—')+'</td>'
+        +'<td class="r" style="white-space:nowrap;font-weight:700;color:'+(r.late_days>0?'var(--neg)':'var(--pos)')+'">'+(r.late_days==null?'':(r.late_days>0?'+'+r.late_days+'d':(r.late_days===0?'on time':(-r.late_days)+'d early')))+'</td>'
+        +'<td class="r">'+(r.at_risk?n(r.at_risk):(r.at_risk===0?'':'?'))+'</td><td class="l">'+pill(r.rag)+'</td>'
+        +'<td class="l tiny" style="max-width:260px;color:var(--ink-soft)">'+esc(r.why||'')+'</td>'
+        +'<td class="l">'+(r.is_po?'<button class="save-btn light cp-chase" data-i="'+i+'" title="Add a team-only chase note on this PO">Chase</button>':'')+'</td></tr>'
+        +'<tr class="cp-chase-row" data-i="'+i+'" style="display:none"><td colspan="14"></td></tr>'; }).join('')
+        :'<tr><td colspan="14" class="mut" style="padding:12px">'+(d.rows.length?'Nothing at risk for this filter.':'No PO lines feed '+(st.drafts?'':'confirmed ')+'campaign SKUs yet.')+'</td></tr>')
+      +'</tbody></table></div>'
+      +'<div class="mut tiny" style="margin-top:8px;max-width:120ch">Late = ETA minus the campaign intake date. At risk = units landing after intake (or with no ETA); for a No PO line, the units short of target cover at launch. RAG and Why come from Launch readiness (DEMAND ▸ Inputs ▸ Calendar ▸ Readiness). ◆ marks these POs and shipments on the PLAN and Shipments grids. Data as of '+fd(d.as_of)+'.</div>'
+      +(d.settings?'<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px;max-width:760px"><b class="tiny">Admin: ETA alert recipients</b><div class="mut tiny" style="margin:3px 0 6px">Daily: when a PO line\'s ETA moves past its campaign intake date, each person gets a To do and one email. Comma separated.</div>'
+        +'<div style="display:flex;gap:6px"><input class="flt" id="cp-emails" style="flex:1" value="'+esc((d.settings.alert_emails||[]).join(', '))+'" placeholder="e.g. zera@dockandbay.com, kathryn@dockandbay.com"><button class="save-btn" id="cp-emails-save">Save</button><span id="cp-emails-msg" class="tiny"></span></div></div>':'');
+    el.innerHTML=h;
+    var redraw=function(){ renderCampPriority(d,el,st); };
+    el.querySelector('#cp-risk').onclick=function(){ st.risk=!st.risk; redraw(); };
+    el.querySelector('#cp-sup').onchange=function(){ st.sup=this.value; redraw(); };
+    el.querySelector('#cp-drafts').onchange=function(){ st.drafts=this.checked; el.innerHTML='<div class="count">Loading…</div>'; campPriLoad(true,st.drafts).then(function(d2){ d=d2; redraw(); }).catch(function(e){ el.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>'; }); };
+    el.querySelector('#cp-csv').onclick=function(){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      downloadCsvStr(['Supplier,PO / ref,Qty,SKU,Product,Campaign,Status,Tier,Market,Channel,Launch,Intake,ETA,Days late,At risk,RAG,Why'].concat(rows.map(function(r){ return [r.supplier,r.ref||'No PO',r.qty,r.sku,r.name,r.campaign,r.status,r.tier,r.market,r.channel==='FBA'?'Amazon':'DTC',fd(r.launch),fd(r.intake),r.eta?fd(r.eta):'',r.late_days,r.at_risk,(CP_RAG[r.rag]||[''])[0],r.why].map(q).join(','); })).join('\n'),'campaign_priority.csv'); };
+    el.querySelectorAll('.cp-chase').forEach(function(b){ b.onclick=function(){ var r=rows[+b.dataset.i], tr=el.querySelector('.cp-chase-row[data-i="'+b.dataset.i+'"]'), td=tr.firstChild;
+      if(tr.style.display!=='none'){ tr.style.display='none'; return; } tr.style.display='';
+      td.innerHTML='<div style="display:flex;gap:6px;align-items:center;padding:4px 0"><input class="flt cp-note" style="flex:1" value="'+esc('Chase: '+r.sku+' for '+r.campaign+' ('+r.tier+'), intake '+fd(r.intake)+(r.eta?', ETA '+fd(r.eta):', no ETA')+'. ')+'"><button class="save-btn cp-note-go">Add PO note</button><span class="tiny cp-note-msg"></span></div><div class="mut tiny">Team-only note on '+esc(r.ref)+' (not shown to the supplier).</div>';
+      var inp=td.querySelector('.cp-note'); inp.focus(); inp.setSelectionRange(inp.value.length,inp.value.length);
+      td.querySelector('.cp-note-go').onclick=function(){ var go=this, msg=td.querySelector('.cp-note-msg'); go.disabled=true; msg.textContent='Saving…';
+        fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:r.ref,body:inp.value.trim(),author_kind:'internal',private:true})}).then(function(x){ return x.json().then(function(j){ if(!x.ok||j.error)throw new Error(j.error||('HTTP '+x.status)); }); })
+          .then(function(){ msg.textContent='Added to '+r.ref+' notes'; msg.style.color='var(--pos)'; inp.disabled=true; }).catch(function(e){ go.disabled=false; msg.textContent='Could not save: '+(e.message||e); msg.style.color='var(--neg)'; }); }; }; });
+    var es=el.querySelector('#cp-emails-save'); if(es)es.onclick=function(){ var m=el.querySelector('#cp-emails-msg'); es.disabled=true;
+      fetch('/api/campaigns/priority/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({alert_emails:el.querySelector('#cp-emails').value})}).then(function(x){ return x.json(); })
+        .then(function(j){ es.disabled=false; if(!j||j.error)throw new Error((j&&j.error)||'failed'); el.querySelector('#cp-emails').value=j.alert_emails.join(', '); m.textContent='Saved ('+j.alert_emails.length+')'; m.style.color='var(--pos)'; })
+        .catch(function(e){ es.disabled=false; m.textContent=e.message||String(e); m.style.color='var(--neg)'; }); };
+  }
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){
     var bd=(_NAVLBL[t[0]]!==undefined)?_navBd(t[0])
       :(t[0]==='orderplan'&&_opExc&&_opExc.count>0)?' <span class="ex-badge" title="'+_opExc.count+' PO(s) with unapproved order-plan exceptions">'+_opExc.count+'</span>'
@@ -6880,13 +6951,15 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===_umb);});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==_umb)_ns.value=_umb;
     var c=document.getElementById('supply-content');
-    hzLate(prefetchNavCounts);   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show (v28.260: after the grid's first paint, not alongside its own fetch)
+    hzLate(prefetchNavCounts); hzLate(function(){ campPriLoad().catch(function(){}); });   // v28.597: campaign ◆ badges + Campaign priority count   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show (v28.260: after the grid's first paint, not alongside its own fetch)
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
       try{ erpGridStatusFetch(); }catch(e){}   // v28.260: in parallel with the rows
       secFetch('purchase-orders','/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(d){ if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='orderplan'){ var showOP=function(d){ if(_tk!==_navToken)return; renderOrderPlan(d); };   // Order plan folded under PURCHASE ORDERS (was an L2 section). renderOrderPlan/opBuild prepend the PO sub-nav.
       if(cache['order-plan'])return showOP(cache['order-plan']); c.innerHTML='<div class="count">Loading…</div>';
       secFetch('order-plan').then(function(d){ showOP(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='campaigns'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav();   // v28.597
+      campPriLoad(true).then(function(d){ if(_tk!==_navToken)return; renderCampPriority(d, document.getElementById('prod-body')); }).catch(function(e){ if(_tk!==_navToken)return; var pb=document.getElementById('prod-body'); if(pb)pb.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>'; }); return; }
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
       secFetch('shipments').then(function(d){ showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }

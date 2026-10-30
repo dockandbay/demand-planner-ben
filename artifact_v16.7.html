@@ -17817,9 +17817,9 @@ function campOpenEditor(ev,onSaved){
       arr.forEach(function(k){ if(have[k])return; if(typeof SKUM!=='undefined'&&!SKUM[k]){ bad.push(k); return; } have[k]=1; C.skus.push({sku:k,tier:tier}); added++; }); });
     return {added:added,bad:bad}; }
   function msg(t,bad){ var m=document.getElementById('ce-msg'); if(m){ m.textContent=t; m.style.color=bad?'var(--neg)':'var(--pos)'; } }
-  function close(){ calClosePop(); wrap.remove(); document.removeEventListener('keydown',onKey); }
+  function close(){ calClosePop(); wrap.remove(); document.removeEventListener('keydown',onKey); window.removeEventListener('hashchange',close); }
   function onKey(e){ if(e.key==='Escape'&&!document.getElementById('calpop'))close(); }
-  document.addEventListener('keydown',onKey);
+  document.addEventListener('keydown',onKey); window.addEventListener('hashchange',close);   // v28.597: leaving the page closes the editor
   function wire(){ var $=function(id){ return document.getElementById(id); };
     wrap.onclick=function(e){ if(e.target===wrap)close(); };
     $('ce-x').onclick=close; $('ce-cancel').onclick=close;
@@ -17902,9 +17902,9 @@ function campReadinessOpen(opt){ opt=opt||{};
   document.body.appendChild(wrap);
   var sel='font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)';
   var btn='border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:5px 12px;font:inherit;font-size:12.5px;cursor:pointer';
-  function close(){ wrap.remove(); document.removeEventListener('keydown',onKey); }
+  function close(){ wrap.remove(); document.removeEventListener('keydown',onKey); window.removeEventListener('hashchange',close); }
   function onKey(e){ if(e.key==='Escape')close(); }
-  document.addEventListener('keydown',onKey);
+  document.addEventListener('keydown',onKey); window.addEventListener('hashchange',close);   // leaving the page closes it
   wrap.onclick=function(e){ if(e.target===wrap)close(); };
   function shell(inner){ wrap.innerHTML='<style>#camp-rd table{table-layout:auto!important}#camp-rd table td,#camp-rd table th{max-width:none!important;overflow:visible!important;text-overflow:clip!important;text-align:left!important;width:auto!important}#camp-rd table td.n,#camp-rd table th.n{text-align:right!important}</style>'
     +'<div role="dialog" aria-label="Launch readiness" style="width:min(1440px,100%);background:var(--bg,var(--card));border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;height:max-content;box-shadow:0 20px 50px rgba(15,23,42,.25)">'+inner+'</div>'; }
