@@ -44,7 +44,7 @@ sources:
   - server.mjs :: biContainerFill
   - server.mjs :: biConsolidations
 fingerprints:
-  server.mjs::WF_TEMPLATES: 289b98b9958a
+  server.mjs::WF_TEMPLATES: d2954f5a2adb
   server.mjs::wfRun: 7d6ef1f12cd6
   server.mjs::wfRunAll: f6ecc9c86402
   server.mjs::wfApplyItem: 55e54d33ed5a
@@ -92,7 +92,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.600
+verified_version: v28.601
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -397,6 +397,8 @@ verified_version: v28.600
 - Recipients (emails on the workflow) get one To do and one email per run, only about changes that are new that run; never in Dry run. (source: wfRun)
 - Supplier completion date -> PO production end: each pending supplier completion-date submission (supplier portal) becomes a change; applying it is the same as pressing Apply on the submission (PO production end set, logged on the PO). Auto applies it only when the date moves by at most N days (default 14); bigger moves wait. (source: WF_TEMPLATES.supplier_completion, applySupplierSubmission)
 - Completion date moved -> update Fulfil: every open PO / shipment whose HORIZON completion date (from Flexport, or the PO's production end) differs from Fulfil by at least N days (default 1) becomes a change: the internal shipment's planned receiving (IS), else the PO's requested delivery, as in Sync Fulfil Dates. POs with no date in Fulfil yet are left out unless "Also fill" is ticked. Live Fulfil writes stay behind FULFIL_LIVE_WRITES; when it is off the change fails with that reason. (source: WF_TEMPLATES.fulfil_dates, fulfilDateSyncPreview, fulfilDateWrite)
+- Payment due late in the month -> likely date the 1st (v28.601): every unpaid supplier payment line in Cash flow (deposit, completion, balance; freight, import duty and tax only if ticked) due after day 26 of its month (setting) with no likely date yet, and not already overdue unless ticked, becomes a change; applying it sets that line's likely payment date to the 1st of the next month, the same write as typing a likely date in Cash flow / Payments due, so Cash flow moves it to that month. A line that already has a likely date (typed, or a deposit's own likely-pay date) is never touched. (source: WF_TEMPLATES.pay_month_end; cashflowResponse; /api/supply/likely-date)
+- Suggest a workflow (v28.601): the Workflows page has a "+ Suggest a workflow" form (Name, Area, When, If, Then one step per line, Approval, Who to tell, Example, Why; Name / When / Then required). It files into the Suggestion box with area Workflows and a body starting "[Workflow request]" in fixed WHEN / IF / THEN / APPROVAL lines, ready to build as a template. Same rights as the Suggestion box. (source: wfSuggest; /api/supply/suggestion)
 - Runs: n8n calls POST /api/cron/workflows hourly (enabled workflows, supplier dates first so the Fulfil check sees them); admins can Run now or Run now (dry run) in the drawer. Only admins can change, run, approve or skip. Other users see Workflows as its own CONFIG tab, view only: the cards, the drawer's Setup (greyed out), Waiting (no tick boxes or buttons) and Log. HOME's Workflows line and card stay admin only. (source: wfRunAll; /api/cron/workflows; renderConfig L2; wfDrawer)
 - Q: Why didn't a supplier's new date apply on its own in Auto? A: It moved the production end by more than the workflow's limit (default 14 days), so it waits for approval.
 

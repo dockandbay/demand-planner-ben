@@ -27175,6 +27175,29 @@ const WF_TEMPLATES = {
       return 'Fulfil (' + fc.env + ') ' + (d.kind === 'IS' ? 'IS ' + d.ref + ' planned receiving' : d.ref + ' requested delivery') + ' → ' + ddMonYy(d.new);
     },
   },
+  // v28.601 (Ben): payments due late in the month are paid in the next month's first run, so set the cash-flow likely date to the 1st.
+  pay_month_end: {
+    order: 3, area: 'Supply', name: 'Payment due late in the month → likely date the 1st',
+    when: 'An unpaid supplier payment (deposit, completion, balance) is due after a set day of the month and has no likely date yet.',
+    then: ['Set its likely payment date to the 1st of the next month (the same as typing it in Cash flow / Payments due)', 'Cash flow and Payments due move the payment to that month'],
+    fields: [{ k: 'after_day', sec: 'if', label: 'Due after day', unit: 'of the month', dflt: 26 },
+      { k: 'include_overdue', sec: 'if', type: 'bool', label: 'Also overdue payments (due date already passed)', dflt: false },
+      { k: 'include_landed', sec: 'if', type: 'bool', label: 'Also freight, import duty and import tax', dflt: false }],
+    dflt: { mode: 'ask', config: { after_day: 26, include_overdue: false, include_landed: false, notify: true, recipients: '', max_per_run: 50 } },
+    async find(cfg) {
+      const d = await cashflowResponse(await poRowsCache.get(), (sql) => pool.query(sql).then(r => r.rows));
+      const after = Math.min(30, Math.max(1, Number(cfg.after_day) || 26));
+      return (d.lines || []).filter(l => !l.paid && !l.likely_date && l.due && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || '')) && Number(l.due.slice(8, 10)) > after && (cfg.include_overdue || l.due >= d.today)).map(l => {
+        const y = +l.due.slice(0, 4), m = +l.due.slice(5, 7), nx = m === 12 ? (y + 1) + '-01-01' : y + '-' + String(m + 1).padStart(2, '0') + '-01';
+        return { key: 'pay|' + l.key + '|' + nx, type: 'po', ref: l.ref,
+          title: l.type + ' ' + l.ref + (l.supplier ? ' (' + l.supplier + ')' : '') + ': due ' + ddMonYy(l.due) + ' → likely ' + ddMonYy(nx) + ', $' + Math.round(l.amount).toLocaleString('en-GB'),
+          detail: { line_key: l.key, type: l.type, supplier: l.supplier, amount: l.amount, old: l.due, new: nx }, autoOk: true }; });
+    },
+    async apply(it) { const d = it.detail || {};
+      await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())
+        ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [d.line_key, d.new]);
+      invalidateSupplyCaches('payment'); return d.line_key + ' likely date → ' + ddMonYy(d.new); },
+  },
 };
 const _wfMissing = e => /relation "planner\.workflow/.test(String(e && e.message));
 const _wfEmails = s => [...new Set(String(s || '').split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)))];

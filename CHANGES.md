@@ -1,3 +1,8 @@
+## v28.601 (31-Oct-26) Workflow: payments due late in the month; Suggest a workflow form
+- New workflow "Payment due late in the month -> likely date the 1st": unpaid supplier payments (deposit, completion, balance) due after day 26 with no likely date get their likely payment date set to the 1st of the next month (same write as Cash flow's likely date). Settings: the day, include overdue, include freight / duty / tax. Starts Off, Ask first. Sandbox dry run: 73 payments.
+- Workflows page: "+ Suggest a workflow" form (When / If / Then) that files into the Suggestion box, area Workflows, in a fixed format.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes (runs on the existing /api/cron/workflows).
+
 ## v28.600 (31-Oct-26) Workflows view only for non-admins
 - Non-admin users get Workflows as its own CONFIG tab (next to Data health), view only: cards, drawer Setup greyed out, Waiting without tick boxes or buttons, Log. Change, run, approve and skip stay admin only (server already enforced). HOME Workflows line and card stay admin only.
 - Files: supply/inject.html, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
