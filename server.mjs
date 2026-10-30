@@ -1319,6 +1319,7 @@ app.use((req, res, next) => {
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
+      || req.path === '/api/cron/workflows'   // v28.599 (Ben): n8n hourly Workflows run (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
       || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
@@ -6555,6 +6556,21 @@ app.get('/api/supply/fulfil/date-sync-preview', async (_req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, env: cfg.env, live_writes: cfg.env !== 'live' || String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() === 'true', items: await fulfilDateSyncPreview() });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.599: one Fulfil date write (IS planned receiving, else the PO's requested delivery), shared by the Sync Fulfil Dates dialog and
+// Workflows. Caller has checked the env / FULFIL_LIVE_WRITES gate. Returns {ref, ok, error?}.
+async function fulfilDateWrite(it, by) {
+  const date = String(it.date || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ref: it.ref, ok: false, error: 'no date' };
+  try {
+    if (it.kind === 'IS' && it.is_id) { await fulfilFetch('PUT', '/model/stock.shipment.internal/' + Number(it.is_id), { planned_date: date }); try { await pool.query(`UPDATE planner.fulfil_internal_shipments SET planned_date=$2::date, source='write', updated_at=now() WHERE fulfil_id=$1`, [Number(it.is_id), date]); } catch (_) {} try { logPoChange(it.master_po || it.ref, 'Uploaded to ERP', 'IS ' + it.ref + ' planned receiving → ' + date + ' (Fulfil)', by); } catch (_) {} return { ref: it.ref, ok: true }; }
+    if (it.kind === 'PO' && it.ref) {
+      const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', String(it.ref)]], 0, 1, null, ['id']]);
+      if (!rows.length) return { ref: it.ref, ok: false, error: 'not in Fulfil' };
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
+      await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [it.ref, date]);
+      try { logPoChange(it.ref, 'Uploaded to ERP', 'requested delivery → ' + date + ' (Fulfil)', by); } catch (_) {} return { ref: it.ref, ok: true }; }
+    return { ref: it.ref, ok: false, error: 'unknown item' };
+  } catch (e) { return { ref: it.ref, ok: false, error: String(e.message || e).slice(0, 160) }; }
+}
 app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
   const items = Array.isArray(req.body && req.body.items) ? req.body.items : []; if (!items.length) return res.status(400).json({ error: 'items[] required' });
   try {
@@ -6562,19 +6578,7 @@ app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
     const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: items.length });
     const by = authUser(req) || 'admin'; const results = [];
-    for (const it of items) {
-      const date = String(it.date || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { results.push({ ref: it.ref, ok: false, error: 'no date' }); continue; }
-      try {
-        if (it.kind === 'IS' && it.is_id) { await fulfilFetch('PUT', '/model/stock.shipment.internal/' + Number(it.is_id), { planned_date: date }); try { await pool.query(`UPDATE planner.fulfil_internal_shipments SET planned_date=$2::date, source='write', updated_at=now() WHERE fulfil_id=$1`, [Number(it.is_id), date]); } catch (_) {} results.push({ ref: it.ref, ok: true }); try { logPoChange(it.master_po || it.ref, 'Uploaded to ERP', 'IS ' + it.ref + ' planned receiving → ' + date + ' (Fulfil)', by); } catch (_) {} }
-        else if (it.kind === 'PO' && it.ref) {
-          const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', String(it.ref)]], 0, 1, null, ['id']]);
-          if (!rows.length) { results.push({ ref: it.ref, ok: false, error: 'not in Fulfil' }); continue; }
-          await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
-          await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [it.ref, date]);
-          results.push({ ref: it.ref, ok: true }); try { logPoChange(it.ref, 'Uploaded to ERP', 'requested delivery → ' + date + ' (Fulfil)', by); } catch (_) {} }
-        else results.push({ ref: it.ref, ok: false, error: 'unknown item' });
-      } catch (e) { results.push({ ref: it.ref, ok: false, error: String(e.message || e).slice(0, 160) }); }
-    }
+    for (const it of items) results.push(await fulfilDateWrite(it, by));
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, updated: results.filter(r => r.ok).length, results });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -17040,6 +17044,7 @@ app.get('/api/home', async (req, res) => {
             count(DISTINCT path) FILTER (WHERE kind='cron_run' AND status >= 400)::int failed_jobs,
             coalesce(sum(count) FILTER (WHERE kind='client_error'),0)::int browser_errors
           FROM planner.app_health_events WHERE ts > now() - interval '24 hours'`)).rows[0]; out.health = h; } catch (e) { out.health = null; }
+      try { out.workflows = (await pool.query(`SELECT count(*) FILTER (WHERE state='waiting')::int waiting, count(*) FILTER (WHERE state='applied' AND decided_at > date_trunc('day', now() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London')::int applied_today, count(*) FILTER (WHERE state='failed' AND decided_at > now() - interval '24 hours')::int failed_24h FROM planner.workflow_items`)).rows[0]; } catch (e) { out.workflows = null; }   // v28.599 HOME Workflows card
     }
     res.set('Cache-Control', 'no-store').json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -18415,15 +18420,14 @@ app.get('/api/supply/supplier-payments/:name', async (req, res) => {
 });
 // Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO
 // (the internal click is the confirmation); completion_date → end_production_overide, invoice_value → supplier_invoice_total.
-app.post('/api/supply/submission/:id/apply', async (req, res) => {
-  try {
-    const s = (await pool.query(`SELECT * FROM planner.supplier_submissions WHERE id=$1`, [req.params.id])).rows[0];
-    if (!s) return res.status(404).json({ error: 'no such submission' });
+// v28.599: apply one staged supplier submission (shared by the Apply button and Workflows). Throws {code} on a refusal.
+async function applySupplierSubmission(id, by) {
+    const s = (await pool.query(`SELECT * FROM planner.supplier_submissions WHERE id=$1`, [id])).rows[0];
+    if (!s) throw Object.assign(new Error('no such submission'), { code: 404 });
     // allow (re)apply on pending OR already-applied (e.g. the final was later edited and needs re-syncing);
     // only a rejected/dismissed submission can't be applied.
-    if (s.status === 'dismissed') return res.status(400).json({ error: 'this submission was rejected' });
-    // Attribute the real approver (the logged-in D&B user) — was recorded as a generic 'PO PLAN' from the client.
-    const by = authUser(req) || (req.body && req.body.by) || 'internal';
+    if (s.status === 'dismissed') throw Object.assign(new Error('this submission was rejected'), { code: 400 });
+    by = by || 'internal';
     const _origin = ' (supplier submission' + (s.submitted_by ? ' by ' + s.submitted_by : '') + ')';
     let applied, logEvent, logDetail;
     if (s.kind === 'completion_date') {
@@ -18432,19 +18436,23 @@ app.post('/api/supply/submission/:id/apply', async (req, res) => {
       applied = 'production-end → ' + s.value;
       logEvent = 'Production end date'; logDetail = ((_o && _o.v) ? ddMonYy(_o.v) : '(none)') + ' → ' + ddMonYy(s.value) + _origin;
     }
-    else if (s.kind === 'invoice_value') { const clean = sanitiseMoney(s.value); if (clean == null) return res.status(400).json({ error: 'Stored invoice value "' + s.value + '" is not a number — fix it on the PO before approving.' });
+    else if (s.kind === 'invoice_value') { const clean = sanitiseMoney(s.value); if (clean == null) throw Object.assign(new Error('Stored invoice value "' + s.value + '" is not a number — fix it on the PO before approving.'), { code: 400 });
       const _o = (await pool.query(`SELECT round(supplier_invoice_total,2)::text v FROM planner.purchase_orders WHERE po=$1`, [s.po])).rows[0];
       await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [clean, s.po]);
       applied = 'invoice total → $' + clean;
       logEvent = 'Final invoice amount'; logDetail = ((_o && _o.v != null) ? '$' + _o.v : '(none)') + ' → $' + clean + _origin;
     }
-    else return res.status(400).json({ error: 'kind ' + s.kind + ' is not applyable here' });
-    await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [by, req.params.id]);
+    else throw Object.assign(new Error('kind ' + s.kind + ' is not applyable here'), { code: 400 });
+    await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [by, id]);
     // Record-of-change: applying a staged supplier submission was previously silent (no po_change_log row) —
     // so the final-invoice / production-end update never showed on the PO timeline. Now it's audited. (v27.325)
     logPoChange(s.po, logEvent, logDetail, by);
-    res.json({ applied });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { applied, po: s.po };
+}
+app.post('/api/supply/submission/:id/apply', async (req, res) => {
+  // Attribute the real approver (the logged-in D&B user) — was recorded as a generic 'PO PLAN' from the client.
+  try { const r = await applySupplierSubmission(req.params.id, authUser(req) || (req.body && req.body.by) || 'internal'); res.json({ applied: r.applied }); }
+  catch (e) { if (e.code === 404 || e.code === 400) return res.status(e.code).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
@@ -27107,6 +27115,192 @@ async function campaignEtaAlert(dry) {
 app.post('/api/cron/campaign-eta', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { res.json(Object.assign({ ok: true }, await campaignEtaAlert(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// WORKFLOWS (v28.599, Ben 31-Oct-26): CONFIG ▸ Admin ▸ Workflows. A workflow = a saved copy of a TEMPLATE below
+// (When / If / Then / Guardrails) with enabled, mode and its settings (planner.workflows, migration 406). Each run asks the
+// template for the changes it would make (find), files each one as an item (dedupe_key stops a repeat), and then:
+//   dry  → items are listed only (state 'dry'); nothing is written, nobody is told
+//   ask  → items wait for an admin to Approve / Skip (HOME card + the workflow's Waiting tab); recipients get a To do + email
+//   auto → items are applied straight away, up to max_per_run and only where the template says it is safe (autoOk);
+//          the rest wait as in ask
+// A waiting item that a later run no longer finds (fixed by hand, or the date moved again) becomes 'superseded'.
+// Apply reuses the same write paths as the buttons (applySupplierSubmission, fulfilDateWrite); Fulfil stays behind the
+// FULFIL_LIVE_WRITES gate. n8n calls POST /api/cron/workflows hourly.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const _wfDays = (a, b) => (a && b) ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) : null;
+const _wfShift = n => n == null ? '' : ' (' + (n > 0 ? '+' : '') + n + ' day' + (Math.abs(n) === 1 ? '' : 's') + ')';
+const WF_TEMPLATES = {
+  supplier_completion: {
+    order: 1, area: 'Supply', name: 'Supplier completion date → PO production end',
+    when: 'A supplier enters a new completion date for a PO in the supplier portal.',
+    then: ['Set the PO\'s production end to the supplier\'s date (the same as pressing Apply on the submission)', 'Logged on the PO timeline'],
+    fields: [{ k: 'max_shift_days', sec: 'if', label: 'In Auto, apply on its own only if the date moves by at most', unit: 'days', dflt: 14 }],
+    dflt: { mode: 'ask', config: { max_shift_days: 14, notify: true, recipients: '', max_per_run: 50 } },
+    async find(cfg) {
+      const rows = (await pool.query(`SELECT s.id, s.po, s.value, s.submitted_by, to_char(s.submitted_at,'YYYY-MM-DD') submitted,
+          to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') cur_end,
+          coalesce(p.supplier_name, sup.name, '') supplier
+        FROM planner.supplier_submissions s JOIN planner.purchase_orders p ON p.po=s.po LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
+        WHERE s.kind='completion_date' AND s.status='pending' AND s.value ~ '^\\d{4}-\\d{2}-\\d{2}' ORDER BY s.submitted_at`)).rows;
+      const max = Number(cfg.max_shift_days); 
+      return rows.map(r => { const shift = _wfDays(r.cur_end, String(r.value).slice(0, 10));
+        return { key: 'sub|' + r.id, type: 'po', ref: r.po,
+          title: r.po + (r.supplier ? ' (' + r.supplier + ')' : '') + ': production end ' + (r.cur_end ? ddMonYy(r.cur_end) : 'none') + ' → ' + ddMonYy(String(r.value).slice(0, 10)) + _wfShift(shift),
+          detail: { submission_id: r.id, old: r.cur_end, new: String(r.value).slice(0, 10), shift_days: shift, supplier: r.supplier, submitted_by: r.submitted_by, submitted: r.submitted },
+          autoOk: shift == null || !Number.isFinite(max) || Math.abs(shift) <= max }; });
+    },
+    async apply(it, by) { const r = await applySupplierSubmission(it.detail.submission_id, by); try { invalidateSupplyCaches(); } catch (_) {} return r.applied; },
+  },
+  fulfil_dates: {
+    order: 2, area: 'Supply', name: 'Completion date moved → update Fulfil',
+    when: 'HORIZON\'s completion date for a PO or shipment (from Flexport, or the PO\'s production end) no longer matches Fulfil.',
+    then: ['Write the date to Fulfil: the internal shipment\'s planned receiving (IS), else the PO\'s requested delivery', 'Logged on the PO timeline'],
+    fields: [{ k: 'min_shift_days', sec: 'if', label: 'Only when the date moves by at least', unit: 'days', dflt: 1 },
+      { k: 'include_blank', sec: 'if', type: 'bool', label: 'Also fill POs / shipments that have no date in Fulfil yet', dflt: false }],
+    dflt: { mode: 'ask', config: { min_shift_days: 1, include_blank: false, notify: true, recipients: '', max_per_run: 20 } },
+    async find(cfg) {
+      const fc = fulfilConfigFor(await activeFulfilEnv()); if (!fc.configured) throw new Error('Fulfil ' + fc.env + ' API not configured');
+      const min = Math.max(0, Number(cfg.min_shift_days) || 0);
+      return (await fulfilDateSyncPreview()).filter(i => i.changed && i.in_fulfil && i.next && (i.current || cfg.include_blank)).map(i => ({ i, shift: _wfDays(i.current, i.next) }))
+        .filter(x => x.shift == null || Math.abs(x.shift) >= min).map(({ i, shift }) => ({ key: i.kind + '|' + i.ref + '|' + i.next, type: i.kind === 'IS' ? 'shipment' : 'po', ref: i.kind === 'IS' ? (i.shipment || i.ref) : i.ref,
+          title: (i.kind === 'IS' ? 'IS ' + i.ref + ' (' + (i.shipment || i.master_po) + ')' : i.ref) + ': Fulfil ' + (i.kind === 'IS' ? 'planned receiving ' : 'requested delivery ') + (i.current ? ddMonYy(i.current) : 'none') + ' → ' + ddMonYy(i.next) + _wfShift(shift),
+          detail: { kind: i.kind, ref: i.ref, is_id: i.is_id || null, master_po: i.master_po || '', shipment: i.shipment || '', old: i.current, new: i.next, shift_days: shift, env: fc.env }, autoOk: true }));
+    },
+    async apply(it, by) {
+      const fc = fulfilConfigFor(await activeFulfilEnv());
+      if (fc.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw new Error('LIVE Fulfil writes are switched off (FULFIL_LIVE_WRITES). Nothing written.');
+      const d = it.detail || {}; const r = await fulfilDateWrite({ kind: d.kind, ref: d.ref, is_id: d.is_id, master_po: d.master_po, date: d.new }, by);
+      if (!r.ok) throw new Error(r.error || 'Fulfil write failed'); try { invalidateSupplyCaches(); } catch (_) {}
+      return 'Fulfil (' + fc.env + ') ' + (d.kind === 'IS' ? 'IS ' + d.ref + ' planned receiving' : d.ref + ' requested delivery') + ' → ' + ddMonYy(d.new);
+    },
+  },
+};
+const _wfMissing = e => /relation "planner\.workflow/.test(String(e && e.message));
+const _wfEmails = s => [...new Set(String(s || '').split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)))];
+function wfCfg(wf) { const T = WF_TEMPLATES[wf.template]; return Object.assign({}, T ? T.dflt.config : {}, wf.config || {}); }
+async function wfSeed() {   // first load: one copy of every template, switched off, Ask first
+  const have = new Set((await pool.query(`SELECT template FROM planner.workflows`)).rows.map(r => r.template));
+  for (const [k, T] of Object.entries(WF_TEMPLATES)) if (!have.has(k))
+    await pool.query(`INSERT INTO planner.workflows (template, name, enabled, mode, config, created_by) VALUES ($1,$2,false,$3,$4,'system')`, [k, T.name, T.dflt.mode, JSON.stringify(T.dflt.config)]);
+}
+async function wfApplyItem(wf, it, by) {
+  const T = WF_TEMPLATES[wf.template]; if (!T) throw new Error('unknown template');
+  try { const msg = await T.apply(it, by);
+    await pool.query(`UPDATE planner.workflow_items SET state='applied', result=$2, decided_by=$3, decided_at=now() WHERE id=$1`, [it.id, String(msg || 'done').slice(0, 500), by]); return { id: it.id, ok: true, result: msg }; }
+  catch (e) { await pool.query(`UPDATE planner.workflow_items SET state='failed', result=$2, decided_by=$3, decided_at=now() WHERE id=$1`, [it.id, String(e.message || e).slice(0, 500), by]); return { id: it.id, ok: false, error: e.message }; }
+}
+async function wfRun(wf, opts) {
+  opts = opts || {}; const T = WF_TEMPLATES[wf.template]; if (!T) throw new Error('unknown template ' + wf.template);
+  const mode = opts.dry ? 'dry' : wf.mode, cfg = wfCfg(wf), by = opts.by || ('workflow: ' + wf.name);
+  const run = (await pool.query(`INSERT INTO planner.workflow_runs (workflow_id, trigger, mode, by_user) VALUES ($1,$2,$3,$4) RETURNING id`, [wf.id, opts.trigger || 'cron', mode, opts.by || null])).rows[0].id;
+  const out = { workflow_id: wf.id, name: wf.name, mode, run_id: run, found: 0, new_waiting: 0, applied: 0, failed: 0, waiting: 0, items: [] };
+  try {
+    const found = await T.find(cfg); out.found = found.length;
+    const keys = found.map(f => f.key), fresh = [];
+    await pool.query(`UPDATE planner.workflow_items SET state='superseded', result='no longer found', decided_at=now() WHERE workflow_id=$1 AND state IN ('waiting','dry') AND NOT (dedupe_key = ANY($2))`, [wf.id, keys]);
+    const before = {}; (await pool.query(`SELECT dedupe_key, state FROM planner.workflow_items WHERE workflow_id=$1 AND dedupe_key = ANY($2)`, [wf.id, keys])).rows.forEach(r => { before[r.dedupe_key] = r.state; });
+    for (const f of found) {
+      const st = mode === 'dry' ? 'dry' : 'waiting', det = Object.assign({}, f.detail, { auto_ok: f.autoOk !== false });
+      const r = (await pool.query(`INSERT INTO planner.workflow_items (workflow_id, run_id, dedupe_key, record_type, record_ref, title, detail, state)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          ON CONFLICT (workflow_id, dedupe_key) DO UPDATE SET run_id=EXCLUDED.run_id, title=EXCLUDED.title, detail=EXCLUDED.detail, state=EXCLUDED.state, created_at=now(), result=NULL
+            WHERE planner.workflow_items.state IN ('dry','superseded') OR (planner.workflow_items.state='waiting' AND EXCLUDED.state='waiting')
+          RETURNING id`, [wf.id, run, f.key, f.type || null, f.ref || null, String(f.title || '').slice(0, 500), JSON.stringify(det), st])).rows[0];
+      if (r && st === 'waiting' && before[f.key] !== 'waiting') fresh.push(r.id);   // new to waiting this run (first seen, or was dry / superseded): only these notify
+      if (out.items.length < 50) out.items.push({ ref: f.ref, title: f.title, auto_ok: f.autoOk !== false });
+    }
+    const appliedNow = [];
+    if (mode === 'auto') {
+      const cap = Math.max(0, Math.min(500, parseInt(cfg.max_per_run, 10) || 20));
+      const waiting = (await pool.query(`SELECT * FROM planner.workflow_items WHERE workflow_id=$1 AND state='waiting' AND coalesce((detail->>'auto_ok')::boolean, true) ORDER BY created_at, id LIMIT $2`, [wf.id, cap])).rows;
+      for (const it of waiting) { const r = await wfApplyItem(wf, it, by); if (r.ok) { out.applied++; appliedNow.push(it); } else out.failed++; }
+    }
+    out.waiting = Number((await pool.query(`SELECT count(*) n FROM planner.workflow_items WHERE workflow_id=$1 AND state='waiting'`, [wf.id])).rows[0].n);
+    const newWaiting = mode === 'dry' ? [] : (await pool.query(`SELECT id, title FROM planner.workflow_items WHERE id = ANY($1) AND state='waiting'`, [fresh])).rows;
+    out.new_waiting = newWaiting.length;
+    // Then: tell the recipients once per run, only about what is new (never in dry)
+    const to = _wfEmails(cfg.recipients);
+    if (mode !== 'dry' && cfg.notify !== false && to.length && (newWaiting.length || appliedNow.length)) {
+      const link = (process.env.APP_BASE_URL || 'https://horizon.dockandbay.com') + '/#/config/admin/workflows';
+      const head = wf.name + ': ' + [appliedNow.length ? appliedNow.length + ' applied' : '', newWaiting.length ? newWaiting.length + ' waiting for approval' : ''].filter(Boolean).join(', ');
+      const lines = [].concat(appliedNow.map(i => 'Applied: ' + i.title), newWaiting.map(i => 'Waiting: ' + i.title));
+      for (const em of to) await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,current_date)`, [em, ('Workflow ' + head).slice(0, 300), (lines.slice(0, 30).join('\n') + '\n' + link).slice(0, 2000)]);
+      try { await sendResendEmail({ to, subject: 'HORIZON workflow: ' + head, kind: 'workflow', ref: 'wf-' + wf.id,
+        html: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828"><p><b>' + b2bEsc(wf.name) + '</b></p><ul>' + lines.slice(0, 60).map(l => '<li style="margin-bottom:5px">' + b2bEsc(l) + '</li>').join('') + '</ul><p><a href="' + link + '">Open Workflows in HORIZON</a></p></div>' }); }
+      catch (e) { console.warn('[workflow] email ' + (e && e.message)); }
+      out.notified = to;
+    }
+  } catch (e) { out.error = String(e.message || e); }
+  await pool.query(`UPDATE planner.workflow_runs SET finished_at=now(), found=$2, applied=$3, waiting=$4, failed=$5, error=$6 WHERE id=$1`, [run, out.found, out.applied, out.waiting, out.failed, out.error || null]);
+  await pool.query(`UPDATE planner.workflows SET last_run_at=now() WHERE id=$1`, [wf.id]);
+  return out;
+}
+async function wfRunAll(opts) {   // enabled workflows, in template order (supplier dates land before the Fulfil check reads them)
+  await wfSeed();
+  const list = (await pool.query(`SELECT * FROM planner.workflows WHERE enabled ORDER BY id`)).rows.sort((a, b) => ((WF_TEMPLATES[a.template] || {}).order || 9) - ((WF_TEMPLATES[b.template] || {}).order || 9));
+  const runs = []; for (const wf of list) runs.push(await wfRun(wf, opts)); return { ok: true, dry: !!(opts && opts.dry), runs };
+}
+async function wfAdmin(req, res) { const me = await permsFor(req).catch(() => ({})); if (me && (me.is_admin || me.live === false)) return me; res.status(403).json({ error: 'Admins only' }); return null; }
+app.get('/api/workflows', async (req, res) => {
+  try { await wfSeed();
+    const wfs = (await pool.query(`SELECT w.*, to_char(w.last_run_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') last_run,
+        (SELECT count(*) FROM planner.workflow_items i WHERE i.workflow_id=w.id AND i.state='waiting')::int waiting,
+        (SELECT count(*) FROM planner.workflow_items i WHERE i.workflow_id=w.id AND i.state='applied' AND i.decided_at > now() - interval '7 days')::int applied_7d,
+        (SELECT count(*) FROM planner.workflow_items i WHERE i.workflow_id=w.id AND i.state='failed' AND i.decided_at > now() - interval '7 days')::int failed_7d
+      FROM planner.workflows w ORDER BY w.id`)).rows;
+    const me = await permsFor(req).catch(() => ({}));
+    res.set('Cache-Control', 'no-store').json({ can_edit: !!(me && (me.is_admin || me.live === false)), workflows: wfs.map(w => Object.assign(w, { config: wfCfg(w) })),
+      templates: Object.entries(WF_TEMPLATES).map(([k, T]) => ({ key: k, name: T.name, area: T.area, when: T.when, then: T.then, fields: T.fields, dflt: T.dflt })) }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/workflows/:id/items', async (req, res) => {   // ?state=waiting|applied|failed|skipped|dry|superseded|all
+  try { const st = String(req.query.state || 'waiting'), lim = Math.min(500, parseInt(req.query.limit, 10) || 200);
+    const rows = (await pool.query(`SELECT id, run_id, record_type, record_ref, title, detail, state, result, decided_by,
+        to_char(decided_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') decided, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created
+      FROM planner.workflow_items WHERE workflow_id=$1 ${st === 'all' ? '' : 'AND state=$3'} ORDER BY coalesce(decided_at, created_at) DESC, id DESC LIMIT $2`, st === 'all' ? [req.params.id, lim] : [req.params.id, lim, st])).rows;
+    const runs = (await pool.query(`SELECT id, trigger, mode, by_user, found, applied, waiting, failed, error, to_char(started_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') started
+      FROM planner.workflow_runs WHERE workflow_id=$1 ORDER BY started_at DESC LIMIT 30`, [req.params.id])).rows;
+    res.set('Cache-Control', 'no-store').json({ items: rows, runs }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/workflows/:id', async (req, res) => {   // admin: name, enabled, mode, config (merged over the template defaults)
+  try { const me = await wfAdmin(req, res); if (!me) return; const b = req.body || {};
+    const wf = (await pool.query(`SELECT * FROM planner.workflows WHERE id=$1`, [req.params.id])).rows[0]; if (!wf) return res.status(404).json({ error: 'no such workflow' });
+    const T = WF_TEMPLATES[wf.template]; const cfg = Object.assign({}, wf.config || {});
+    if (b.config && typeof b.config === 'object') { for (const f of (T.fields || [])) if (b.config[f.k] !== undefined) { if (f.type === 'bool') { cfg[f.k] = !!b.config[f.k]; continue; } const n = Number(b.config[f.k]); if (b.config[f.k] !== '' && Number.isFinite(n) && n >= 0) cfg[f.k] = n; }
+      if (b.config.recipients !== undefined) cfg.recipients = _wfEmails(b.config.recipients).join(', ');
+      if (b.config.notify !== undefined) cfg.notify = !!b.config.notify;
+      if (b.config.max_per_run !== undefined) { const n = parseInt(b.config.max_per_run, 10); if (Number.isFinite(n) && n >= 1 && n <= 500) cfg.max_per_run = n; } }
+    const mode = ['dry', 'ask', 'auto'].includes(b.mode) ? b.mode : wf.mode, enabled = b.enabled === undefined ? wf.enabled : !!b.enabled;
+    const name = b.name ? String(b.name).trim().slice(0, 120) || wf.name : wf.name;
+    await pool.query(`UPDATE planner.workflows SET name=$2, enabled=$3, mode=$4, config=$5, updated_by=$6, updated_at=now() WHERE id=$1`, [wf.id, name, enabled, mode, JSON.stringify(cfg), authUser(req) || null]);
+    res.json({ ok: true }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/workflows/:id/run', async (req, res) => {   // admin: Run now (body {dry:true} = test without writing)
+  try { const me = await wfAdmin(req, res); if (!me) return;
+    const wf = (await pool.query(`SELECT * FROM planner.workflows WHERE id=$1`, [req.params.id])).rows[0]; if (!wf) return res.status(404).json({ error: 'no such workflow' });
+    res.json(await wfRun(wf, { trigger: 'manual', dry: !!(req.body && req.body.dry), by: authUser(req) || 'admin' })); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/workflows/items/decide', async (req, res) => {   // admin: {ids:[...], action:'approve'|'skip'}; approve applies now
+  try { const me = await wfAdmin(req, res); if (!me) return; const b = req.body || {}, by = authUser(req) || 'admin';
+    const ids = (Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isFinite).slice(0, 200); if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    if (b.action !== 'approve' && b.action !== 'skip') return res.status(400).json({ error: 'action must be approve or skip' });
+    const items = (await pool.query(`SELECT i.*, w.template, w.name wf_name FROM planner.workflow_items i JOIN planner.workflows w ON w.id=i.workflow_id WHERE i.id = ANY($1) AND i.state IN ('waiting','failed') ORDER BY i.id`, [ids])).rows;
+    const results = [];
+    for (const it of items) {
+      if (b.action === 'skip') { await pool.query(`UPDATE planner.workflow_items SET state='skipped', decided_by=$2, decided_at=now() WHERE id=$1`, [it.id, by]); results.push({ id: it.id, ok: true, skipped: true }); continue; }
+      results.push(await wfApplyItem({ template: it.template, name: it.wf_name }, it, by));
+    }
+    res.json({ ok: true, done: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results, ignored: ids.length - items.length }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/workflows', async (req, res) => {   // n8n hourly; ?dry=1 lists only
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await wfRunAll({ trigger: 'cron', dry: req.query.dry === '1' })); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};

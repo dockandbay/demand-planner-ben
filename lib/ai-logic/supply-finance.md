@@ -110,7 +110,7 @@ fingerprints:
   supply/inject.html::runCmd: d0195899403f
   supply/inject.html::gotoPO: 3a92dc2c4023
   supply/inject.html::gotoPOFilter: 0775f59112be
-  supply/inject.html::hzCmdPages: 2b6fbc5fd6be
+  supply/inject.html::hzCmdPages: ed1497d05c39
   supply/inject.html::fillErpFulfil: 6bfb8bb869f8
   server.mjs::/api/client/commission/orders/search: dff873219789
   server.mjs::/api/client/commission/orders/fulfil-tag: 237f8471b12a
@@ -231,7 +231,7 @@ fingerprints:
   server.mjs::/api/supply/received-pos/process: 39c24ef889e6
   server.mjs::/api/portal/submit: 08ea62191222
   server.mjs::/api/portal/line-cost: 7d91a415da96
-  server.mjs::/api/supply/submission/:id/apply: 49638e804b19
+  server.mjs::/api/supply/submission/:id/apply: f6f96fae6650
   server.mjs::/api/supply/po-line-accept: 073111cc8cb5
   server.mjs::/api/supply/po-line-reject: e6636f5d3d7e
   server.mjs::portalShipmentRole: 745b3171a691
@@ -331,7 +331,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.594
+verified_version: v28.599
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)

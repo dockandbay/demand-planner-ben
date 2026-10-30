@@ -3,6 +3,10 @@ topic: actions
 title: Actions and Exceptions
 covers: Action lists and exception reports in HORIZON: DEMAND Exceptions (9 sub-tabs), DEMAND Actions (server rules, client detectors, Trend Gaps), SUPPLY BI & REPORTS Actions, PO action items, Recommendations, ERP Compare, DTC Mismatch, Urgent Buy, Reallocate, Container Fill, Consolidate, BUY & MOVE Actions
 sources:
+  - server.mjs :: WF_TEMPLATES, wfRun, wfRunAll, wfApplyItem
+  - server.mjs :: /api/workflows, /api/workflows/items/decide, /api/cron/workflows
+  - server.mjs :: applySupplierSubmission, fulfilDateWrite
+  - supply/inject.html :: wfDrawer
   - artifact_v16.7.html :: renderKlaviyoBisView
   - artifact_v16.7.html :: renderExceptionsView
   - artifact_v16.7.html :: skuMonthlyMap
@@ -40,6 +44,16 @@ sources:
   - server.mjs :: biContainerFill
   - server.mjs :: biConsolidations
 fingerprints:
+  server.mjs::WF_TEMPLATES: 289b98b9958a
+  server.mjs::wfRun: 7d6ef1f12cd6
+  server.mjs::wfRunAll: f6ecc9c86402
+  server.mjs::wfApplyItem: 55e54d33ed5a
+  server.mjs::/api/workflows: 71dbddfe3273
+  server.mjs::/api/workflows/items/decide: d8668114e268
+  server.mjs::/api/cron/workflows: cbfc60a675d0
+  server.mjs::applySupplierSubmission: d5d27be8069b
+  server.mjs::fulfilDateWrite: b1c7c99f9fab
+  supply/inject.html::wfDrawer: 12d7ccddd80b
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
   artifact_v16.7.html::renderExceptionsView: ba470f4fee51
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
@@ -78,7 +92,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.563
+verified_version: v28.599
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -375,3 +389,14 @@ verified_version: v28.563
 
 ## Approve all partials (PURCHASE ORDERS > PLAN, v28.428)
 - Ben 21-Oct-26: "have a tick box up top approve all partials". Ticking it reads the order plan, takes every unapproved partial-carton line (carton check shows the warning, not yet approved) on POs that are not complete, shipping or delivered (only the chosen supplier when the PLAN Supplier filter is set), asks with the line and PO counts, then sets partial_carton_approved on them in one call (POST /api/supply/po-lines/approve-partials, supply edit or admin) with one PO record of change entry per PO. (source: server.mjs :: po-lines/approve-partials; inject.html :: po-apprpart)
+
+## Workflows (CONFIG > Admin > Workflows, v28.599)
+- A workflow is a saved copy of a template: When (what it watches), If (its conditions), Then (what it does), Guardrails (On / off, mode, at most N changes applied per run). Stored in planner.workflows; every change it finds is an item in planner.workflow_items, every run a row in planner.workflow_runs (migration 406). (source: WF_TEMPLATES, wfRun)
+- Modes: Dry run lists what it would do and writes nothing, tells nobody. Ask first files each change as Waiting until an admin approves or skips it (the workflow's Waiting tab, and a HOME "Needs you" line plus a Workflows card). Auto applies changes at once, up to the per-run limit and only where the template allows it; the rest wait as in Ask first. New workflows start switched off in Ask first. (source: wfRun, wfApplyItem)
+- The same change is never raised twice (dedupe key per workflow). A waiting change a later run no longer finds (fixed by hand, or the date moved again) becomes Superseded. Skip only stops the workflow acting; the source record is left as it is. (source: wfRun; /api/workflows/items/decide)
+- Recipients (emails on the workflow) get one To do and one email per run, only about changes that are new that run; never in Dry run. (source: wfRun)
+- Supplier completion date -> PO production end: each pending supplier completion-date submission (supplier portal) becomes a change; applying it is the same as pressing Apply on the submission (PO production end set, logged on the PO). Auto applies it only when the date moves by at most N days (default 14); bigger moves wait. (source: WF_TEMPLATES.supplier_completion, applySupplierSubmission)
+- Completion date moved -> update Fulfil: every open PO / shipment whose HORIZON completion date (from Flexport, or the PO's production end) differs from Fulfil by at least N days (default 1) becomes a change: the internal shipment's planned receiving (IS), else the PO's requested delivery, as in Sync Fulfil Dates. POs with no date in Fulfil yet are left out unless "Also fill" is ticked. Live Fulfil writes stay behind FULFIL_LIVE_WRITES; when it is off the change fails with that reason. (source: WF_TEMPLATES.fulfil_dates, fulfilDateSyncPreview, fulfilDateWrite)
+- Runs: n8n calls POST /api/cron/workflows hourly (enabled workflows, supplier dates first so the Fulfil check sees them); admins can Run now or Run now (dry run) in the drawer. Only admins can change, run, approve or skip. (source: wfRunAll; /api/cron/workflows)
+- Q: Why didn't a supplier's new date apply on its own in Auto? A: It moved the production end by more than the workflow's limit (default 14 days), so it waits for approval.
+

@@ -1,0 +1,7 @@
+{
+ "workflows_run": "R8DFQ7jdF5Wtmcx6",
+ "name": "Horizon | Workflows run (hourly at :10, London)",
+ "created": "2026-10-31",
+ "calls": "POST https://horizon.dockandbay.com/api/cron/workflows (x-webhook-secret)",
+ "note": "Created inactive; activate after v28.599 is live and a ?dry=1 call returns ok"
+}

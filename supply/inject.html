@@ -152,6 +152,45 @@
 #todo-dr{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100vw;background:var(--card);color:var(--ink);border-left:1px solid var(--line);box-shadow:-18px 0 44px -18px rgba(16,24,40,.35);z-index:100061;display:flex;flex-direction:column;transform:translateX(102%);transition:transform .18s ease;font-size:13px}
 #todo-dr.open{transform:none}
 @media (prefers-reduced-motion:reduce){#todo-dr{transition:none}}
+/* v28.599 WORKFLOWS: cards + pop-out drawer */
+.wf-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.wf-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;text-align:left}
+.wf-card h3{margin:0;font-size:14.5px;font-weight:800;color:var(--ink)}
+.wf-card p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.45}
+.wf-top{display:flex;align-items:center;gap:8px}
+.wf-area{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.wf-st{margin-left:auto;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;background:var(--hover);color:var(--muted)}
+.wf-st.wf-ask{background:var(--amber-bg);color:var(--amber)}.wf-st.wf-auto{background:var(--pos-bg);color:var(--pos)}.wf-st.wf-dry{background:var(--blue-soft);color:var(--blue-ink)}
+.wf-k{display:flex;gap:18px;padding:4px 0}.wf-k div{display:flex;flex-direction:column}.wf-k b{font-size:17px;font-weight:800;color:var(--ink)}.wf-k b.amb{color:var(--amber)}.wf-k b.neg{color:var(--neg)}.wf-k span{font-size:11px;color:var(--muted)}
+.wf-foot{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:auto}
+.wf-foot button,.wf-btns button{margin-left:auto;font:inherit;font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:5px 12px;cursor:pointer}
+.wf-btns{display:flex;gap:8px;align-items:center;margin:12px 0 4px}.wf-btns button{margin-left:0}.wf-btns button.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+#wf-dr{position:fixed;top:0;right:0;bottom:0;width:560px;max-width:100vw;background:var(--card);color:var(--ink);border-left:1px solid var(--line);box-shadow:-18px 0 44px -18px rgba(16,24,40,.35);z-index:100061;display:flex;flex-direction:column;transform:translateX(102%);transition:transform .18s ease;font-size:13px;text-align:left}
+#wf-dr.open{transform:none}
+@media (prefers-reduced-motion:reduce){#wf-dr{transition:none}}
+#wf-dr .wf-hd{display:flex;align-items:flex-start;gap:8px;padding:14px 18px 8px}
+#wf-dr .wf-hd h2{margin:2px 0 0;font-size:16px;font-weight:800}
+#wf-dr .wf-x{margin-left:auto;border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:2px 6px}
+#wf-dr .wf-tabs{display:flex;gap:4px;padding:0 18px;border-bottom:1px solid var(--line)}
+#wf-dr .wf-tabs button{font:inherit;font-size:12.5px;font-weight:600;border:0;background:none;color:var(--muted);padding:8px 10px;border-bottom:2px solid transparent;cursor:pointer}
+#wf-dr .wf-tabs button.on{color:var(--ink);border-bottom-color:var(--blue)}
+#wf-dr .wf-body{overflow:auto;padding:12px 18px 24px;flex:1}
+.wf-sec{border:1px solid var(--line2,var(--line));border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.wf-sec p{margin:0;font-size:12.5px;line-height:1.45}
+.wf-sl{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--blue-ink);margin-bottom:6px}
+.wf-row{display:flex;align-items:center;gap:6px;font-size:12.5px;margin:6px 0;flex-wrap:wrap}.wf-row.wf-col{flex-direction:column;align-items:stretch}
+.wf-row input[type=text],.wf-row input:not([type]),#wf-rcp{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+.wf-num{width:56px;text-align:right}
+.wf-then{margin:0 0 6px;padding-left:18px;font-size:12.5px;line-height:1.5}
+.wf-seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:4px 0}
+.wf-seg button{font:inherit;font-size:12px;font-weight:600;border:0;border-right:1px solid var(--line);background:var(--card);color:var(--muted);padding:5px 12px;cursor:pointer}.wf-seg button:last-child{border-right:0}
+.wf-seg button.on{background:var(--ink);color:var(--card)}
+.wf-msg{font-size:12px;color:var(--muted);min-height:16px}
+.wf-items{list-style:none;margin:0;padding:0}.wf-items li{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line2,var(--line))}
+.wf-it{font-size:12.5px;font-weight:600}.wf-im{font-size:11.5px;color:var(--muted);margin-top:2px}.wf-im .amb{color:var(--amber);font-weight:600}
+.wf-s{font-size:10.5px;font-weight:700;border-radius:4px;padding:1px 6px;background:var(--hover);color:var(--muted);text-transform:capitalize}
+.wf-s-applied{background:var(--pos-bg);color:var(--pos)}.wf-s-failed{background:var(--neg-bg);color:var(--neg)}.wf-s-dry{background:var(--blue-soft);color:var(--blue-ink)}
+.wf-runs{width:100%;border-collapse:collapse;font-size:12px}.wf-runs th,.wf-runs td{padding:4px 6px;border-bottom:1px solid var(--line2,var(--line));text-align:right}.wf-runs .l{text-align:left}.wf-runs .neg{color:var(--neg);font-weight:700}
 #todo-dr .td-hd{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--line)}
 #todo-dr .td-hd h2{margin:0;font-size:15px;font-weight:800}
 #todo-dr .td-hd .td-x{margin-left:auto;border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px}
@@ -9022,8 +9061,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback','gmail-connectors']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback','gmail-connectors','workflows']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
+    var ADM_LABEL={workflows:'Workflows','email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -9034,9 +9073,9 @@
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
-    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log','data-health'].indexOf(CONFIG_SUB)>=0){
+    if(ME===null && ['xero','workflows','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log','data-health'].indexOf(CONFIG_SUB)>=0){
       c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
-    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
+    if((CONFIG_SUB==='workflows'||CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
@@ -10047,6 +10086,21 @@
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       // v28.552 (Ben 28-Oct-26, mockup "cards side by side"): CONFIG ▸ Admin ▸ Gmail connectors. One card per mailbox (accounts@, ops@): status,
       // last read, what uses it, Connect / Reconnect / Disconnect (admin). Read only: HORIZON never sends, labels or deletes mail.
+      // v28.599 WORKFLOWS (Ben): one card per workflow; Open slides out the drawer (Setup = When / If / Then / Guardrails, Waiting, Log).
+      SUBS['workflows']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/workflows',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){
+          if(d.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(d.error)+'</div>'; return; }
+          var T={}; (d.templates||[]).forEach(function(t){ T[t.key]=t; });
+          var h='<div style="text-align:left;max-width:1100px"><div class="sect-h">Workflows</div><div class="count" style="margin-bottom:12px;max-width:110ch">Each workflow watches for a change and acts on it. <b>Dry run</b> only lists what it would do; <b>Ask first</b> waits for an admin to approve each change (shown on HOME); <b>Auto</b> applies it straight away within its limits. Writes into Fulfil stay behind the live-write switch. Runs every hour; use Run now to test.</div>'
+            +'<div class="wf-cards">'+(d.workflows||[]).map(function(w){ var t=T[w.template]||{}, st=!w.enabled?['Off','off']:w.mode==='auto'?['Auto','auto']:w.mode==='dry'?['Dry run','dry']:['Ask first','ask'];
+              return '<article class="wf-card" data-id="'+w.id+'"><div class="wf-top"><span class="wf-area">'+esc(t.area||'')+'</span><span class="wf-st wf-'+st[1]+'">'+st[0]+'</span></div>'
+                +'<h3>'+esc(w.name)+'</h3><p>'+esc(t.when||'')+'</p>'
+                +'<div class="wf-k"><div><b class="'+(w.waiting?'amb':'')+'">'+w.waiting+'</b><span>waiting</span></div><div><b>'+w.applied_7d+'</b><span>applied (7 days)</span></div><div><b class="'+(w.failed_7d?'neg':'')+'">'+w.failed_7d+'</b><span>failed (7 days)</span></div></div>'
+                +'<div class="wf-foot"><span>'+(w.last_run?'Last run '+esc(fd(w.last_run))+' '+esc(String(w.last_run).slice(11)):'Not run yet')+'</span><button class="wf-open" data-id="'+w.id+'" data-tab="'+(w.waiting?'waiting':'setup')+'">Open</button></div></article>'; }).join('')+'</div></div>';
+          b.innerHTML=h;
+          b.querySelectorAll('.wf-open').forEach(function(x){ x.onclick=function(){ var w=(d.workflows||[]).filter(function(y){ return String(y.id)===x.getAttribute('data-id'); })[0]; if(w)wfDrawer(w,T[w.template]||{},d.can_edit,x.getAttribute('data-tab'),function(){ SUBS['workflows'](); }); }; });
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; });
+      };
       SUBS['gmail-connectors']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         var flash=''; try{ var fm=/[?&]gmail=([^&#]*)/.exec(location.search); if(fm){ flash=decodeURIComponent(fm[1].replace(/\+/g,' ')); history.replaceState(null,'',location.pathname+location.hash); } }catch(e){}
         var draw=function(d,disc){
@@ -21014,6 +21068,64 @@
   function hmLabel(path){ var seg=String(path||'').replace(/^#\/?/,'').split('/').filter(Boolean).map(function(x){ try{ x=decodeURIComponent(x); }catch(e){} return HM_SEG[x]||(x.charAt(0).toUpperCase()+x.slice(1).replace(/-/g,' ')); });
     if(seg.length>2)seg=seg.slice(-2); return seg.join(' · ')||'Home'; }
   function hmItem(area,sev,t,s,btn,href,kind){ return {area:area,sev:sev,t:t,s:s,btn:btn,href:href,kind:kind||'go'}; }
+  // v28.599 WORKFLOWS drawer: Setup (When / If / Then / Guardrails), Waiting (approve / skip) and Log (items + runs).
+  function wfDrawer(w,t,canEdit,tab,onChange){
+    var dr=document.getElementById('wf-dr'); if(!dr){ dr=document.createElement('aside'); dr.id='wf-dr'; dr.setAttribute('role','dialog'); dr.setAttribute('aria-label','Workflow'); document.body.appendChild(dr);
+      document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&dr.classList.contains('open'))dr.classList.remove('open'); }); window.addEventListener('hashchange',function(){ dr.classList.remove('open'); }); }
+    var cfg=w.config||{}, TAB=tab||'setup', dis=canEdit?'':' disabled';
+    function sec(lbl,body){ return '<section class="wf-sec"><div class="wf-sl">'+lbl+'</div>'+body+'</section>'; }
+    function setup(){ var f=(t.fields||[]).filter(function(x){ return x.sec==='if'; });
+      return sec('When','<p>'+esc(t.when||'')+'</p>')
+        +sec('If',f.length?f.map(function(x){ var v=cfg[x.k]; return x.type==='bool'?'<label class="wf-row"><input type="checkbox" class="wf-f" data-k="'+x.k+'" data-t="bool"'+(v?' checked':'')+dis+'> '+esc(x.label)+'</label>'
+          :'<label class="wf-row">'+esc(x.label)+' <input class="wf-f wf-num" data-k="'+x.k+'" inputmode="numeric" value="'+esc(v==null?'':v)+'"'+dis+'> '+esc(x.unit||'')+'</label>'; }).join(''):'<p class="mut">No conditions.</p>')
+        +sec('Then','<ul class="wf-then">'+(t.then||[]).map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul>'
+          +'<label class="wf-row"><input type="checkbox" id="wf-notify"'+(cfg.notify!==false?' checked':'')+dis+'> Tell people: a To do and one email per run, only about new changes</label>'
+          +'<label class="wf-row wf-col">Who (emails, comma separated)<input id="wf-rcp" value="'+esc(cfg.recipients||'')+'" placeholder="e.g. zera@dockandbay.com"'+dis+'></label>')
+        +sec('Guardrails','<div class="wf-row"><label><input type="checkbox" id="wf-on"'+(w.enabled?' checked':'')+dis+'> On (runs every hour)</label></div>'
+          +'<div class="wf-seg" role="radiogroup" aria-label="Mode">'+[['dry','Dry run','Lists what it would do. Writes nothing, tells nobody.'],['ask','Ask first','Each change waits for an admin to approve it.'],['auto','Auto','Applies changes straight away, within the limits.']].map(function(m){ return '<button class="wf-m'+(w.mode===m[0]?' on':'')+'" data-m="'+m[0]+'" title="'+esc(m[2])+'"'+dis+'>'+m[1]+'</button>'; }).join('')+'</div>'
+          +'<label class="wf-row">At most <input id="wf-cap" class="wf-num" inputmode="numeric" value="'+esc(cfg.max_per_run||'')+'"'+dis+'> changes applied per run (the rest wait)</label>')
+        +(canEdit?'<div class="wf-btns"><button id="wf-test">Run now (dry run)</button><button id="wf-run">Run now</button><span style="flex:1"></span><button id="wf-save" class="pri">Save</button></div><div id="wf-msg" class="wf-msg"></div>':'<p class="mut">Only admins can change workflows.</p>'); }
+    function itemsHtml(items,sel){ if(!items.length)return '<p class="mut" style="padding:8px 0">Nothing here.</p>';
+      return '<ul class="wf-items">'+items.map(function(i){ return '<li>'+(sel&&canEdit?'<input type="checkbox" class="wf-sel" value="'+i.id+'" aria-label="Select">':'')+'<div><div class="wf-it">'+esc(i.title)+'</div><div class="wf-im">'
+        +(sel?(i.detail&&i.detail.auto_ok===false?'<span class="amb">Needs approval: bigger move than Auto allows</span> · ':'')+'raised '+esc(fd(i.created))+' '+esc(String(i.created||'').slice(11)):'<span class="wf-s wf-s-'+esc(i.state)+'">'+esc(i.state)+'</span> '+esc(i.decided?fd(i.decided)+' '+String(i.decided).slice(11):fd(i.created))+(i.decided_by?' · '+esc(i.decided_by):'')+(i.result?' · '+esc(i.result):''))+'</div></div></li>'; }).join('')+'</ul>'; }
+    function draw(){
+      dr.innerHTML='<div class="wf-hd"><div><div class="wf-area">'+esc(t.area||'')+' workflow</div><h2>'+esc(w.name)+'</h2></div><button class="wf-x" aria-label="Close">×</button></div>'
+        +'<div class="wf-tabs">'+[['setup','Setup'],['waiting','Waiting'+(w.waiting?' ('+w.waiting+')':'')],['log','Log']].map(function(x){ return '<button data-tab="'+x[0]+'" class="'+(TAB===x[0]?'on':'')+'">'+x[1]+'</button>'; }).join('')+'</div><div class="wf-body" id="wf-body"></div>';
+      dr.querySelector('.wf-x').onclick=function(){ dr.classList.remove('open'); };
+      dr.querySelectorAll('.wf-tabs button').forEach(function(x){ x.onclick=function(){ TAB=x.getAttribute('data-tab'); draw(); }; });
+      var body=dr.querySelector('#wf-body');
+      if(TAB==='setup'){ body.innerHTML=setup(); var MODE=w.mode;
+        body.querySelectorAll('.wf-m').forEach(function(x){ x.onclick=function(){ MODE=x.getAttribute('data-m'); body.querySelectorAll('.wf-m').forEach(function(y){ y.classList.toggle('on',y===x); }); }; });
+        var msg=function(s,bad){ var m=body.querySelector('#wf-msg'); if(m){ m.textContent=s; m.style.color=bad?'var(--neg)':'var(--muted)'; } };
+        var collect=function(){ var c={notify:body.querySelector('#wf-notify').checked,recipients:body.querySelector('#wf-rcp').value,max_per_run:body.querySelector('#wf-cap').value};
+          body.querySelectorAll('.wf-f').forEach(function(x){ c[x.getAttribute('data-k')]=x.getAttribute('data-t')==='bool'?x.checked:x.value; }); return {enabled:body.querySelector('#wf-on').checked,mode:MODE,config:c}; };
+        var save=function(){ return fetch('/api/workflows/'+w.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(collect())}).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error); return j; }); };
+        var run=function(dry){ msg(dry?'Testing…':'Running…'); save().then(function(){ return fetch('/api/workflows/'+w.id+'/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dry:dry})}); }).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error);
+            var _t=((dry?'Dry run: found '+j.found+' change'+(j.found===1?'':'s')+' (nothing written).':'Found '+j.found+': '+j.applied+' applied, '+j.new_waiting+' new waiting, '+j.waiting+' waiting in total'+(j.failed?', '+j.failed+' failed':'')+'.')+(j.items&&j.items.length?' e.g. '+j.items.slice(0,3).map(function(i){ return i.title; }).join(' · '):''));
+            refresh(_t); }).catch(function(e){ msg(String(e.message||e),true); }); };
+        if(canEdit){ body.querySelector('#wf-save').onclick=function(){ msg('Saving…'); save().then(function(){ refresh('Saved.'); }).catch(function(e){ msg(String(e.message||e),true); }); };
+          body.querySelector('#wf-test').onclick=function(){ run(true); }; body.querySelector('#wf-run').onclick=function(){ run(false); }; }
+        return; }
+      body.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/workflows/'+w.id+'/items?state='+(TAB==='waiting'?'waiting':'all')+'&limit=200',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
+        if(j.error){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(j.error)+'</div>'; return; }
+        if(TAB==='waiting'){ body.innerHTML=(canEdit&&j.items.length?'<div class="wf-btns"><label class="wf-row" style="margin:0"><input type="checkbox" id="wf-all"> All</label><span style="flex:1"></span><button id="wf-skip">Skip</button><button id="wf-ok" class="pri">Approve</button></div><div id="wf-msg" class="wf-msg"></div>':'')+itemsHtml(j.items,true);
+          var all=body.querySelector('#wf-all'); if(all)all.onchange=function(){ body.querySelectorAll('.wf-sel').forEach(function(x){ x.checked=all.checked; }); };
+          var decide=function(action){ var ids=[].map.call(body.querySelectorAll('.wf-sel:checked'),function(x){ return x.value; }); var m=body.querySelector('#wf-msg'); if(!ids.length){ m.textContent='Tick the changes first.'; return; }
+            m.textContent=action==='approve'?'Applying '+ids.length+'…':'Skipping…';
+            fetch('/api/workflows/items/decide',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ids:ids,action:action})}).then(function(r){ return r.json(); }).then(function(k){ if(k.error)throw new Error(k.error);
+              var bad=(k.results||[]).filter(function(x){ return !x.ok; }); m.style.color=bad.length?'var(--neg)':'var(--muted)'; m.textContent=(action==='approve'?k.done+' applied':k.done+' skipped')+(bad.length?', '+bad.length+' failed: '+bad[0].error:'');
+              var keep=m.textContent, kc=m.style.color; body.querySelectorAll('.wf-sel:checked').forEach(function(x){ var li=x.closest('li'); if(li)li.remove(); }); refresh(); m.textContent=keep; m.style.color=kc; }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=String(e.message||e); }); };
+          if(canEdit&&j.items.length){ body.querySelector('#wf-ok').onclick=function(){ decide('approve'); }; body.querySelector('#wf-skip').onclick=function(){ decide('skip'); }; }
+          return; }
+        body.innerHTML='<div class="wf-sl">Changes</div>'+itemsHtml(j.items.filter(function(i){ return i.state!=='waiting'; }).slice(0,100),false)
+          +'<div class="wf-sl" style="margin-top:14px">Runs</div><table class="wf-runs"><tr><th class="l">When</th><th class="l">Mode</th><th>Found</th><th>Applied</th><th>Waiting</th><th>Failed</th></tr>'
+          +j.runs.map(function(r){ return '<tr><td class="l">'+esc(fd(r.started))+' '+esc(String(r.started).slice(11))+(r.trigger==='manual'?' <span class="mut">by '+esc(r.by_user||'')+'</span>':'')+'</td><td class="l">'+esc({dry:'Dry run',ask:'Ask first',auto:'Auto'}[r.mode]||r.mode)+'</td><td>'+r.found+'</td><td>'+r.applied+'</td><td>'+r.waiting+'</td><td'+(r.error||r.failed?' class="neg"':'')+(r.error?' title="'+esc(r.error)+'"':'')+'>'+(r.error?'error':r.failed)+'</td></tr>'; }).join('')+'</table>';
+      }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; });
+    }
+    function refresh(note){ fetch('/api/workflows',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ var n=(d.workflows||[]).filter(function(x){ return x.id===w.id; })[0]; if(n){ w=n; cfg=w.config||{}; } if(typeof note==='string'&&TAB==='setup'){ draw(); var m=dr.querySelector('#wf-msg'); if(m)m.textContent=note; } else if(TAB!=='waiting')draw(); else { var t=dr.querySelector('.wf-tabs button[data-tab="waiting"]'); if(t)t.textContent='Waiting'+(w.waiting?' ('+w.waiting+')':''); } if(onChange)onChange(); }).catch(function(){}); }
+    draw(); void dr.offsetWidth; dr.classList.add('open');   // reflow first so it slides in (rAF stalls in a background tab)
+  }
   function renderHome(){ var r=document.getElementById('home-root'); if(!r||r.style.display==='none')return;
     var m=ME||{}, d=HOME.d||{}, today=hmToday(), name=(m.email||'').split('@')[0].split(/[._-]/)[0]||'';
     name=name?name.charAt(0).toUpperCase()+name.slice(1):''; var hr=new Date().getHours(), g=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
@@ -21031,6 +21143,7 @@
     if(sup&&HOME.opx)N.push(hmItem('Supply','amb',HOME.opx+' PO'+(HOME.opx>1?'s':'')+' with order plan exceptions','Unapproved partials, supplier or country risk, discontinued SKUs','Review','#/supply/purchase-orders/orderplan'));
     if((prod||sup)&&HOME.samp)N.push(hmItem('Samples','amb',HOME.samp+' open sample action'+(HOME.samp>1?'s':''),'Shipped by supplier, overdue, charges or unread notes','Open','#/supply/samples'));
     if(cli&&HOME.cl)N.push(hmItem('Client','amb',HOME.cl+' unread client message'+(HOME.cl>1?'s':''),'CLIENT ▸ Messages','Reply','#/client/messages'));
+    if(adm&&d.workflows&&d.workflows.waiting)N.push(hmItem('Workflows','amb',d.workflows.waiting+' workflow change'+(d.workflows.waiting>1?'s':'')+' waiting for approval','Approve or skip each change','Review','#/config/admin/workflows'));   // v28.599
     if(acc)stale.forEach(function(a){ N.push(hmItem('Accounts','neg',String(a.org).toUpperCase()+' uncoded statement lines not uploaded for '+a.days+' days','Last upload '+fd(a.last_upload)+' · stale after 5 days','Upload','#/accounts/bank-statement')); });
     if(adm&&d.health&&d.health.failed_jobs)N.push(hmItem('System','amb',d.health.failed_jobs+' scheduled job'+(d.health.failed_jobs>1?'s':'')+' failed in the last 24 hours','CONFIG ▸ Health log','Open','#/config/health-log'));
     if(adm&&d.health&&d.health.server_errors)N.push(hmItem('System','neg',d.health.server_errors+' server error'+(d.health.server_errors>1?'s':'')+' in the last 24 hours','CONFIG ▸ Health log','Open','#/config/health-log'));
@@ -21066,6 +21179,7 @@
     if(acc){ var ac=d.accounts||[], byO={}; ac.forEach(function(a){ byO[a.org]=a; });
       var kA=function(o){ var a=byO[o]; return a?K(a.days+'d','Since '+o.toUpperCase()+' uncoded upload',a.days>5?'neg':'pos'):K(d.accounts?'never':null,'Since '+o.toUpperCase()+' uncoded upload',d.accounts?'neg':''); };
       cards.push(C('Accounts',true,kA('uk')+kA('au')+K(null,'Bank lines (to come)'),ac.map(function(a){ return [a.org.toUpperCase()+' last upload',fd(a.last_upload)]; }),[['Upload uncoded lines','#/accounts/bank-statement'],['Reconcile','#/accounts/reconcile'],['Payments','#/accounts/payments-report']])); }
+    if(adm&&d.workflows){ var wq=d.workflows; cards.push(C('Workflows',true,K(wq.waiting,'Waiting for approval',wq.waiting?'amb':'pos')+K(wq.applied_today,'Applied today','')+K(wq.failed_24h,'Failed (24h)',wq.failed_24h?'neg':'pos'),null,[['Workflows','#/config/admin/workflows']])); }   // v28.599
     if(adm&&d.health){ var h=d.health; cards.push(C('System',true,K(h.server_errors,'Server errors (24h)',h.server_errors?'neg':'pos')+K(h.failed_jobs,'Failed jobs (24h)',h.failed_jobs?'amb':'pos')+K(h.slow_views,'Slow views (24h)',h.slow_views>20?'amb':''),[['Browser errors (24h)',String(h.browser_errors||0)],['Version','__APP_VERSION__']],[['Health log','#/config/health-log'],['Permissions','#/config/permissions']])); }
     r.innerHTML='<div class="hm-hello"><div><h1>'+esc(g+(name?', '+name:''))+'</h1><div class="hm-meta">'+esc(fd(today))+(m.email?' · '+esc(m.email):'')+'</div></div><div class="hm-pulse">'
         +(neg?'<span class="hm-pill neg">'+neg+' urgent</span>':'')+(amb?'<span class="hm-pill amb">'+amb+' to do soon</span>':'')+(!neg&&!amb&&!loading?'<span class="hm-pill pos">All clear</span>':'')+'</div></div>'
@@ -23059,7 +23173,7 @@
       SECTIONS.forEach(function(t){ if(['purchase-orders','reports','payments','config'].indexOf(t[0])<0)add('Supply ▸ '+tc(t[1]),'#/supply/'+t[0]); }); }catch(e){}
     var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portalopen:'Open portal',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
     Object.keys(SCL).forEach(function(k){ add('Supply ▸ Config ▸ '+SCL[k],'#/supply/config/'+k); });
-    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
+    var ADL={workflows:'Workflows','email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
     var DML={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     Object.keys(DML).forEach(function(k){ add('Config ▸ Demand ▸ '+DML[k],'#/config/demand/'+k); });

@@ -1,3 +1,12 @@
+## v28.599 (31-Oct-26) WORKFLOWS (basics) with the first two supply workflows
+- CONFIG ▸ Admin ▸ Workflows: one card per workflow (state, waiting, applied and failed in 7 days, last run); Open slides out a drawer with Setup (When / If / Then / Guardrails: On, Dry run / Ask first / Auto, at most N changes per run, who to tell), Waiting (tick, Approve or Skip) and Log (changes and runs).
+- Supplier completion date → PO production end: a supplier's completion date from the portal is applied as if Apply were pressed (logged on the PO). In Auto only moves of up to 14 days (setting) apply on their own; bigger ones wait.
+- Completion date moved → update Fulfil: a PO / shipment whose HORIZON completion date (Flexport or production end) differs from Fulfil by at least 1 day (setting) writes the IS planned receiving, else the PO's requested delivery (the Sync Fulfil Dates write). POs with no Fulfil date are left out unless ticked. Live writes stay behind FULFIL_LIVE_WRITES.
+- Ask first changes show on HOME (Needs you line + Workflows card, admins). Recipients get one To do + one email per run about new changes only. A change is raised once; one no longer found becomes Superseded. Both workflows start Off / Ask first.
+- Refactors (behaviour unchanged): applySupplierSubmission (Apply button) and fulfilDateWrite (Sync Fulfil Dates) are shared with Workflows.
+- NEW MIGRATION: migrations/406_workflows.sql (planner.workflows, workflow_runs, workflow_items; additive).
+- NEW CRON ROUTE: POST /api/cron/workflows (x-webhook-secret; ?dry=1 lists only), added to the login-gate cron list. n8n flow "Horizon | Workflows run (hourly at :10, London)" R8DFQ7jdF5Wtmcx6 created inactive. New routes: GET /api/workflows, GET /api/workflows/:id/items, POST /api/workflows/:id, POST /api/workflows/:id/run, POST /api/workflows/items/decide (admin). No new env var.
+
 ## v28.598 (31-Oct-26) Campaigns phase 4: campaign SKUs on the DEMAND plan (filters, flag, uplift shown in the launch cell)
 - DEMAND ▸ Plan: a SKU in a campaign for the market shown carries "◆ <campaign> · <tier>" under its code (+N if in several; faded italic when all Draft; hover lists status, launch, markets, channels, uplift range).
 - New ◆ Campaign dropdown on the plan bar (off / all campaign SKUs / one campaign in this market). More filters ▸ Campaign adds launch month, campaign tier (Hero / Supporting / Cross-sell) and status (Confirmed / Draft). Shows as a chip; Reset all clears it. Behaves like the Release filter (SKUs listed under each sub-category, Smooth blocked).
