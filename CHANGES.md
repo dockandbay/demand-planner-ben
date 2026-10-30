@@ -1,3 +1,10 @@
+## v28.594 (30-Oct-26) DEPOSITS: Xero FX captured automatically; USD/GBP vs USD/AUD; no red flag on non-USD rows
+- Ben: deposits.xero_fx had been blank since P58 (the move to HORIZON's supplier-payment flow). The 76-row backfill was run on live by Ben earlier on 30-Oct-26; this version keeps it filled.
+- Rule: xero_fx = the CurrencyRate of the run's SUPPLIER-PAYMENT bill (not the bank payment rate), matched by date paid + supplier + region (AU run -> AU rows; UK run -> other rows, or any row before 01-Oct-26). USD bills only. Blanks only: a manual value is never overwritten.
+- Captured when Create in Xero (xero-post) makes the bill, and again whenever the bill passes through the bill cache (hourly bills sync, live refresh), so a hand-made Xero bill still lands.
+- DEPOSITS register: the FX column shows the pair (USD/GBP, or USD/AUD for AU from 01-Oct-26). A blank FX is red only when a rate is expected (paid deposit, or paid Other row in a USD supplier-payment run); GBP / EUR / AUD payments and rows with no bill are no longer red (live: 100 blank rows, none expected).
+- No migration, no env vars, no cron routes.
+
 ## v28.593 (30-Oct-26) B2B requests: customer stages + Fulfil SO, other markets, reserve by tier, chaser
 - Kathryn's improvements 8, 6, 7 and 11 (phase C). With v28.590 to v28.592 all 11 of her points are covered.
 - **After approval (8):** approved cards show Customer: Approved > Offered > Accepted / Declined > Shipped, with buttons for the requester, approvers and admins. Shipped needs the **Fulfil sales order number**. Declined and Shipped release the hold and email the requester + notify list; Declined sets reason Customer declined. A shipped request can't be reopened.

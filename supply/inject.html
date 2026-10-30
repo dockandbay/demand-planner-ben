@@ -7311,7 +7311,9 @@
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l"><button class="cell-pick dep-sup-pick" data-id="'+d.id+'" data-val="'+esc(d.supplier_name||'')+'" title="pick a supplier">'+(d.supplier_name?esc(d.supplier_name):'<span class="mut">— set</span>')+' ▾</button></td>';
       var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
-      var ctryBlank=!String(d.country||'').trim(), fxBlank=(d.xero_fx==null||String(d.xero_fx).trim()===''); // flag missing region / FX rate
+      // flag missing region / FX rate. v28.594 (Ben): FX only applies to USD payments; the server says when one is expected (fx_expected) and which pair it is (fx_pair)
+      var ctryBlank=!String(d.country||'').trim(), fxBlank=(d.xero_fx==null||String(d.xero_fx).trim()==='')&&!!d.fx_expected;
+      var _fxTxt=(d.xero_fx==null||d.xero_fx==='')?'<span class="mut">—</span>':esc(d.xero_fx)+(d.fx_pair?' <span class="mut" style="font-size:9.5px" title="'+(d.fx_pair==='USD/AUD'?'Xero AU: USD per AUD':'Xero UK: USD per GBP')+'">'+esc(d.fx_pair)+'</span>':'');
       var _redTd=' style="background:var(--neg-bg)"';   // highlight a blank required cell
       var c_ctry= locked?'<td class="l"'+(ctryBlank?_redTd:'')+'>'+txt(d.country)+'</td>':'<td class="l"'+(ctryBlank?_redTd:'')+'><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
@@ -7321,7 +7323,7 @@
         ? '<span style="color:var(--muted);font-style:italic" title="Estimated — Σ start deposit of the linked POs (no amount entered yet). Drives cash flow + the POs\' drawdown so the start isn\'t pushed into completion.">~'+money(d.amount_est)+' <span style="font-size:9px">est</span></span>'
         : ((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount));
       var c_amt = locked?'<td style="font-variant-numeric:tabular-nums">'+_amtDisp+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
-      var c_fx  = locked?'<td'+(fxBlank?_redTd:'')+'>'+txt(d.xero_fx)+'</td>':'<td'+(fxBlank?_redTd:'')+'>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
+      var c_fx  = locked?'<td'+(fxBlank?_redTd:'')+'>'+_fxTxt+'</td>':'<td'+(fxBlank?_redTd:'')+'>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       // Dates — Due / Likely pay / Paid merged into one stacked cell with small labels. Likely pay hides once paid (unpaid-only).
       var _dl='display:inline-block;width:38px;color:var(--faint)';   // little row label
       var c_dates = locked
@@ -7374,7 +7376,7 @@
       var v_ctry= locked?txt(d.country):'<select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select>';
       var v_prod= locked?txt(d.prod_no):'<button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button>';
       var v_amt = locked?(d.amount_is_est?'<span style="color:var(--muted);font-style:italic" title="Estimated — Σ start deposit of the linked POs (no amount entered yet)">~'+money(d.amount_est)+' est</span>':((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount))):editCell(ep,'amount',d.amount,'','style="width:120px"');
-      var v_fx  = locked?txt(d.xero_fx):editCell(ep,'xero_fx',d.xero_fx,'','style="width:90px"');
+      var v_fx  = locked?((d.xero_fx==null||d.xero_fx==='')?'<span class="mut">—</span>':esc(d.xero_fx)+(d.fx_pair?' <span class="mut" style="font-size:9.5px">'+esc(d.fx_pair)+'</span>':'')):editCell(ep,'xero_fx',d.xero_fx,'','style="width:90px"');
       var _dl='display:inline-block;width:46px;color:var(--faint)';
       var v_dates = locked
         ? '<div><span style="'+_dl+'">Due</span>'+txt(d.date_due,true)+'</div>'+(d.date_paid?'':'<div><span style="'+_dl+'">Likely</span>'+txt(d.date_likely_pay,true)+'</div>')+'<div><span style="'+_dl+'">Paid</span>'+txt(d.date_paid,true)+'</div>'
@@ -13533,7 +13535,7 @@
     var h='<div class="tw"><table class="hz-stack"><thead><tr><th class="l">Reference</th><th class="l">Type</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Description</th><th>Amount</th><th>FX (Xero)</th><th class="l">Date paid</th><th>Used</th><th>Remaining</th><th class="l">POs assigned</th></tr></thead><tbody>';
     h+=rows.map(function(d){var ep='/api/supply/deposit/'+encodeURIComponent(d.id); var oth=!d.is_deposit;
       return '<tr><td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l"><span class="tool-badge '+(d.is_deposit?'bg-blue':'bg-neutral')+'">'+(d.is_deposit?'Deposit':'Other')+'</span></td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'prod_no',d.prod_no,'txt')+'</td><td class="l">'+editCell(ep,'description',d.description,'txt')+'</td>'
-        +'<td>'+editCell(ep,'amount',d.amount)+'</td><td>'+(oth?'<span class="mut">—</span>':editCell(ep,'xero_fx',d.xero_fx))+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>'
+        +'<td>'+editCell(ep,'amount',d.amount)+'</td><td>'+(oth&&(d.xero_fx==null||d.xero_fx==='')&&!d.fx_expected?'<span class="mut">—</span>':editCell(ep,'xero_fx',d.xero_fx))+(d.fx_pair&&d.xero_fx!=null&&d.xero_fx!==''?' <span class="mut" style="font-size:9.5px">'+esc(d.fx_pair)+'</span>':'')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>'
         +'<td>'+(oth?'<span class="mut">—</span>':money(d.deposit_used))+'</td>'
         +'<td'+((Number(d.deposit_remaining)||0)<0?' style="color:var(--neg);font-weight:700" title="assigned start deposits exceed the pool"':'')+'>'+(oth?'<span class="mut">—</span>':money(d.deposit_remaining))+(d.shared_ref?' <span class="src fx" title="used/remaining are pooled across rows sharing this reference">pool</span>':'')+'</td>'
         +'<td class="l bc-mono tiny">'+(oth?'<span class="mut">—</span>':esc(d.linked_pos||''))+'</td></tr>';}).join('');

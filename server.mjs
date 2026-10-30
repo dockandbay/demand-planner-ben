@@ -9818,6 +9818,9 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
     const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
     out.rate = runRate;
+    try { const rr = (req.body && req.body.run) || {};   // v28.594: the run's deposit + Other rows take this bill's rate (blanks only, USD bills only)
+      out.deposits_fx_filled = await depFxFill(rr.dt, rr.supplier || plan.supplier, region === 'au' ? 'AU' : 'UK', runRate, (binv && binv.CurrencyCode) || plan.currency || 'USD'); }
+    catch (e) { console.warn('[deposits xero_fx] post ' + (e && e.message)); }
     // 2) a payment against each PO bill, IN ITS SETTLE ORG. Same-org → from the paying org's USD bank at the run rate
     //    (a pre-P58 same-org deposit at the deposit-reference rate). Cross-org completion → in the HOME org from that
     //    org's loan (901); we let Xero apply the home org's own daily USD rate (each entity books at its own rate).
@@ -10321,9 +10324,31 @@ const xbDead = s => /^(VOIDED|DELETED)$/i.test(String(s || ''));
 const xbUrl = id => 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + id;
 // Upsert Xero ACCPAY invoices (API shape) into planner.xero_bills in ONE multi-row statement. Returns how many rows are new
 // or changed (status, amount due, or UpdatedDateUTC differ from the cached row), so callers can tell "nothing changed".
+// v28.594 (Ben 30-Oct-26): planner.deposits.xero_fx = the CurrencyRate of the run's SUPPLIER-PAYMENT bill (payment_xero_bills), matched by
+// run date = date_paid, supplier and region (AU run -> country AU; UK run -> any other country, or any row before PAY_REGION_SPLIT_FROM).
+// USD bills only: UK org = USD per GBP, AU org = USD per AUD. Fills BLANKS only, never a manual value. Called when xero-post creates the
+// bill and from xbUpsert (hourly bills sync + live refresh), so a bill made by hand in Xero or a rate edited later still lands.
+async function depFxFill(runDate, supplier, region, rate, ccy) {
+  if (!runDate || !supplier || !(Number(rate) > 0) || String(ccy || 'USD').toUpperCase() !== 'USD') return 0;
+  const au = String(region || '').toUpperCase() === 'AU';
+  const r = await pool.query(`UPDATE planner.deposits SET xero_fx=$4, updated_at=now()
+      WHERE date_paid=$1::date AND lower(trim(supplier_name))=lower(trim($2)) AND (xero_fx IS NULL OR xero_fx::text='')
+        AND (CASE WHEN $3 THEN upper(coalesce(country,''))='AU' ELSE ($1::date < $5::date OR upper(coalesce(country,''))<>'AU') END)`,
+    [String(runDate).slice(0, 10), supplier, au, Number(rate), PAY_REGION_SPLIT_FROM]);
+  return r.rowCount || 0;
+}
+async function depFxFromBills(inv) {   // inv = Xero ACCPAY invoices just read; only SUPPLIER-PAYMENT bills recorded by a run count
+  const ids = (inv || []).filter(v => v && v.InvoiceID && v.CurrencyRate != null && String(v.CurrencyCode || '').toUpperCase() === 'USD').map(v => v.InvoiceID);
+  if (!ids.length) return 0;
+  const runs = (await pool.query(`SELECT bill_id, to_char(run_date,'YYYY-MM-DD') run_date, supplier, region FROM planner.payment_xero_bills
+      WHERE bill_id = ANY($1::text[]) AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, [ids])).rows;
+  let n = 0; for (const b of runs) { const v = inv.find(x => x.InvoiceID === b.bill_id); n += await depFxFill(b.run_date, b.supplier, b.region, v.CurrencyRate, v.CurrencyCode); }
+  return n;
+}
 async function xbUpsert(inv, reg) {
   inv = (inv || []).filter(v => v && v.InvoiceID && (!v.Type || v.Type === 'ACCPAY'));
   if (!inv.length) return 0;
+  try { await depFxFromBills(inv); } catch (e) { console.warn('[deposits xero_fx] ' + (e && e.message)); }   // v28.594
   const prev = new Map((await pool.query(`SELECT invoice_id, status, amount_due, updated_utc FROM planner.xero_bills WHERE invoice_id = ANY($1::text[])`, [inv.map(v => v.InvoiceID)])).rows.map(r => [r.invoice_id, r]));
   const vals = [], params = []; let pi = 0, changed = 0;
   for (const v of inv) {
@@ -12920,6 +12945,12 @@ supplySectionHandler = async (req, res, next) => {
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status,
+            -- v28.594: FX applies to USD payments only. Expected = a paid deposit, or a paid Other row whose run has a USD supplier-payment
+            -- bill; GBP / EUR bills or no bill stay blank without the red flag. Pair: AU org from 01-Oct-26 = USD per AUD, else USD per GBP.
+            (d.date_paid IS NOT NULL AND (d.is_deposit OR EXISTS (SELECT 1 FROM planner.payment_xero_bills b JOIN planner.xero_bills xb ON xb.invoice_id=b.bill_id
+               WHERE b.run_date=d.date_paid AND lower(trim(b.supplier))=lower(trim(d.supplier_name)) AND upper(coalesce(xb.currency_code,''))='USD'
+                 AND upper(coalesce(b.status,'')) NOT IN ('VOIDED','DELETED')))) fx_expected,
+            CASE WHEN upper(coalesce(d.country,''))='AU' AND d.date_paid >= '${PAY_REGION_SPLIT_FROM}'::date THEN 'USD/AUD' ELSE 'USD/GBP' END fx_pair,
             to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id, to_char(d.date_paid,'YYYY-MM-DD') date_paid,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365); v28.426: date_paid was inside this comment (Payments Due showed paid Other payments and deposits as unpaid)
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,

@@ -68,6 +68,7 @@ sources:
   - server.mjs :: afLoadCommon (Auto Forecast cash phasing)
   - server.mjs :: buildUpfxStatement, upfxCsv, upfxConfig, runUpfxStatementCron, upfxEmailed, /api/supply/xero/up-fx-statement.csv, /api/cron/up-fx-statement
   - supply/inject.html :: PO_STATUSES, stGroup, prodStatusException, isFOBdest, poErpMisaligned, upfxDownload
+  - server.mjs :: depFxFill, depFxFromBills
   - server.mjs :: syncXeroBills, _syncXeroBillsRun, xbUpsert, xbLastSync, xeroBillsFullResync, /api/supply/xero/bills-sync-visit, /api/supply/xero/bills-resync-all (Xero bill cache)
   - server.mjs :: xeroHealPoLinks, xeroHealAllVoided, xbRefreshLive, xbLeadMatch, xeroVoidLinkFinding, resolvePoLinks, /api/supply/po/:po/links, /api/supply/xero/bills/search, /api/supply/xero/bills/verify (PO to Xero bill links)
   - supply/inject.html :: xeroBillPicker, xbsVisit, xbsSync
@@ -170,7 +171,7 @@ fingerprints:
   server.mjs::case 'shipments': 9611b8722270
   server.mjs::poShipObj: bff1ca67664d
   server.mjs::upsertTracking: aaba6026cb4a
-  server.mjs::case 'deposits': 987dc1c07280
+  server.mjs::case 'deposits': 53e9e06c9102
   server.mjs::case 'productions': 535e6383bf1d
   server.mjs::case 'payments-report': e30568f69d63
   server.mjs::PAY_REGION_SPLIT_FROM: dc36a85b870b
@@ -178,7 +179,7 @@ fingerprints:
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
   server.mjs::computeXeroRunPlan: 95c189a540cf
-  server.mjs::/api/supply/payments/xero-post: 420dcfad00f1
+  server.mjs::/api/supply/payments/xero-post: 9e32d5551188
   server.mjs::/api/supply/xero/deposit-credit-note: f24292c48a0a
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
@@ -282,9 +283,11 @@ fingerprints:
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
   supply/inject.html::upfxDownload: 13f375924b7e
+  server.mjs::depFxFill: afe9bd5fb04c
+  server.mjs::depFxFromBills: 2b36496b77f3
   server.mjs::syncXeroBills: 526e1a6f6e06
   server.mjs::_syncXeroBillsRun: 96082099a446
-  server.mjs::xbUpsert: 7f5a5479a726
+  server.mjs::xbUpsert: e375410bfe06
   server.mjs::xbLastSync: 29ebc29cc1f8
   server.mjs::xeroBillsFullResync: 29e5b96dbbac
   server.mjs::/api/supply/xero/bills-sync-visit: 87f77c346216
@@ -328,7 +331,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.585
+verified_version: v28.594
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -409,6 +412,7 @@ verified_version: v28.585
 - A production = one supplier within one prod_no. Status is Completed when all its POs are complete, else Active. (source: server.mjs :: case 'productions')
 - prod_no drives the supplier-confirmation requirement (prod_numbers.require_supplier_confirmation) and the production Xero account (prod_numbers.xero_account_code, matched ignoring a leading "P"). (source: server.mjs :: PO_ROWS_SQL, payments-report ACCT)
 - Batches (planner.batches) are buying batches; they are not payment runs. (source: server.mjs :: case 'batches')
+- Deposit / Other FX (deposits.xero_fx, v28.594, Ben 30-Oct-26) = the Xero CurrencyRate of the run's SUPPLIER-PAYMENT bill (payment_xero_bills), NOT the bank payment's rate (checked 30-Oct-26: all 11 manual Jun to Jul-26 rates equal the bill rate). Matched by run date = date_paid, supplier (ignoring case and spaces) and region: an AU run fills rows with country AU; a UK run fills the other rows, and any row paid before 01-Oct-26 (PAY_REGION_SPLIT_FROM). USD bills only: Xero UK stores USD per GBP, Xero AU stores USD per AUD (the register shows the pair, USD/GBP or USD/AUD). It fills BLANKS only and never overwrites a manual value. It is written when xero-post creates the bill, and again whenever the bill is read into the bill cache (hourly bills sync, live refresh), so a bill made by hand in Xero still lands. GBP / EUR / AUD payments or rows with no bill stay blank. The register flags a blank FX red only when one is expected: a paid deposit, or a paid Other row whose run has a USD supplier-payment bill (fx_expected). (source: server.mjs :: depFxFill, depFxFromBills, xero-post)
 
 ## Cash flow (SUPPLY ▸ Cash Flow)
 - Lines are built from the PO grid rows. A line is timed on: the paid date, else the likely date (the deposit's date_likely_pay or a manual payment_likely_dates override), else the due date. Lines of 0 or less are dropped. (source: server.mjs :: cashflowResponse mkLine)
