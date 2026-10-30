@@ -1,3 +1,10 @@
+## v28.596 (31-Oct-26) Campaigns phase 2: launch READINESS one-pager (Kathryn's Launch Readiness spec)
+- DEMAND ▸ Inputs ▸ Calendar ▸ Readiness (or Readiness on a campaign): one page per launch month, every campaign SKU per market x channel location (DTC = <market>_3pl, Amazon = <market>_fba), as in the approved mockup. Filters: month, campaign, tier. Tiles: lines, Green, Amber, Red. ⬇ CSV and Print / PDF (A4 landscape).
+- Per line: on hand there (negative shown red, counted as 0), the other pool for info, inbound by the intake date and after it (each PO with qty and ETA; after-intake and no-ETA legs in amber), forecast from today to launch (pro-rated by day), stock at launch, the launch month forecast, cover vs target, RAG and the reason.
+- RAG: Red = not sold there (PRODUCT availability), nothing left at launch, or under 2 weeks; Amber = below target (campaign target, else the SKU's target cover at that location) or no launch-month forecast; Green = at or above target. Drafts are calculated but marked "not chased". Uplift is not applied yet (phase 5).
+- Calendar timeline: each upcoming campaign chip shows its worst RAG and the count (e.g. "Amber 1", "Red 13").
+- New: GET /api/trading-calendar/readiness?month=YYYY-MM&id= (read only; campaignReadiness). No migration, no env var, no cron route.
+
 ## v28.595 (31-Oct-26) Sandbox lean mode: SANDBOX_LEAN=1 stops background database work (free-tier Supabase disk IO)
 - Ben: the sandbox server was eating the free Supabase project's disk IO budget. It rebuilt the Actions, Order plan, lookups, exceptions and Open-actions caches every 5 to 10 min, 24/7, plus a 5 s keep-alive, 30 s payment-email and health-event writes, and hourly / daily sync and health jobs, even with nobody using it.
 - SANDBOX_LEAN=1 (local .env) runs the sandbox like Vercel for background work: no boot warms, no re-warm timers, no keep-alive, no preorders / FBA-inflight / health-check / DHL / Fulfil PO import timers, no post-write portal prewarm. Caches build on the first request, then stale-while-revalidate as before. Health flush and payment emails every 5 min, token purge every 6 h.

@@ -17522,7 +17522,7 @@ function renderCalTimeline(rows){
       if(e.status){ var n=(e.skus||[]).length, dr=e.status!=='confirmed';   // v28.589: a campaign shows once: name, market · channels · SKU count, Draft / Confirmed; click to open
         return '<div class="cal-camp-chip" data-id="'+e.id+'" role="button" tabindex="0" title="Open campaign" style="background:'+(dr?'var(--card)':c)+';color:'+(dr?'var(--ink)':'#fff')+';border:1.5px '+(dr?'dashed':'solid')+' '+c+';border-radius:5px;padding:3px 6px;margin-bottom:4px;cursor:pointer">'
           +'<div style="font-weight:700;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+tHesc(e.title||'Campaign')+'</div>'
-          +'<div style="opacity:.85;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+tHesc(campMarkets(e).join(',')+' · '+campChanLbl(e.channels)+' · '+n+' SKU'+(n===1?'':'s')+' · '+(dr?'Draft':'Confirmed'))+'</div></div>'; }
+          +'<div style="opacity:.85;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+tHesc(campMarkets(e).join(',')+' · '+campChanLbl(e.channels)+' · '+n+' SKU'+(n===1?'':'s')+' · '+(dr?'Draft':'Confirmed'))+'</div><div class="cal-camp-rag" data-id="'+e.id+'"></div></div>'; }
       var det=[e.event_date,(e.market||'ALL'),(e.category||'ALL'),(e.sku_list?'SKUs: '+e.sku_list:''),e.event_type,e.title,(e.uplift_pct!=null&&e.uplift_pct!==''?'+'+e.uplift_pct+'%':''),e.notes].filter(Boolean).join(' · ');
       return '<div title="'+String(det).replace(/"/g,'&quot;')+'" style="background:'+c+';color:#fff;border-radius:5px;padding:3px 6px;margin-bottom:4px;cursor:help">'
         +'<div style="font-weight:700;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+tHesc(e.title||e.event_type||'event')+'</div>'
@@ -17768,6 +17768,7 @@ function campOpenEditor(ev,onSaved){
     var h='<style>#camp-ed table{table-layout:auto!important}#camp-ed td,#camp-ed th,tr.cal-camp-row td{text-align:left!important;max-width:none!important;overflow:visible!important;text-overflow:clip!important}</style><div role="dialog" aria-label="Campaign" style="width:min(820px,100vw);height:100%;background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;box-shadow:-18px 0 44px -18px rgba(16,24,40,.35)">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--violet);text-transform:uppercase">Campaign</span>'
         +'<input id="ce-title" value="'+esc(C.title)+'" aria-label="Campaign name" style="'+inp+';font-size:16px;font-weight:800;flex:1">'+campStatusPill(C.status)
+        +(ev.event_date?'<button id="ce-rd" title="Launch readiness for this campaign (as last saved)" style="border:1px solid var(--violet);color:var(--violet);background:var(--card);border-radius:6px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer">Readiness</button>':'')
         +'<button id="ce-x" aria-label="Close" style="border:0;background:none;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>'
       +'<div style="flex:1;overflow:auto;padding:14px 18px;display:grid;gap:14px;align-content:start">'
       +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px">'
@@ -17822,6 +17823,7 @@ function campOpenEditor(ev,onSaved){
   function wire(){ var $=function(id){ return document.getElementById(id); };
     wrap.onclick=function(e){ if(e.target===wrap)close(); };
     $('ce-x').onclick=close; $('ce-cancel').onclick=close;
+    if($('ce-rd'))$('ce-rd').onclick=function(){ campReadinessOpen({month:String(ev.event_date).slice(0,7),id:+ev.id}); };   // v28.596
     $('ce-intake').onchange=function(){ grab(); draw(); }; $('ce-date').onchange=function(){ grab(); draw(); };
     wrap.querySelectorAll('.ce-mk').forEach(function(b){ b.onclick=function(){ grab(); var m=b.dataset.m, i=C.mk.indexOf(m); if(i>=0){ if(C.mk.length>1)C.mk.splice(i,1); } else C.mk.push(m); draw(); }; });
     wrap.querySelectorAll('.ce-ch').forEach(function(b){ b.onclick=function(){ grab(); var c=b.dataset.c, i=C.ch.indexOf(c); if(i>=0){ if(C.ch.length>1)C.ch.splice(i,1); } else C.ch.push(c); draw(); }; });
@@ -17851,6 +17853,96 @@ function campOpenEditor(ev,onSaved){
   }
   draw(); var t=document.getElementById('ce-title'); if(t)t.focus();
 }
+// ─── v28.596 (Ben 31-Oct-26, Kathryn's Launch Readiness spec phase 2): monthly launch READINESS one-pager ─────────────────
+// Every campaign launching in the month, per market × channel location: on hand, inbound landing by the intake date, forecast to
+// launch, stock at launch, cover in the launch month and a RAG with the reason (server: campaignReadiness). Drafts are shown but
+// marked not chased. Filters by campaign and tier; CSV and Print / PDF. Opened from the Calendar (Readiness) or a campaign.
+var CAMP_RAG={g:['Green','var(--pos)','var(--pos-bg)'],a:['Amber','var(--amber)','var(--amber-bg)'],r:['Red','var(--neg)','var(--neg-bg)']};
+function campRagPill(r,n){ var x=CAMP_RAG[r]; if(!x)return ''; return '<span style="font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:1px 7px;white-space:nowrap;background:'+x[2]+';color:'+x[1]+'">'+x[0]+(n!=null?' '+n:'')+'</span>'; }
+function campMonLbl(ym){ var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return ym?mn[+ym.slice(5,7)-1]+'-'+ym.slice(2,4):''; }
+function campChLbl(ch){ return ch==='FBA'?'Amazon':'DTC'; }
+// rows after the campaign / tier filters: [{c, g, rows}]
+function campRdPanels(d,f){ var out=[]; (d.campaigns||[]).forEach(function(c){ if(f.id&&c.id!==f.id)return;
+  c.groups.forEach(function(g){ var rows=g.rows.filter(function(r){ return !f.tier||r.tier===f.tier; }); if(rows.length)out.push({c:c,g:g,rows:rows}); }); }); return out; }
+function campRdTable(p,esc){ var lym=p.c.launch.slice(0,7), other=p.g.channel==='FBA'?'3PL':'FBA', n=function(v){ return v==null?'':Math.round(v).toLocaleString('en-GB'); };
+  var th=function(t,num){ return '<th'+(num?' class="n"':'')+' style="text-align:'+(num?'right':'left')+';padding:5px 7px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);white-space:nowrap;border-bottom:1px solid var(--line)">'+t+'</th>'; };
+  var td=function(v,num,st){ return '<td'+(num?' class="n"':'')+' style="padding:5px 7px;vertical-align:top;'+(num?'text-align:right;font-variant-numeric:tabular-nums;':'')+(st||'')+'">'+v+'</td>'; };
+  return '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
+    +th('SKU')+th('Tier')+th('On hand '+(p.g.channel==='FBA'?'FBA':'3PL'),1)+th(other+' (info)',1)+th('In by intake',1)+th('In after',1)+th('POs (ETA)')+th('Sales to launch',1)+th('At launch',1)+th(campMonLbl(lym)+' fcst',1)+th('Cover / target',1)+th('RAG')+th('Why')+'</tr></thead><tbody>'
+    +p.rows.map(function(r){ return '<tr style="border-top:1px solid var(--line2)">'
+      +td('<b style="white-space:nowrap">'+esc(r.sku)+'</b><div style="color:var(--muted);font-size:11px;min-width:150px;max-width:200px">'+esc(r.name||'')+'</div>')+td(esc(r.tier))
+      +td(n(r.on_hand),1,r.on_hand<0?'color:var(--neg)':'')+td(n(r.other_pool),1,'color:var(--faint)')+td(n(r.in_by),1)+td(r.in_after?n(r.in_after):'',1)
+      +td(r.legs.map(function(x){ return '<div style="white-space:nowrap;font-size:11px;color:'+(x.by?'var(--ink-soft)':'var(--amber)')+'">'+esc(x.ref)+' · '+n(x.qty)+' · '+(x.eta?saDate(x.eta):'no ETA')+'</div>'; }).join(''))
+      +td(n(r.sales_to_launch),1)+td('<b>'+n(r.at_launch)+'</b>',1)+td(n(r.launch_fc),1)+td((r.cover==null?'n/a':r.cover.toFixed(1))+'<span style="color:var(--faint)"> / '+(r.target==null?'?':r.target)+' wks</span>',1,'white-space:nowrap')
+      +td(campRagPill(r.rag))+td(esc(r.why),0,'color:var(--ink-soft);font-size:11.5px;min-width:160px')+'</tr>'; }).join('')
+    +'</tbody></table></div>'; }
+function campRdBody(d,f,esc){ var ps=campRdPanels(d,f), cnt={g:0,a:0,r:0}, tot=0;
+  ps.forEach(function(p){ p.rows.forEach(function(r){ tot++; cnt[r.rag]++; }); });
+  var kpi=function(l,v,col){ return '<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:110px;background:var(--card)"><div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">'+l+'</div><div style="font-size:22px;font-weight:800;color:'+(col||'var(--ink)')+'">'+v+'</div></div>'; };
+  return '<div style="display:flex;gap:10px;flex-wrap:wrap">'+kpi('Campaign SKU lines',tot)+kpi('Green',cnt.g,'var(--pos)')+kpi('Amber',cnt.a,'var(--amber)')+kpi('Red',cnt.r,'var(--neg)')+'</div>'
+    +(ps.length?ps.map(function(p){ var dr=p.c.status!=='confirmed', pc={g:0,a:0,r:0}; p.rows.forEach(function(r){ pc[r.rag]++; });
+      return '<section class="rd-panel" style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--card);'+(dr?'border-style:dashed;':'')+'break-inside:avoid">'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b style="font-size:14px">'+esc(p.c.title)+'</b>'
+        +'<span style="color:var(--muted);font-size:12px">'+esc(p.g.market+' '+campChLbl(p.g.channel))+' · launch '+esc(saDate(p.c.launch))+' · intake '+esc(saDate(p.c.intake))+(p.c.intake_set?' (set)':'')+'</span>'
+        +campStatusPill(p.c.status)+(dr?'<span style="font-size:11px;color:var(--faint)">Draft: shown, not chased</span>':'')
+        +'<span style="margin-left:auto;display:flex;gap:4px">'+['r','a','g'].filter(function(k){ return pc[k]; }).map(function(k){ return campRagPill(k,pc[k]); }).join('')+'</span></div>'
+        +campRdTable(p,esc)+'</section>'; }).join('')
+      :'<div style="padding:14px;color:var(--faint)">No campaign SKUs launch this month'+(f.id||f.tier?' for this filter':'')+'.</div>')
+    +'<div style="font-size:11.5px;color:var(--faint);max-width:120ch">At launch = on hand at the location (negative counted as 0) + inbound landing there by the intake date (a passed ETA still counts) − forecast from today to the day before launch (latest forecast run). Cover = at launch ÷ the launch month\'s weekly forecast. Red: not sold there (PRODUCT availability), nothing left at launch, or under '+(d.red_weeks||2)+' weeks. Amber: below target (campaign target, else the SKU\'s target cover there) or no launch-month forecast. Uplift is not applied yet. Data as of '+esc(saDate(d.as_of))+'.</div>'; }
+function campRdCsv(d,f){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  var L=[['Campaign','Status','Launch','Intake','Market','Channel','SKU','Product','Tier','On hand','Other pool','In by intake','In after','POs','Sales to launch','At launch','Launch month fcst','Cover wks','Target wks','RAG','Why'].join(',')];
+  campRdPanels(d,f).forEach(function(p){ p.rows.forEach(function(r){ L.push([p.c.title,p.c.status,saDate(p.c.launch),saDate(p.c.intake),p.g.market,campChLbl(p.g.channel),r.sku,r.name,r.tier,r.on_hand,r.other_pool,r.in_by,r.in_after,
+    r.legs.map(function(x){ return x.ref+' '+x.qty+' '+(x.eta?saDate(x.eta):'no ETA'); }).join('; '),r.sales_to_launch,r.at_launch,r.launch_fc,r.cover,r.target,(CAMP_RAG[r.rag]||[''])[0],r.why].map(q).join(',')); }); });
+  return L.join('\n'); }
+function campReadinessOpen(opt){ opt=opt||{};
+  var esc=tHesc, old=document.getElementById('camp-rd'); if(old)old.remove();
+  var f={month:opt.month||'', id:opt.id||null, tier:''}, D=null;
+  var wrap=document.createElement('div'); wrap.id='camp-rd';
+  wrap.style.cssText='position:fixed;inset:0;z-index:9001;background:rgba(15,23,42,.35);display:flex;justify-content:center;padding:18px 12px;overflow:auto';
+  document.body.appendChild(wrap);
+  var sel='font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)';
+  var btn='border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:5px 12px;font:inherit;font-size:12.5px;cursor:pointer';
+  function close(){ wrap.remove(); document.removeEventListener('keydown',onKey); }
+  function onKey(e){ if(e.key==='Escape')close(); }
+  document.addEventListener('keydown',onKey);
+  wrap.onclick=function(e){ if(e.target===wrap)close(); };
+  function shell(inner){ wrap.innerHTML='<style>#camp-rd table{table-layout:auto!important}#camp-rd table td,#camp-rd table th{max-width:none!important;overflow:visible!important;text-overflow:clip!important;text-align:left!important;width:auto!important}#camp-rd table td.n,#camp-rd table th.n{text-align:right!important}</style>'
+    +'<div role="dialog" aria-label="Launch readiness" style="width:min(1440px,100%);background:var(--bg,var(--card));border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;height:max-content;box-shadow:0 20px 50px rgba(15,23,42,.25)">'+inner+'</div>'; }
+  function draw(){ var cs=(D.campaigns||[]);
+    var head='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--violet);text-transform:uppercase">Campaigns ▸ Readiness</span>'
+      +'<h2 style="margin:0;font-size:18px;font-weight:800">Launch readiness · '+esc(campMonLbl(f.month))+'</h2><span style="flex:1"></span>'
+      +'<select id="rd-month" aria-label="Launch month" style="'+sel+'">'+(D.months||[]).concat(D.months.indexOf(f.month)<0?[f.month]:[]).sort().map(function(m){ return '<option value="'+m+'"'+(m===f.month?' selected':'')+'>'+campMonLbl(m)+'</option>'; }).join('')+'</select>'
+      +'<select id="rd-camp" aria-label="Campaign" style="'+sel+'"><option value="">All campaigns</option>'+cs.map(function(c){ return '<option value="'+c.id+'"'+(c.id===f.id?' selected':'')+'>'+esc(c.title)+'</option>'; }).join('')+'</select>'
+      +'<select id="rd-tier" aria-label="Tier" style="'+sel+'"><option value="">All tiers</option>'+CAMP_TIERS.map(function(t){ return '<option'+(t===f.tier?' selected':'')+'>'+t+'</option>'; }).join('')+'</select>'
+      +'<button id="rd-csv" style="'+btn+'">⬇ CSV</button><button id="rd-print" style="'+btn+'">Print / PDF</button>'
+      +'<button id="rd-x" aria-label="Close" style="border:0;background:none;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>';
+    shell(head+'<div id="rd-body" style="display:flex;flex-direction:column;gap:12px">'+campRdBody(D,f,esc)+'</div>');
+    var $=function(id){ return document.getElementById(id); };
+    $('rd-x').onclick=close;
+    $('rd-month').onchange=function(){ f.month=this.value; f.id=null; load(); };
+    $('rd-camp').onchange=function(){ f.id=this.value?+this.value:null; draw(); };
+    $('rd-tier').onchange=function(){ f.tier=this.value; draw(); };
+    $('rd-csv').onclick=function(){ var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([campRdCsv(D,f)],{type:'text/csv'})); a.download='launch_readiness_'+campMonLbl(f.month)+'.csv'; a.click(); };
+    $('rd-print').onclick=function(){ var w=window.open('','_blank'); if(!w){ alert('Allow pop-ups to print the one-pager.'); return; }
+      var css=getComputedStyle(document.documentElement), vars=['--card','--bg','--line','--line2','--ink','--ink-soft','--muted','--faint','--pos','--pos-bg','--amber','--amber-bg','--neg','--neg-bg','--hover','--violet'].map(function(v){ return v+':'+css.getPropertyValue(v); }).join(';');
+      w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Launch readiness '+esc(campMonLbl(f.month))+'</title><style>:root{'+vars+'}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#fff;margin:16px;display:flex;flex-direction:column;gap:12px}@page{size:A4 landscape;margin:10mm}section{break-inside:avoid}</style></head><body>'
+        +'<h2 style="margin:0">Launch readiness · '+esc(campMonLbl(f.month))+(f.id?' · '+esc(((cs.filter(function(c){ return c.id===f.id; })[0])||{}).title||''):'')+(f.tier?' · '+esc(f.tier):'')+'</h2>'+campRdBody(D,f,esc)+'</body></html>');
+      w.document.close(); w.focus(); setTimeout(function(){ w.print(); },300); };
+  }
+  function load(){ shell('<div style="padding:18px;color:var(--muted);font-size:12.5px">Loading readiness…</div>');
+    fetch('/api/trading-calendar/readiness'+(f.month?'?month='+encodeURIComponent(f.month):'')).then(function(r){ return r.json(); }).then(function(d){
+      if(d&&d.error){ shell('<div style="padding:18px;color:var(--neg)">'+esc(d.error)+'</div>'); return; }
+      if(!f.month){ f.month=(d.months||[])[0]||new Date().toISOString().slice(0,7); if((d.months||[]).length){ return load(); } }
+      D=d; if(f.id&&!(d.campaigns||[]).some(function(c){ return c.id===f.id; }))f.id=null; draw(); })
+      .catch(function(e){ shell('<div style="padding:18px;color:var(--neg)">Could not load readiness: '+esc(e&&e.message||e)+'</div>'); }); }
+  load();
+}
+// Calendar timeline: worst RAG on each upcoming campaign chip (one call for all campaigns from today).
+function campRdDecorate(root){ var els=root.querySelectorAll('.cal-camp-rag'); if(!els.length)return;
+  fetch('/api/trading-calendar/readiness').then(function(r){ return r.json(); }).then(function(d){ var by={}; (d.campaigns||[]).forEach(function(c){ by[c.id]=c; });
+    els.forEach(function(el){ var c=by[el.dataset.id]; if(!c||!c.worst)return; var x=CAMP_RAG[c.worst];
+      el.innerHTML='<span title="Launch readiness: '+c.counts.r+' red, '+c.counts.a+' amber, '+c.counts.g+' green" style="display:inline-block;margin-top:2px;font-size:9px;font-weight:800;text-transform:uppercase;border-radius:6px;padding:0 5px;background:var(--card);color:'+x[1]+';border:1px solid '+x[1]+'">'+x[0]+(c.worst!=='g'?' '+c.counts[c.worst]:'')+'</span>'; }); }).catch(function(){}); }
 function renderCalendarView(body){
   var MK=['ALL','UK','US','EU','AU'];
   function load(){ body.innerHTML='<div style="padding:18px;color:var(--muted);font-size:12px">Loading…</div>';
@@ -17860,7 +17952,7 @@ function renderCalendarView(body){
     var head='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
       +'<div style="font-weight:700;font-size:13px">Trading calendar</div>'
       +'<button id="cal-add" style="'+bs+';border-color:var(--blue);color:var(--blue)">+ Event</button>'
-      +(CAL_CAMPAIGNS_ON?'<button id="cal-addcamp" style="'+bs+';border-color:var(--violet);color:var(--violet)" title="A marketing campaign: launch date, markets, channels and its SKUs by tier, entered once">+ Campaign</button>':'')
+      +(CAL_CAMPAIGNS_ON?'<button id="cal-addcamp" style="'+bs+';border-color:var(--violet);color:var(--violet)" title="A marketing campaign: launch date, markets, channels and its SKUs by tier, entered once">+ Campaign</button><button id="cal-rd" style="'+bs+';border-color:var(--violet);color:var(--violet)" title="Launch readiness one-pager: every campaign SKU launching in a month, stock at launch, cover and RAG">Readiness</button>':'')
       +'<button id="cal-dl" style="'+bs+'">⬇ CSV</button><button id="cal-ul" style="'+bs+'">⬆ Upload CSV</button>'
       +'<span style="color:var(--faint);font-size:11px;margin-left:auto">'+rows.length+' events</span></div><div id="cal-upbox"></div>';
     function inp(ep,f,val,w,extra){ return '<input class="cal-in" data-ep="'+ep+'" data-f="'+f+'"'+(extra||'')+' value="'+tHesc(val==null?'':val)+'" style="width:'+(w||120)+'px;padding:3px 5px;border:1px solid #d6d6d6;border-radius:4px;font-size:12px">'; }
@@ -17908,6 +18000,7 @@ function renderCalendarView(body){
     var byId={}; rows.forEach(function(r){ byId[r.id]=r; });
     body.querySelectorAll('.cal-open,.cal-camp-chip').forEach(function(el){ var go=function(){ var ev=byId[el.dataset.id]; if(ev)campOpenEditor(ev,load); };
       el.onclick=go; el.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } }; });
+    var rdb=document.getElementById('cal-rd'); if(rdb)rdb.onclick=function(){ campReadinessOpen({}); }; campRdDecorate(body);   // v28.596
     var acb=document.getElementById('cal-addcamp'); if(acb)acb.onclick=function(){ acb.disabled=true;
       fetch('/api/trading-calendar/campaign',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){ return r.json(); }).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed');
         return fetch('/api/trading-calendar').then(function(r){ return r.json(); }).then(function(d){ var ev=(d.events||[]).filter(function(e){ return e.id==j.id; })[0]; load(); if(ev)campOpenEditor(ev,load); }); })

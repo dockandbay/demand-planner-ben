@@ -26945,6 +26945,90 @@ async function campaignIntakeDeadlines() {
   }
   return Object.values(best);
 }
+// v28.596 (Ben 31-Oct-26, Kathryn's Launch Readiness spec phase 2): launch READINESS per campaign SKU x market x channel location
+// (DTC = <market>_3pl, Amazon = <market>_fba). At launch = on hand at that location (a negative counts as 0) + open inbound to it with an
+// ETA on or before the intake date (a passed ETA still counts, flagged) - forecast from today to the day before launch (latest SKU run,
+// months pro-rated by day). Cover = at launch / the launch month's weekly forecast (units / (days in month / 7)). Target = the campaign's
+// target cover, else the SKU's resolved target at that location (products.target_cover_weeks_<loc>). RAG: Red = not sold there
+// (PRODUCT availability), nothing left at launch, or under 2 weeks; Amber = below target, or no launch-month forecast to measure it;
+// Green = at or above target. Drafts are calculated too (the page shows them as not chased). Uplift is not applied (display only).
+const CAMP_RED_WEEKS = 2;
+async function campaignReadiness(opts = {}) {
+  const today = new Date().toISOString().slice(0, 10), params = [CAMPAIGN_INTAKE_DAYS];
+  let where = `c.status IS NOT NULL AND c.event_date IS NOT NULL`;
+  if (opts.id) { params.push(opts.id); where += ` AND c.id=$${params.length}`; }
+  else if (opts.month) { params.push(opts.month + '-01'); where += ` AND date_trunc('month', c.event_date)=$${params.length}::date`; }
+  else where += ` AND c.event_date >= current_date`;
+  const camps = (await pool.query(`SELECT c.id, c.title, to_char(c.event_date,'YYYY-MM-DD') launch, c.market, coalesce(c.channels,'DTC') channels, c.status,
+      to_char(coalesce(c.intake_date, c.event_date - $1::int),'YYYY-MM-DD') intake, c.intake_date IS NOT NULL intake_set, c.target_cover_weeks,
+      coalesce((SELECT json_agg(json_build_object('sku',s.sku,'tier',s.tier) ORDER BY s.sku) FROM planner.campaign_skus s WHERE s.event_id=c.id),'[]'::json) skus
+    FROM planner.trading_calendar c WHERE ${where} ORDER BY c.event_date, c.title`, params)).rows;
+  const months = (await pool.query(`SELECT DISTINCT to_char(event_date,'YYYY-MM') ym FROM planner.trading_calendar
+    WHERE status IS NOT NULL AND event_date >= date_trunc('month', current_date) ORDER BY 1`)).rows.map(r => r.ym);
+  const skus = [...new Set(camps.flatMap(c => (c.skus || []).map(s => s.sku)))];
+  if (!skus.length) return { as_of: today, months, campaigns: camps.map(c => ({ ...c, skus: undefined, groups: [], counts: { g: 0, a: 0, r: 0 }, worst: null })) };
+  const lastLaunch = camps.reduce((a, c) => c.launch > a ? c.launch : a, today);
+  const [prod, inb, fc] = await Promise.all([
+    pool.query(`SELECT * FROM planner.products WHERE sku = ANY($1)`, [skus]),
+    pool.query(`SELECT sku, lower(destination_warehouse) wh, reference ref, (quantity-received_quantity)::int qty, to_char(estimated_delivery_date,'YYYY-MM-DD') eta
+      FROM planner.inbound_shipments WHERE sku = ANY($1) AND (quantity-received_quantity) > 0 ORDER BY estimated_delivery_date NULLS LAST`, [skus]),
+    pool.query(`WITH lr AS (SELECT max(run_id) rid FROM planner.forecasts WHERE level='sku')
+      SELECT f.sku, lower(f.warehouse) wh, to_char(f.month,'YYYY-MM') ym, sum(f.units)::numeric units FROM planner.forecasts f, lr
+      WHERE f.run_id=lr.rid AND f.level='sku' AND f.sku = ANY($1) AND f.month >= date_trunc('month', current_date) AND f.month <= date_trunc('month', $2::date)
+      GROUP BY 1,2,3`, [skus, lastLaunch])]);
+  const P = {}; prod.rows.forEach(r => { P[r.sku] = r; });
+  const IN = {}; inb.rows.forEach(r => { (IN[r.sku + '|' + r.wh] = IN[r.sku + '|' + r.wh] || []).push(r); });
+  const FC = {}; fc.rows.forEach(r => { FC[r.sku + '|' + r.wh + '|' + r.ym] = Number(r.units) || 0; });
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const dayMs = 86400000, dt = s => Date.parse(s + 'T00:00:00Z');
+  const dim = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
+  const addM = (ym, n) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+  const fmtN = n => Math.round(n).toLocaleString('en-GB');
+  const out = camps.map(c => {
+    const mkts = String(c.market || '').toUpperCase().split(',').map(s => s.trim()).filter(m => /^(UK|US|EU|AU)$/.test(m));
+    const chs = String(c.channels || '').toUpperCase().split(',').map(s => s.trim()).filter(x => x === 'DTC' || x === 'FBA');
+    const lym = c.launch.slice(0, 7), counts = { g: 0, a: 0, r: 0 }, groups = [];
+    for (const M of mkts) for (const ch of chs) {
+      const m = M.toLowerCase(), loc = m + (ch === 'FBA' ? '_fba' : '_3pl'), other = m + (ch === 'FBA' ? '_3pl' : '_fba');
+      const rows = (c.skus || []).map(s => {
+        const p = P[s.sku] || {}, sold = p['available_' + m + '_' + (ch === 'FBA' ? 'fba' : 'dtc')];
+        const ohRaw = num(p['inventory_' + loc]), oh = Math.max(0, ohRaw), ohOther = num(p['inventory_' + other]) + (loc === 'us_fba' ? num(p.inventory_us_awd) : 0);
+        const legs = (IN[s.sku + '|' + loc] || []).map(x => ({ ref: x.ref, qty: x.qty, eta: x.eta, by: !!(x.eta && x.eta <= c.intake), late: !!(x.eta && x.eta < today) }));
+        const inBy = legs.filter(x => x.by).reduce((a, x) => a + x.qty, 0), inAfter = legs.filter(x => !x.by).reduce((a, x) => a + x.qty, 0), noEta = legs.filter(x => !x.eta).reduce((a, x) => a + x.qty, 0);
+        let pre = 0;   // forecast from today to the day before launch, months pro-rated by day
+        for (let ym = today.slice(0, 7); ym <= lym; ym = addM(ym, 1)) {
+          const ms = dt(ym + '-01'), me = ms + dim(ym) * dayMs, a = Math.max(ms, dt(today)), b = Math.min(me, dt(c.launch));
+          if (b > a) pre += (FC[s.sku + '|' + loc + '|' + ym] || 0) * ((b - a) / dayMs) / dim(ym);
+        }
+        const launchFc = FC[s.sku + '|' + loc + '|' + lym] || 0, wk = launchFc / (dim(lym) / 7);
+        const at = Math.max(0, oh + inBy - pre), cover = wk > 0 ? at / wk : null;
+        const target = c.target_cover_weeks != null ? num(c.target_cover_weeks) : (p['target_cover_weeks_' + loc] != null ? num(p['target_cover_weeks_' + loc]) : null);
+        let rag, why;
+        if (sold === false) { rag = 'r'; why = 'Not sold in ' + M + ' ' + (ch === 'FBA' ? 'Amazon' : 'DTC') + ' (PRODUCT availability)'; }
+        else if (at <= 0) { rag = 'r'; why = (!oh && !legs.length && !launchFc && !pre) ? 'No stock, no PO, no forecast' : 'Nothing left at launch' + (inAfter - noEta ? '; ' + fmtN(inAfter - noEta) + ' lands after intake' : '') + (noEta ? '; ' + fmtN(noEta) + ' on order with no ETA' : ''); }
+        else if (cover == null) { rag = 'a'; why = 'No launch-month forecast to measure cover'; }
+        else if (cover < CAMP_RED_WEEKS) { rag = 'r'; why = 'Under ' + CAMP_RED_WEEKS + ' wks at launch'; }
+        else if (target != null && cover < target) { const first = legs.find(x => !x.by);
+          rag = 'a'; why = inAfter ? 'Top-up ' + fmtN(inAfter) + ' lands after intake' + (first && first.eta ? ' (' + ddMonYy(first.eta) + ')' : ' (no ETA)') : 'Below ' + target + ' wk target'; }
+        else { rag = 'g'; why = 'Covered'; }
+        if (legs.some(x => x.by && x.late)) why += '; ETA passed, counted as in';
+        counts[rag]++;
+        return { sku: s.sku, name: p.product_name || '', tier: s.tier, sold: sold == null ? null : !!sold, on_hand: ohRaw, other_pool: ohOther, in_by: inBy, in_after: inAfter,
+          legs, sales_to_launch: Math.round(pre), at_launch: Math.round(at), launch_fc: Math.round(launchFc), cover: cover == null ? null : Math.round(cover * 10) / 10, target, rag, why };
+      });
+      groups.push({ market: M, channel: ch, loc, rows });
+    }
+    const worst = counts.r ? 'r' : counts.a ? 'a' : counts.g ? 'g' : null;
+    return { id: Number(c.id), title: c.title, launch: c.launch, intake: c.intake, intake_set: c.intake_set, status: c.status, markets: mkts, channels: chs,
+      target_cover_weeks: c.target_cover_weeks == null ? null : num(c.target_cover_weeks), groups, counts, worst };
+  });
+  return { as_of: today, months, red_weeks: CAMP_RED_WEEKS, campaigns: out };
+}
+app.get('/api/trading-calendar/readiness', async (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : null, id = parseInt(req.query.id, 10) || null;
+  try { res.set('Cache-Control', 'no-store').json(await campaignReadiness({ month, id })); }
+  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};
   try { const r = await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes)
