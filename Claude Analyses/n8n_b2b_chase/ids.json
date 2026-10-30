@@ -1,0 +1,7 @@
+{
+  "b2b_chase": "fabJ23JWzlkTrYaM",
+  "name": "Horizon | B2B request chaser (hourly, weekdays 08-18 London)",
+  "created": "2026-10-30",
+  "calls": "POST https://horizon.dockandbay.com/api/cron/b2b-chase (x-webhook-secret)",
+  "note": "Created inactive; activate after v28.593 is live and a ?dry=1 call returns ok"
+}
