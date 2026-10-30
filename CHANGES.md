@@ -1,3 +1,8 @@
+## v28.595 (31-Oct-26) Sandbox lean mode: SANDBOX_LEAN=1 stops background database work (free-tier Supabase disk IO)
+- Ben: the sandbox server was eating the free Supabase project's disk IO budget. It rebuilt the Actions, Order plan, lookups, exceptions and Open-actions caches every 5 to 10 min, 24/7, plus a 5 s keep-alive, 30 s payment-email and health-event writes, and hourly / daily sync and health jobs, even with nobody using it.
+- SANDBOX_LEAN=1 (local .env) runs the sandbox like Vercel for background work: no boot warms, no re-warm timers, no keep-alive, no preorders / FBA-inflight / health-check / DHL / Fulfil PO import timers, no post-write portal prewarm. Caches build on the first request, then stale-while-revalidate as before. Health flush and payment emails every 5 min, token purge every 6 h.
+- Unset = unchanged. Vercel (live) is never affected: the flag only applies when VERCEL is not set. No new env var on live, no migration.
+
 ## v28.594 (30-Oct-26) DEPOSITS: Xero FX captured automatically; USD/GBP vs USD/AUD; no red flag on non-USD rows
 - Ben: deposits.xero_fx had been blank since P58 (the move to HORIZON's supplier-payment flow). The 76-row backfill was run on live by Ben earlier on 30-Oct-26; this version keeps it filled.
 - Rule: xero_fx = the CurrencyRate of the run's SUPPLIER-PAYMENT bill (not the bank payment rate), matched by date paid + supplier + region (AU run -> AU rows; UK run -> other rows, or any row before 01-Oct-26). USD bills only. Blanks only: a manual value is never overwritten.

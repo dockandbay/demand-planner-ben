@@ -49,6 +49,11 @@ if (typeof globalThis.DOMMatrix === 'undefined') {
 // short-lived serverless connections — with a tiny per-instance pool. Session pooler (5432)
 // caps at 15 clients and serverless instances exhaust it. Locally, keep 5432 + a larger pool.
 let CONN = process.env.DATABASE_URL || '';
+// v28.595 (Ben 31-Oct-26, free-tier Supabase disk IO): SANDBOX_LEAN=1 runs the long-lived sandbox server like Vercel for background
+// work: no boot warms, no cache re-warm / sync / health timers, no keep-alive; caches build on the first request (SWR after that).
+// Health-event flush and payment emails slow to 5 min, token purge to 6 h. Unset = today's behaviour. Never affects Vercel.
+const HZ_LEAN = !process.env.VERCEL && process.env.SANDBOX_LEAN === '1';
+const HZ_BG = !process.env.VERCEL && !HZ_LEAN;   // background timers + boot warms allowed
 if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432/', ':6543/');   // USE_TXN_POOLER: local dev escape hatch when the session pooler (cap 15) is exhausted
 // v27.799 (review item 9): on Vercel (prod) refuse to boot silently mis-configured. Without PLANNER_KEY the access gate
 // (GATE, ~L852) disables and the app serves open; without DATABASE_URL / N8N_WEBHOOK_SECRET the DB and n8n webhooks fail.
@@ -245,7 +250,7 @@ pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 
 // slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
 // connection alive so requests reuse it. Long-lived server only; on Vercel the process is ephemeral (keepalive would
 // be pointless and would fight allowExitOnIdle). unref() so it never itself holds the process open.
-if (!process.env.VERCEL) {
+if (HZ_BG) {
   const _ka = setInterval(() => { pool.query('SELECT 1').catch(() => {}); }, 5000);
   _ka.unref?.();
 }
@@ -1009,8 +1014,8 @@ function hzHealthFlush(force) {
     return _hzHBbusy;
   } catch (e) { console.warn('[health] flush error: ' + (e && e.message)); return null; }
 }
-if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
-if (!process.env.VERCEL) setInterval(() => tokPurgeMaybe(false), 3600000).unref?.();   // v28.210 (Ben): hourly token purge on the long-lived server
+if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), HZ_LEAN ? 300000 : 30000).unref?.();
+if (!process.env.VERCEL) setInterval(() => tokPurgeMaybe(false), HZ_LEAN ? 6 * 3600000 : 3600000).unref?.();   // v28.210 (Ben): hourly token purge on the long-lived server
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   if (_hzHB.size) hzWaitUntil(hzHealthFlush(false));   // v28.159: due flush rides an active request (Vercel has no background time). v28.231: kept alive past the response
   hzWaitUntil(tokPurgeMaybe(false));   // v28.210 (Ben): expired login-token purge, at most once an hour per instance (a no-op Date check otherwise)
@@ -1603,7 +1608,7 @@ function _hzOnWrite(req, kind) {
   // long-lived server: rebuild the writer's payload(s) right behind the write so their next load is warm (v27.879 prewarm). Not on
   // Vercel: a timer after the response may run in a frozen container (stranded pooled connections, Diviyaj 01-Sep); there the
   // writer's next load waits for the rebuild (read-your-writes) instead.
-  if (!process.env.VERCEL && process.env.PORTAL_PREWARM !== '0') {
+  if (HZ_BG && process.env.PORTAL_PREWARM !== '0') {
     const st0 = _pbNames({ names }); const store = _reqStore.getStore();
     setTimeout(() => { for (const n of st0) { const st = _lc.get(n); if (st && st.dirty.length && !st.job) _reqStore.run(store, () => _lcJob(st, 0, null)); } }, 250).unref?.();
   }
@@ -3457,7 +3462,7 @@ app.post('/api/cron/preorders-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {}; const r = await runPreordersCron({ dry: b.dry_run === true || b.dry_run === 'true' || req.query.dry === '1' }); res.status(r.ok ? 200 : 500).json(r); }   /* 500 on failure so the n8n error workflow fires */ catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
+if (HZ_BG && process.env.HZ_PREORDERS_CRON !== '0') {
   const _pc = () => runPreordersCron().then(r => console.log('[preorders] ' + (r.ok ? ('synced ' + r.lines + ' line(s)') : ('not synced: ' + r.error))), e => console.warn('[preorders] failed: ' + (e && e.message)));
   setTimeout(_pc, 900000).unref?.(); setInterval(_pc, 86400000).unref?.();
 }
@@ -12190,7 +12195,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
   // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
   // lazily on the first request instead (cold miss → refresh). Long-lived (sandbox) server keeps warm + proactive SWR.
-  if (!process.env.VERCEL) {
+  if (HZ_BG) {
     refresh().catch(() => {});                       // warm on boot
     if (opts.proactive !== false) setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();   // proactive re-warm (heavy builds opt out → lazy SWR)
   }
@@ -12226,7 +12231,7 @@ async function _sectionBuild(sec) {
 const SEC_STALE_GRACE_MS = Math.max(0, Number(process.env.SEC_STALE_GRACE_MS || 1500));   // v28.550: how long a stale section request waits for its revalidation
 function _secCache(sec) { return _lc.get('sec:' + sec) || _lcNew('sec:' + sec, () => _sectionBuild(sec), SECTION_CACHE_TTL_MAP[sec]); }
 function _sectionRecompute(sec) { const st = _secCache(sec); return (st.job || _lcJob(st, 0, null)).p.catch(() => null); }
-if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
+if (HZ_BG) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
   setTimeout(() => { Object.keys(SECTION_CACHE_TTL_MAP).forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 1500).unref?.()); }, 4000).unref?.();
 }
 // Supplier-portal bootstrap cache, per supplier-set + includeArchived (history: v27.879 own Map + single-flight; v27.880 served
@@ -17909,7 +17914,7 @@ async function processPaymentEmails() {
 // is warm, so prod needs a scheduler hitting the cron route below (n8n every 1-2 min, webhook-secret gated like the others).
 // Coordinator safety: prod keeps the in-process timer (today's behaviour) until the scheduler exists; Diviyaj sets
 // PAYMENT_EMAIL_CRON=1 once n8n hits /api/cron/payment-emails, which turns the Vercel timer off.
-if (!process.env.VERCEL || process.env.PAYMENT_EMAIL_CRON !== '1') setInterval(processPaymentEmails, 30000).unref?.();
+if (!process.env.VERCEL || process.env.PAYMENT_EMAIL_CRON !== '1') setInterval(processPaymentEmails, HZ_LEAN ? 300000 : 30000).unref?.();
 app.post('/api/cron/payment-emails', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.261: safeEq like every other cron
   try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -21650,7 +21655,7 @@ async function getOpenActionsCached() {
   return _oaRefresh(); }
 // Long-lived (sandbox) server only — on Vercel the getter above builds this lazily on first request; boot-warming +
 // a 5-min timer on a frozen container just churns pooled connections with no user in flight (Diviyaj 01-Sep).
-if (!process.env.VERCEL) {
+if (HZ_BG) {
   _oaRefresh().catch(() => {});                              // warm on boot
   setInterval(() => { _oaRefresh().catch(() => {}); }, _OA_TTL).unref?.();
 }
@@ -21876,7 +21881,7 @@ app.post('/api/cron/fba-inflight-refresh', async (req, res) => {
   try { const b = req.body || {}; const r = await runFbaInflightCron({ dry: b.dry_run === true || b.dry_run === 'true' }); res.status(r.ok || r.inert ? 200 : 500).json(r); }   // 500 on a real failure so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-if (!process.env.VERCEL && process.env.HZ_FBA_INFLIGHT_CRON !== '0') {
+if (HZ_BG && process.env.HZ_FBA_INFLIGHT_CRON !== '0') {
   const _fi = () => runFbaInflightCron({}).then(r => console.log('[fba-inflight] ' + (r.ok ? ('refreshed ' + r.lines + ' line(s)') : ('not refreshed: ' + r.error))), e => console.warn('[fba-inflight] failed: ' + (e && e.message)));
   setTimeout(_fi, 600000).unref?.(); setInterval(_fi, 86400000).unref?.();
 }
@@ -31737,7 +31742,7 @@ app.post('/api/cron/health-checks', async (req, res) => {
   try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } try { r.attach = await accAttachMaybe(); } catch (e) { r.attach = { error: e.message }; } try { r.autobill = await accAutoBillMaybe(); } catch (e) { r.autobill = { error: e.message }; }   /* v28.276 */ }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {
+if (HZ_BG && process.env.HZ_HEALTH_CHECKS !== '0') {
   const _hc = () => accStmtStaleCheck({}).catch(e => console.warn('[stmt-alert] ' + e.message)).then(() => coghlansMailMaybe().then(x => { if (x && !x.skipped) console.log('[coghlans-mail] ' + JSON.stringify(x).slice(0, 200)); }).catch(e => console.warn('[coghlans-mail] ' + e.message))).then(() => runHealthChecks({})).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
   setTimeout(_hc, 180000).unref?.(); setInterval(_hc, 3600000).unref?.();
 }
@@ -36442,7 +36447,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
 if (!process.env.VERCEL) {
   // DHL tracking in-app poller (long-lived server only; on Vercel the n8n schedule hits /api/tracking/poll).
   // Inert without DHL_API_KEY. Runs hourly; the poller itself honours per-number staleness vs the config interval.
-  if (!process.env.VERCEL) {
+  if (HZ_BG) {
     const tick = () => getDhlConfig().then(c => (c.enabled && c.key_present) ? pollTracking({ reason: 'timer' }) : null).catch(() => {});
     setTimeout(() => { tick(); setInterval(tick, 60 * 60 * 1000).unref?.(); }, 60 * 1000).unref?.();
     // v27.738: Fulfil PO mirror import (drift). Inert unless the Fulfil env is configured. n8n hits /api/supply/fulfil/import-pos in prod.
