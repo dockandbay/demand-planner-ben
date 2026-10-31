@@ -1,3 +1,7 @@
+## v28.602 (31-Oct-26) Payment-late-in-month workflow: current and last month only
+- "Payment due late in the month -> likely date the 1st" now only picks up payments due in the current month or the month before (Ben). Future months are left alone. The "include overdue" setting is gone (replaced by this rule). Sandbox dry run on 31-Oct: 67 payments (late Sep and late Oct).
+- Files: server.mjs, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.601 (31-Oct-26) Workflow: payments due late in the month; Suggest a workflow form
 - New workflow "Payment due late in the month -> likely date the 1st": unpaid supplier payments (deposit, completion, balance) due after day 26 with no likely date get their likely payment date set to the 1st of the next month (same write as Cash flow's likely date). Settings: the day, include overdue, include freight / duty / tax. Starts Off, Ask first. Sandbox dry run: 73 payments.
 - Workflows page: "+ Suggest a workflow" form (When / If / Then) that files into the Suggestion box, area Workflows, in a fixed format.

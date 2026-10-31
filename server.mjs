@@ -27178,16 +27178,17 @@ const WF_TEMPLATES = {
   // v28.601 (Ben): payments due late in the month are paid in the next month's first run, so set the cash-flow likely date to the 1st.
   pay_month_end: {
     order: 3, area: 'Supply', name: 'Payment due late in the month → likely date the 1st',
-    when: 'An unpaid supplier payment (deposit, completion, balance) is due after a set day of the month and has no likely date yet.',
+    when: 'An unpaid supplier payment (deposit, completion, balance) due late in THIS month or LAST month (after a set day) has no likely date yet. Future months are left alone.',
     then: ['Set its likely payment date to the 1st of the next month (the same as typing it in Cash flow / Payments due)', 'Cash flow and Payments due move the payment to that month'],
     fields: [{ k: 'after_day', sec: 'if', label: 'Due after day', unit: 'of the month', dflt: 26 },
-      { k: 'include_overdue', sec: 'if', type: 'bool', label: 'Also overdue payments (due date already passed)', dflt: false },
       { k: 'include_landed', sec: 'if', type: 'bool', label: 'Also freight, import duty and import tax', dflt: false }],
-    dflt: { mode: 'ask', config: { after_day: 26, include_overdue: false, include_landed: false, notify: true, recipients: '', max_per_run: 50 } },
+    dflt: { mode: 'ask', config: { after_day: 26, include_landed: false, notify: true, recipients: '', max_per_run: 50 } },
     async find(cfg) {
       const d = await cashflowResponse(await poRowsCache.get(), (sql) => pool.query(sql).then(r => r.rows));
       const after = Math.min(30, Math.max(1, Number(cfg.after_day) || 26));
-      return (d.lines || []).filter(l => !l.paid && !l.likely_date && l.due && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || '')) && Number(l.due.slice(8, 10)) > after && (cfg.include_overdue || l.due >= d.today)).map(l => {
+      // v28.602 (Ben): only payments due in the current month or the month before; future months are left alone.
+      const cy = +d.today.slice(0, 4), cm = +d.today.slice(5, 7), cur = d.today.slice(0, 7), prev = cm === 1 ? (cy - 1) + '-12' : cy + '-' + String(cm - 1).padStart(2, '0');
+      return (d.lines || []).filter(l => !l.paid && !l.likely_date && l.due && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || '')) && Number(l.due.slice(8, 10)) > after && (l.due.slice(0, 7) === cur || l.due.slice(0, 7) === prev)).map(l => {
         const y = +l.due.slice(0, 4), m = +l.due.slice(5, 7), nx = m === 12 ? (y + 1) + '-01-01' : y + '-' + String(m + 1).padStart(2, '0') + '-01';
         return { key: 'pay|' + l.key + '|' + nx, type: 'po', ref: l.ref,
           title: l.type + ' ' + l.ref + (l.supplier ? ' (' + l.supplier + ')' : '') + ': due ' + ddMonYy(l.due) + ' → likely ' + ddMonYy(nx) + ', $' + Math.round(l.amount).toLocaleString('en-GB'),
