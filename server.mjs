@@ -14,6 +14,7 @@ import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
 import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
+import { B2B_TYPES, B2B_CURRENCIES, B2B_STATUSES, B2B_COGS_DEFAULT, b2bRate, b2bCalc, b2bChecks, b2bSummary, b2bParseSheet, b2bSplitText, b2bParseDate, b2bDateSuspect, b2bNum, b2bPct, b2bFy, b2bCsv } from './lib/b2b_forecast.mjs';   // v28.603 CLIENT > B2B forecast
 import { ILG_POOLS, ILG_FILE_RE, ILG_GMAIL_Q, ilgReportAt, parseIlgReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
@@ -1319,6 +1320,7 @@ app.use((req, res, next) => {
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
+      || req.path === '/api/cron/b2b-forecast' || req.path === '/api/feed/chief/b2b-forecast' || req.path === '/api/feed/b2b-forecast.csv'   // v28.603 (Ben): B2B forecast nightly Fulfil refresh (x-webhook-secret) + Chief feed (Bearer CHIEF_FEED_TOKEN) + workbook CSV (?token=B2B_CSV_TOKEN); all checked in the handlers with safeEq, fail closed
       || req.path === '/api/cron/workflows'   // v28.599 (Ben): n8n hourly Workflows run (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
       || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
@@ -16944,25 +16946,32 @@ async function mcpColExpr() {
     try { _mcpCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='mcp_access'`)).rowCount > 0; } catch (_) {} }
   return _mcpCol.ok ? 'coalesce(mcp_access,false)' : 'false';
 }
+// v28.603: CLIENT > B2B forecast edit grant (migration 407); until the column exists only admins edit.
+let _b2bCol = { ok: false, at: 0 };
+async function b2bColExpr() {
+  if (!_b2bCol.ok && Date.now() - _b2bCol.at > 60000) { _b2bCol.at = Date.now();
+    try { _b2bCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='b2b_forecast_edit'`)).rowCount > 0; } catch (_) {} }
+  return _b2bCol.ok ? 'coalesce(b2b_forecast_edit,false)' : 'false';
+}
 async function permsFor(req) {
   const email = authUser(req);
   // v28.151 (review B3): no identity under a GATE (prod: planner key but no signed login cookie) = READ-ONLY, not admin.
   // Local dev / sandbox (no GATE) keeps full access exactly as before.
-  if (!email && GATE) return { email: null, live: true, supply_edit: false, demand_edit: false, product_edit: false, is_admin: false, client_access: false, commissions: false, accounts_access: false, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: [] };
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, accounts_access: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
+  if (!email && GATE) return { email: null, live: true, supply_edit: false, demand_edit: false, product_edit: false, is_admin: false, client_access: false, commissions: false, accounts_access: false, b2b_forecast_edit: false, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: [] };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, accounts_access: true, b2b_forecast_edit: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null, lookupFailed = false;
   const m = _permsMemo.get(e);
   if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
   else {
-    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (err) { lookupFailed = true; log500(err); }   // v28.297 (Diviyaj's prod fix upstream): a failed lookup is not memoised and is flagged, so callers answer 503 instead of acting on zero rights
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await b2bColExpr()) + ' b2b_forecast_edit, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (err) { lookupFailed = true; log500(err); }   // v28.297 (Diviyaj's prod fix upstream): a failed lookup is not memoised and is flagged, so callers answer 503 instead of acting on zero rights
   }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
   // inbox_types: which top-bar Inbox item types this user sees. NULL/unset = all (back-compat); a saved array (incl. empty) is explicit.
   let inboxTypes = INBOX_TYPES_ALL;
   if (row && row.inbox_types != null) { try { const a = typeof row.inbox_types === 'string' ? JSON.parse(row.inbox_types) : row.inbox_types; if (Array.isArray(a)) inboxTypes = a.filter(t => INBOX_TYPES_ALL.includes(t)); } catch (_) {} }
-  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), accounts_access: sa || !!(row && (row.accounts_access || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes, ...(lookupFailed && !sa ? { lookupFailed: true } : {}) };
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), accounts_access: sa || !!(row && (row.accounts_access || row.is_admin)), b2b_forecast_edit: sa || !!(row && (row.b2b_forecast_edit || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes, ...(lookupFailed && !sa ? { lookupFailed: true } : {}) };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
@@ -17056,7 +17065,7 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, ' + (await connectColExpr()) + ' connect_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, ' + (await connectColExpr()) + ' connect_access, ' + (await b2bColExpr()) + ' b2b_forecast_edit, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
     r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
     res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -17486,6 +17495,7 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
       if (!b.mcp_access) await pool.query(`DELETE FROM planner.mcp_tokens WHERE lower(email)=$1`, [email]).catch(() => {}); }
     // v28.483: Connect grant (Gmail add-on / Chrome side panel); unticking refuses their next Connect request
     if (b.connect_access !== undefined && (await connectColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET connect_access=$2 WHERE email=$1`, [email, !!b.connect_access]);
+    if (b.b2b_forecast_edit !== undefined && (await b2bColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET b2b_forecast_edit=$2 WHERE email=$1`, [email, !!b.b2b_forecast_edit]);   // v28.603
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
@@ -28546,6 +28556,8 @@ app.post('/oauth/revoke', express.urlencoded({ extended: false, limit: '8kb' }),
 
 // ── Tools ──
 const MCP_EXTRA_TOOLS = [
+  { name: 'b2b_forecast', title: 'B2B forecast (direct-to-client orders)', description: 'CLIENT > B2B forecast, read only: direct-to-client wholesale orders and forecast buckets (value, currency, GBP value and rate, confirmed, status, order / ship dates, payments, checks, matched Fulfil orders and actual vs forecast) and the monthly cash receipts (UK incl. VAT), P&L revenue (ship month, net) and production cash out (unconfirmed, COGS 30/70), confirmed vs forecast. Rules: app_logic("b2b-forecast").',
+    input_schema: { type: 'object', properties: { client: { type: 'string', description: 'part of the client / bucket name or reference (optional)' }, from: { type: 'string', description: 'first month YYYY-MM for the monthly rows (optional)' }, to: { type: 'string', description: 'last month YYYY-MM (optional)' } } } },
   { name: 'po_status', title: 'Purchase order status', description: 'One HORIZON purchase order: supplier, status, branch, production and delivery dates, shipment, payment dates and amounts, and its lines (SKU, qty, cost). Use for "where is PO-x / when does it land / is it paid".',
     input_schema: { type: 'object', properties: { po: { type: 'string', description: 'PO number, e.g. PO-57AUBL1' } }, required: ['po'] } },
   { name: 'client_orders', title: 'Wholesale client orders', description: 'Find wholesale (Fulfil) client orders by order number (SO…), customer reference / PO, or customer name: status, dates, totals, shipments and tracking codes. Newest first.',
@@ -28568,6 +28580,17 @@ async function mcpPoStatus(po) {
   const lines = (await pool.query(`SELECT sku, qty, carton_qty, cost_price FROM planner.v_purchase_order_lines WHERE po=$1 ORDER BY sku`, [p.po])).rows;
   const ship = p.shipment_ref ? (await pool.query(`SELECT shipment_ref, status, mode, carrier, carrier_ref, departure_date, landing_date, delivery_date, arrival_date, tracked_delivery_date FROM planner.shipments WHERE shipment_ref=$1`, [p.shipment_ref])).rows[0] || null : null;
   return { po: aiCleanRow(p), shipment: ship, lines: lines.map(aiCleanRow), line_count: lines.length, total_units: lines.reduce((a, l) => a + (Number(l.qty) || 0), 0) };
+}
+async function mcpB2bForecast(args) {   // v28.603: read only; same numbers as the page and the Chief feed
+  try { const { orders, today } = await b2bLoad(); const q = String(args.client || '').trim().toLowerCase();
+    const mine = q ? orders.filter(o => [o.client_label, o.client_name, o.reference, ...(o.fulfil_order_refs || [])].some(x => String(x || '').toLowerCase().includes(q))) : orders;
+    const from = /^\d{4}-\d{2}$/.test(args.from || '') ? args.from : null, to = /^\d{4}-\d{2}$/.test(args.to || '') ? args.to : null;
+    return { today, orders: mine.slice(0, 150).map(o => ({ id: o.id, client: o.client_label, reference: o.reference, type: o.order_type, entity: o.entity, bucket: !!o.bucket, value: o.value_source, currency: o.currency,
+        value_gbp: o.calc.value_gbp, fx_rate: o.calc.fx_rate, confirmed: !!o.confirmed, status: o.status, order_date: o.order_date, ship_date: o.ship_date, payment_terms: o.payment_terms,
+        payments: o.payments, checks: o.checks.map(c => c.sev + ': ' + c.text), fulfil_orders: o.fulfil ? o.fulfil.orders.map(x => x.number || x.reference) : [],
+        actual_value: o.fulfil ? o.fulfil.ordered_value : null, actual_vs_forecast_pct: o.fulfil ? o.fulfil.vs_forecast_pct : null, owner: o.owner_email })),
+      truncated: mine.length > 150, monthly: b2bSummary(mine).filter(r => (!from || r.month >= from) && (!to || r.month <= to)) };
+  } catch (e) { return { error: _b2bMissing(e) ? 'B2B forecast not installed yet (migration 407)' : e.message }; }
 }
 async function mcpClientOrders(query, limit) {
   const q = String(query || '').trim(); if (!q) return { error: 'no search text' };
@@ -28716,6 +28739,7 @@ async function mcpCallTool(name, args, a) {
   if (MCP_WRITE_NAMES.has(name)) return await mcpWrite(name, args, a);   // v28.525
   if (name === 'po_status') return await mcpPoStatus(args.po);
   if (name === 'client_orders') return await mcpClientOrders(args.query, args.limit);
+  if (name === 'b2b_forecast') return await mcpB2bForecast(args);   // v28.603
   if (!AI_TOOLS.some(t => t.name === name)) return { error: 'unknown tool ' + name };
   if (name === 'query_horizon') { const why = mcpSqlBlocked(String(args.sql || ''), a); if (why) return { error: why }; }
   if (name === 'describe_data' && args.table) { const why = mcpSqlBlocked(String(args.table), a); if (why) return { error: why }; }
@@ -31057,12 +31081,270 @@ async function cpOriginRule(cached) {   // v28.175 (Ben): cached = read through 
 async function cpAdminGate(req, res, next) {
   try {
     const me = await permsFor(req);
-    if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required — ask an admin (CONFIG ▸ Admin ▸ Permissions)', code: 'no_client_access' });
+    if (me.live && !(me.is_admin || me.client_access) && !(/^\/b2b-forecast/.test(req.path) && me.b2b_forecast_edit)) return res.status(403).json({ error: 'CLIENT access required — ask an admin (CONFIG ▸ Admin ▸ Permissions)', code: 'no_client_access' });
     if (/^\/commission/.test(req.path) && me.live && !(me.is_admin || me.commissions)) return res.status(403).json({ error: 'COMMISSIONS access required', code: 'no_commissions' });
     req.me = me; next();
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
 app.use('/api/client', cpAdminGate);
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.603 (Ben 31-Oct-26): CLIENT > B2B forecast. Replaces the "B2B - Direct to Client Forecast" Google Sheet that Andy's
+// budget workbook imports (spec docs/specs/b2b-forecast.md, tables migration 407). One row per client order or forecast
+// bucket + its payments. The maths lives in lib/b2b_forecast.mjs (b2bCalc / b2bChecks / b2bSummary) so the page, the
+// Chief feed, the workbook CSV and the tests agree. View = CLIENT access; edit = admin or app_permissions.b2b_forecast_edit;
+// import = admin. Fulfil is read only (fulfil_sales). Every create / edit / delete writes b2b_forecast_changes.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const _b2bMissing = e => /relation "planner\.b2b_forecast/.test(String(e && e.message));
+const _b2bIso = v => (v == null || v === '' ? null : (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)));
+const b2bCanEdit = me => !!(me && (me.is_admin || me.b2b_forecast_edit || me.live === false));
+async function b2bFx() {
+  const rows = (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key IN ('fx_rates','usd_gbp_rate')`)).rows;
+  let fx = {}, usd = null; for (const r of rows) { if (r.key === 'fx_rates') { try { fx = JSON.parse(r.value) || {}; } catch (_) {} } else { const v = parseFloat(r.value); if (v > 0) usd = v; } }
+  return { fx, usd };
+}
+// Fulfil read for every referenced order: fulfil_sales by customer reference or SO number. The channel duplicates
+// (no SO number, state ignored / provisional) are skipped. Returns {ref -> [rows]}.
+async function b2bFulfilRows(refs) {
+  const list = [...new Set(refs.map(x => String(x || '').trim()).filter(Boolean))]; if (!list.length) return {};
+  const rows = (await pool.query(`SELECT number, reference, state, shipment_state, invoice_state, currency, untaxed::float untaxed, to_char(sale_date,'YYYY-MM-DD') sale_date, channel, party_name
+      FROM planner.fulfil_sales WHERE (reference = ANY($1) OR number = ANY($1)) AND NOT (number IS NULL AND state IN ('ignored','provisional'))`, [list])).rows;
+  const m = {}; for (const r of rows) for (const k of [r.reference, r.number]) if (k && list.includes(k)) (m[k] = m[k] || []).push(r);
+  return m;
+}
+// fx: {fx, usd} so a Fulfil order in another currency converts to the row's currency (via GBP, same rates as the row).
+function b2bFulfilState(o, fm, fx) {
+  const rows = []; for (const ref of (o.fulfil_order_refs || [])) for (const r of (fm[ref] || [])) if (!rows.includes(r)) rows.push(r);
+  if (!rows.length) return null;
+  const live = rows.filter(r => r.state !== 'cancel'), shippedRows = live.filter(r => /^(sent|done)$/.test(r.shipment_state || ''));
+  const conv = r => { const v = r.untaxed || 0, c = r.currency || o.currency; if (c === o.currency) return v; const d = r.sale_date || o.ship_date || o.order_date || new Date().toISOString().slice(0, 10);
+    const a = b2bRate(fx.fx, c, d, fx.usd), b = b2bRate(fx.fx, o.currency, d, fx.usd); return a && b ? v / a.rate * b.rate : null; };
+  const sum = list => { let t = 0; for (const r of list) { const v = conv(r); if (v == null) return null; t += v; } return Math.round(t * 100) / 100; };
+  const ordered = sum(live);
+  return { any: true, cancelled: !live.length, shipped: shippedRows.length > 0, shipped_value: sum(shippedRows),
+    ordered_value: ordered, vs_forecast_pct: ordered != null && Number(o.value_source) > 0 ? Math.round((ordered / Number(o.value_source) - 1) * 1000) / 10 : null,
+    invoiced: live.length > 0 && live.every(r => /^(posted|paid)$/.test(r.invoice_state || '')), paid: live.length > 0 && live.every(r => r.invoice_state === 'paid'),
+    orders: rows.map(r => ({ number: r.number, reference: r.reference, state: r.state, shipment: r.shipment_state, invoice: r.invoice_state, currency: r.currency, untaxed: r.untaxed, sale_date: r.sale_date, channel: r.channel, party: r.party_name })) };
+}
+// Load orders (+ payments, client, Fulfil, calc, checks). where: {client_id?, ids?}
+async function b2bLoad(where) {
+  where = where || {}; const cond = [], args = [];
+  if (where.client_id) { args.push(Number(where.client_id)); cond.push(`o.client_id=$${args.length}`); }
+  if (where.ids) { args.push(where.ids.map(Number)); cond.push(`o.id = ANY($${args.length})`); }
+  const orders = (await pool.query(`SELECT o.*, to_char(o.order_date,'YYYY-MM-DD') order_date, to_char(o.ship_date,'YYYY-MM-DD') ship_date,
+      to_char(o.updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated, c.name client_name, c.market client_market, c.currency client_currency
+    FROM planner.b2b_forecast_orders o LEFT JOIN planner.clients c ON c.id=o.client_id ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+    ORDER BY coalesce(o.ship_date, o.order_date) NULLS LAST, o.id`, args)).rows;
+  const ids = orders.map(o => o.id);
+  const pays = ids.length ? (await pool.query(`SELECT order_id, seq, to_char(due_date,'YYYY-MM-DD') due_date, pct::float pct FROM planner.b2b_forecast_payments WHERE order_id = ANY($1) ORDER BY order_id, seq`, [ids])).rows : [];
+  const pm = {}; pays.forEach(p => (pm[p.order_id] = pm[p.order_id] || []).push({ seq: p.seq, due_date: p.due_date, pct: p.pct }));
+  const { fx, usd } = await b2bFx(); const today = new Date().toISOString().slice(0, 10);
+  const fm = await b2bFulfilRows(orders.flatMap(o => o.fulfil_order_refs || []));
+  for (const o of orders) {
+    o.id = Number(o.id); o.value_source = Number(o.value_source); o.cogs_pct = o.cogs_pct == null ? null : Number(o.cogs_pct); o.payments = pm[o.id] || [];
+    o.calc = b2bCalc(o, fx, usd, today); o.fulfil = b2bFulfilState(o, fm, { fx, usd });
+    o.checks = b2bChecks(o, { today, calc: o.calc, fulfil: o.fulfil, client: o.client_id ? { market: o.client_market, currency: o.client_currency } : null });
+  }
+  return { orders, fx, usd, today };
+}
+const B2B_FIELDS = ['client_id', 'client_label', 'reference', 'order_type', 'entity', 'bucket', 'value_source', 'currency', 'confirmed', 'status', 'order_date', 'payment_terms', 'ship_date', 'fulfil_order_refs', 'owner_email', 'cogs_pct', 'notes'];
+// Validate + normalise one field. Throws a readable message.
+function b2bField(k, v) {
+  const blank = v == null || v === '';
+  switch (k) {
+    case 'client_id': return blank ? null : (Number.isInteger(+v) ? +v : (() => { throw new Error('client_id must be a number'); })());
+    case 'client_label': if (blank) throw new Error('Client is required'); return String(v).trim().slice(0, 200);
+    case 'order_type': if (!B2B_TYPES.includes(v)) throw new Error('Type must be one of: ' + B2B_TYPES.join(', ')); return v;
+    case 'entity': if (!['UK', 'AU'].includes(v)) throw new Error('Entity must be UK or AU'); return v;
+    case 'currency': { const c = String(v || '').toUpperCase(); if (!B2B_CURRENCIES.includes(c)) throw new Error('Currency must be one of: ' + B2B_CURRENCIES.join(', ')); return c; }
+    case 'status': if (!B2B_STATUSES.includes(v)) throw new Error('Status must be one of: ' + B2B_STATUSES.join(', ')); return v;
+    case 'bucket': case 'confirmed': return v === true || /^(true|yes|y|1)$/i.test(String(v));
+    case 'value_source': { const n = b2bNum(v); if (n == null) throw new Error('Order value must be a number'); return n; }
+    case 'cogs_pct': { if (blank) return null; let n = b2bNum(String(v).replace('%', '')); if (n == null) throw new Error('COGS must be a number'); if (n > 1) n = n / 100; return n; }
+    case 'order_date': case 'ship_date': { if (blank) return null; const d = b2bParseDate(v); if (!d) throw new Error('Could not read the date "' + v + '"'); return d; }
+    case 'fulfil_order_refs': return (Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/)).map(x => String(x).trim()).filter(Boolean).slice(0, 20);
+    case 'owner_email': return blank ? null : String(v).trim().toLowerCase().slice(0, 200);
+    default: return blank ? null : String(v).trim().slice(0, 2000);
+  }
+}
+function b2bPays(list) {
+  return (Array.isArray(list) ? list : []).map((p, i) => { const pct = b2bPct(p.pct), due = p.due_date == null || p.due_date === '' ? null : b2bParseDate(p.due_date);
+    if (due === null && p.due_date) throw new Error('Could not read the payment date "' + p.due_date + '"');
+    return { seq: i + 1, due_date: due || null, pct: pct || 0 }; }).filter(p => p.pct || p.due_date);
+}
+const _b2bStr = v => v == null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v);
+const _b2bPayStr = ps => (ps || []).map(p => (+p.pct || 0) + '% ' + (p.due_date || 'no date')).join(' · ');
+// Save one order (create when no id). Writes the audit rows and the stored GBP value / rate used. Returns the id.
+async function b2bSave(client, b, by) {
+  const id = b.id ? Number(b.id) : null; const fields = {};
+  for (const k of B2B_FIELDS) if (b[k] !== undefined) fields[k] = b2bField(k, b[k]);
+  if (fields.order_type && b.entity === undefined) fields.entity = fields.order_type === 'AU Distributor' ? 'AU' : 'UK';
+  if (fields.confirmed === true && b.status === undefined && !id) fields.status = 'confirmed';
+  const pays = b.payments !== undefined ? b2bPays(b.payments) : null;
+  let prev = null, prevPays = [];
+  if (id) { prev = (await client.query(`SELECT *, to_char(order_date,'YYYY-MM-DD') order_date, to_char(ship_date,'YYYY-MM-DD') ship_date FROM planner.b2b_forecast_orders WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+    if (!prev) { const e = new Error('No such row (deleted?)'); e.code = 404; throw e; }
+    prevPays = (await client.query(`SELECT seq, to_char(due_date,'YYYY-MM-DD') due_date, pct::float pct FROM planner.b2b_forecast_payments WHERE order_id=$1 ORDER BY seq`, [id])).rows;
+    // confirming a forecast row moves its status on, un-confirming moves it back (unless Fulfil has moved it further)
+    if (fields.confirmed !== undefined && b.status === undefined) { if (fields.confirmed && prev.status === 'forecast') fields.status = 'confirmed'; if (!fields.confirmed && prev.status === 'confirmed') fields.status = 'forecast'; }
+  } else { for (const k of ['client_label', 'order_type', 'value_source', 'currency']) if (fields[k] == null) throw new Error((k === 'client_label' ? 'Client' : k === 'order_type' ? 'Type' : k === 'value_source' ? 'Order value' : 'Currency') + ' is required'); }
+  let oid = id;
+  if (id) { const ks = Object.keys(fields); if (ks.length) await client.query(`UPDATE planner.b2b_forecast_orders SET ${ks.map((k, i) => k + '=$' + (i + 2)).join(', ')}, updated_by=$${ks.length + 2}, updated_at=now() WHERE id=$1`, [id, ...ks.map(k => fields[k]), by]); }
+  else { const ks = Object.keys(fields); oid = (await client.query(`INSERT INTO planner.b2b_forecast_orders (${ks.join(',')}, created_by, updated_by) VALUES (${ks.map((_, i) => '$' + (i + 1)).join(',')}, $${ks.length + 1}, $${ks.length + 1}) RETURNING id`, [...ks.map(k => fields[k]), by])).rows[0].id; }
+  if (pays) { await client.query(`DELETE FROM planner.b2b_forecast_payments WHERE order_id=$1`, [oid]);
+    for (const p of pays) await client.query(`INSERT INTO planner.b2b_forecast_payments (order_id, seq, due_date, pct) VALUES ($1,$2,$3,$4)`, [oid, p.seq, p.due_date, p.pct]); }
+  // audit
+  const log = (field, o, n) => client.query(`INSERT INTO planner.b2b_forecast_changes (order_id, field, old_value, new_value, changed_by) VALUES ($1,$2,$3,$4,$5)`, [oid, field, o, n, by]);
+  if (!id) await log('created', null, [fields.client_label, fields.reference, fields.order_type, fields.value_source + ' ' + fields.currency].filter(Boolean).join(' | ') + (pays && pays.length ? ' | ' + _b2bPayStr(pays) : ''));
+  else { for (const k of Object.keys(fields)) { const o = _b2bStr(k === 'value_source' || k === 'cogs_pct' ? (prev[k] == null ? null : Number(prev[k])) : prev[k]), n = _b2bStr(fields[k]); if (o !== n) await log(k, o, n); }
+    if (pays && _b2bPayStr(prevPays) !== _b2bPayStr(pays)) await log('payments', _b2bPayStr(prevPays), _b2bPayStr(pays)); }
+  return oid;
+}
+// Store value_gbp / fx_rate / fx_source (+ Fulfil state) for the given orders, so a number can always be traced.
+async function b2bStoreCalc(ids) {
+  if (!ids.length) return; const { orders } = await b2bLoad({ ids });
+  for (const o of orders) await pool.query(`UPDATE planner.b2b_forecast_orders SET value_gbp=$2, fx_rate=$3, fx_source=$4 WHERE id=$1`, [o.id, o.calc.value_gbp, o.calc.fx_rate, o.calc.fx_source]);
+}
+// Fulfil refresh: move status on from what Fulfil shows (shipped / invoiced / paid / cancelled). Never writes to Fulfil.
+// Status only moves forward (forecast < confirmed < shipped < invoiced < paid); cancelled in Fulfil = cancelled.
+async function b2bFulfilRefresh(by) {
+  const { orders } = await b2bLoad(); const rank = { forecast: 0, confirmed: 1, shipped: 2, invoiced: 3, paid: 4, cancelled: 9 }; const moved = [];
+  for (const o of orders) { const f = o.fulfil;
+    await pool.query(`UPDATE planner.b2b_forecast_orders SET fulfil_status=$2, value_gbp=$3, fx_rate=$4, fx_source=$5 WHERE id=$1`, [o.id, f ? JSON.stringify(Object.assign({ at: new Date().toISOString() }, f)) : null, o.calc.value_gbp, o.calc.fx_rate, o.calc.fx_source]);
+    if (!f || o.status === 'cancelled' || o.bucket) continue;   // a bucket collects many orders: its status stays manual
+    const next = f.cancelled ? 'cancelled' : f.paid ? 'paid' : f.invoiced ? 'invoiced' : f.shipped ? 'shipped' : null;
+    if (next && (next === 'cancelled' || rank[next] > rank[o.status])) {
+      await pool.query(`UPDATE planner.b2b_forecast_orders SET status=$2, updated_at=now(), updated_by=$3 WHERE id=$1`, [o.id, next, by]);
+      await pool.query(`INSERT INTO planner.b2b_forecast_changes (order_id, field, old_value, new_value, changed_by) VALUES ($1,'status',$2,$3,$4)`, [o.id, o.status, next, by + ' (Fulfil)']);
+      moved.push({ id: o.id, client: o.client_label, reference: o.reference, from: o.status, to: next }); } }
+  return { checked: orders.length, linked: orders.filter(o => o.fulfil).length, moved };
+}
+
+// Page data. ?client_id= narrows to one client (the client detail tab).
+app.get('/api/client/b2b-forecast', async (req, res) => {
+  try { const { orders, fx, usd, today } = await b2bLoad({ client_id: req.query.client_id });
+    const owners = [...new Set(orders.map(o => o.owner_email).filter(Boolean))].sort();
+    const clients = (await pool.query(`SELECT id, name, market, currency FROM planner.clients WHERE coalesce(active,true) ORDER BY name`)).rows;
+    res.set('Cache-Control', 'no-store').json({ today, fx, usd_gbp_rate: usd, can_edit: b2bCanEdit(req.me), can_import: !!(req.me && (req.me.is_admin || req.me.live === false)),
+      client_view: !!(req.me && (req.me.is_admin || req.me.client_access || req.me.live === false)),
+      types: B2B_TYPES, currencies: B2B_CURRENCIES, statuses: B2B_STATUSES, cogs_default: B2B_COGS_DEFAULT,
+      orders: orders.map(o => { const x = Object.assign({}, o); delete x.client_market; delete x.client_currency; return x; }), summary: b2bSummary(orders), owners, clients });
+  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// Save rows: {rows:[{id?, ...fields, payments?}]}. One transaction; a bad value stops the whole save with the row named.
+app.post('/api/client/b2b-forecast/save', async (req, res) => {
+  if (!b2bCanEdit(req.me)) return res.status(403).json({ error: 'B2B forecast edit rights needed (CONFIG > Permissions)' });
+  const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows.slice(0, 500) : []; if (!rows.length) return res.status(400).json({ error: 'nothing to save' });
+  const by = (req.me && req.me.email) || 'sandbox', client = await pool.connect(), ids = [];
+  try { await client.query('BEGIN');
+    for (let i = 0; i < rows.length; i++) { try { ids.push(await b2bSave(client, rows[i], by)); } catch (e) { e.message = (rows.length > 1 ? 'Row ' + (i + 1) + ': ' : '') + e.message; throw e; } }
+    await client.query('COMMIT'); client.release(); await b2bStoreCalc(ids);
+    const { orders } = await b2bLoad({ ids }); res.json({ ok: true, ids, orders });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' });
+    if (e.code === 404) return res.status(404).json({ error: e.message }); res.status(400).json({ error: e.message }); }
+});
+app.post('/api/client/b2b-forecast/delete', async (req, res) => {
+  if (!b2bCanEdit(req.me)) return res.status(403).json({ error: 'B2B forecast edit rights needed (CONFIG > Permissions)' });
+  const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger).slice(0, 200); if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  const by = (req.me && req.me.email) || 'sandbox';
+  try { const gone = (await pool.query(`DELETE FROM planner.b2b_forecast_orders WHERE id = ANY($1) RETURNING id, client_label, reference, value_source::float v, currency`, [ids])).rows;
+    for (const g of gone) await pool.query(`INSERT INTO planner.b2b_forecast_changes (order_id, field, old_value, new_value, changed_by) VALUES ($1,'deleted',$2,null,$3)`, [g.id, [g.client_label, g.reference, g.v + ' ' + g.currency].filter(Boolean).join(' | '), by]);
+    res.json({ ok: true, deleted: gone.length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/b2b-forecast/history/:id', async (req, res) => {
+  try { res.json({ changes: (await pool.query(`SELECT field, old_value, new_value, changed_by, to_char(changed_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.b2b_forecast_changes WHERE order_id=$1 ORDER BY changed_at DESC, id DESC LIMIT 300`, [req.params.id])).rows }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Actual orders to match to a forecast row: Fulfil sales orders in the row's market channels (Key Accounts, Custom/Co-Brand,
+// distributors; never the dockandbay-*-ws warehouse channels unless ?all=1), dated from 60 days before the order date to
+// 60 days after the ship date (?anydate=1 = any date), not cancelled. Each shows which row it is already matched to.
+const B2B_CH = { 'UK Wholesale': '^UK - ', 'US Wholesale': '^US - ', 'EU Wholesale': '^EU - (Key|Custom)', 'International Distributor': 'International Distributor|^EU - International', 'AU Distributor': 'AU entity|^AU - ' };
+app.get('/api/client/b2b-forecast/candidates/:id', async (req, res) => {
+  try { const o = (await pool.query(`SELECT id, order_type, to_char(order_date,'YYYY-MM-DD') order_date, to_char(ship_date,'YYYY-MM-DD') ship_date, fulfil_order_refs FROM planner.b2b_forecast_orders WHERE id=$1`, [req.params.id])).rows[0];
+    if (!o) return res.status(404).json({ error: 'no such row' });
+    const all = req.query.all === '1', anyd = req.query.anydate === '1', from = o.order_date || o.ship_date, to = o.ship_date || o.order_date;
+    const args = [all ? '.' : (B2B_CH[o.order_type] || '.')]; let dq = '';
+    if (!anyd && from) { args.push(from, to); dq = ` AND sale_date BETWEEN $2::date - 60 AND $3::date + 60`; }
+    const rows = (await pool.query(`SELECT number, reference, party_name, channel, currency, untaxed::float untaxed, state, shipment_state, invoice_state, to_char(sale_date,'YYYY-MM-DD') sale_date
+        FROM planner.fulfil_sales WHERE number IS NOT NULL AND state NOT IN ('cancel','draft','quotation') AND channel ~* $1 ${all ? '' : `AND channel !~* '^dockandbay-'`} ${dq}
+        ORDER BY sale_date DESC LIMIT 300`, args)).rows;
+    const linked = {}; (await pool.query(`SELECT id, client_label, unnest(fulfil_order_refs) ref FROM planner.b2b_forecast_orders WHERE id<>$1`, [o.id])).rows.forEach(x => { linked[x.ref] = { id: Number(x.id), client: x.client_label }; });
+    res.json({ window: anyd || !from ? null : { from, to }, linked_here: o.fulfil_order_refs || [], orders: rows.map(r => Object.assign(r, { linked_to: linked[r.number] || (r.reference && linked[r.reference]) || null })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/b2b-forecast/refresh-fulfil', async (req, res) => {
+  if (!b2bCanEdit(req.me)) return res.status(403).json({ error: 'B2B forecast edit rights needed' });
+  try { res.json(await b2bFulfilRefresh((req.me && req.me.email) || 'sandbox')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Import from the sheet (admin): {text: paste of B2B_DIRECT_FORECAST columns C..O or CSV, apply?: bool, replace?: bool}.
+// Without apply = preview (rows, skipped, unmatched clients, flagged dates, workbook GBP vs HORIZON GBP per row).
+// Refused when the table already holds rows, unless every row is an untouched earlier import and replace is set.
+app.post('/api/client/b2b-forecast/import', async (req, res) => {
+  if (!(req.me && (req.me.is_admin || req.me.live === false))) return res.status(403).json({ error: 'Admins only' });
+  const b = req.body || {}; const P = b2bParseSheet(b2bSplitText(b.text || ''));
+  try { const clients = (await pool.query(`SELECT id, name FROM planner.clients`)).rows; const byName = new Map(clients.map(c => [c.name.trim().toLowerCase(), c.id]));
+    const { fx, usd } = await b2bFx(); const today = new Date().toISOString().slice(0, 10);
+    const WB = { USD: 1.883, EUR: 1.873 };   // the workbook's wrong lookups (GBP>CAD values), shown so Andy sees the change
+    const norm = x => x.trim().toLowerCase().replace(/[’']/g, '').replace(/\s+/g, ' ');
+    const byPrefix = clients.map(c => [norm(c.name), c.id]).filter(x => x[0].length >= 4).sort((a, b) => b[0].length - a[0].length);
+    const matchClient = label => { const n = norm(label); return byName.get(label.trim().toLowerCase()) || (byPrefix.find(x => n === x[0] || n.startsWith(x[0] + ' ')) || [])[1] || null; };   // exact, else the longest client name the label starts with ("John Lewis AW26" -> John Lewis)
+    const rows = P.rows.map(r => { r.client_id = matchClient(r.client_label); const c = b2bCalc(r, fx, usd, today);
+      return Object.assign(r, { value_gbp: c.value_gbp, fx_rate: c.fx_rate, workbook_gbp: r.currency === 'GBP' ? r.value_source : WB[r.currency] ? Math.round(r.value_source / WB[r.currency] * 100) / 100 : null }); });
+    const unmatched = [...new Set(rows.filter(r => !r.client_id).map(r => r.client_label))];
+    const flagged = P.flagged.map(r => ({ line: r.line, client: r.client_label, flags: r.import_flags, dates: [r.order_date, r.ship_date].concat(r.payments.map(p => p.due_date)).filter(b2bDateSuspect) }));
+    const summary = { rows_in: rows.length, skipped: P.skipped, unmatched_clients: unmatched, flagged_dates: flagged, buckets: rows.filter(r => r.bucket).length };
+    if (!b.apply) return res.json({ preview: true, summary, rows });
+    const have = (await pool.query(`SELECT count(*)::int n, count(*) FILTER (WHERE created_by NOT LIKE 'import%' OR updated_at > created_at + interval '5 seconds')::int touched FROM planner.b2b_forecast_orders`)).rows[0];
+    if (have.n && !(b.replace && !have.touched)) return res.status(409).json({ error: have.touched ? 'The B2B forecast already has ' + have.n + ' rows and some were added or edited in HORIZON, so the import is refused (it would overwrite them).' : 'The B2B forecast already holds ' + have.n + ' imported rows. Tick "Replace the earlier import" to load again.', rows: have.n });
+    const by = 'import:' + ((req.me && req.me.email) || 'sandbox'), client = await pool.connect(), ids = [];
+    try { await client.query('BEGIN'); if (have.n) await client.query(`DELETE FROM planner.b2b_forecast_orders WHERE created_by LIKE 'import%'`);   // only untouched earlier-import rows (checked above)
+      for (const r of rows) { const id = await b2bSave(client, { client_id: r.client_id, client_label: r.client_label, reference: r.reference, order_type: r.order_type, entity: r.entity, bucket: r.bucket,
+          value_source: r.value_source, currency: r.currency, confirmed: r.confirmed, status: r.status, order_date: r.order_date, payment_terms: r.payment_terms, ship_date: r.ship_date,
+          fulfil_order_refs: r.fulfil_order_refs, payments: r.payments }, by);
+        if (r.import_flags) await client.query(`UPDATE planner.b2b_forecast_orders SET import_flags=$2 WHERE id=$1`, [id, JSON.stringify(r.import_flags)]); ids.push(id); }
+      await client.query('COMMIT'); } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
+    await b2bStoreCalc(ids); res.json({ ok: true, imported: ids.length, summary });
+  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── Feeds (outside the browser session gate; token checked here, fails closed) ──
+const _b2bRl = new Map();   // tiny rate limit: 60 requests a minute per IP per feed
+function b2bRateOk(req, key) { const k = key + '|' + (req.ip || ''), now = Date.now(), r = _b2bRl.get(k) || { t: now, n: 0 };
+  if (now - r.t > 60000) { r.t = now; r.n = 0; } r.n++; _b2bRl.set(k, r); if (_b2bRl.size > 5000) _b2bRl.clear(); return r.n <= 60; }
+// Chief (the founders' app) reads the monthly cash / P&L / production rows, the order drill-down and the change log.
+// Header Authorization: Bearer <CHIEF_FEED_TOKEN>. Nothing else is exposed (no contacts, prices or other tables).
+app.get('/api/feed/chief/b2b-forecast', async (req, res) => {
+  const tok = process.env.CHIEF_FEED_TOKEN, got = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!tok || !safeEq(got, tok)) return res.status(401).json({ error: 'unauthorized' });
+  if (!b2bRateOk(req, 'chief')) return res.status(429).json({ error: 'rate limited' });
+  try { const { orders, fx, today } = await b2bLoad(); const from = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from : null, to = /^\d{4}-\d{2}$/.test(req.query.to || '') ? req.query.to : null;
+    const fy = b2bFy(today), rates = fx[fy] || {};
+    const rows = b2bSummary(orders).filter(r => (!from || r.month >= from) && (!to || r.month <= to));
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.changes_since || '') ? req.query.changes_since : new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const changes = (await pool.query(`SELECT order_id, field, old_value, new_value, changed_by, changed_at FROM planner.b2b_forecast_changes WHERE changed_at >= $1::date ORDER BY changed_at`, [since])).rows;
+    res.set('Cache-Control', 'no-store').json({ computed_at: new Date().toISOString(), fx: { USD: rates.USD || null, EUR: rates.EUR || null, AUD: rates.AUD || null, CAD: rates.CAD || null, source: 'app_settings.fx_rates FY' + fy },
+      rows, orders: orders.filter(o => o.status !== 'cancelled').map(o => ({ id: o.id, client: o.client_name || o.client_label, label: o.client_label, reference: o.reference, order_type: o.order_type, entity: o.entity, bucket: !!o.bucket,
+        status: o.status, confirmed: !!o.confirmed, currency: o.currency, value_source: o.value_source, value_gbp: o.calc.value_gbp, fx_rate: o.calc.fx_rate, order_date: o.order_date, ship_date: o.ship_date,
+        actual_value: o.fulfil ? o.fulfil.ordered_value : null, actual_vs_forecast_pct: o.fulfil ? o.fulfil.vs_forecast_pct : null, fulfil_orders: o.fulfil ? o.fulfil.orders.length : 0,
+        payments: o.payments.map(p => ({ due_date: p.due_date, pct: p.pct })), checks: o.checks.map(c => c.text), owner_email: o.owner_email })),
+      changes_since: since, changes });
+  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: 'server error' }); }
+});
+// The budget workbook: IMPORTDATA("<url>?token=...") in place of today's IMPORTRANGE. Same columns as B2B_DIRECT_FORECAST!C:O.
+// Its own token (B2B_CSV_TOKEN), because a URL in a sheet formula is easier to leak than Chief's header token.
+app.get('/api/feed/b2b-forecast.csv', async (req, res) => {
+  const tok = process.env.B2B_CSV_TOKEN; if (!tok || !safeEq(req.query.token, tok)) return res.status(401).type('text/plain').send('unauthorized');
+  if (!b2bRateOk(req, 'csv')) return res.status(429).type('text/plain').send('rate limited');
+  try { const { orders } = await b2bLoad(); const out = b2bCsv(orders);
+    res.set('Cache-Control', 'no-store').set('X-B2B-Skipped', out.skipped.join(',')).type('text/csv').send(out.csv); }
+  catch (e) { log500(e); res.status(500).type('text/plain').send('server error'); }
+});
+// Nightly Fulfil status refresh (n8n). x-webhook-secret, fails closed.
+app.post('/api/cron/b2b-forecast', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await b2bFulfilRefresh('n8n')); } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+});
 
 // ── lookups for the admin forms ──
 app.get('/api/client/lookups', async (req, res) => {

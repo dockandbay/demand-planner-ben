@@ -1,6 +1,6 @@
 {
   "name": "dock-bay-demand-planner",
-  "version": "28.602",
+  "version": "28.603",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node tests/portal-inplace.cjs",
+    "test": "node tests/portal-inplace.cjs && node tests/b2b-forecast.cjs",
     "bump": "npm version minor --no-git-tag-version",
     "ai-logic:check": "node scripts/ai-logic-check.cjs"
   },

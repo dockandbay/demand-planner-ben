@@ -1,0 +1,7 @@
+{
+ "b2b_forecast_refresh": "5ux7at0jTaNoulBx",
+ "name": "Horizon | B2B forecast Fulfil refresh (nightly 06:15, London)",
+ "created": "2026-10-31",
+ "calls": "POST https://horizon.dockandbay.com/api/cron/b2b-forecast (x-webhook-secret)",
+ "note": "Created inactive; activate after v28.603 is live, migration 407 run and a manual POST returns ok"
+}

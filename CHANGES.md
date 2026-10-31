@@ -1,3 +1,19 @@
+## v28.603 (31-Oct-26) CLIENT > B2B forecast (replaces the "B2B - Direct to Client Forecast" Google Sheet)
+Spec: docs/specs/b2b-forecast.md (Ben 31-Oct-26).
+- New CLIENT tab B2B FORECAST (and a B2B forecast tab on each client): one row per direct-to-client order or forecast bucket, payments, checks. Strip on top: next 12 months of cash receipts (UK x1.2 VAT) / P&L revenue (ship month, net) / production cash out (unconfirmed, COGS 45%, 30% order month / 70% ship month), confirmed vs forecast. Excel-like grid in the sheet's column order (paste rows from the sheet straight in), row drawer with all payments, Fulfil orders, checks and history.
+- GBP value from CONFIG > Exchange rates by financial year (never the workbook's 1.883 / 1.873 / 1.32); no rate = out of totals + red check.
+- Fulfil link (read only, fulfil_sales): status moves forward to shipped / invoiced / paid / cancelled (Refresh button + nightly cron). Match actual Key Accounts / Co-Brand / distributor orders to a row or bucket: Actual (Fulfil) and Actual vs forecast columns (Ben).
+- Import from sheet (admin, paste or CSV) + scripts/import-b2b-forecast.mjs. Sandbox: 65 rows imported, 12 buckets.
+- Feeds: Chief (read only) and the workbook CSV (same columns as B2B_DIRECT_FORECAST!C:O, for IMPORTDATA).
+- MCP (read): b2b_forecast(client?, from?, to?). Logic: lib/ai-logic/b2b-forecast.md. Tests: tests/b2b-forecast.cjs (spec acceptance tests 1-7, in npm test).
+- NEW MIGRATION: migrations/407_b2b_forecast.sql (3 tables + app_permissions.b2b_forecast_edit, seeds the edit tick for mikey@, madison@, liam@, hannah@; mikey@ gets a new permissions row with nothing else ticked).
+- NEW ENV VARS: CHIEF_FEED_TOKEN (Bearer token for Chief), B2B_CSV_TOKEN (token in the workbook's IMPORTDATA URL; separate so a leaked sheet formula can't read the Chief feed). Both fail closed when unset.
+- NEW ROUTES: /api/client/b2b-forecast* (behind cpAdminGate), GET /api/feed/chief/b2b-forecast, GET /api/feed/b2b-forecast.csv.
+- NEW CRON ROUTE: POST /api/cron/b2b-forecast (x-webhook-secret), on the login-gate allowlist with the two feeds. n8n "Horizon | B2B forecast Fulfil refresh (nightly 06:15, London)" 5ux7at0jTaNoulBx created INACTIVE.
+- New permission tick: CONFIG > Permissions "B2B forecast".
+- One-off after deploy: run Import from sheet once on production (admin), then Ben checks the summary.
+- Files: server.mjs, supply/inject.html, lib/b2b_forecast.mjs, lib/ai-logic/b2b-forecast.md, lib/ai-logic/reports.md, migrations/407_b2b_forecast.sql, scripts/import-b2b-forecast.mjs, tests/b2b-forecast.cjs, docs/specs/b2b-forecast.md, Claude Analyses/n8n_b2b_forecast/ids.json, package.json, CHANGES.md.
+
 ## v28.602 (31-Oct-26) Payment-late-in-month workflow: current and last month only
 - "Payment due late in the month -> likely date the 1st" now only picks up payments due in the current month or the month before (Ben). Future months are left alone. The "include overdue" setting is gone (replaced by this rule). Sandbox dry run on 31-Oct: 67 payments (late Sep and late Oct).
 - Files: server.mjs, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.

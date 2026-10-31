@@ -156,7 +156,7 @@ fingerprints:
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   supply/inject.html::hzUpload: c4353cd913f7
   server.mjs::mcpAccess: 6fa73a2097c0
-  server.mjs::mcpCallTool: 3168cccfa958
+  server.mjs::mcpCallTool: 83cd4074af12
   server.mjs::mcpSqlBlocked: bacf960a3825
   server.mjs::mcpHandle: 529be3cd3236
   server.mjs::mcpWrite: e746d01e75cd
@@ -331,7 +331,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.599
+verified_version: v28.603
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)

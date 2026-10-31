@@ -76,6 +76,59 @@
 #client-root .cph-sum b{color:var(--ink)}
 #client-root .cph-btn{font:inherit;font-size:12px;font-weight:700;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:0 12px;height:30px;border-radius:7px;cursor:pointer}
 #client-root .cph-btn:hover{background:var(--hover)}
+/* v28.603 CLIENT > B2B forecast: strip, Excel-like grid, row drawer */
+.b2b-root .b2b-strip{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:10px 12px;margin-bottom:10px}
+.b2b-root .b2b-sh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.b2b-root .b2b-seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.b2b-root .b2b-seg button{border:none;background:transparent;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)}
+.b2b-root .b2b-seg button.on{background:var(--blue);color:#fff}
+.b2b-root .b2b-bars{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;align-items:end}
+.b2b-root .b2b-bar{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.b2b-root .b2b-col{width:70%;max-width:46px;display:flex;flex-direction:column;justify-content:flex-end;height:76px;border-bottom:1px solid var(--line)}
+.b2b-root .b2b-c{background:var(--blue);border-radius:2px 2px 0 0}
+.b2b-root .b2b-f{background:var(--blue-soft,#bfdbfe);border-radius:2px 2px 0 0}
+.b2b-root .b2b-v{font-size:10px;color:var(--ink);white-space:nowrap}
+.b2b-root .b2b-m{font-size:10px;color:var(--muted);white-space:nowrap}
+.b2b-root .b2b-leg{margin-top:6px;display:flex;gap:6px;align-items:center}
+.b2b-root .b2b-sw{display:inline-block;width:10px;height:10px;border-radius:2px}
+.b2b-root .b2b-bar-f{gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+.b2b-root .b2b-sb{display:flex;align-items:center;gap:8px;margin:4px 0;min-height:24px}
+.b2b-root .b2b-tw{max-height:62vh}
+.b2b-root table.b2b-grid{border-collapse:separate;border-spacing:0;font-size:12px;outline:none;min-width:2200px}
+.b2b-root table.b2b-grid td,.b2b-root table.b2b-grid th{border-right:1px solid var(--line2,var(--line));border-bottom:1px solid var(--line2,var(--line));padding:3px 6px;white-space:nowrap;cursor:cell;user-select:none;height:20px}
+.b2b-root table.b2b-grid th{cursor:default}
+.b2b-root table.b2b-grid td.b2b-n,.b2b-root table.b2b-grid th.b2b-n{position:sticky;left:0;z-index:2;background:var(--band);color:var(--muted);text-align:center;min-width:34px;cursor:pointer;font-size:11px}
+.b2b-root table.b2b-grid th.b2b-n{z-index:3}
+.b2b-root table.b2b-grid td.b2b-n:hover{color:var(--blue)}
+.b2b-root table.b2b-grid .b2b-cv{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b2b-root table.b2b-grid td.b2b-ro{background:var(--band);color:var(--muted)}
+.b2b-root table.b2b-grid td.b2b-sel{background:var(--blue-soft,#dbeafe)}
+.b2b-root table.b2b-grid td.b2b-act{box-shadow:inset 0 0 0 2px var(--blue)}
+.b2b-root table.b2b-grid td.b2b-ed{padding:0;box-shadow:inset 0 0 0 2px var(--blue)}
+.b2b-root .b2b-in{width:100%;box-sizing:border-box;border:none;outline:none;padding:3px 6px;font:inherit;font-size:12px;background:var(--card);color:var(--ink);min-width:60px}
+.b2b-root tr.b2b-bucket td:not(.b2b-n){font-style:italic;color:var(--muted)}
+.b2b-root tr.b2b-cx td:not(.b2b-n){text-decoration:line-through;opacity:.6}
+.b2b-root tr.b2b-draft td{background:var(--amber-bg,#fef3c7)}
+.b2b-root tr.b2b-blank td.b2b-n{color:var(--blue);font-weight:700}
+.b2b-root .b2b-faint{color:var(--faint,var(--muted));font-size:11px}
+.b2b-red{color:var(--neg,#dc2626)} .b2b-amb{color:var(--amber,#b45309)} .b2b-pos{color:var(--pos,#15803d)}
+.b2b-root .b2b-ck{white-space:nowrap;margin-right:6px}
+.b2b-root .b2b-imp{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:10px 12px;margin-bottom:8px}
+.b2b-root .b2b-imp textarea{width:100%;box-sizing:border-box;margin:6px 0;font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+#b2b-dr-bk{position:fixed;inset:0;background:rgba(15,23,42,.25);z-index:100040;display:none}
+#b2b-dr{position:fixed;top:0;right:0;bottom:0;width:520px;max-width:96vw;background:var(--card);color:var(--ink);box-shadow:-12px 0 30px rgba(15,23,42,.2);z-index:100041;transform:translateX(105%);transition:transform .18s ease;display:flex;flex-direction:column;font-size:13px}
+#b2b-dr.open{transform:none}
+#b2b-dr .b2b-dh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+#b2b-dr .b2b-x{background:none;border:none;font-size:18px;cursor:pointer;color:var(--faint,var(--muted))}
+#b2b-dr .b2b-db{padding:12px 16px;overflow:auto}
+#b2b-dr .b2b-kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:12px}
+#b2b-dr .b2b-kv span{color:var(--muted)}
+#b2b-dr .b2b-sl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px}
+#b2b-dr .b2b-pt{width:100%;border-collapse:collapse;font-size:12px}
+#b2b-dr .b2b-pt td,#b2b-dr .b2b-pt th{border-bottom:1px solid var(--line2,var(--line));padding:3px 6px;text-align:left}
+#b2b-dr input{border:1px solid var(--line);border-radius:5px;padding:3px 6px;font:inherit;font-size:12px;background:var(--card);color:var(--ink)}
+#b2b-dr a{color:var(--blue);cursor:pointer}
+@media (prefers-reduced-motion: reduce){ #b2b-dr{transition:none} }
 #client-root .cph-tw{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:64vh;background:var(--card)}
 #client-root .cph-tw table th{position:sticky;top:0;z-index:1;background:var(--hdr-tint,var(--band));border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
 #client-root .cph-tw table th:hover{color:var(--ink)}
@@ -10201,6 +10254,7 @@
               +'<td class="l" style="text-align:center">'+chk(r.email,'client_access',r.client_access)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'commissions',r.commissions)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'accounts_access',r.accounts_access)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'b2b_forecast_edit',r.b2b_forecast_edit)+'</td>'   // v28.603 CLIENT > B2B forecast edit
               +'<td class="l" style="text-align:center">'+chk(r.email,'connect_access',r.connect_access)+'</td>'   // v28.483 (Ben): Connect tick
               +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
               +'<td class="l">'+inboxCell(r.email,r.inbox_types)+'</td>'
@@ -10218,7 +10272,7 @@
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
               +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
               +'<span class="pm-err" style="color:var(--neg);font-size:12px"></span></div>'
-            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center" title="See the ACCOUNTS menu (admins always can)">ACCOUNTS</th><th class="l" style="white-space:nowrap;text-align:center" title="May use Connect (Gmail add-on and Chrome side panel, read-only HORIZON cards). Unticking refuses their next request.">Connect</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap;text-align:center" title="Which top-bar Inbox item types this user sees">Inbox</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="14" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>'
+            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center" title="See the ACCOUNTS menu (admins always can)">ACCOUNTS</th><th class="l" style="white-space:nowrap;text-align:center" title="May edit CLIENT > B2B forecast (anyone with CLIENT can view it; admins always can edit). Without CLIENT they see only the B2B forecast.">B2B forecast</th><th class="l" style="white-space:nowrap;text-align:center" title="May use Connect (Gmail add-on and Chrome side panel, read-only HORIZON cards). Unticking refuses their next request.">Connect</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap;text-align:center" title="Which top-bar Inbox item types this user sees">Inbox</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="14" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>'
             // v28.480 (Ben): Claude connector, how to connect + the latest tool calls (planner.mcp_audit)
             +'<div class="sect-h" style="margin-top:18px">Claude connector <span class="mut tiny">(read-only HORIZON data in Claude chat)</span></div>'
             +'<div class="annot">An owner of the Claude organisation adds a custom connector with the URL <b><code>'+esc(location.origin)+'/mcp</code></b> (Claude ▸ Settings ▸ Connectors). Everyone with a @dockandbay.com Google account can then click Connect and sign in with their own account: no tick needed, including people not listed here (v28.489). Tools are read-only; ACCOUNTS and COMMISSIONS data need those grants above. Anyone suspended in Google Workspace is blocked.</div>'
@@ -10233,7 +10287,7 @@
           function rowPayload(tr){ return { email:tr.dataset.em,
             supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked,
             product_edit:tr.querySelector('.pm-chk[data-f="product_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked,
-            client_access:tr.querySelector('.pm-chk[data-f="client_access"]').checked, commissions:tr.querySelector('.pm-chk[data-f="commissions"]').checked, accounts_access:tr.querySelector('.pm-chk[data-f="accounts_access"]').checked, mcp_access:(tr.querySelector('.pm-chk[data-f="mcp_access"]')||{}).checked, connect_access:tr.querySelector('.pm-chk[data-f="connect_access"]').checked,
+            client_access:tr.querySelector('.pm-chk[data-f="client_access"]').checked, commissions:tr.querySelector('.pm-chk[data-f="commissions"]').checked, accounts_access:tr.querySelector('.pm-chk[data-f="accounts_access"]').checked, b2b_forecast_edit:(tr.querySelector('.pm-chk[data-f="b2b_forecast_edit"]')||{}).checked, mcp_access:(tr.querySelector('.pm-chk[data-f="mcp_access"]')||{}).checked, connect_access:tr.querySelector('.pm-chk[data-f="connect_access"]').checked,
             inbox_types:Array.prototype.map.call(tr.querySelectorAll('.pm-inbox:checked'),function(c){return c.dataset.t;}),
             landing_page:(tr.querySelector('.pm-land')||{}).value||'' }; }
           b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
@@ -14632,7 +14686,7 @@
     if(seg[0]==='home'){ if(!ME){ if(!window._hmWaitAt)window._hmWaitAt=Date.now(); if(Date.now()-window._hmWaitAt<10000){ setTimeout(applyRoute,250); return; } } showHome(); return; }   // v28.580: HOME (logo)
     if(seg[0]==='accounts'){ if(!ME){ if(!window._acWaitAt)window._acWaitAt=Date.now(); if(Date.now()-window._acWaitAt<10000){ setTimeout(applyRoute,250); return; } }   /* permissions not loaded yet: wait up to 10s (v28.251: by time, reset in fetchMe, so a slow /api/me never poisons later routes) */
       if(!accountsCan()){ location.replace('#/supply/purchase-orders'); return; } showAccounts(); var _as=(AC_SLUG_IN[seg[1]]||seg[1])||ACCOUNTS_SUB||'bank'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='bank'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
-    if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if(_cs==='config'&&seg[2]==='preview'){ _cs='portal'; seg=seg.slice(0,2); }   /* v28.463: old Config ▸ Portal preview link */ if({clients:1,orders:1,commission:1,messages:1,notices:1,portal:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
+    if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if(_cs==='config'&&seg[2]==='preview'){ _cs='portal'; seg=seg.slice(0,2); }   /* v28.463: old Config ▸ Portal preview link */ if({clients:1,orders:1,commission:1,b2b:1,messages:1,notices:1,portal:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
         else selectReport(seg[2]||reportTab||'actions'); }   // #/supply/reports/<actions|recommendations|erp-compare|…>
@@ -20897,7 +20951,8 @@
   // v28.198 (Ben): last Clients & agents > Edit tab used in this browser (localStorage can throw in private mode: memory fallback).
   var _ceTabMem='';
   function cpCeTabSet(t){ _ceTabMem=t; try{ localStorage.setItem('hz.client.editTab',t); }catch(e){} }
-  function clientCan(){ var m=ME||null; return !m || m.is_admin || m.client_access || m.live===false; }
+  function clientFullCan(){ var m=ME||null; return !m || m.is_admin || m.client_access || m.live===false; }
+  function clientCan(){ var m=ME||null; return clientFullCan() || !!(m&&m.b2b_forecast_edit); }   // v28.603: a B2B forecast editor without CLIENT sees CLIENT with only the B2B forecast tab
   function clientCommCan(){ var m=ME||null; return !m || m.is_admin || m.commissions || m.live===false; }
   function cpGet(u){ return fetch(u).then(function(r){ return r.json().then(function(j){ if(!r.ok||(j&&j.error))throw new Error((j&&j.error)||('HTTP '+r.status)); return j; }); }); }
   function cpPost(u,b){ return fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||(j&&j.error&&!j.ok))throw new Error((j&&j.error)||('HTTP '+r.status)); return j; }); }); }
@@ -20957,7 +21012,7 @@
   function cpFeatList(f){ f=f||{}; var L=[['order_placement','orders'],['sample_requests','samples'],['view_stock','stock'],['view_line_sheet','line sheet'],['view_commission','commission'],['messaging','messages'],['view_images','images']]; return L.filter(function(x){return f[x[0]];}).map(function(x){return x[1];}).join(' · ')||'<span class="mut">none</span>'; }
   function ensureClientRoot(){ if(document.getElementById('client-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='client-root';
-    el.innerHTML='<div id="client-subnav"><button class="stab" data-k="clients">CLIENTS &amp; AGENTS <span id="cp-agset" class="ex-badge" style="display:none" title="Agents missing key data for bills and statements"></span></button><button class="stab" data-k="orders">ORDERS <span id="cp-ordrev" class="ex-badge" style="display:none" title="Portal orders awaiting review"></span></button><button class="stab" data-k="commission">COMMISSIONS</button><button class="stab" data-k="messages">MESSAGES <span id="cp-unread" class="ex-badge" style="display:none"></span></button><button class="stab" data-k="notices">NOTICES</button><button class="stab" data-k="portal">PORTAL PREVIEW</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="client-body"></div>';
+    el.innerHTML='<div id="client-subnav"><button class="stab" data-k="clients">CLIENTS &amp; AGENTS <span id="cp-agset" class="ex-badge" style="display:none" title="Agents missing key data for bills and statements"></span></button><button class="stab" data-k="orders">ORDERS <span id="cp-ordrev" class="ex-badge" style="display:none" title="Portal orders awaiting review"></span></button><button class="stab" data-k="commission">COMMISSIONS</button><button class="stab" data-k="b2b">B2B FORECAST <span id="cp-b2bck" class="ex-badge" style="display:none" title="B2B forecast rows with a red check"></span></button><button class="stab" data-k="messages">MESSAGES <span id="cp-unread" class="ex-badge" style="display:none"></span></button><button class="stab" data-k="notices">NOTICES</button><button class="stab" data-k="portal">PORTAL PREVIEW</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="client-body"></div>';
     app.appendChild(el); el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectClientSub(b.dataset.k); }; }); cpoBadgeRefresh(); cpAgSetupRefresh(); }
   function showClient(){ ensureClientRoot(); if(typeof hideAccounts==='function')hideAccounts(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideProduct==='function')hideProduct();
     var app=document.getElementById('app'); if(app){ app.classList.add('client-active'); app.classList.remove('supply-active'); app.classList.remove('config-mode'); app.classList.remove('product-active'); }
@@ -20970,10 +21025,10 @@
   var _cpMfT=null; function cpMarkFiltersSoon(){ clearTimeout(_cpMfT); _cpMfT=setTimeout(cpMarkFilters,30); }
   function cpMfHook(){ var root=document.getElementById('client-root'); if(!root||root.__hzMf)return !!root; root.__hzMf=1; root.addEventListener('change',function(e){ if(e.target&&e.target.tagName==='SELECT')cpMarkFilters(); },true); try{ new MutationObserver(cpMarkFiltersSoon).observe(root,{childList:true,subtree:true}); }catch(e){} cpMarkFilters(); return true; }
   (function(){ if(!cpMfHook()){ var n=0, iv=setInterval(function(){ if(cpMfHook()||++n>120)clearInterval(iv); },500); } })();
-  function selectClientSub(k){ try{ cpMfHook(); }catch(e){} if(k==='commission'&&!clientCommCan())k='clients'; CLIENT_SUB=k; document.querySelectorAll('#client-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); b.style.display=(b.dataset.k==='commission'&&!clientCommCan())?'none':''; });
+  function selectClientSub(k){ try{ cpMfHook(); }catch(e){} if(k==='commission'&&!clientCommCan())k='clients'; if(!clientFullCan())k='b2b'; CLIENT_SUB=k; document.querySelectorAll('#client-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); b.style.display=((b.dataset.k==='commission'&&!clientCommCan())||(!clientFullCan()&&b.dataset.k!=='b2b'))?'none':''; });
     try{ writeHash(['client',k].concat(_cpPending&&_cpPending.sub===k?[String(_cpPending.id)].concat(_cpPending.tab?[String(_cpPending.tab)]:[]):[])); }catch(e){}
     var b=document.getElementById('client-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
-    ({clients:cpRenderClients,orders:cpRenderOrders,commission:cpRenderCommission,messages:cpRenderMessages,notices:cpRenderNotices,portal:cpRenderPortal,config:cpRenderConfig})[k](b); }
+    ({clients:cpRenderClients,orders:cpRenderOrders,commission:cpRenderCommission,b2b:function(el){ b2bfRender(el,{}); },messages:cpRenderMessages,notices:cpRenderNotices,portal:cpRenderPortal,config:cpRenderConfig})[k](b); }
   function ensureClientButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('client-btn'); if(existing){ existing.style.display=clientCan()?'':'none'; return; } if(!clientCan())return;
     var btn=document.createElement('button'); btn.id='client-btn'; btn.className='view-toggle client-toggle'; btn.innerHTML='CLIENT';
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
@@ -22269,7 +22324,7 @@
   function cpEditClient(b,id,tab){ cpLookups(function(LK){ cpGet('/api/client/clients/'+id).then(function(d){ var c=d.client, v=c.visibility||{}, ss=c.stock_scope||{mode:'default'}, F=c.features||{};
       // v28.199 (Ben: "needs to be a tabbed view, not all the boxes"): 6 tabs. Tab = deep link (#/client/clients/<id>/<tab>) > last tab used in this browser > Account.
       // v28.423 (Ben 21-Oct-26: "default to ACCOUNT sub tab, not customers"): opening a client starts on Account; only a deep link names another tab (no last-tab memory).
-      var CE_TABS=['account','users','access','commission','customers','orders','audit']; if(CE_TABS.indexOf(tab)<0)tab='account';
+      var CE_TABS=['account','users','access','commission','customers','orders','b2b','audit']; if(CE_TABS.indexOf(tab)<0)tab='account';
       try{ if(CLIENT_SUB==='clients')writeHash(['client','clients',String(id),tab]); }catch(e){}
       var modes=v.modes||[]; var has=function(m){return modes.indexOf(m)>=0;};
       var opt=function(list,val,lbl,blank){ return '<select class="fci ce" data-f="'+lbl+'">'+(blank?'<option value="">'+blank+'</option>':'')+list.map(function(o){ var vv=typeof o==='object'?o[0]:o, ll=typeof o==='object'?o[1]:o; return '<option value="'+esc(vv)+'"'+(String(vv)===String(val==null?'':val)?' selected':'')+'>'+esc(ll)+'</option>'; }).join('')+'</select>'; };
@@ -22280,7 +22335,7 @@
       // v28.198 (Ben): header strip, always visible above the tabs: name · type · status · users · last login (portal sign-in or last seen, dd-mmm-yy).
       var _actU=d.users.filter(function(u){return u.active;}).length, _lastIn=d.last_login||d.users.reduce(function(m,u){ return (u.last_login_at&&u.last_login_at>m)?u.last_login_at:m; },'');
       var _tabBtn=function(k,l,extra){ return '<button class="rtab cetab'+(k===tab?' active':'')+'" data-ct="'+k+'">'+l+(extra||'')+'</button>'; }, _cnt=function(n){ return n?'<span class="ce-cnt">'+n+'</span>':''; };
-      var _tabsH='<div class="ce-tabs" id="ce-tabs" role="tablist">'+_tabBtn('account','Account')+_tabBtn('users','Users',_cnt(d.users.length))+_tabBtn('access','Access &amp; features','<span class="ce-dot" id="ce-vis-dot" title="portal visibility warnings" style="display:none"></span>')+_tabBtn('commission','Commission')+(c.type==='agent'?_tabBtn('customers','Customers'):'')+_tabBtn('orders','Orders',_cnt(d.portal_orders.length))+_tabBtn('audit','Audit')+'</div>';
+      var _tabsH='<div class="ce-tabs" id="ce-tabs" role="tablist">'+_tabBtn('account','Account')+_tabBtn('users','Users',_cnt(d.users.length))+_tabBtn('access','Access &amp; features','<span class="ce-dot" id="ce-vis-dot" title="portal visibility warnings" style="display:none"></span>')+_tabBtn('commission','Commission')+(c.type==='agent'?_tabBtn('customers','Customers'):'')+_tabBtn('orders','Orders',_cnt(d.portal_orders.length))+_tabBtn('b2b','B2B forecast')+_tabBtn('audit','Audit')+'</div>';
       var _pan=function(k){ return '<div class="ce-panel" data-ct="'+k+'"'+(k===tab?'':' style="display:none"')+'>'; };
       b.innerHTML='<div class="sect-h" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="save-btn light" id="cp-back">← Back</button> '+esc(c.name)+' '+cpTypeBadge(c.type)+(c.active?' <span class="tool-badge bg-green">Active</span>':' <span class="tool-badge bg-red">Inactive</span>')+'<span class="mut tiny" id="ce-strip">'+_actU+' user'+(_actU===1?'':'s')+(d.users.length>_actU?' ('+(d.users.length-_actU)+' inactive)':'')+' · last login '+(_lastIn?esc(fd(_lastIn)):'never')+'</span><span class="mut tiny">owner '+esc(shortUser(c.owner_email)||'—')+' · updated '+esc(c.updated_at?fd(String(c.updated_at)):'')+(c.updated_by?' by '+esc(shortUser(c.updated_by)):'')+'</span><span style="margin-left:auto;display:flex;gap:8px;align-items:center"><span class="mut tiny" id="ce-msg" title="every change saves automatically">changes save automatically</span><button class="save-btn light" id="ce-del" style="color:var(--neg)">Delete</button></span></div>'   /* v28.097 (Ben): auto-save (green flash), no Save button */
         +'<datalist id="cp-chlist">'+Object.keys(LK.channel_alias||{}).map(function(k){return '<option value="'+k+'">';}).join('')+(LK.channels||[]).map(function(x){return '<option value="'+esc(x.channel)+'">';}).join('')+'</datalist>'
@@ -22292,7 +22347,7 @@
         +'<a class="cu-act" data-id="'+u.id+'" data-on="'+(u.active?'0':'1')+'" style="cursor:pointer;color:var(--muted)">'+(u.active?'deactivate':'activate')+'</a>'
         +'<a class="cu-del" data-id="'+u.id+'" style="cursor:pointer;color:var(--neg)">delete user</a>'
         +'</div></td></tr>'; }).join('')||'<tr><td colspan="5" class="l mut">No users yet.</td></tr>')+'</tbody></table></div><div class="bar" style="margin-top:8px;gap:6px;flex-wrap:wrap"><input class="fci txt" id="cu-name" placeholder="name" style="width:150px"><input class="fci txt" id="cu-email" placeholder="email" style="width:210px"><select class="fci" id="cu-scope2"><option value="client">whole client</option><option value="self">own customers only</option></select><label class="tiny"><input type="checkbox" id="cu-invite" checked> send link now</label><button class="save-btn" id="cu-add">+ Add user</button></div><div class="tiny" id="cu-msg" style="margin-top:6px;word-break:break-all"></div>')
-          +'</div>'+_pan('audit')+card('Audit trail','<div class="tw" style="max-height:220px;overflow:auto"><table><thead><tr><th class="l">When</th><th class="l">By</th><th class="l">Change</th></tr></thead><tbody>'+(d.audit.map(function(a){return '<tr><td class="l tiny" style="white-space:nowrap">'+esc(a.at)+'</td><td class="l tiny">'+esc((a.changed_by||'').split('@')[0])+'</td><td class="l tiny">'+esc(a.event)+(a.detail?' · <span class="mut">'+esc(a.detail)+'</span>':'')+'</td></tr>';}).join('')||'<tr><td colspan="3" class="l mut">—</td></tr>')+'</tbody></table></div>')+'</div>'
+          +'</div>'+_pan('b2b')+'<div id="ce-b2b"></div>'+'</div>'+_pan('audit')+card('Audit trail','<div class="tw" style="max-height:220px;overflow:auto"><table><thead><tr><th class="l">When</th><th class="l">By</th><th class="l">Change</th></tr></thead><tbody>'+(d.audit.map(function(a){return '<tr><td class="l tiny" style="white-space:nowrap">'+esc(a.at)+'</td><td class="l tiny">'+esc((a.changed_by||'').split('@')[0])+'</td><td class="l tiny">'+esc(a.event)+(a.detail?' · <span class="mut">'+esc(a.detail)+'</span>':'')+'</td></tr>';}).join('')||'<tr><td colspan="3" class="l mut">—</td></tr>')+'</tbody></table></div>')+'</div>'
         +_pan('access')+'<div id="ce-vis-warn"></div>'+card('Access &amp; visibility <span class="mut tiny" style="font-weight:400">— what their users can see; modes combine with OR</span>','<label class="tiny" style="display:block;margin-bottom:4px"><input type="checkbox" class="ce-mode" data-m="agent_code"'+(has('agent_code')?' checked':'')+'> <b>Agent Code (rep group)</b> — every order whose Fulfil <b>Agent Code</b> is one of <input class="fci txt ce" data-f="vis_agent_codes" value="'+esc((v.agent_codes||[]).join(', '))+'" placeholder="e.g. appelman" style="width:200px;margin-left:6px"></label><div id="ce-agent-codes" class="tiny mut" style="margin:0 0 8px 22px">Loading Agent Codes from Fulfil…</div><label class="tiny" style="display:block;margin-bottom:6px"><input type="checkbox" class="ce-mode" data-m="tag"'+(has('tag')?' checked':'')+'> <b>Tag-based</b> — every order carrying the tag <input class="fci txt ce" data-f="vis_tag" value="'+esc(v.tag||'')+'" placeholder="agent_ideco" style="width:160px;margin-left:6px"></label><label class="tiny" style="display:block;margin-bottom:4px"><input type="checkbox" class="ce-mode" data-m="channel_region"'+(has('channel_region')?' checked':'')+'> <b>Channel + region</b> — whole channel, filtered to a country</label><div id="ce-chs" style="margin:0 0 4px 22px">'+chRows()+'</div><a class="tiny" id="ce-ch-add" style="cursor:pointer;margin-left:22px;color:var(--blue)">+ add channel</a><label class="tiny" style="display:block;margin:8px 0 4px"><input type="checkbox" class="ce-mode" data-m="company_email"'+(has('company_email')?' checked':'')+'> <b>Company / email match</b> — orders whose billing company or customer email matches</label><div style="margin-left:22px"><textarea class="fci ce" data-f="vis_companies" rows="2" placeholder="company names, one per line (matches contains)" style="width:100%">'+esc((v.companies||[]).join('\n'))+'</textarea><textarea class="fci ce" data-f="vis_emails" rows="1" placeholder="customer emails, one per line (optional)" style="width:100%;margin-top:4px">'+esc((v.emails||[]).join('\n'))+'</textarea></div><div class="mut tiny" style="margin-top:6px"><b>Agent Code</b> is the rep group: with it set, <b>every</b> user of this client (including "own customers only" users) sees all the group\'s orders, and commission runs use the same orders. Without an Agent Code, an "own customers only" user sees only the orders where they are the customer email. Tag-based reads sale metadata (legacy).</div>')
           +card('Feature toggles <span class="mut tiny" style="font-weight:400">— what they can do, independent of what they see</span>','<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">'+tog('order_placement','Order placement','default on')+tog('sample_requests','Sample requests','default on')+tog('view_stock','View stock availability')+tog('view_line_sheet','View line sheet')+tog('view_commission','View commission report','agent groups')+tog('messaging','Client messaging')+tog('view_images','Image galleries','default on')+'</div>')+card('Image galleries <span class="mut tiny" style="font-weight:400">— which ImageBank galleries this client sees in Catalogue ▸ Images</span>','<div id="ce-gal"><div class="count">Loading galleries…</div></div>')
           +card('Stock scope','<label class="tiny" style="display:block"><input type="radio" name="ce-ss" class="ce-ss" value="default"'+(ss.mode!=='custom'?' checked':'')+'> <b>Default</b> — one assigned warehouse, all SKUs, banded</label><div style="margin:4px 0 8px 22px">'+opt([['uk_3pl','UK 3PL (ILG)'],['us_3pl','US 3PL (Geneva)'],['eu_3pl','EU 3PL (iFulfilment)'],['au_3pl','AU 3PL (Coghlans)']],c.warehouse_code,'warehouse_code')+'</div><label class="tiny" style="display:block"><input type="radio" name="ce-ss" class="ce-ss" value="custom"'+(ss.mode==='custom'?' checked':'')+'> <b>Custom stock report</b> — the Dillard\'s exception: a region + an explicit SKU list, exact counts</label><div style="margin:4px 0 0 22px"><select class="fci ce" data-f="ss_region"><option value="warehouse"'+(ss.region==='warehouse'||!ss.region?' selected':'')+'>assigned warehouse only</option><option value="market_all"'+(ss.region==='market_all'?' selected':'')+'>all warehouses in the market (3PL + FBA)</option><option value="us_all"'+(ss.region==='us_all'?' selected':'')+'>all US (Geneva + FBA)</option></select> <label class="tiny"><input type="checkbox" class="ce" data-f="ss_exact"'+(ss.exact!==false?' checked':'')+'> exact units (else banded)</label><textarea class="fci ce" data-f="ss_skus" rows="3" placeholder="SKU list, one per line or comma-separated (blank = all active SKUs)" style="width:100%;margin-top:4px">'+esc((ss.sku_list||[]).join('\n'))+'</textarea></div><div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line2)"><b class="tiny mut" style="text-transform:uppercase;letter-spacing:.03em">Discontinue date shown</b> <select class="fci ce" data-f="ss_disc_market" style="font-size:11px;margin-left:6px"><option value="">Client market (default: '+esc(c.market)+')</option><option value="US"'+(ss.disc_market==='US'?' selected':'')+'>US / UK / EU date</option><option value="AU"'+(ss.disc_market==='AU'?' selected':'')+'>AU date</option><option value="CA"'+(ss.disc_market==='CA'?' selected':'')+'>CA date</option></select><div class="mut tiny" style="margin-top:3px">Which market\'s product discontinue date the line sheet shows this client. Default follows the client market.</div></div>')
@@ -22306,8 +22361,9 @@
       function ceShowTab(k){ if(CE_TABS.indexOf(k)<0)k='account'; tab=k;
         b.querySelectorAll('#ce-tabs .cetab').forEach(function(x){ var on=x.dataset.ct===k; x.classList.toggle('active',on); x.setAttribute('aria-selected',on?'true':'false'); });
         b.querySelectorAll('#ce-panels > .ce-panel').forEach(function(p){ p.style.display=p.dataset.ct===k?'':'none'; });
+        if(k==='b2b'){ var _bb=document.getElementById('ce-b2b'); if(_bb&&!_bb.__done){ _bb.__done=1; b2bfRender(_bb,{client_id:id,client_name:c.name}); } }   // v28.603: this client's B2B forecast rows
         cpCeTabSet(k); try{ if(CLIENT_SUB==='clients')writeHash(['client','clients',String(id),k]); }catch(e){} }
-      b.querySelectorAll('#ce-tabs .cetab').forEach(function(x){ x.onclick=function(){ ceShowTab(x.dataset.ct); }; }); cpCeTabSet(tab);
+      b.querySelectorAll('#ce-tabs .cetab').forEach(function(x){ x.onclick=function(){ ceShowTab(x.dataset.ct); }; }); cpCeTabSet(tab); if(tab==='b2b')ceShowTab('b2b');
       // v28.198 (Ben): portal-visibility warnings: a ticked mode with nothing to match on, or no mode at all (users would see no orders).
       // Shown at the top of Access & features and as a red dot on its tab; re-checked as those fields change (reads the DOM, rebuilds nothing).
       function ceVisWarn(){ var w=[], val=function(f){ var el=b.querySelector('.ce[data-f="'+f+'"]'); return el?String(el.value||'').trim():''; };
@@ -22626,6 +22682,303 @@
   // ── COMMISSIONS ──
   var _cpComm={month:'',group:'',run:null,tab:'report'};
   var _cpMsg={client:'',thread:null,kind:''};   // v28.200 (Ben): + kind ('' | 'order' | 'general')   // v28.086 (Ben): MESSAGES sub-tab state — was never declared, so clicking MESSAGES threw "ReferenceError: _cpMsg is not defined" and the page never rendered
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // v28.603 (Ben 31-Oct-26): CLIENT > B2B forecast (spec docs/specs/b2b-forecast.md). Replaces the "B2B - Direct to
+  // Client Forecast" Google Sheet. Receipts strip on top (Receipts / P&L / Production, 12 months, confirmed vs forecast),
+  // filters, then a spreadsheet-like grid in the sheet's own column order (Client .. Payment 2 %), so rows copied from the
+  // sheet paste straight in. Grid keys as DEMAND > Key Accounts: click / drag / Shift selects, arrows, Tab, Enter / F2 /
+  // typing edits, Delete clears, Ctrl/Cmd+C copies, Ctrl/Cmd+V pastes (one value fills a selection), Ctrl/Cmd+Z undoes.
+  // Typing in the blank last row starts a new order; it saves once Client, Type, Value and Currency are filled.
+  // The # cell opens the row drawer: all payments (+ add), Fulfil orders, checks and the change history.
+  // opts: {client_id, client_name} = one client's rows (CLIENT > Clients > Edit > B2B forecast).
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  var _b2bF={type:'',entity:'',conf:'',status:'open',owner:'',qtr:'',checks:false,q:''}, _b2bKind='receipt';
+  function b2bfRender(host,opts){ opts=opts||{}; var one=!!opts.client_id;
+    var D=null, ROWS=[], DRAFTS=[], SS={a:null,e:null,drag:false}, ED=null, UNDO=[], SAVING=0, Q=Promise.resolve(), F=one?{type:'',entity:'',conf:'',status:'',owner:'',qtr:'',checks:false,q:''}:_b2bF;
+    host.innerHTML='<div class="b2b-root"><div class="count">Loading…</div></div>'; var root=host.firstChild;
+    var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function dmy(iso){ if(!iso)return ''; var p=String(iso).slice(0,10).split('-'); return p.length<3?String(iso):(p[2]+'-'+MON[+p[1]-1]+'-'+p[0].slice(2)); }
+    function isoD(t){ return String(t==null?'':t).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g,function(m){ return dmy(m); }); }   // audit text: ISO dates -> dd-mmm-yy
+    function money(n,cur){ if(n==null||n==='')return ''; var s=Math.round(Number(n)).toLocaleString('en-GB'); return (cur==='GBP'?'£':cur==='USD'?'$':cur==='EUR'?'€':cur==='AUD'?'A$':cur==='CAD'?'C$':'')+s; }
+    function k(n){ n=Number(n)||0; return Math.abs(n)>=999500?'£'+(n/1e6).toFixed(2)+'m':'£'+Math.round(n/1000)+'k'; }
+    function canEdit(){ return !!(D&&D.can_edit); }
+    function load(keepSel){ return cpGet('/api/client/b2b-forecast'+(one?'?client_id='+encodeURIComponent(opts.client_id):'')).then(function(d){ D=d; draw(keepSel); badge(); })
+      .catch(function(e){ root.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
+    function badge(){ if(one)return; var n=(D.orders||[]).filter(function(o){ return (o.checks||[]).some(function(c){ return c.sev==='red'; }); }).length, el=document.getElementById('cp-b2bck'); if(el){ el.textContent=n; el.style.display=n?'':'none'; } }
+    // ── columns: the sheet's C..O first, then HORIZON's own ──
+    function COLS(){ return [
+      {k:'client_label',h:'Client',t:'text',w:170},{k:'reference',h:'Reference / note / order no.',t:'text',w:170},{k:'order_type',h:'Type',t:'sel',o:D.types,w:150},
+      {k:'value_source',h:'Order value (net)',t:'num',w:96},{k:'currency',h:'Cur',t:'sel',o:D.currencies,w:48},{k:'confirmed',h:'Conf',t:'bool',w:44},
+      {k:'order_date',h:'Order date',t:'date',w:78},{k:'payment_terms',h:'Payment terms',t:'text',w:170},{k:'ship_date',h:'Ship date',t:'date',w:78},
+      {k:'p1d',h:'Pay 1 date',t:'pdate',i:0,w:78},{k:'p1p',h:'Pay 1 %',t:'ppct',i:0,w:52},{k:'p2d',h:'Pay 2 date',t:'pdate',i:1,w:78},{k:'p2p',h:'Pay 2 %',t:'ppct',i:1,w:52},
+      {k:'value_gbp',h:'£ value',t:'ro',w:84},{k:'actual',h:'Actual (Fulfil)',t:'ro',w:100},{k:'vsfc',h:'Actual vs forecast',t:'ro',w:70},{k:'status',h:'Status',t:'sel',o:D.statuses,w:82},{k:'bucket',h:'Bucket',t:'bool',w:50},
+      {k:'client_id',h:'HORIZON client',t:'client',w:140},{k:'owner_email',h:'Owner',t:'text',w:130},{k:'fulfil_order_refs',h:'Fulfil order refs',t:'text',w:130},
+      {k:'cogs_pct',h:'COGS %',t:'cogs',w:56},{k:'notes',h:'Notes',t:'text',w:160},{k:'checks',h:'Checks',t:'ro',w:220}]; }
+    var C=[];
+    function raw(o,c){ var v; switch(c.t){
+      case 'pdate': v=(o.payments||[])[c.i]; return v&&v.due_date?dmy(v.due_date):'';
+      case 'ppct': v=(o.payments||[])[c.i]; return v&&(v.pct||v.pct===0)&&(v.pct||v.due_date)?String(v.pct):'';
+      case 'date': return o[c.k]?dmy(o[c.k]):''; case 'bool': return o[c.k]?'TRUE':'FALSE';
+      case 'client': var cl=(D.clients||[]).filter(function(x){ return x.id===o.client_id; })[0]; return cl?cl.name:'';
+      case 'cogs': return o.cogs_pct==null||o.cogs_pct===''?'':String(Math.round(o.cogs_pct*1000)/10);
+      case 'num': return o[c.k]==null?'':String(o[c.k]);
+      default: if(c.k==='fulfil_order_refs')return (o.fulfil_order_refs||[]).join(', '); if(c.k==='value_gbp')return o.calc&&o.calc.value_gbp!=null?String(o.calc.value_gbp):''; if(c.k==='actual')return o.fulfil&&o.fulfil.ordered_value!=null?String(o.fulfil.ordered_value):''; if(c.k==='vsfc')return o.fulfil&&o.fulfil.vs_forecast_pct!=null?String(o.fulfil.vs_forecast_pct)+'%':''; if(c.k==='checks')return (o.checks||[]).map(function(x){ return x.text; }).join('; ');
+        return o[c.k]==null?'':String(o[c.k]); } }
+    function shown(o,c){ var v=raw(o,c);
+      if(c.t==='num')return v===''?'':Math.round(Number(v)).toLocaleString('en-GB');
+      if(c.t==='ppct')return v===''?'':v+'%';
+      if(c.t==='bool')return o[c.k]?'✓':'';
+      if(c.t==='cogs')return v===''?'<span class="b2b-faint">'+Math.round((D.cogs_default||0.45)*100)+'%</span>':esc(v)+'%';
+      if(c.k==='value_gbp'){ if(o._draft)return ''; return o.calc&&o.calc.value_gbp!=null?'£'+Math.round(o.calc.value_gbp).toLocaleString('en-GB')+(o.currency!=='GBP'?'<span class="b2b-faint" title="'+esc(o.calc.fx_source||'')+'"> @'+(+o.calc.fx_rate).toFixed(3)+'</span>':''):'<span class="b2b-red">no FX rate</span>'; }
+      if(c.k==='actual'){ var f0=o.fulfil; if(!f0||!f0.any)return ''; var n0=(f0.orders||[]).filter(function(x){ return x.state!=='cancel'; }).length; return (f0.ordered_value!=null?money(f0.ordered_value,o.currency):'?')+' <span class="b2b-faint">'+n0+' order'+(n0===1?'':'s')+'</span>'; }
+      if(c.k==='vsfc'){ var p0=o.fulfil&&o.fulfil.vs_forecast_pct; if(p0==null)return ''; return '<span class="'+(p0< -10?'b2b-red':p0>10?'b2b-pos':'')+'">'+(p0>0?'+':'')+p0+'%</span>'; }
+      if(c.k==='checks'){ if(o._draft)return '<span class="b2b-amb">Draft: needs '+esc(draftMissing(o).join(', '))+'</span>'; return (o.checks||[]).map(function(x){ return '<span class="b2b-ck '+(x.sev==='red'?'b2b-red':'b2b-amb')+'">● '+esc(x.text)+'</span>'; }).join(' '); }
+      if(c.k==='status'&&o.fulfil&&o.fulfil.any)return esc(v)+' <span class="b2b-faint" title="Linked to Fulfil">⛓</span>';
+      if(c.t==='pdate'&&c.i===1&&(o.payments||[]).length>2)return esc(v)+' <span class="b2b-amb" title="More payments: open the row (#)">+'+((o.payments.length)-2)+'</span>';
+      return esc(v); }
+    function draftMissing(o){ var m=[]; if(!o.client_label)m.push('Client'); if(!o.order_type)m.push('Type'); if(o.value_source==null||o.value_source==='')m.push('Value'); if(!o.currency)m.push('Currency'); return m; }
+    // ── filters ──
+    function fyQ(iso){ if(!iso)return ''; var y=+iso.slice(0,4), m=+iso.slice(5,7), fy=m>=3?y:y-1, q=Math.floor(((m+9)%12)/3)+1; return 'FY'+String(fy).slice(2)+' Q'+q; }
+    function pass(o){ if(o._draft)return true;
+      if(F.type&&o.order_type!==F.type)return false; if(F.entity&&o.entity!==F.entity)return false;
+      if(F.conf==='confirmed'&&!o.confirmed)return false; if(F.conf==='forecast'&&o.confirmed)return false; if(F.conf==='bucket'&&!o.bucket)return false;
+      if(F.status==='open'&&(o.status==='cancelled'||o.status==='paid'))return false; if(F.status&&F.status!=='open'&&o.status!==F.status)return false;
+      if(F.owner&&(o.owner_email||'')!==F.owner)return false; if(F.qtr&&fyQ(o.ship_date)!==F.qtr)return false; if(F.checks&&!(o.checks||[]).length)return false;
+      if(F.q){ var t=(o.client_label+' '+(o.reference||'')+' '+(o.payment_terms||'')+' '+(o.notes||'')+' '+(o.fulfil_order_refs||[]).join(' ')).toLowerCase(); if(t.indexOf(F.q.toLowerCase())<0)return false; }
+      return true; }
+    function build(){ C=COLS(); ROWS=(D.orders||[]).filter(pass).concat(DRAFTS); if(canEdit())ROWS.push({_blank:true,_draft:true,payments:[]}); }
+    // ── strip ──
+    function strip(){ var now=D.today.slice(0,7), ms=[], y=+now.slice(0,4), m=+now.slice(5,7); for(var i=0;i<12;i++){ ms.push(y+'-'+(m<10?'0':'')+m); m++; if(m>12){ m=1; y++; } }
+      var A={}; ms.forEach(function(x){ A[x]={c:0,f:0}; }); var before={c:0,f:0};
+      (D.orders||[]).filter(pass).forEach(function(o){ ((o.calc&&o.calc.lines)||[]).forEach(function(l){ if(l.kind!==_b2bKind)return; var t=A[l.month]||(l.month<ms[0]?before:null); if(!t)return; t[l.confirmed?'c':'f']+=l.amount_gbp; }); });
+      var mx=1, tot=0; ms.forEach(function(x){ mx=Math.max(mx,A[x].c+A[x].f); tot+=A[x].c+A[x].f; });
+      var lab={receipt:'Cash receipts (UK incl. 20% VAT)',pnl_revenue:'P&L revenue by ship month (net)',production_cost:'Production cash out, unconfirmed orders (COGS 30% at order, 70% at ship)'}[_b2bKind];
+      return '<div class="b2b-strip"><div class="b2b-sh"><span class="b2b-seg">'+[['receipt','Receipts'],['pnl_revenue','P&amp;L'],['production_cost','Production']].map(function(x){ return '<button data-kind="'+x[0]+'" class="'+(x[0]===_b2bKind?'on':'')+'">'+x[1]+'</button>'; }).join('')+'</span>'
+        +'<span class="mut tiny">'+lab+'. GBP, filters apply.</span><span style="flex:1"></span><span class="tiny">12-month total <b>'+k(tot)+'</b>'+((before.c+before.f)>0.5?' <span class="mut" title="Due before this month and not marked paid">· earlier, still open '+k(before.c+before.f)+'</span>':'')+'</span></div>'
+        +'<div class="b2b-bars">'+ms.map(function(x){ var a=A[x], h=function(v){ return Math.round(v/mx*74); };
+          return '<div class="b2b-bar" title="'+MON[+x.slice(5)-1]+' '+x.slice(2,4)+': confirmed '+k(a.c)+', forecast '+k(a.f)+'"><div class="b2b-v">'+((a.c+a.f)>0.5?k(a.c+a.f):'')+'</div><div class="b2b-col"><div class="b2b-f" style="height:'+h(a.f)+'px"></div><div class="b2b-c" style="height:'+h(a.c)+'px"></div></div><div class="b2b-m">'+MON[+x.slice(5)-1]+'-'+x.slice(2,4)+'</div></div>'; }).join('')+'</div>'
+        +'<div class="tiny mut b2b-leg"><span class="b2b-sw b2b-c"></span>confirmed <span class="b2b-sw b2b-f"></span>forecast</div></div>'; }
+    function sel(id,cur,list,all){ return '<select class="flt" data-f="'+id+'"><option value="">'+all+'</option>'+list.map(function(x){ var v=Array.isArray(x)?x[0]:x, l=Array.isArray(x)?x[1]:x; return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+esc(l)+'</option>'; }).join('')+'</select>'; }
+    function draw(keepSel){ build(); var qs={}; (D.orders||[]).forEach(function(o){ var q=fyQ(o.ship_date); if(q)qs[q]=1; });
+      var red=(D.orders||[]).filter(function(o){ return o.status!=='cancelled'&&(o.checks||[]).some(function(c){ return c.sev==='red'; }); }).length;
+      root.innerHTML=(one?'':'<div class="annot" style="margin-bottom:8px">Direct-to-client wholesale orders and forecast buckets (was the "B2B - Direct to Client Forecast" sheet). Drives cash receipts, P&amp;L and production cash in Andy\'s budget. <b>Do not add key accounts ordering from the warehouse (3PL)</b>: those stay in DEMAND &gt; Key Accounts and normal sales.</div>')
+        +strip()
+        +'<div class="bar b2b-bar-f">'+sel('type',F.type,D.types,'All types')+sel('entity',F.entity,['UK','AU'],'Both entities')+sel('conf',F.conf,[['confirmed','Confirmed'],['forecast','Forecast'],['bucket','Buckets']],'Confirmed + forecast')
+          +sel('status',F.status,[['open','Open (not paid / cancelled)']].concat(D.statuses.map(function(x){ return [x,x.charAt(0).toUpperCase()+x.slice(1)]; })),'All statuses')
+          +(one?'':sel('owner',F.owner,D.owners||[],'All owners'))+sel('qtr',F.qtr,Object.keys(qs).sort(),'All ship quarters')
+          +'<label class="tiny" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-f="checks"'+(F.checks?' checked':'')+'> has checks'+(red?' <span class="b2b-red">('+red+' red)</span>':'')+'</label>'
+          +'<input class="flt" data-f="q" placeholder="Search client / ref / notes" value="'+esc(F.q)+'" style="width:190px">'
+          +'<span style="flex:1"></span>'
+          +(canEdit()?'<button class="save-btn light" id="b2b-add">+ Add order</button><button class="save-btn light" id="b2b-del" disabled>Delete rows</button><button class="save-btn light" id="b2b-ref" title="Read the linked Fulfil orders (read only) and move status on: shipped / invoiced / paid / cancelled">Refresh Fulfil</button>':'')
+          +(D.can_import&&!one?'<button class="save-btn light" id="b2b-imp">Import from sheet</button>':'')+'</div>'
+        +'<div id="b2b-panel"></div>'
+        +'<div class="b2b-sb"><span id="b2b-sbt" class="tiny mut"></span><span style="flex:1"></span><button class="save-btn light" id="b2b-undo" disabled>Undo</button><span id="b2b-saving" class="tiny mut"></span><span id="b2b-toast" class="tiny"></span></div>'
+        +'<div class="cph-tw b2b-tw"><table class="b2b-grid" tabindex="0"><thead><tr><th class="b2b-n">#</th>'+C.map(function(c){ return '<th class="l" style="min-width:'+c.w+'px">'+esc(c.h)+'</th>'; }).join('')+'</tr></thead><tbody>'
+        +ROWS.map(function(o,r){ var cls=(o._blank?'b2b-blank':'')+(o.bucket?' b2b-bucket':'')+(o.status==='cancelled'?' b2b-cx':'')+(o._draft&&!o._blank?' b2b-draft':'');
+          return '<tr class="'+cls+'"><td class="b2b-n" data-r="'+r+'" title="'+(o._blank?'Type in this row to add an order':'Open: payments, Fulfil, history')+'">'+(o._blank?'+':(r+1))+'</td>'+C.map(function(c,ci){ var ro=c.t==='ro'||!canEdit();
+            var tv=o._blank?'':raw(o,c); return '<td class="l'+(ro?' b2b-ro':'')+'" data-r="'+r+'" data-c="'+ci+'"'+(tv.length>28||c.k==='checks'?' title="'+esc(c.k==='checks'?tv:tv)+'"':'')+'><div class="b2b-cv">'+(o._blank?'':shown(o,c))+'</div></td>'; }).join('')+'</tr>'; }).join('')
+        +'</tbody></table><textarea id="b2b-clip" aria-hidden="true" tabindex="-1" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea></div>'
+        +'<div class="tiny mut" style="margin-top:6px">'+(canEdit()?'Click a cell, then type, or paste rows copied from the sheet (columns Client to Payment 2 %) into the last row. Enter or F2 edits, Delete clears, Ctrl/Cmd+Z undoes. Saves as you go. ':'View only: ask an admin for B2B forecast edit rights (CONFIG &gt; Permissions). ')+'Rates: CONFIG &gt; Exchange rates (local currency per £1, by financial year).</div>';
+      bind(); if(keepSel&&SS.a)paint(); else sb(); }
+    // ── selection ──
+    function tbl(){ return root.querySelector('table.b2b-grid'); }
+    function TD(r,c){ var t=tbl(); return t&&t.querySelector('td[data-r="'+r+'"][data-c="'+c+'"]'); }
+    function nR(){ return ROWS.length; } function nC(){ return C.length; }
+    function rect(){ var a=SS.a, e=SS.e||a; if(!a)return null; return {r0:Math.min(a.r,e.r),r1:Math.max(a.r,e.r),c0:Math.min(a.c,e.c),c1:Math.max(a.c,e.c)}; }
+    function paint(scroll){ var t=tbl(); if(!t)return; var R=rect(); t.querySelectorAll('td.b2b-sel,td.b2b-act').forEach(function(x){ x.classList.remove('b2b-sel','b2b-act'); });
+      if(R){ for(var r=R.r0;r<=R.r1;r++)for(var c=R.c0;c<=R.c1;c++){ var td=TD(r,c); if(td)td.classList.add('b2b-sel'); } var at=TD(SS.a.r,SS.a.c); if(at){ at.classList.add('b2b-act'); if(scroll){ try{ (TD((SS.e||SS.a).r,(SS.e||SS.a).c)||at).scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } } }
+      sb(); }
+    function setA(r,c){ if(!nR())return; r=Math.max(0,Math.min(nR()-1,r)); c=Math.max(0,Math.min(nC()-1,c)); SS.a={r:r,c:c}; SS.e={r:r,c:c}; paint(true); }
+    function extTo(r,c){ if(!SS.a)return setA(r,c); SS.e={r:Math.max(0,Math.min(nR()-1,r)),c:Math.max(0,Math.min(nC()-1,c))}; paint(true); }
+    function selRows(){ var R=rect(), out=[]; if(!R)return out; for(var r=R.r0;r<=R.r1;r++)if(ROWS[r]&&!ROWS[r]._blank)out.push(ROWS[r]); return out; }
+    function sb(){ var el=root.querySelector('#b2b-sbt'); if(!el)return; var R=rect();
+      if(!R)el.textContent=(D.orders||[]).length+' rows ('+ROWS.filter(function(o){ return !o._blank; }).length+' shown). Click a cell to select.';
+      else { var n=(R.r1-R.r0+1)*(R.c1-R.c0+1), sum=0, cnt=0; for(var r=R.r0;r<=R.r1;r++)for(var c=R.c0;c<=R.c1;c++){ var o=ROWS[r], cc=C[c]; if(!o||o._blank)continue; var v=cc.k==='value_gbp'?(o.calc&&o.calc.value_gbp):(cc.t==='num'?o[cc.k]:null); if(v!=null&&v!==''){ sum+=Number(v); cnt++; } }
+        el.innerHTML='Selected <b>'+n+'</b> cell'+(n===1?'':'s')+(cnt?' &nbsp; Sum <b>'+Math.round(sum).toLocaleString('en-GB')+'</b> &nbsp; Count <b>'+cnt+'</b>':''); }
+      var db=root.querySelector('#b2b-del'); if(db){ var sr=selRows().filter(function(o){ return !o._draft; }); db.disabled=!sr.length; db.textContent=sr.length?'Delete '+sr.length+' row'+(sr.length===1?'':'s'):'Delete rows'; }
+      var ub=root.querySelector('#b2b-undo'); if(ub){ var u=UNDO[UNDO.length-1]; ub.disabled=!u; ub.title=u?'Undo '+u.label+' (Ctrl/Cmd+Z)':'Nothing to undo'; }
+      var sv=root.querySelector('#b2b-saving'); if(sv)sv.textContent=SAVING?'Saving…':''; }
+    function toast(msg,bad){ var el=root.querySelector('#b2b-toast'); if(!el)return; el.style.color=bad?'var(--neg)':'var(--pos,#15803d)'; el.textContent=msg; clearTimeout(el._t); el._t=setTimeout(function(){ el.textContent=''; },bad?10000:4000); }
+    function focusGrid(){ var t=tbl(); if(t&&document.activeElement!==t){ try{ t.focus({preventScroll:true}); }catch(e){ t.focus(); } } }
+    // ── edits ──
+    // A change = {o (row object), patch {field: raw}}; payment cells patch o.payments. Drafts collect locally until complete.
+    function payPatch(o,c,v,pays){ pays=pays||(o.payments||[]).map(function(p){ return {due_date:p.due_date?dmy(p.due_date):'',pct:p.pct}; });
+      while(pays.length<=c.i)pays.push({due_date:'',pct:''}); if(c.t==='pdate')pays[c.i].due_date=v; else pays[c.i].pct=v;
+      while(pays.length&&!pays[pays.length-1].due_date&&(pays[pays.length-1].pct===''||pays[pays.length-1].pct==null||+pays[pays.length-1].pct===0))pays.pop(); return pays; }
+    function normBool(v){ return /^(true|yes|y|1|✓|x)$/i.test(String(v).trim()); }
+    function fieldVal(c,v){ if(c.t==='bool')return normBool(v); if(c.t==='client'){ var t=String(v||'').trim().toLowerCase(); if(!t)return ''; var m=(D.clients||[]).filter(function(x){ return x.name.toLowerCase()===t; })[0]; if(!m)throw new Error('No HORIZON client called "'+v+'"'); return m.id; }
+      if(c.t==='sel'){ var t2=String(v||'').trim(); if(!t2)return t2; var mm=c.o.filter(function(x){ return x.toLowerCase()===t2.toLowerCase(); })[0]; if(!mm)throw new Error(c.h+' must be one of: '+c.o.join(', ')); return mm; }
+      if(c.t==='cogs')return String(v||'').replace('%','').trim(); return v; }
+    // edits: [{r,c,v}] (v = raw text). Groups per row, one save request, optimistic, reverted on failure.
+    function apply(edits,label,isUndo){ if(!canEdit()||!edits.length)return; var per=new Map(), err=null;
+      edits.forEach(function(x){ var o=ROWS[x.r], c=C[x.c]; if(!o||!c||c.t==='ro')return; if(o._blank){ o=newDraft(); }
+        var g=per.get(o); if(!g){ g={o:o,patch:{},prev:{},pays:null}; per.set(o,g); }
+        try{ if(c.t==='pdate'||c.t==='ppct'){ if(!g.prevPays)g.prevPays=JSON.parse(JSON.stringify(o.payments||[])); g.pays=payPatch(o,c,String(x.v==null?'':x.v).replace('%','').trim(),g.pays); }
+          else { var fv=fieldVal(c,x.v); if(!(c.k in g.prev))g.prev[c.k]=o[c.k]; g.patch[c.k]=fv; } } catch(e){ err=err||e.message; } });
+      if(err){ toast(err,true); }
+      var saves=[], undo=[];
+      per.forEach(function(g){ var o=g.o;
+        if(o._draft){ Object.keys(g.patch).forEach(function(kk){ o[kk]=kk==='client_id'?(g.patch[kk]||null):g.patch[kk]; }); if(g.pays)o.payments=g.pays.map(function(p,i){ return {seq:i+1,due_date:p.due_date,pct:p.pct}; });
+          if(!draftMissing(o).length){ var body={}; ['client_label','reference','order_type','value_source','currency','confirmed','order_date','payment_terms','ship_date','status','bucket','client_id','owner_email','fulfil_order_refs','cogs_pct','notes'].forEach(function(kk){ if(o[kk]!==undefined&&o[kk]!=='')body[kk]=o[kk]; });
+            body.payments=(o.payments||[]).map(function(p){ return {due_date:p.due_date,pct:p.pct}; }); saves.push({draft:o,body:body}); } return; }
+        var body2={id:o.id}; Object.keys(g.patch).forEach(function(kk){ body2[kk]=g.patch[kk]; }); if(g.pays)body2.payments=g.pays;
+        var back={id:o.id}; Object.keys(g.prev).forEach(function(kk){ back[kk]=kk==='order_date'||kk==='ship_date'?(g.prev[kk]?dmy(g.prev[kk]):''):g.prev[kk]; }); if(g.pays)back.payments=(g.prevPays||[]).map(function(p){ return {due_date:p.due_date?dmy(p.due_date):'',pct:p.pct}; });
+        undo.push(back); saves.push({body:body2}); });
+      draw(true); if(!saves.length)return;
+      SAVING++; sb(); var bodies=saves.map(function(x){ return x.body; });
+      Q=Q.then(function(){ return cpPost('/api/client/b2b-forecast/save',{rows:bodies}); }).then(function(j){
+        saves.forEach(function(x){ if(x.draft){ DRAFTS=DRAFTS.filter(function(d){ return d!==x.draft; }); } });
+        (j.orders||[]).forEach(function(n){ var ix=-1; (D.orders||[]).forEach(function(o,i){ if(o.id===n.id)ix=i; }); if(ix>=0)D.orders[ix]=n; else D.orders.push(n); });
+        var ids=saves.map(function(x,i){ return x.draft?(j.ids||[])[i]:null; }).filter(function(x){ return x!=null; }), created=ids.length;
+        if(!isUndo){ if(undo.length||created)UNDO.push({label:label,rows:undo,created:ids}); if(UNDO.length>30)UNDO.shift(); }
+        draw(true); badge(); toast((isUndo?'Undone':'Saved')+(created?': '+created+' new order'+(created===1?'':'s'):'')); })
+      .catch(function(e){ toast('Not saved: '+(e.message||e)+'. Reloaded.',true); return load(true); })
+      .then(function(){ SAVING=Math.max(0,SAVING-1); sb(); }); }
+    function newDraft(){ var o={_draft:true,payments:[],confirmed:false,bucket:false,entity:'UK',owner_email:(ME&&ME.email)||''}; if(one){ o.client_id=+opts.client_id; o.client_label=opts.client_name||''; } DRAFTS.push(o); return o; }
+    function undoLast(){ if(SAVING){ Q.then(undoLast); return; } var u=UNDO.pop(); if(!u){ toast('Nothing to undo'); sb(); return; }
+      var p=Promise.resolve(); if(u.created&&u.created.length)p=cpPost('/api/client/b2b-forecast/delete',{ids:u.created});
+      SAVING++; sb(); p.then(function(){ return u.rows.length?cpPost('/api/client/b2b-forecast/save',{rows:u.rows}):null; }).then(function(){ toast('Undone: '+u.label); return load(true); })
+        .catch(function(e){ toast('Undo failed: '+(e.message||e),true); return load(true); }).then(function(){ SAVING=Math.max(0,SAVING-1); sb(); }); }
+    // ── in-cell editor ──
+    function startEdit(r,c,first){ if(!canEdit())return; var o=ROWS[r], cc=C[c]; if(!o||!cc||cc.t==='ro')return; var td=TD(r,c); if(!td)return;
+      if(cc.t==='bool'&&first==null){ apply([{r:r,c:c,v:o[cc.k]?'FALSE':'TRUE'}],cc.h); return; }
+      var cur=o._blank?'':raw(o,cc), opts2=cc.t==='sel'?cc.o:cc.t==='client'?(D.clients||[]).map(function(x){ return x.name; }):null;
+      ED={r:r,c:c}; td.classList.add('b2b-ed');
+      if(opts2&&first==null){ td.innerHTML='<select class="b2b-in">'+(cc.t==='client'?'<option value="">(none)</option>':'')+opts2.map(function(x){ return '<option'+(x===cur?' selected':'')+'>'+esc(x)+'</option>'; }).join('')+'</select>'; }
+      else td.innerHTML='<input class="b2b-in" value="'+esc(first!=null?first:cur)+'"'+(cc.t==='date'||cc.t==='pdate'?' placeholder="dd-mmm-yy"':'')+'>';
+      var inp=td.querySelector('.b2b-in'); inp.focus(); if(inp.setSelectionRange&&first!=null){ var L=inp.value.length; inp.setSelectionRange(L,L); } else if(inp.select&&inp.tagName==='INPUT')inp.select();
+      var done=false; function commit(move){ if(done)return; done=true; var v=inp.value; ED=null; if(String(v)!==String(cur))apply([{r:r,c:c,v:v}],cc.h); else draw(true);
+        if(move){ setA(r+move[0],c+move[1]); } focusGrid(); }
+      inp.onkeydown=function(ev){ var kk=ev.key; ev.stopPropagation();
+        if(kk==='Enter'){ ev.preventDefault(); commit([ev.shiftKey?-1:1,0]); } else if(kk==='Tab'){ ev.preventDefault(); commit([0,ev.shiftKey?-1:1]); }
+        else if(kk==='Escape'){ ev.preventDefault(); done=true; ED=null; draw(true); focusGrid(); } };
+      inp.onblur=function(){ setTimeout(function(){ if(!done)commit(null); },0); };
+      if(inp.tagName==='SELECT')inp.onchange=function(){ commit([0,0]); }; }
+    // ── clipboard ──
+    function copyText(){ var R=rect(); if(!R)return ''; var lines=[]; for(var r=R.r0;r<=R.r1;r++){ var o=ROWS[r], row=[]; for(var c=R.c0;c<=R.c1;c++){ var v=(!o||o._blank)?'':raw(o,C[c]); if(C[c].t==='ppct'&&v!=='')v=v+'%'; row.push(/[\t\n"]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v); } lines.push(row.join('\t')); } return lines.join('\n'); }
+    function copySel(){ var txt=copyText(); if(!txt&&!rect())return; var ta=root.querySelector('#b2b-clip');
+      var via=function(){ ta.value=txt; ta.focus(); ta.select(); var ok=false; try{ ok=document.execCommand('copy'); }catch(e){} ta.value=''; focusGrid(); return ok; };
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){ toast('Copied'); },function(){ toast(via()?'Copied':'The browser blocked the copy',!via); }); else toast(via()?'Copied':'The browser blocked the copy'); }
+    function parseClip(t){ t=String(t==null?'':t).replace(/\r\n?/g,'\n'); if(t.slice(-1)==='\n')t=t.slice(0,-1); var tab=t.indexOf('\t')>=0, rows=[], row=[], cell='', q=false, sep=tab?'\t':',';
+      for(var i=0;i<t.length;i++){ var ch=t[i]; if(q){ if(ch==='"'){ if(t[i+1]==='"'){ cell+='"'; i++; } else q=false; } else cell+=ch; continue; }
+        if(ch==='"'&&cell===''){ q=true; continue; } if(ch===sep){ row.push(cell); cell=''; continue; } if(ch==='\n'){ row.push(cell); rows.push(row); row=[]; cell=''; continue; } cell+=ch; }
+      row.push(cell); rows.push(row); return rows; }
+    function pasteText(txt){ var a=SS.a; if(!a||!canEdit())return; var B=parseClip(txt), R=rect(), edits=[], out=0;
+      if(B.length===1&&B[0].length===1&&R&&(R.r1>R.r0||R.c1>R.c0)){ for(var r=R.r0;r<=R.r1;r++)for(var c=R.c0;c<=R.c1;c++)if(ROWS[r]&&!ROWS[r]._blank)edits.push({r:r,c:c,v:B[0][0]}); apply(edits,'fill'); return; }
+      var blankAt=ROWS.length-1, startsBlank=ROWS[a.r]&&ROWS[a.r]._blank;
+      if(startsBlank){ // new rows: one draft per pasted line, all saved in one request when complete
+        var drafts=B.filter(function(row){ return row.some(function(x){ return String(x).trim(); }); }).map(function(row){ var o=newDraft(); row.forEach(function(v,j){ var c=C[a.c+j]; if(!c||c.t==='ro'){ if(c==null)out++; return; } try{ if(c.t==='pdate'||c.t==='ppct'){ o.payments=payPatch(o,c,String(v).replace('%','').trim(),o.payments&&o.payments.map(function(p){ return {due_date:p.due_date,pct:p.pct}; })); } else { var fv=fieldVal(c,v); o[c.k]=fv; } }catch(e){ toast(e.message,true); } }); if(o.order_type==='AU Distributor')o.entity='AU'; if(o.confirmed&&!o.status)o.status='confirmed'; return o; });
+        var ready=drafts.filter(function(o){ return !draftMissing(o).length; });
+        if(ready.length){ var bodies=ready.map(function(o){ var bd={}; ['client_label','reference','order_type','value_source','currency','confirmed','order_date','payment_terms','ship_date','status','bucket','client_id','owner_email','fulfil_order_refs','cogs_pct','notes','entity'].forEach(function(kk){ if(o[kk]!==undefined&&o[kk]!=='')bd[kk]=o[kk]; }); bd.payments=(o.payments||[]).map(function(p,i){ return {due_date:p.due_date,pct:p.pct}; }); if(/^[A-Z]{3,5}\d{3,6}-\d+[A-Z]?$|^SO\d{4,}$/i.test(String(o.reference||'').trim())&&!bd.fulfil_order_refs)bd.fulfil_order_refs=[String(o.reference).trim()]; return bd; });
+          SAVING++; draw(true); Q=Q.then(function(){ return cpPost('/api/client/b2b-forecast/save',{rows:bodies}); }).then(function(j){ DRAFTS=DRAFTS.filter(function(d){ return ready.indexOf(d)<0; }); (j.orders||[]).forEach(function(n){ D.orders.push(n); }); UNDO.push({label:'paste '+ready.length+' rows',rows:[],created:j.ids||[]}); draw(true); badge(); toast('Added '+ready.length+' order'+(ready.length===1?'':'s')+(drafts.length>ready.length?'; '+(drafts.length-ready.length)+' left as drafts (missing fields)':'')); })
+            .catch(function(e){ toast('Not saved: '+(e.message||e),true); draw(true); }).then(function(){ SAVING=Math.max(0,SAVING-1); sb(); }); }
+        else { draw(true); toast(drafts.length+' draft row'+(drafts.length===1?'':'s')+': fill Client, Type, Value and Currency to save',true); } return; }
+      B.forEach(function(row,i){ row.forEach(function(v,j){ var r=a.r+i, c=a.c+j; if(r>=blankAt||c>=nC()){ out++; return; } edits.push({r:r,c:c,v:v}); }); });
+      apply(edits,'paste'); if(out)toast(out+' cell'+(out===1?'':'s')+' outside the grid skipped (paste new rows into the last row)'); }
+    // ── row drawer: payments, Fulfil, checks, history ──
+    function drawer(o){ var bk=document.getElementById('b2b-dr-bk'), dr=document.getElementById('b2b-dr');
+      if(!dr){ bk=document.createElement('div'); bk.id='b2b-dr-bk'; dr=document.createElement('div'); dr.id='b2b-dr'; document.body.appendChild(bk); document.body.appendChild(dr); }
+      var close=function(){ dr.classList.remove('open'); bk.style.display='none'; document.removeEventListener('keydown',esc_); }, esc_=function(e){ if(e.key==='Escape')close(); };
+      bk.onclick=close; bk.style.display='block'; void dr.offsetWidth; dr.classList.add('open'); document.addEventListener('keydown',esc_);
+      var pays=(o.payments||[]).map(function(p){ return {due_date:p.due_date?dmy(p.due_date):'',pct:p.pct}; }), ed=canEdit();
+      function payH(){ return '<table class="b2b-pt"><tr><th class="l">#</th><th class="l">Due date</th><th class="l">%</th><th class="l">£ (receipt)</th><th></th></tr>'+pays.map(function(p,i){ var g=o.calc&&o.calc.value_gbp!=null&&p.pct?o.calc.value_gbp*p.pct/100*(o.order_type==='UK Wholesale'?1.2:1):null;
+          return '<tr><td>'+(i+1)+'</td><td><input class="b2b-pd" data-i="'+i+'" value="'+esc(p.due_date||'')+'" placeholder="dd-mmm-yy"'+(ed?'':' disabled')+'></td><td><input class="b2b-pp" data-i="'+i+'" value="'+esc(p.pct==null?'':p.pct)+'" style="width:56px"'+(ed?'':' disabled')+'></td><td class="tiny">'+(g!=null?'£'+Math.round(g).toLocaleString('en-GB'):'')+'</td><td>'+(ed?'<a class="b2b-px" data-i="'+i+'">remove</a>':'')+'</td></tr>'; }).join('')+'</table>'
+          +(ed?'<div class="bar" style="gap:6px;margin-top:6px"><button class="save-btn light" id="b2b-padd">+ Add payment</button><span style="flex:1"></span><span class="tiny mut" id="b2b-psum"></span><button class="save-btn" id="b2b-psave" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save payments</button></div><div class="tiny" id="b2b-pmsg"></div>':''); }
+      var f=o.fulfil, ck=o.checks||[];
+      dr.innerHTML='<div class="b2b-dh"><div><div class="tiny mut">'+esc(o.order_type)+(o.bucket?' · bucket':'')+' · '+esc(o.entity)+' entity</div><b>'+esc(o.client_label)+'</b> '+esc(o.reference||'')+'</div><button class="b2b-x" title="Close (Esc)">✕</button></div>'
+        +'<div class="b2b-db"><div class="b2b-kv"><span>Value</span><b>'+money(o.value_source,o.currency)+' '+esc(o.currency)+'</b><span>£ value</span><b>'+(o.calc&&o.calc.value_gbp!=null?'£'+Math.round(o.calc.value_gbp).toLocaleString('en-GB'):'no FX rate')+'</b><span>Rate</span><b>'+(o.currency==='GBP'?'GBP, no conversion':o.calc&&o.calc.fx_rate?(+o.calc.fx_rate).toFixed(4)+' '+esc(o.currency)+'/£ ('+esc(o.calc.fx_source)+', '+dmy(o.calc.rate_date)+')':'—')+'</b><span>Status</span><b>'+esc(o.status)+(o.confirmed&&o.status!=='confirmed'?' (confirmed)':'')+(!o.confirmed&&o.status!=='forecast'?' (not ticked confirmed)':'')+'</b><span>Order / ship</span><b>'+(dmy(o.order_date)||'—')+' / '+(dmy(o.ship_date)||'—')+'</b></div>'
+        +(ck.length?'<div class="b2b-sl">Checks</div>'+ck.map(function(c){ return '<div class="'+(c.sev==='red'?'b2b-red':'b2b-amb')+'">● '+esc(c.text)+(c.code==='shipped_unconfirmed'&&ed?' <a id="b2b-mkc">Mark confirmed</a>':'')+'</div>'; }).join(''):'')
+        +'<div class="b2b-sl">Payments</div><div id="b2b-pbox">'+payH()+'</div>'
+        +'<div class="b2b-sl">Fulfil</div>'+(f&&f.orders&&f.orders.length?'<table class="b2b-pt"><tr><th class="l">SO</th><th class="l">Ref</th><th class="l">State</th><th class="l">Shipment</th><th class="l">Invoice</th><th class="l">Net</th></tr>'+f.orders.map(function(x){ return '<tr><td>'+esc(x.number||'')+'</td><td>'+esc(x.reference||'')+'</td><td>'+esc(x.state||'')+'</td><td>'+esc(x.shipment||'')+'</td><td>'+esc(x.invoice||'')+'</td><td>'+money(x.untaxed,x.currency)+'</td></tr>'; }).join('')+'</table>':'<div class="tiny mut">'+((o.fulfil_order_refs||[]).length?'No Fulfil order found for '+esc(o.fulfil_order_refs.join(', '))+'.':'Not linked: put the Fulfil SO number or customer reference in "Fulfil order refs".')+'</div>')
+        +(f&&f.any?'<div class="tiny" style="margin-top:4px">Actual ordered <b>'+(f.ordered_value!=null?money(f.ordered_value,o.currency):'?')+'</b> vs forecast '+money(o.value_source,o.currency)+(f.vs_forecast_pct!=null?' (<b>'+(f.vs_forecast_pct>0?'+':'')+f.vs_forecast_pct+'%</b>)':'')+(f.shipped?', shipped '+money(f.shipped_value,o.currency):'')+'.</div>':'')
+        +(ed?'<div class="bar" style="gap:8px;margin-top:6px"><button class="save-btn light" id="b2b-mopen">Match actual orders…</button><span class="tiny mut">Pick the Fulfil orders (Key Accounts, Co-Brand, distributor channels) that this '+(o.bucket?'bucket':'forecast')+' turned into.</span></div><div id="b2b-mbox"></div>':'')
+        +'<div class="b2b-sl">History</div><div id="b2b-hist" class="tiny mut">Loading…</div></div>';
+      dr.querySelector('.b2b-x').onclick=close;
+      var mo=dr.querySelector('#b2b-mopen'); if(mo)mo.onclick=function(){ matchBox(o,dr); };
+      var mk=dr.querySelector('#b2b-mkc'); if(mk)mk.onclick=function(){ var r=ROWS.indexOf(o); close(); if(r>=0)apply([{r:r,c:5,v:'TRUE'}],'mark confirmed'); };
+      function bindP(){ var box=dr.querySelector('#b2b-pbox'); if(!ed)return; var sum=function(){ var t=pays.reduce(function(s,p){ return s+(+String(p.pct).replace('%','')||0); },0), el=dr.querySelector('#b2b-psum'); if(el){ el.textContent='Total '+(Math.round(t*100)/100)+'%'; el.style.color=Math.abs(t-100)>0.01?'var(--neg)':''; } };
+        box.querySelectorAll('.b2b-pd').forEach(function(x){ x.oninput=function(){ pays[+x.dataset.i].due_date=x.value; }; });
+        box.querySelectorAll('.b2b-pp').forEach(function(x){ x.oninput=function(){ pays[+x.dataset.i].pct=x.value.replace('%',''); sum(); }; });
+        box.querySelectorAll('.b2b-px').forEach(function(x){ x.onclick=function(){ pays.splice(+x.dataset.i,1); box.innerHTML=payH(); bindP(); }; });
+        box.querySelector('#b2b-padd').onclick=function(){ pays.push({due_date:'',pct:''}); box.innerHTML=payH(); bindP(); };
+        box.querySelector('#b2b-psave').onclick=function(){ var m=dr.querySelector('#b2b-pmsg'); m.style.color='var(--muted)'; m.textContent='Saving…';
+          var prev=(o.payments||[]).map(function(p){ return {due_date:p.due_date?dmy(p.due_date):'',pct:p.pct}; });
+          cpPost('/api/client/b2b-forecast/save',{rows:[{id:o.id,payments:pays}]}).then(function(j){ var n=(j.orders||[])[0]; if(n){ D.orders.forEach(function(x,i){ if(x.id===n.id)D.orders[i]=n; }); UNDO.push({label:'payments',rows:[{id:o.id,payments:prev}],created:[]}); o=n; }
+            m.style.color='var(--pos,#15803d)'; m.textContent='Saved.'; draw(true); badge(); hist(); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=String(e.message||e); }); };
+        sum(); }
+      bindP();
+      function hist(){ cpGet('/api/client/b2b-forecast/history/'+o.id).then(function(j){ var el=dr.querySelector('#b2b-hist'); if(!el)return; var L={value_source:'Value',order_date:'Order date',ship_date:'Ship date',client_label:'Client',order_type:'Type',confirmed:'Confirmed',status:'Status',payments:'Payments',currency:'Currency',reference:'Reference',fulfil_order_refs:'Fulfil refs',client_id:'HORIZON client',cogs_pct:'COGS',payment_terms:'Terms',owner_email:'Owner',notes:'Notes',bucket:'Bucket',entity:'Entity',created:'Created'};
+        el.innerHTML=(j.changes||[]).length?'<table class="b2b-pt">'+j.changes.map(function(c){ return '<tr><td style="white-space:nowrap">'+dmy(c.at.slice(0,10))+' '+esc(c.at.slice(11))+'</td><td>'+esc(String(c.changed_by||'').split('@')[0])+'</td><td><b>'+esc(L[c.field]||c.field)+'</b> '+(c.old_value!=null&&c.field!=='created'?esc(isoD(c.old_value))+' → ':'')+esc(isoD(c.new_value||''))+'</td></tr>'; }).join('')+'</table>':'No changes yet.'; }).catch(function(){}); }
+      hist(); }
+    // ── match actual Fulfil orders to a forecast row (v28.603, Ben: "did they happen, and the real value vs forecast") ──
+    function matchBox(o,dr){ var box=dr.querySelector('#b2b-mbox'), all=false, anyd=false, picked={}; (o.fulfil_order_refs||[]).forEach(function(x){ picked[x]=1; });
+      function get(){ box.innerHTML='<div class="tiny mut">Loading Fulfil orders…</div>'; cpGet('/api/client/b2b-forecast/candidates/'+o.id+'?all='+(all?1:0)+'&anydate='+(anyd?1:0)).then(function(j){ var L=j.orders||[];
+        var rate=function(cur,iso){ if(cur==='GBP')return 1; var y=+iso.slice(0,4), m=+iso.slice(5,7), fy=String(m>=3?y:y-1), v=D.fx&&D.fx[fy]&&+D.fx[fy][cur]; return v>0?v:(cur==='USD'&&D.usd_gbp_rate?+D.usd_gbp_rate:null); };   // same rule as the server (local per £1 by FY)
+        var tot=function(){ var t=0, bad=false; L.forEach(function(x){ if(!picked[x.number])return; var d=x.sale_date||D.today, a=rate(x.currency||o.currency,d), b=rate(o.currency,d); if(!a||!b){ bad=true; return; } t+=(x.untaxed||0)/a*b; }); return bad?'? (no FX rate)':money(t,o.currency); };
+        box.innerHTML='<div class="bar tiny" style="gap:10px;margin:6px 0"><label><input type="checkbox" id="b2b-mall"'+(all?' checked':'')+'> include warehouse (dockandbay-ws) channels</label><label><input type="checkbox" id="b2b-many"'+(anyd?' checked':'')+'> any date</label><span class="mut">'+(j.window?'Orders dated '+dmy(j.window.from)+' -60 days to '+dmy(j.window.to)+' +60 days':'All dates')+'</span></div>'
+          +(L.length?'<div style="max-height:300px;overflow:auto"><table class="b2b-pt"><tr><th></th><th class="l">SO</th><th class="l">Date</th><th class="l">Customer</th><th class="l">Ref</th><th class="l">Channel</th><th class="l">Net</th><th class="l">Status</th></tr>'+L.map(function(x){ var lk=x.linked_to&&x.linked_to.id!==o.id;
+            return '<tr'+(lk?' style="opacity:.55"':'')+'><td><input type="checkbox" class="b2b-mc" data-n="'+esc(x.number)+'"'+(picked[x.number]||picked[x.reference]?' checked':'')+(lk?' disabled title="Already matched to '+esc(x.linked_to.client)+'"':'')+'></td><td>'+esc(x.number)+'</td><td style="white-space:nowrap">'+dmy(x.sale_date)+'</td><td>'+esc(x.party_name||'')+'</td><td>'+esc(x.reference||'')+'</td><td class="tiny">'+esc(x.channel||'')+'</td><td style="white-space:nowrap">'+money(x.untaxed,x.currency)+'</td><td class="tiny">'+esc(x.shipment_state==='sent'?'shipped':x.state)+(lk?'<br>on '+esc(x.linked_to.client):'')+'</td></tr>'; }).join('')+'</table></div>':'<div class="tiny mut">No orders in that window. Try "any date" or the warehouse channels.</div>')
+          +'<div class="bar" style="gap:8px;margin-top:6px"><span class="tiny">Ticked total <b id="b2b-mtot">'+tot()+'</b> vs forecast '+money(o.value_source,o.currency)+'</span><span style="flex:1"></span><button class="save-btn" id="b2b-msave" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save matches</button></div><div class="tiny" id="b2b-mmsg"></div>';
+        box.querySelector('#b2b-mall').onchange=function(){ all=this.checked; get(); }; box.querySelector('#b2b-many').onchange=function(){ anyd=this.checked; get(); };
+        box.querySelectorAll('.b2b-mc').forEach(function(x){ x.onchange=function(){ if(x.checked)picked[x.dataset.n]=1; else { delete picked[x.dataset.n]; var row=L.filter(function(y){ return y.number===x.dataset.n; })[0]; if(row&&row.reference)delete picked[row.reference]; } box.querySelector('#b2b-mtot').textContent=tot(); }; });
+        box.querySelector('#b2b-msave').onclick=function(){ var m=box.querySelector('#b2b-mmsg'); m.style.color='var(--muted)'; m.textContent='Saving…'; var refs=Object.keys(picked), prev=(o.fulfil_order_refs||[]).join(', ');
+          cpPost('/api/client/b2b-forecast/save',{rows:[{id:o.id,fulfil_order_refs:refs}]}).then(function(j2){ var n=(j2.orders||[])[0]; if(n){ D.orders.forEach(function(x,i){ if(x.id===n.id)D.orders[i]=n; }); UNDO.push({label:'matched orders',rows:[{id:o.id,fulfil_order_refs:prev}],created:[]}); draw(true); badge(); drawer(n); } })
+            .catch(function(e){ m.style.color='var(--neg)'; m.textContent=String(e.message||e); }); }; })
+        .catch(function(e){ box.innerHTML='<div class="b2b-red tiny">'+esc(e.message||e)+'</div>'; }); }
+      get(); }
+    // ── import panel (admin) ──
+    function importPanel(){ var p=root.querySelector('#b2b-panel'); if(p.innerHTML){ p.innerHTML=''; return; }
+      p.innerHTML='<div class="b2b-imp"><b>Import from the Google Sheet</b> <span class="tiny mut">Open "B2B - Direct to Client Forecast", tab B2B_DIRECT_FORECAST, select columns C to O from the header row down (or the whole tab), copy, and paste below. Or choose a CSV export. The example rows and blank rows are skipped. One-off: refused once rows have been added or edited here.</span>'
+        +'<textarea id="b2b-it" rows="6" placeholder="Client&#9;Reference&#9;TYPE&#9;Order Value …"></textarea><div class="bar" style="gap:8px"><input type="file" id="b2b-if" accept=".csv,.tsv,.txt"><button class="save-btn light" id="b2b-ip">Preview</button><label class="tiny"><input type="checkbox" id="b2b-irep"> Replace the earlier import</label><span style="flex:1"></span><button class="save-btn" id="b2b-ia" disabled style="background:var(--blue);color:#fff;border-color:var(--blue)">Import</button></div><div id="b2b-ires" class="tiny"></div></div>';
+      p.querySelector('#b2b-if').onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ p.querySelector('#b2b-it').value=String(rd.result); }; rd.readAsText(f); };
+      var res=p.querySelector('#b2b-ires');
+      function go(apply){ res.style.color='var(--muted)'; res.textContent=apply?'Importing…':'Reading…';
+        cpPost('/api/client/b2b-forecast/import',{text:p.querySelector('#b2b-it').value,apply:!!apply,replace:p.querySelector('#b2b-irep').checked}).then(function(j){ var s=j.summary||{};
+          if(apply){ res.style.color='var(--pos,#15803d)'; res.textContent='Imported '+j.imported+' rows.'; p.innerHTML=''; load(); return; }
+          var rows=j.rows||[], dGBP=0; rows.forEach(function(r){ if(r.workbook_gbp!=null&&r.value_gbp!=null)dGBP+=r.value_gbp-r.workbook_gbp; });
+          res.style.color='';
+          res.innerHTML='<div><b>'+s.rows_in+'</b> rows to import ('+s.buckets+' as buckets), <b>'+(s.skipped||[]).length+'</b> skipped'+((s.skipped||[]).length?': '+s.skipped.map(function(x){ return 'line '+x.line+' '+esc(x.why); }).join('; '):'')+'.</div>'
+            +'<div>Not matched to a HORIZON client ('+(s.unmatched_clients||[]).length+'): <span class="mut">'+esc((s.unmatched_clients||[]).join(', '))+'</span></div>'
+            +'<div>Dates to check: '+((s.flagged_dates||[]).length?s.flagged_dates.map(function(x){ return esc(x.client)+' (line '+x.line+': '+esc(((x.flags||[]).map(function(f){ return f.field+' "'+f.raw+'"'; })).concat((x.dates||[]).map(dmy)).join(', '))+')'; }).join('; '):'none')+'</div>'
+            +'<div style="margin-top:4px">Workbook vs HORIZON £ value (USD and EUR rows; the workbook divided USD by 1.883 and EUR by 1.873): HORIZON is <b>'+(dGBP>=0?'+':'')+'£'+Math.round(dGBP).toLocaleString('en-GB')+'</b> in total.</div>'
+            +'<div class="cph-tw" style="max-height:220px;margin-top:6px"><table><thead><tr><th class="l">Line</th><th class="l">Client</th><th class="l">Value</th><th class="l">Workbook £</th><th class="l">HORIZON £</th><th class="l">Rate</th></tr></thead><tbody>'+rows.filter(function(r){ return r.currency!=='GBP'; }).map(function(r){ return '<tr><td>'+r.line+'</td><td>'+esc(r.client_label)+'</td><td>'+money(r.value_source,r.currency)+'</td><td>'+(r.workbook_gbp!=null?'£'+Math.round(r.workbook_gbp).toLocaleString('en-GB'):'—')+'</td><td>'+(r.value_gbp!=null?'£'+Math.round(r.value_gbp).toLocaleString('en-GB'):'no rate')+'</td><td>'+(r.fx_rate?(+r.fx_rate).toFixed(4):'')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+          p.querySelector('#b2b-ia').disabled=!s.rows_in; }).catch(function(e){ res.style.color='var(--neg)'; res.textContent=String(e.message||e); }); }
+      p.querySelector('#b2b-ip').onclick=function(){ go(false); }; p.querySelector('#b2b-ia').onclick=function(){ go(true); }; }
+    // ── events ──
+    function bind(){ var t=tbl();
+      root.querySelectorAll('.b2b-seg button').forEach(function(x){ x.onclick=function(){ _b2bKind=x.dataset.kind; draw(true); }; });
+      root.querySelectorAll('.b2b-bar-f [data-f]').forEach(function(x){ var f=x.dataset.f; var h=function(){ F[f]=x.type==='checkbox'?x.checked:x.value; SS.a=null; SS.e=null; draw(); if(f==='q'){ var q=root.querySelector('[data-f="q"]'); if(q){ q.focus(); q.setSelectionRange(q.value.length,q.value.length); } } };
+        if(f==='q'){ var tm; x.oninput=function(){ clearTimeout(tm); tm=setTimeout(h,250); }; } else x.onchange=h; });
+      var ad=root.querySelector('#b2b-add'); if(ad)ad.onclick=function(){ setA(nR()-1,0); startEdit(nR()-1,0,''); };
+      var dl=root.querySelector('#b2b-del'); if(dl)dl.onclick=function(){ var rs=selRows().filter(function(o){ return !o._draft; }); if(!rs.length)return;
+        if(dl.dataset.arm!=='1'){ dl.dataset.arm='1'; dl.textContent='Click again to delete '+rs.length; dl.style.color='var(--neg)'; setTimeout(function(){ if(dl.isConnected){ dl.dataset.arm=''; dl.style.color=''; sb(); } },4000); return; }
+        cpPost('/api/client/b2b-forecast/delete',{ids:rs.map(function(o){ return o.id; })}).then(function(j){ toast('Deleted '+j.deleted+' row'+(j.deleted===1?'':'s')+' (kept in the change log)'); SS.a=null; load(); }).catch(function(e){ toast(e.message,true); }); };
+      var rf=root.querySelector('#b2b-ref'); if(rf)rf.onclick=function(){ rf.disabled=true; rf.textContent='Reading Fulfil…'; cpPost('/api/client/b2b-forecast/refresh-fulfil',{}).then(function(j){ toast('Fulfil: '+j.linked+' linked rows read, '+j.moved.length+' status change'+(j.moved.length===1?'':'s')+(j.moved.length?': '+j.moved.map(function(m){ return m.client+' '+m.from+' → '+m.to; }).join('; '):'')); return load(true); }).catch(function(e){ toast(e.message,true); rf.disabled=false; rf.textContent='Refresh Fulfil'; }); };
+      var im=root.querySelector('#b2b-imp'); if(im)im.onclick=importPanel;
+      var ub=root.querySelector('#b2b-undo'); if(ub)ub.onclick=undoLast;
+      if(!t)return;
+      t.addEventListener('mousedown',function(ev){ var td=ev.target.closest&&ev.target.closest('td'); if(!td||ED)return; if(td.classList.contains('b2b-n')){ var o=ROWS[+td.dataset.r]; if(o&&!o._blank&&!o._draft){ ev.preventDefault(); drawer(o); } return; }
+        if(!td.dataset.c)return; ev.preventDefault(); focusGrid(); var r=+td.dataset.r, c=+td.dataset.c; if(ev.shiftKey&&SS.a)extTo(r,c); else setA(r,c); SS.drag=true; });
+      t.addEventListener('mouseover',function(ev){ if(!SS.drag)return; var td=ev.target.closest&&ev.target.closest('td[data-c]'); if(td)extTo(+td.dataset.r,+td.dataset.c); });
+      if(!window.__b2bMu){ window.__b2bMu=1; document.addEventListener('mouseup',function(){ var h=window.__b2bSS; if(h)h.drag=false; }); } window.__b2bSS=SS;
+      t.addEventListener('dblclick',function(ev){ var td=ev.target.closest&&ev.target.closest('td[data-c]'); if(td)startEdit(+td.dataset.r,+td.dataset.c); });
+      t.addEventListener('keydown',function(ev){ if(ED)return; var kk=ev.key, mod=ev.metaKey||ev.ctrlKey, kl=String(kk).toLowerCase();
+        if(mod&&kl==='c'){ ev.preventDefault(); copySel(); return; }
+        if(mod&&kl==='z'){ ev.preventDefault(); undoLast(); return; }
+        if(mod&&kl==='v'){ var ta=root.querySelector('#b2b-clip'); ta.value=''; ta.focus(); setTimeout(function(){ if(document.activeElement===ta)focusGrid(); },80); return; }
+        if(!SS.a){ if(/^(Arrow|Enter|F2|Tab)/.test(kk)&&nR()){ ev.preventDefault(); setA(0,0); } return; }
+        var a=SS.a, e=SS.e||a, dr=kk==='ArrowUp'?-1:kk==='ArrowDown'?1:0, dc=kk==='ArrowLeft'?-1:kk==='ArrowRight'?1:0;
+        if(dr||dc){ ev.preventDefault(); if(ev.shiftKey)extTo(e.r+dr,e.c+dc); else setA(a.r+dr,a.c+dc); return; }
+        if(kk==='Tab'){ ev.preventDefault(); setA(a.r,a.c+(ev.shiftKey?-1:1)); return; }
+        if(kk==='Enter'||kk==='F2'){ ev.preventDefault(); startEdit(a.r,a.c); return; }
+        if(kk===' '&&C[a.c]&&C[a.c].t==='bool'){ ev.preventDefault(); startEdit(a.r,a.c); return; }
+        if(kk==='Delete'||kk==='Backspace'){ ev.preventDefault(); var R=rect(), ed=[]; for(var r=R.r0;r<=R.r1;r++)for(var c=R.c0;c<=R.c1;c++){ var o=ROWS[r], cc=C[c]; if(!o||o._blank||cc.t==='ro')continue; if(['client_label','order_type','value_source','currency'].indexOf(cc.k)>=0)continue; ed.push({r:r,c:c,v:cc.t==='bool'?'FALSE':''}); } if(ed.length)apply(ed,'clear'); else toast('Client, Type, Value and Currency can\'t be blank'); return; }
+        if(kk==='Escape'){ SS.a=null; SS.e=null; paint(); return; }
+        if(kk.length===1&&!mod&&!ev.altKey){ ev.preventDefault(); startEdit(a.r,a.c,kk); } });
+      var ta=root.querySelector('#b2b-clip');
+      ta.addEventListener('paste',function(ev){ var cd=ev.clipboardData||window.clipboardData, txt=cd?(cd.getData('text/plain')||cd.getData('text')):null; if(txt==null)return; ev.preventDefault(); ta.value=''; focusGrid(); pasteText(txt); });
+      ta.addEventListener('input',function(){ var v=ta.value; ta.value=''; focusGrid(); if(v)pasteText(v); }); }
+    load(); }
   function cpRenderCommission(b){ var S=_cpComm; var _cdw=document.getElementById('cph-drawer'); if(_cdw&&S.tab!=='paid'){ _cdw.style.display='none'; var _cbk=document.getElementById('cph-drawer-bk'); if(_cbk)_cbk.style.display='none'; }   // v28.446: the Paid history drawer belongs to that tab
     // v28.331 (Ben): level 3 deep links #/client/commission/<orders|exceptions|run|paid>[/<run id>] (old #/client/commission/<run id> still opens the run)
     if(_cpPending&&_cpPending.sub==='commission'){ var _pi=String(_cpPending.id||''), _pt=String(_cpPending.tab||''); _cpPending=null;
