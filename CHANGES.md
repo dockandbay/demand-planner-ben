@@ -1,3 +1,8 @@
+## v28.605 (31-Oct-26) Ask Claude: "Ask in Claude" for people connected to Claude
+- People who have connected HORIZON to their own Claude (claude.ai connector, a live connector token) see an "Ask in Claude" button next to Send in the Ask Claude drawer. It opens claude.ai in a new tab with the question and the screen they are on (e.g. SUPPLY > PURCHASE ORDERS > PLAN), and Claude answers through the HORIZON connector on their own Claude plan instead of our API key. Attachments stay in HORIZON (a link cannot carry files; they are told). The in-app chat is unchanged and remains the default and fallback. HORIZON never calls their Claude.
+- New: GET /api/assistant/connector (behind the existing Ask Claude gate; reads planner.mcp_tokens for the signed-in person only; false while MCP_ENABLED is off).
+- Files: server.mjs, artifact_v16.7.html, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.604 (31-Oct-26) B2B forecast edit grant: hanna@, not hannah@
 - migrations/407_b2b_forecast.sql seeds the B2B forecast edit tick for hanna@dockandbay.com (Ben: hanna@ is correct). 407 is not live yet, so the file is edited in place.
 - Files: migrations/407_b2b_forecast.sql, lib/ai-logic/b2b-forecast.md, package.json, CHANGES.md. No env vars or cron routes.

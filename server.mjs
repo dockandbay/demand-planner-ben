@@ -29118,6 +29118,16 @@ app.post('/api/identity/revoke', (req, res) => connectIdentity(req, res, 'revoke
 app.post('/api/identity/restore', (req, res) => connectIdentity(req, res, 'restore'));
 
 // list the caller's conversations (newest first)
+// v28.605 (Ben 31-Oct-26): has this person connected HORIZON to their own Claude (claude.ai connector)? A live refresh token
+// = connected. Ask Claude then offers "Ask in Claude": the question opens in claude.ai, answered through the connector on
+// their Claude plan instead of our API key. HORIZON never calls their Claude; the in-app chat stays as the fallback.
+app.get('/api/assistant/connector', async (req, res) => {
+  try { const e = aiUser(req); let connected = false, last_used = null;
+    if (mcpOn() && e) { const r = (await pool.query(`SELECT max(last_used_at) lu, count(*) FILTER (WHERE kind='refresh' AND expires_at > now())::int n FROM planner.mcp_tokens WHERE lower(email)=lower($1)`, [e])).rows[0];
+      connected = !!(r && r.n > 0); last_used = r && r.lu; }
+    res.set('Cache-Control', 'no-store').json({ connected, last_used });
+  } catch (e) { if (/mcp_tokens/.test(String(e && e.message))) return res.json({ connected: false }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/assistant/conversations', async (req, res) => {
   try { const r = await pool.query(`SELECT c.id, c.title, c.created_at, c.updated_at,
       (SELECT count(*) FROM planner.ai_messages m WHERE m.conversation_id=c.id) msgs

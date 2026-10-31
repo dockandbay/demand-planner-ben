@@ -22791,7 +22791,9 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
    +'.ask-typing b{color:var(--ink,#0f172a);font-style:normal}.ask-typing .el{font-variant-numeric:tabular-nums;margin-left:4px;font-size:12px}'
    +'.ask-joke{font-style:italic;font-size:12.5px;margin-top:3px;transition:opacity .35s ease;min-height:1.3em}'
    +'@media (prefers-reduced-motion:reduce){.ask-spark{animation:none}}'
-   +'.ask-hint{color:var(--faint,#94a3b8);font-size:11px;margin-top:6px;text-align:center}';
+   +'.ask-hint{color:var(--faint,#94a3b8);font-size:11px;margin-top:6px;text-align:center}'
+   +'.ask-ext{background:var(--card,#fff);color:var(--ink,#0f172a);border:1px solid var(--line,#e6e9ef);border-radius:10px;height:38px;padding:0 10px;cursor:pointer;font-size:12px;font-weight:600;flex:0 0 auto;white-space:nowrap;font-family:inherit}'
+   +'.ask-ext:hover{background:var(--hover,#f1f5f9)}';
     document.head.appendChild(st); }
   function build(){ css(); if(document.getElementById('ask-dw')) return;
     var bg=document.createElement('div'); bg.id='ask-bg'; bg.onclick=closeAsk; document.body.appendChild(bg);
@@ -23021,15 +23023,30 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'+fbHtml(m); }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?thinkingHtml():'');
     bindFb(b); b.scrollTop=b.scrollHeight; }
   function renderComposer(){ var f=document.getElementById('ask-foot'); if(!f)return;
-    f.innerHTML='<div class="ask-atts" id="ask-atts"></div><div class="ask-inrow"><button class="ask-clip" id="ask-clip" title="Attach a file">&#128206;</button><input type="file" id="ask-file" multiple style="display:none"><textarea class="ask-ta" id="ask-ta" rows="1" placeholder="Ask anything, or attach a file…"></textarea><button class="ask-send" id="ask-send" title="Send">&#10148;</button></div><div class="ask-hint">Private to you. Claude can read CSV, spreadsheets, PDF, images and text.</div>';
+    f.innerHTML='<div class="ask-atts" id="ask-atts"></div><div class="ask-inrow"><button class="ask-clip" id="ask-clip" title="Attach a file">&#128206;</button><input type="file" id="ask-file" multiple style="display:none"><textarea class="ask-ta" id="ask-ta" rows="1" placeholder="Ask anything, or attach a file…"></textarea><button class="ask-ext" id="ask-ext" style="display:none" title="Open this question in your own Claude (claude.ai). It answers through your HORIZON connector, on your Claude plan.">Ask in Claude &#8599;</button><button class="ask-send" id="ask-send" title="Send">&#10148;</button></div><div class="ask-hint">Private to you. Claude can read CSV, spreadsheets, PDF, images and text.<span id="ask-ext-hint" style="display:none"> Connected to Claude: <b>Ask in Claude</b> answers in claude.ai on your Claude plan.</span></div>';
     var ta=document.getElementById('ask-ta'); ta.oninput=function(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,140)+'px'; };
     ta.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } };
     document.getElementById('ask-send').onclick=send;
+    document.getElementById('ask-ext').onclick=askInClaude; connector();
     document.getElementById('ask-clip').onclick=function(){ document.getElementById('ask-file').click(); };
     document.getElementById('ask-file').onchange=function(e){ pickFiles(e.target.files); e.target.value=''; };
     renderAtts(); }
   function renderAtts(){ var a=document.getElementById('ask-atts'); if(!a)return; a.innerHTML=ST.atts.map(function(f,i){ return '<span class="ask-chip">'+esc(f.filename)+' <span class="x" data-i="'+i+'">&times;</span></span>'; }).join(''); a.querySelectorAll('.x').forEach(function(x){ x.onclick=function(){ ST.atts.splice(+x.dataset.i,1); renderAtts(); }; }); }
   function pickFiles(list){ var arr=Array.prototype.slice.call(list||[]).slice(0,6); arr.forEach(function(file){ if(file.size>12*1024*1024){ alert(file.name+' is over 12 MB'); return; } var r=new FileReader(); r.onload=function(){ ST.atts.push({filename:file.name,mime:file.type||'application/octet-stream',data_base64:String(r.result).split(',')[1]}); if(ST.atts.length>6)ST.atts=ST.atts.slice(0,6); renderAtts(); }; r.readAsDataURL(file); }); }
+  // v28.605 (Ben 31-Oct-26): people who connected HORIZON to their own Claude (claude.ai connector) get "Ask in Claude": the
+  // question (plus the screen they are on) opens in claude.ai, which answers through the connector on their Claude plan, not
+  // our API key. Attachments stay here (a link cannot carry files). The in-app chat is unchanged and stays the fallback.
+  function connector(){ var show=function(){ var on=!!(ST.conn&&ST.conn.connected); ['ask-ext','ask-ext-hint'].forEach(function(id){ var el=document.getElementById(id); if(el)el.style.display=on?'':'none'; }); };
+    if(ST.conn&&Date.now()-ST.conn.at<300000)return show();
+    api('/connector').then(function(j){ ST.conn={connected:!!j.connected,at:Date.now()}; show(); }).catch(function(){ ST.conn={connected:false,at:Date.now()}; show(); }); }
+  function screenLabel(){ var h=String(location.hash||'').replace(/^#\/?/,'').split(/[\/?]/).filter(Boolean).slice(0,3);
+    return h.length?h.map(function(x){ return decodeURIComponent(x).replace(/[-_]/g,' ').toUpperCase(); }).join(' > '):''; }
+  function askInClaude(){ var ta=document.getElementById('ask-ta'); var text=(ta&&ta.value||'').trim();
+    if(!text){ if(ta){ ta.focus(); ta.placeholder='Type your question, then Ask in Claude'; } return; }
+    var where=screenLabel(), q='Use the HORIZON connector to answer this'+(where?' (I am on HORIZON '+where+')':'')+':\n\n'+text.slice(0,1500);
+    if(ST.atts.length&&!confirm('Files cannot be sent to claude.ai from here. Attach them in Claude yourself. Continue?'))return;
+    window.open('https://claude.ai/new?q='+encodeURIComponent(q),'_blank','noopener');
+    ta.value=''; ta.style.height='auto'; ST.atts=[]; renderAtts(); }
   function send(){ if(ST.sending||!ST.conv)return; var ta=document.getElementById('ask-ta'); var text=(ta.value||'').trim(); if(!text&&!ST.atts.length)return;
     var atts=ST.atts.slice(); ST.atts=[]; renderAtts();
     ST.msgs.push({role:'user',content:text,files:atts.map(function(a){return {filename:a.filename,direction:'in',id:null};})});
