@@ -29125,8 +29125,8 @@ app.get('/api/assistant/connector', async (req, res) => {
   try { const e = aiUser(req); let connected = false, last_used = null;
     if (mcpOn() && e) { const r = (await pool.query(`SELECT max(last_used_at) lu, count(*) FILTER (WHERE kind='refresh' AND expires_at > now())::int n FROM planner.mcp_tokens WHERE lower(email)=lower($1)`, [e])).rows[0];
       connected = !!(r && r.n > 0); last_used = r && r.lu; }
-    res.set('Cache-Control', 'no-store').json({ connected, last_used });
-  } catch (e) { if (/mcp_tokens/.test(String(e && e.message))) return res.json({ connected: false }); log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ connected, last_used, available: mcpOn() });
+  } catch (e) { if (/mcp_tokens/.test(String(e && e.message))) return res.json({ connected: false, available: false }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/assistant/conversations', async (req, res) => {
   try { const r = await pool.query(`SELECT c.id, c.title, c.created_at, c.updated_at,

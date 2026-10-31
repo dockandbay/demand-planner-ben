@@ -1,3 +1,9 @@
+## v28.606 (31-Oct-26) Ask Claude: setup steps for people not yet connected to Claude
+- Not connected (and the connector is on for this HORIZON): "Use your own Claude?" under the Ask Claude box opens the steps (Claude > Settings > Connectors > HORIZON > Connect, sign in with @dockandbay.com), with "Open Claude connectors" and "Check again" (shows Ask in Claude as soon as the connection exists). If HORIZON is not listed: the Claude organisation owner adds it with <origin>/mcp.
+- GET /api/assistant/connector also returns available (MCP_ENABLED on), so the steps never show where the connector is off.
+- Claude cannot be shown inside HORIZON in a frame: claude.ai refuses to be framed (X-Frame-Options SAMEORIGIN).
+- Files: server.mjs, artifact_v16.7.html, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.605 (31-Oct-26) Ask Claude: "Ask in Claude" for people connected to Claude
 - People who have connected HORIZON to their own Claude (claude.ai connector, a live connector token) see an "Ask in Claude" button next to Send in the Ask Claude drawer. It opens claude.ai in a new tab with the question and the screen they are on (e.g. SUPPLY > PURCHASE ORDERS > PLAN), and Claude answers through the HORIZON connector on their own Claude plan instead of our API key. Attachments stay in HORIZON (a link cannot carry files; they are told). The in-app chat is unchanged and remains the default and fallback. HORIZON never calls their Claude.
 - New: GET /api/assistant/connector (behind the existing Ask Claude gate; reads planner.mcp_tokens for the signed-in person only; false while MCP_ENABLED is off).
