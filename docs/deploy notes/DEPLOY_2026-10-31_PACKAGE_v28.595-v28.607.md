@@ -1,6 +1,6 @@
 # Deploy package v28.595 to v28.607 (31-Oct-26)
 
-Ben source HEAD (code): 2bb2d0b2 (v28.607). Live before this deploy: v28.594. Port PR #55 (port/v28.604, prod commits 822d628 + 9370f65 + 484a559). Status: PR OPEN, checks green; migrations 406 + 407 to run on live before the merge.
+Ben source HEAD (code): 2bb2d0b2 (v28.607). Live before this deploy: v28.594. Port PR #55 (port/v28.604, prod commits 822d628 + 9370f65 + 484a559). Status: LIVE 31-Oct-26. Migrations 406 + 407 run by Ben and read back on live (6 tables, 5 indexes, app_permissions.b2b_forecast_edit, 4 edit grants incl hanna@). PR #55 squash-merged as 4007e62a, deploy run 41190669335 green, /api/version = v28.607. n8n flows for campaign-eta / workflows / b2b-forecast still inactive (dry runs pending).
 
 ## What changed
 - v28.595: sandbox lean mode (SANDBOX_LEAN=1 stops background DB work; off unless set, so no change on live).
