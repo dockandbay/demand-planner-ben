@@ -11,7 +11,7 @@ sources:
   - server.mjs :: connectIdentity, /api/identity/revoke, /api/identity/restore
   - server.mjs :: mcpAccess (Claude connector honours the block)
   - migrations/387_connect.sql :: planner.identity_blocks, planner.identity_events, app_permissions.connect_access
-verified_version: v28.605
+verified_version: v28.606
 fingerprints:
   server.mjs::connectVerify: ed0b696fae5a
   server.mjs::connectAccess: d272750cfad4
@@ -36,8 +36,8 @@ fingerprints:
   server.mjs::/api/connect/search: 7f62d998f2fb
   server.mjs::/api/connect/lookup: 42068be10bbd
   server.mjs::connectIdentity: a43200abf591
-  server.mjs::/api/identity/revoke: 439c003de89f
-  server.mjs::/api/identity/restore: 279a52b02b74
+  server.mjs::/api/identity/revoke: e6c5b69ac9cc
+  server.mjs::/api/identity/restore: 0fcaa07a303f
   server.mjs::mcpAccess: 6fa73a2097c0
   migrations/387_connect.sql::planner.identity_blocks: f68b1e47bbec
   migrations/387_connect.sql::planner.identity_events: f68b1e47bbec
