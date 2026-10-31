@@ -9,7 +9,7 @@ sources:
   - server.mjs :: /api/feed/chief/b2b-forecast, /api/feed/b2b-forecast.csv, /api/cron/b2b-forecast
   - supply/inject.html :: b2bfRender
   - migrations/407_b2b_forecast.sql :: planner.b2b_forecast_orders, planner.b2b_forecast_payments, planner.b2b_forecast_changes, app_permissions.b2b_forecast_edit
-verified_version: v28.603
+verified_version: v28.604
 fingerprints:
   lib/b2b_forecast.mjs::b2bParseDate: e97f2bd97ecb
   lib/b2b_forecast.mjs::b2bFy: 13a76c1bc38f
@@ -35,17 +35,17 @@ fingerprints:
   server.mjs::/api/feed/b2b-forecast.csv: e08987ff231e
   server.mjs::/api/cron/b2b-forecast: 37a95ea24863
   supply/inject.html::b2bfRender: f5f89514ab9b
-  migrations/407_b2b_forecast.sql::planner.b2b_forecast_orders: 8a3995392cc9
-  migrations/407_b2b_forecast.sql::planner.b2b_forecast_payments: 8a3995392cc9
-  migrations/407_b2b_forecast.sql::planner.b2b_forecast_changes: 8a3995392cc9
-  migrations/407_b2b_forecast.sql::app_permissions.b2b_forecast_edit: 8a3995392cc9
+  migrations/407_b2b_forecast.sql::planner.b2b_forecast_orders: f89ba438f55c
+  migrations/407_b2b_forecast.sql::planner.b2b_forecast_payments: f89ba438f55c
+  migrations/407_b2b_forecast.sql::planner.b2b_forecast_changes: f89ba438f55c
+  migrations/407_b2b_forecast.sql::app_permissions.b2b_forecast_edit: f89ba438f55c
 ---
 
 ## What it is
 - One row per direct-to-client wholesale order, or per forecast bucket (e.g. "UK Jan Key Accounts", "Distro Feb"), with its payment schedule. It replaced the Google Sheet "B2B - Direct to Client Forecast" (tab B2B_DIRECT_FORECAST) that Andy's budget workbook imported (v28.603, Ben 31-Oct-26). (source: migrations/407_b2b_forecast.sql)
 - Rule kept from the sheet: do NOT add key accounts ordering from the warehouse (3PL). Those stay in DEMAND > Key Accounts and normal sales.
 - Where: CLIENT > B2B forecast, and CLIENT > Clients > (a client) > B2B forecast for that client's rows. (source: b2bfRender)
-- Who: anyone with CLIENT can view. Edit = admins or the "B2B forecast" tick in CONFIG > Permissions (seeded for Mikey, Madison, Liam, Hannah). Someone with the edit tick but no CLIENT access sees CLIENT with only the B2B forecast tab. Import is admin only. (source: b2bCanEdit, cpAdminGate)
+- Who: anyone with CLIENT can view. Edit = admins or the "B2B forecast" tick in CONFIG > Permissions (seeded for Mikey, Madison, Liam, Hanna (hanna@)). Someone with the edit tick but no CLIENT access sees CLIENT with only the B2B forecast tab. Import is admin only. (source: b2bCanEdit, cpAdminGate)
 
 ## GBP value and FX
 - value_gbp = order value (net, ex tax, order currency) / rate. Rate = local currency per 1 GBP from CONFIG > Exchange rates (app_settings.fx_rates) for the financial year (FY starts 1 March) of the ship date, else the order date, else today; USD falls back to app_settings.usd_gbp_rate only if fx_rates has no rate. (source: b2bRate, b2bCalc)

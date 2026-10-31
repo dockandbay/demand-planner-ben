@@ -50,9 +50,9 @@ create table if not exists planner.b2b_forecast_changes (
 create index if not exists b2b_forecast_changes_at on planner.b2b_forecast_changes (changed_at);
 create index if not exists b2b_forecast_changes_order on planner.b2b_forecast_changes (order_id);
 
--- Edit grant (view = anyone with CLIENT). Ben 31-Oct-26: admins + Mikey, Madison, Liam, Hannah.
+-- Edit grant (view = anyone with CLIENT). Ben 31-Oct-26: admins + Mikey, Madison, Liam, Hanna (hanna@).
 alter table planner.app_permissions add column if not exists b2b_forecast_edit boolean default false;
 insert into planner.app_permissions (email, b2b_forecast_edit, updated_at, updated_by)
   values ('mikey@dockandbay.com', true, now(), 'migration 407'), ('madison@dockandbay.com', true, now(), 'migration 407'),
-         ('liam@dockandbay.com', true, now(), 'migration 407'), ('hannah@dockandbay.com', true, now(), 'migration 407')
+         ('liam@dockandbay.com', true, now(), 'migration 407'), ('hanna@dockandbay.com', true, now(), 'migration 407')
   on conflict (email) do update set b2b_forecast_edit = true, updated_at = now(), updated_by = 'migration 407';
