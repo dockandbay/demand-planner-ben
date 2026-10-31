@@ -4709,24 +4709,76 @@ function crRefsIn(txt) { const s = String(txt || '').toUpperCase(), refs = new S
 function crNameHit(customer, txt) { const hay = ' ' + String(txt || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
   return String(customer || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').split(' ').filter(t => t.length >= 3 && !/^(LTD|LIMITED|THE|AND|GMBH|INC|LLC|PTY|SHOP|STORE)$/.test(t)).some(t => hay.indexOf(' ' + t + ' ') >= 0); }
 const crLineKey = l => l.org + '|' + l.account_name + '|' + l.line_date + '|' + Number(l.amount).toFixed(2) + '|' + (l.reference || '');
-// Suggestions for every open money-in line: two LIVE Fulfil reads in all (orders named in the bank text; orders whose total equals a line).
+// Suggestions for every open money-in line (v28.607, Ben 31-Oct-26: auto-match customer bank transfers; Shopify store orders only, AU out,
+// exact amounts only, never posted automatically). LIVE Fulfil reads, all read only: (1) every unpaid store order with a posted invoice in the
+// last 12 months (one read, ~500), (2) orders named in the bank text, (3) orders whose total equals a line, (4) Fulfil invoice numbers in the
+// text. Per line the best match is, in order: (a) order / SO / invoice number in the reference, (b) exact amount + customer named, (c) the sum
+// of one customer's open orders (a subset when the customer is named, all of them when not). Each comes with why. strong = Reconcile button.
+const CR_INV_RE = /(?:\bINV(?:OICE)?|#)\s*[:#\-]?\s*(\d{4,6})\b/g;
+function crInvTokens(txt) { const s = String(txt || '').toUpperCase(), strong = new Set(), any = new Set(); let m;
+  while ((m = CR_INV_RE.exec(s))) strong.add(m[1]); CR_INV_RE.lastIndex = 0;
+  const re = /\b(\d{4,6})\b/g; while ((m = re.exec(s))) any.add(m[1]);
+  return { strong: [...strong], any: [...any] }; }
+// Smallest exact subset of dues (cents) that adds up to target; n <= 14 (16k combinations). null when none.
+function crSubset(items, target) { const n = Math.min(items.length, 14), t = Math.round(target * 100), c = items.slice(0, n).map(o => Math.round(o.due * 100)); let best = null;
+  for (let mask = 1; mask < (1 << n); mask++) { let sum = 0, k = 0; for (let i = 0; i < n; i++) if (mask & (1 << i)) { sum += c[i]; k++; }
+    if (sum === t && (!best || k < best.k)) best = { k, mask }; }
+  return best ? items.slice(0, n).filter((_, i) => best.mask & (1 << i)) : null; }
 async function crSuggest(lines) {
   const all = new Map(), add = rows => rows.forEach(r => { if (r.store && r.due > 0.005) all.set(r.sale_id, r); });
-  const refs = new Set(), sos = new Set(); lines.forEach(l => { const x = crRefsIn(l.reference + ' ' + l.description); x.refs.forEach(v => refs.add(v)); x.sos.forEach(v => sos.add(v)); });
+  const refs = new Set(), sos = new Set(), invs = new Set(); lines.forEach(l => { const t = l.reference + ' ' + l.description, x = crRefsIn(t); x.refs.forEach(v => refs.add(v)); x.sos.forEach(v => sos.add(v)); crInvTokens(t).any.forEach(v => invs.add(v)); });
+  const today = new Date().toISOString().slice(0, 10), minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
+  add(await crSearch(CR_BASE.concat([['invoice_state', '=', 'posted'], ['sale_date', '>=', crIso(crDays(today, -365))]]), 500));
   if (refs.size || sos.size) add(await crSearch(CR_BASE.concat([['OR', [['reference', 'in', [...refs]]], [['number', 'in', [...sos]]]]]), 200));
-  const amts = [...new Set(lines.map(l => cr2(l.amount)))].slice(0, 150), minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
+  const amts = [...new Set(lines.map(l => cr2(l.amount)))].slice(0, 150);
   if (amts.length) add(await crSearch(CR_BASE.concat([['sale_date', '>=', crIso(crDays(minD, -180))], ['OR', ...amts.map(a => [['total_amount_cache', '>=', a - 0.011], ['total_amount_cache', '<=', a + 0.011]])]]), 500));
-  const out = {};
-  lines.forEach(l => { const txt = l.reference + ' ' + l.description, x = crRefsIn(txt), a = cr2(l.amount);
-    const c = [...all.values()].map(o => { const ref = x.refs.includes(String(o.reference).toUpperCase()) || x.sos.includes(o.number), amt = Math.abs(o.due - a) < 0.011;
-      if (!ref && !amt) return null; if (o.org !== l.org || (l.currency && o.currency !== l.currency)) return null;
-      const lag = Math.round((new Date(l.line_date) - new Date(o.sale_date)) / 864e5); if (!ref && (lag < -3 || lag > 180)) return null;
-      const name = crNameHit(o.customer, txt), why = [ref ? 'order named on the bank line' : null, amt ? 'amount due matches' : 'amount due ' + o.due, name ? 'customer named' : null].filter(Boolean);
-      return Object.assign({}, o, { score: (ref ? 60 : 0) + (amt ? 30 : 0) + (name ? 20 : 0) + Math.max(0, 10 - Math.floor(Math.abs(lag) / 7)), why }); })
-      .filter(Boolean).sort((p, q) => q.score - p.score).slice(0, 5);
-    out[crLineKey(l)] = c; });
+  const invSale = new Map();   // Fulfil invoice number -> sale ids (customer invoices still open)
+  if (invs.size) { const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/account.invoice/search_read', [[['type', '=', 'out'], ['state', '=', 'posted'], ['number', 'in', [...invs].slice(0, 300)]], 0, 300, null, ['number', 'sales']]);
+    (Array.isArray(rows) ? rows : []).forEach(r => invSale.set(String(fulfilUnwrap(r.number)), (fulfilUnwrap(r.sales) || []).map(Number)));
+    const miss = [...new Set([...invSale.values()].flat())].filter(id => !all.has(id)); if (miss.length) add(await crSearch([['id', 'in', miss.slice(0, 200)]], 200)); }
+  const out = {}, open = [...all.values()];
+  lines.forEach(l => { const txt = l.reference + ' ' + l.description, x = crRefsIn(txt), it = crInvTokens(txt), a = cr2(l.amount);
+    const fits = o => o.org === l.org && (!l.currency || o.currency === l.currency);
+    const lagOk = (o, max) => { const lag = Math.round((new Date(l.line_date) - new Date(o.sale_date)) / 864e5); return lag >= -3 && lag <= max; };
+    const invOf = o => { for (const [n, ids] of invSale) if (ids.includes(o.sale_id)) return n; return null; };
+    const named = o => x.refs.includes(String(o.reference).toUpperCase()) || x.sos.includes(o.number);
+    const invNamed = o => { const n = invOf(o); return n && (it.strong.includes(n) || (it.any.includes(n) && (Math.abs(o.due - a) < 0.011 || crNameHit(o.customer, txt)))) ? n : null; };
+    const c = open.filter(fits).map(o => { const ref = named(o), inv = invNamed(o), amt = Math.abs(o.due - a) < 0.011, name = crNameHit(o.customer, txt);
+      if (!ref && !inv && !amt && !name) return null; if (!ref && !inv && !lagOk(o, amt ? 180 : 365)) return null;
+      const why = [ref ? (o.reference || o.number) + ' named on the bank line' : null, inv ? 'invoice ' + inv + ' named on the bank line' : null, amt ? 'amount due matches' : 'amount due ' + o.due.toFixed(2), name ? 'customer named' : null].filter(Boolean);
+      return Object.assign({}, o, { invoice: invOf(o), score: (ref || inv ? 60 : 0) + (amt ? 30 : 0) + (name ? 20 : 0) + Math.max(0, 10 - Math.floor(Math.abs((new Date(l.line_date) - new Date(o.sale_date)) / 864e5) / 7)), why }); })
+      .filter(Boolean).sort((p, q) => q.score - p.score);
+    // best: (a) named orders together; (b) exact amount + customer; (c) one customer's open orders adding up to the line; (d) amount only (weak)
+    let best = null; const mk = (orders, kind, why, strong) => { const tot = cr2(orders.reduce((s, o) => s + o.due, 0)); return { kind, strong, sale_ids: orders.map(o => o.sale_id), orders: orders.map(o => ({ sale_id: o.sale_id, reference: o.reference, number: o.number, store: o.store, customer: o.customer, due: o.due, currency: o.currency, invoice: o.invoice })), total: tot, diff: cr2(a - tot), why }; };
+    const refd = c.filter(o => named(o) || invNamed(o));
+    if (refd.length) { const t = cr2(refd.reduce((s, o) => s + o.due, 0)), d = cr2(a - t);
+      best = mk(refd, 'ref', [refd.map(o => invNamed(o) && !named(o) ? 'invoice ' + invNamed(o) : (o.reference || o.number)).join(', ') + ' named on the bank line', Math.abs(d) < 0.011 ? 'amount matches' : d > 0 ? 'bank line is ' + d.toFixed(2) + ' more (overpaid?)' : 'bank line is ' + (-d).toFixed(2) + ' short']
+        .concat(refd.some(o => crNameHit(o.customer, txt)) ? ['customer named'] : []), true); }
+    if (!best) { const an = c.find(o => Math.abs(o.due - a) < 0.011 && crNameHit(o.customer, txt)); if (an) best = mk([an], 'amount_name', ['amount due matches', 'customer named'], true); }
+    if (!best) { const byC = new Map(); open.filter(o => fits(o) && lagOk(o, 365)).forEach(o => { const k = o.customer.trim().toLowerCase(); if (!byC.has(k)) byC.set(k, []); byC.get(k).push(o); });
+      for (const os of byC.values()) { if (os.length < 2) continue; const name = crNameHit(os[0].customer, txt), tot = cr2(os.reduce((s, o) => s + o.due, 0));
+        if (Math.abs(tot - a) < 0.011) { best = mk(os, 'sum', ['sum of all ' + os.length + ' open orders of ' + os[0].customer].concat(name ? ['customer named'] : []), true); break; }
+        if (name) { const sub = crSubset(os.slice().sort((p, q) => p.sale_date < q.sale_date ? -1 : 1), a); if (sub && sub.length >= 2) { best = mk(sub, 'sum', ['sum of ' + sub.length + ' open orders of ' + os[0].customer, 'customer named'], true); break; } } } }
+    if (!best) { const am = c.filter(o => Math.abs(o.due - a) < 0.011); if (am.length) best = mk([am[0]], 'amount', ['amount due matches'].concat(am.length > 1 ? [am.length + ' orders have this amount'] : ['customer not named']), false); }
+    if (best) best.orders.forEach(o => { if (!c.some(y => y.sale_id === o.sale_id)) { const f = all.get(o.sale_id); if (f) c.unshift(Object.assign({}, f, { invoice: invOf(f), score: 50, why: best.why })); } });
+    out[crLineKey(l)] = { suggestions: c.slice(0, 8), best }; });
   return out;
 }
+// Open WHOLESALE store invoices (UKWS / USWS / EUWS) with no payment after their due date (Fulfil account.invoice, read only). Retail store
+// invoices are left out: they are paid at checkout (Fulfil shows many as posted, not paid). AU stays out.
+async function crOverdue() {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/account.invoice/search_read', [[['type', '=', 'out'], ['state', '=', 'posted'], ['invoice_date', '<', crIso(today)], ['invoice_date', '>=', crIso(crDays(today, -400))], ['sales.channel.name', 'in', ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws']]], 0, 500, [['invoice_date', 'ASC']],
+    ['id', 'number', 'reference', 'party.name', 'currency.code', 'total_amount', 'balance_due', 'earliest_due_date', 'invoice_date', 'sales']]);
+  const L = (Array.isArray(rows) ? rows : []).map(r => { const o = {}; Object.keys(r).forEach(k => { o[k] = fulfilUnwrap(r[k]); }); const tot = cr2(o.total_amount || 0), bal = cr2(o.balance_due || 0), due = o.earliest_due_date;
+    return { invoice: String(o.number || ''), reference: o.reference || '', customer: o['party.name'] || '', currency: o['currency.code'] || '', total: tot, balance: bal, due_date: due, invoice_date: o.invoice_date,
+      days: Math.round((new Date(today) - new Date(due)) / 864e5), sale_ids: (o.sales || []).map(Number) }; })
+    ;
+  const net = new Map(); L.forEach(o => { const k = o.sale_ids.join(','); net.set(k, cr2((net.get(k) || 0) + o.balance)); });   // a credit note on the same order cancels the invoice out
+  return L.filter(o => o.due_date && o.due_date < today && o.total > 0.005 && Math.abs(o.balance - o.total) < 0.011 && (net.get(o.sale_ids.join(',')) || 0) > 0.005).sort((p, q) => q.days - p.days);   // no payment at all (part-paid ones are not "no payment")
+}
+// After posting: does Fulfil show the orders paid yet? (Fulfil imports Shopify's Mark as paid on its own schedule.)
+async function crFulfilPaid(ids) { if (!ids.length) return new Map(); const rows = await crSearch([['id', 'in', ids.slice(0, 300)]], 300); return new Map(rows.map(r => [r.sale_id, r])); }
 const SHOPIFY_API_VERSION = '2025-07';
 function shopifyCfg(store) { const d = (process.env['SHOPIFY_' + store + '_DOMAIN'] || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, ''), t = (process.env['SHOPIFY_' + store + '_TOKEN'] || '').trim();
   return { store, domain: d, configured: !!(d && t), token: t }; }
@@ -4788,7 +4840,8 @@ async function crPlan(b, prior) {
       else if (Math.abs(out - o.due) > 0.011) problems.push(lab + 'Shopify says ' + out + ' outstanding, Fulfil ' + o.due);
     } catch (e) { problems.push(lab + e.message); } }
   const total = cr2(orders.reduce((s, o) => s + (Number(o.due) || 0), 0)), diff = cr2(line.amount - total);
-  if (orders.length && Math.abs(diff) > 0.011) problems.push('The ticked orders come to ' + total.toFixed(2) + ', the bank line is ' + line.amount.toFixed(2) + ' (difference ' + diff.toFixed(2) + '). Only exact payments can be posted for now.');
+  if (orders.length && Math.abs(diff) > 0.011) problems.push(diff > 0 ? 'Overpaid: the bank line is ' + line.amount.toFixed(2) + ', ' + diff.toFixed(2) + ' more than the ticked orders (' + total.toFixed(2) + '). Shopify orders can only be marked paid in full: tick the other order(s) it covers, or deal with the extra in Xero.'
+    : 'Short: the bank line is ' + line.amount.toFixed(2) + ', ' + (-diff).toFixed(2) + ' less than the ticked orders (' + total.toFixed(2) + '). Shopify orders can only be marked paid in full: wait for the rest, or untick an order.');
   try { const dup = (await pool.query(`SELECT id, line_date::text d, account_name, status FROM planner.accounts_customer_receipts WHERE status <> 'error' AND ($1::bigint IS NULL OR id <> $1) AND (sale_ids && $2::bigint[] OR (org=$3 AND account_name=$4 AND line_date=$5::date AND abs(line_amount-$6::numeric)<0.005 AND line_ref=$7))`,
       [prior ? prior.id : null, ids, line.org, line.account_name, line.line_date, line.amount, line.reference])).rows;
     dup.forEach(d => problems.push('Already posted (or being posted): ' + d.account_name + ' ' + d.d + ' (' + d.status + ')'));
@@ -4807,10 +4860,16 @@ app.get('/api/accounts/receipts', async (req, res) => {
     try { log = (await pool.query(`SELECT id, org, account_name, to_char(line_date,'YYYY-MM-DD') line_date, line_amount::float8 amount, line_ref reference, orders, xero_txn_id, status, error, created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_customer_receipts WHERE status <> 'error' OR created_at > now() - interval '30 days' ORDER BY id`)).rows; }
     catch (e) { if (/does not exist/.test(e.message)) migrated = false; else throw e; }
     const sug = lines.length ? await crSuggest(lines) : {}, out = {};
-    lines.forEach(l => { const k = crLineKey(l); out[k] = { suggestions: sug[k] || [] }; });
+    lines.forEach(l => { const k = crLineKey(l); out[k] = sug[k] || { suggestions: [], best: null }; });
     log.forEach(r => { const k = crLineKey(r); if (out[k] && (!out[k].receipt || r.status !== 'error')) out[k].receipt = Object.assign(r, { url: r.xero_txn_id ? 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + r.xero_txn_id : null }); });
+    // v28.607 read-back: for posted receipts, does Fulfil show each order paid yet?
+    const posted = Object.values(out).map(o => o.receipt).filter(r => r && r.status === 'created');
+    const fp = await crFulfilPaid([...new Set(posted.flatMap(r => (r.orders || []).map(o => Number(o.sale_id))))]).catch(() => null);
+    posted.forEach(r => { if (!fp) { r.fulfil = { checked: false }; return; } const os = (r.orders || []).map(o => fp.get(Number(o.sale_id))).filter(Boolean);
+      r.fulfil = { checked: true, paid: os.length === (r.orders || []).length && os.every(o => o.due <= 0.005), unpaid: os.filter(o => o.due > 0.005).map(o => o.reference || o.number) }; });
+    let overdue = [], overdue_err = null; try { overdue = await crOverdue(); } catch (e) { overdue_err = e.message; }
     const shopify = {}; CR_STORES.forEach(s => { shopify[s] = shopifyCfg(s).configured; });
-    _crMemo = { at: Date.now(), v: { ok: true, migrated, shopify, lines: out } }; res.set('Cache-Control', 'no-store').json(_crMemo.v);
+    _crMemo = { at: Date.now(), v: { ok: true, migrated, shopify, lines: out, overdue, overdue_err } }; res.set('Cache-Control', 'no-store').json(_crMemo.v);
   } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 409 : 500).json({ error: e.message }); }
 });
 // Search unpaid Shopify orders in LIVE Fulfil by order (UKWS-7033 / SO68420) or customer, last 12 months, for a bank line's card.
@@ -4861,7 +4920,9 @@ app.post('/api/accounts/receipts/post', async (req, res) => {
     const t = r && r.BankTransactions && r.BankTransactions[0]; if (!t || !t.BankTransactionID) throw new Error('Xero did not return the Receive Money (Shopify is done; press Post again to finish Xero)');
     await pool.query(`UPDATE planner.accounts_customer_receipts SET xero_txn_id=$2, status='created', error=null, updated_at=now() WHERE id=$1`, [row.id, t.BankTransactionID]);
     _crMemo.at = 0;
-    res.json({ ok: true, orders: P.orders.map(o => ({ reference: o.reference, number: o.number, amount: o.due, clearing: o.clearing.code })), xero: { id: t.BankTransactionID, amount: L.amount, url: 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + t.BankTransactionID } });
+    // v28.607 read-back: Fulfil imports Shopify's Mark as paid on its own schedule, so this usually still says "not yet"; the Bank lines row re-checks on every load
+    let fulfil = null; try { const fp = await crFulfilPaid(P.orders.map(o => o.sale_id)); const os = P.orders.map(o => fp.get(o.sale_id)).filter(Boolean); fulfil = { checked: true, paid: os.length === P.orders.length && os.every(o => o.due <= 0.005) }; } catch (_) { fulfil = { checked: false }; }
+    res.json({ ok: true, fulfil, orders: P.orders.map(o => ({ reference: o.reference, number: o.number, amount: o.due, clearing: o.clearing.code })), xero: { id: t.BankTransactionID, amount: L.amount, url: 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + t.BankTransactionID } });
   } catch (e) {
     if (row) { const cur = (await pool.query(`SELECT orders FROM planner.accounts_customer_receipts WHERE id=$1`, [row.id]).catch(() => ({ rows: [] }))).rows[0], any = cur && (cur.orders || []).some(o => o.shopify_done);
       await pool.query(`UPDATE planner.accounts_customer_receipts SET status=$2, error=$3, updated_at=now() WHERE id=$1`, [row.id, any ? 'shopify_done' : 'error', String(e.message).slice(0, 400)]).catch(() => {}); }

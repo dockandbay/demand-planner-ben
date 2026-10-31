@@ -1,3 +1,11 @@
+## v28.607 (31-Oct-26) Customer receipts: auto-match bank transfers to open Shopify orders (ACCOUNTS > Reconcile > Bank lines > Money in)
+- Best match per money-in line, with why: (a) order / SO / Fulfil invoice number on the bank line ("INV 59756" or "#59756"; a bare number only with amount or customer), (b) exact amount + customer named, (c) the sum of one customer's open orders (all of them, or the smallest exact set when the customer is named), (d) amount only (weak). Differences show as overpaid / short. Same org and currency only.
+- Reconcile button on strong exact matches: ticks the orders, runs the checks, then the usual confirm before writing (Shopify Mark as paid + Xero Receive Money, as before). Never posts automatically. Weak or inexact matches: Review.
+- Overdue wholesale invoices, no payment: collapsible panel above the Money in lines (UKWS / USWS / EUWS Fulfil invoices past due with nothing paid; credit-noted ones left out). Sandbox read of live Fulfil: 31.
+- Read back: posted lines show "Fulfil shows it paid" or "Fulfil not paid yet" (re-checked on every load).
+- Scope (Ben 31-Oct-26): Shopify stores only (UK, US, EU, UKWS, USWS, EUWS); Key Accounts, distributors and Custom/Co-Brand are invoiced and paid in Xero, left out. AU out. Shopify orders exact amounts only.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, lib/ai-logic/reports.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.606 (31-Oct-26) Ask Claude: setup steps for people not yet connected to Claude
 - Not connected (and the connector is on for this HORIZON): "Use your own Claude?" under the Ask Claude box opens the steps (Claude > Settings > Connectors > HORIZON > Connect, sign in with @dockandbay.com), with "Open Claude connectors" and "Check again" (shows Ask in Claude as soon as the connection exists). If HORIZON is not listed: the Claude organisation owner adds it with <origin>/mcp.
 - GET /api/assistant/connector also returns available (MCP_ENABLED on), so the steps never show where the connector is off.

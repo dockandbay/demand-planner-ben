@@ -21742,6 +21742,7 @@
       +'<span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
+    if(F==='money')h+=acCrOverdueHtml();   // v28.607
     h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':F==='money'?'Order paid':'Why')+'</th><th></th></tr></thead><tbody>';
     h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):(r.amount>0?acCrCells(r,i):null));
       var rc=fx?fx.rc:k==='found'?('<div>'+esc(hzTrkDate(m.date))+' · '+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+(m.ambiguous?' <span class="pill" style="cursor:default" title="Another email has the same amount: check it in Review">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+'</div>')
@@ -22048,13 +22049,19 @@
     if(R&&R.status==='created'){ var cl=(R.orders||[]).map(function(o){ return o.clearing; }).filter(function(v,j,a){ return v&&a.indexOf(v)===j; });
       rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">Paid</span> '+esc((R.orders||[]).map(function(o){ return o.reference||o.number; }).join(', '))+'</div><div class="tiny mut">marked paid in Shopify · Receive Money to '+esc(cl.join(', '))+' · '+esc(String(R.created_by||'').split('@')[0]+'@')+' '+esc(R.at||'')+'</div>';
       act=(R.url?'<a href="'+esc(R.url)+'" target="_blank" rel="noopener">Receive Money in Xero ↗</a>':'Done')+'<div class="tiny mut">match it in Xero</div>';
+      var Fp=R.fulfil; rc+=Fp&&Fp.checked?(Fp.paid?'<div class="tiny" style="color:var(--pos)">✓ Fulfil shows it paid</div>':'<div class="tiny" style="color:var(--amber);white-space:normal;max-width:320px" title="Fulfil imports Shopify\'s Mark as paid on its own schedule. If this stays for more than a day, check the order in Fulfil.">Fulfil not paid yet: '+esc((Fp.unpaid||[]).join(', '))+'</div>'):'';
       return {rc:rc,act:act,open:false,card:''}; }
-    var s=(c&&c.suggestions)||[], b=s[0];
+    // v28.607 (Ben 31-Oct-26): best match per line (order / invoice number named, exact amount + customer, or one customer's open orders adding
+    // up), with why. Strong + exact = a one-click Reconcile (still shows the confirm with what it writes); anything else = Review.
+    var B=c&&c.best, kl={ref:'named on the bank line',amount_name:'amount + customer',sum:'customer\'s open orders',amount:'amount only, check'};
     rc=AC_CR.err?'<span class="tiny" style="color:var(--neg)">'+esc(AC_CR.err)+'</span>':!AC_CR.d?'<span class="tiny mut">looking for the order…</span>'
-      :b?'<div><span class="pill" style="cursor:default;background:#dbeafe;color:#1d4ed8;border-color:#93c5fd">'+esc(b.store)+'</span> <b>'+esc(b.reference||b.number)+'</b> '+esc(b.customer)+' <span class="mut">'+esc(b.currency)+' '+money(b.due)+'</span></div><div class="tiny mut">'+esc((b.why||[]).join(' · '))+(s.length>1?' · '+(s.length-1)+' more':'')+'</div>'
+      :B?'<div><span class="pill" style="cursor:default;background:'+(B.strong?'#dbeafe;color:#1d4ed8;border-color:#93c5fd':'#fef3c7;color:#b45309;border-color:#fcd34d')+'">'+esc(kl[B.kind]||B.kind)+'</span> <b>'+esc(B.orders.map(function(o){ return o.reference||o.number; }).join(', '))+'</b> '+esc(B.orders[0].customer)+' <span class="mut">'+esc(B.orders[0].currency)+' '+money(B.total)+'</span></div>'
+        +'<div class="tiny" style="white-space:normal;max-width:360px;color:'+(Math.abs(B.diff)<0.011?'var(--muted)':'var(--amber)')+'">'+esc(B.why.join(' · '))+'</div>'
       :'<span class="tiny mut">no unpaid order found: Review to search</span>';
     if(R&&R.status==='shopify_done')rc+='<div class="tiny" style="color:var(--amber);white-space:normal;max-width:320px">Marked paid in Shopify; Xero Receive Money still to do'+(R.error?': '+esc(R.error):'')+'</div>';
-    act='<span class="save-btn" data-cr="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">'+(AC_CR.open[k]?'Close':'Review')+'</span>';
+    var quick=B&&B.strong&&Math.abs(B.diff)<0.011&&!(R&&R.status==='shopify_done'), bz=AC_CR.busyK[k];
+    act=(quick?'<span class="save-btn ac-cr-rec" data-k="'+esc(k)+'" style="background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700;margin-right:6px" title="Checks it, then asks you to confirm: marks '+esc(B.orders.map(function(o){ return o.reference||o.number; }).join(', '))+' paid in Shopify and creates the Receive Money in Xero">'+(bz==='preview'?'Checking…':bz==='post'?'Posting…':'Reconcile')+'</span>':'')
+      +'<span class="save-btn'+(quick?' light':'')+'" data-cr="'+i+'"'+(quick?'':' style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700"')+'>'+(AC_CR.open[k]?'Close':'Review')+'</span>';
     return {rc:rc,act:act,open:!!AC_CR.open[k],card:AC_CR.open[k]?acCrCard(r):''}; }
   function acCrCard(r){ var k=acCrKey(r), c=acCrOf(r)||{}, sel=acCrSel(k), seen={}, list=[], ccy=r.currency||'', S=(AC_CR.d&&AC_CR.d.shopify)||{}, P=AC_CR.plan[k], m=AC_CR.msg[k], R=c.receipt, bz=AC_CR.busyK[k];
     Object.keys(sel).map(function(id){ return sel[id]; }).concat(c.suggestions||[], AC_CR.srch[k]||[]).forEach(function(o){ if(o&&!seen[o.sale_id]){ seen[o.sale_id]=1; list.push(o); } });
@@ -22099,9 +22106,24 @@
       AC_CR.msg[k]=j.error?{ok:false,html:esc(j.error)}:{ok:true,html:'✓ '+esc(j.orders.map(function(o){ return o.reference||o.number; }).join(', '))+' marked paid in Shopify; <a href="'+esc(j.xero.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">Receive Money '+money(j.xero.amount)+' ↗</a> created. Match the line to it in Xero.'};
       if(!j.error){ AC_CR.plan[k]=null; AC_CR.sel[k]={}; } acCrLoad(true); })
       .catch(function(e){ AC_CR.busyK[k]=null; AC_CR.msg[k]={ok:false,html:esc(e.message||String(e))}; acCrLoad(true); }); }
+  // v28.607: one-click Reconcile on a strong exact match: tick the best orders, run the checks, then acCrPost (its confirm lists what it writes).
+  function acCrQuick(k){ var r=acCrRow(k), c=r&&acCrOf(r), B=c&&c.best; if(!r||!B||AC_CR.busyK[k])return; var s={}; B.orders.forEach(function(o){ s[o.sale_id]=acCrFind(k,o.sale_id)||o; }); AC_CR.sel[k]=s;
+    var sig=acCrSig(k); AC_CR.busyK[k]='preview'; AC_CR.msg[k]=null; acCrRepaint();
+    fetch('/api/accounts/receipts/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:acCrLineBody(r),sale_ids:sig.split(',').map(Number)})}).then(function(x){ return x.json(); }).then(function(j){ AC_CR.busyK[k]=null; j._sig=sig; AC_CR.plan[k]=j;
+      if(j.ok)acCrPost(k); else { AC_CR.open[k]=true; acCrRepaint(); } })
+      .catch(function(e){ AC_CR.busyK[k]=null; AC_CR.plan[k]={error:e.message||String(e)}; AC_CR.open[k]=true; acCrRepaint(); }); }
+  // v28.607: wholesale store invoices (UKWS / USWS / EUWS) with no payment after their due date, above the Money in lines.
+  function acCrOverdueHtml(){ var d=AC_CR.d; if(!d)return ''; var L=d.overdue||[]; if(d.overdue_err)return '<div class="tiny" style="color:var(--neg);margin:6px 0">Overdue invoices: '+esc(d.overdue_err)+'</div>'; if(!L.length)return '';
+    var tot={}; L.forEach(function(o){ tot[o.currency]=(tot[o.currency]||0)+o.total; });
+    var h='<div style="border:1px solid var(--line);border-radius:10px;margin:8px 0 10px;background:var(--card)"><div id="ac-cr-od" style="padding:8px 12px;cursor:pointer;display:flex;gap:10px;align-items:center"><b>'+(AC_CR.odOpen?'▾':'▸')+' Overdue wholesale invoices, no payment ('+L.length+')</b><span class="tiny mut">'+Object.keys(tot).map(function(c){ return c+' '+money(tot[c]); }).join(' · ')+'. Fulfil, read only: a transfer for one of these should show up as a match below.</span></div>';
+    if(AC_CR.odOpen)h+='<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Order</th><th class="l">Fulfil invoice</th><th class="l">Customer</th><th class="l">Invoiced</th><th class="l">Due</th><th class="l">Days over</th><th class="l" style="text-align:right">Amount</th></tr></thead><tbody>'
+      +L.map(function(o){ return '<tr style="border-top:1px solid var(--line)"><td style="font-family:ui-monospace,Menlo,monospace">'+esc(o.reference)+'</td><td style="font-family:ui-monospace,Menlo,monospace">'+esc(o.invoice)+'</td><td>'+esc(o.customer)+'</td><td>'+esc(hzTrkDate(o.invoice_date))+'</td><td>'+esc(hzTrkDate(o.due_date))+'</td><td'+(o.days>30?' style="color:var(--neg)"':'')+'>'+o.days+'</td><td style="text-align:right;font-variant-numeric:tabular-nums">'+esc(o.currency)+' '+money(o.total)+'</td></tr>'; }).join('')+'</tbody></table></div>';
+    return h+'</div>'; }
   function acCrWire(b){
+    b.querySelectorAll('.ac-cr-rec').forEach(function(x){ x.onclick=function(){ acCrQuick(x.dataset.k); }; });
+    var od=b.querySelector('#ac-cr-od'); if(od)od.onclick=function(){ AC_CR.odOpen=!AC_CR.odOpen; acCrRepaint(); };
     b.querySelectorAll('[data-cr]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.cr]; if(!r)return; var k=acCrKey(r); AC_CR.open[k]=!AC_CR.open[k];
-      if(AC_CR.open[k]){ var c=acCrOf(r), s=acCrSel(k), t=c&&c.suggestions&&c.suggestions[0]; if(!Object.keys(s).length&&t&&t.score>=60)s[t.sale_id]=t; if(AC_CR.q[k]==null)AC_CR.q[k]=(r.payee_key&&r.payee_key!=='(blank)')?r.payee_key:''; }
+      if(AC_CR.open[k]){ var c=acCrOf(r), s=acCrSel(k), t=c&&c.suggestions&&c.suggestions[0]; if(!Object.keys(s).length){ if(c&&c.best&&c.best.strong)c.best.orders.forEach(function(o){ s[o.sale_id]=acCrFind(k,o.sale_id)||o; }); else if(t&&t.score>=60)s[t.sale_id]=t; } if(AC_CR.q[k]==null)AC_CR.q[k]=(r.payee_key&&r.payee_key!=='(blank)')?r.payee_key:''; }
       acCrRepaint(); }; });
     b.querySelectorAll('.ac-cr-ck').forEach(function(x){ x.onchange=function(){ var k=x.dataset.k, s=acCrSel(k), id=x.dataset.id; if(x.checked){ var o=acCrFind(k,id)||s[id]; if(o)s[id]=o; } else delete s[id]; acCrRepaint(); }; });
     b.querySelectorAll('.ac-cr-q').forEach(function(x){ x.oninput=function(){ AC_CR.q[x.dataset.k]=x.value; }; x.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); acCrSearch(x.dataset.k); } }; });
