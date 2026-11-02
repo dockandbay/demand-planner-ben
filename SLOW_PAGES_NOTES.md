@@ -133,3 +133,17 @@ n8n background job, every ~4 h. Each run does ~400 sequential single-row upserts
 128 internal shipments, 58 group rows) plus the Fulfil API pages. Batching the upserts would save most of the DB
 round trips, but it rewrites the ERP mirror that drives ERP deviations; it needs a before/after mirror diff
 against a real Fulfil pull before shipping. Not user-facing; left for a follow-up.
+
+### 6f. PO grid delivery-date snapshot kept alive (server.mjs)
+
+maybeRecordPoDeliveries() (one INSERT ... SELECT into po_delivery_history, at most every 10 min per instance) ran
+fire-and-forget on every PO grid load. With the grid served from cache the response goes out at once and the
+INSERT could be frozen with the instance, holding a connection into the next thaw. Now wrapped in hzWaitUntil.
+Verified: PO plan renders (105 rows), no console errors, npm test 29/29.
+
+## Not done in this pass (summary)
+- Order plan "All SKUs" / "Show all" render cost (60k <input> cells): needs a UX decision (see 2).
+- DEMAND first-load build (2-6 s main thread + worker): no contained fix; re-measure on a visible tab.
+- PO_ROWS_SQL cold build per Vercel instance (4 s): share across instances or slim the SQL (see 6c).
+- import-pos batching (see 6e); balxCheck at boot (see 6a).
+- Supplier portal custom batch production endpoint: out of scope (Customiser app). ILG status polling: fixed in v28.615.

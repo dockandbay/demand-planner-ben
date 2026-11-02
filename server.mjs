@@ -20390,7 +20390,7 @@ const PO_REC_THROTTLE_MS = 600000;   // snapshot at most once / 10 min per insta
 function maybeRecordPoDeliveries() {
   if (_poRecInFlight || Date.now() - _poRecAt < PO_REC_THROTTLE_MS) return;
   _poRecInFlight = true; _poRecAt = Date.now();
-  recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; });
+  hzWaitUntil(recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; }));   // v28.6xx (slow pages, 02-Nov-26): kept alive, so a cached PO grid answer no longer leaves this INSERT frozen with the instance holding a pooled connection
 }
 async function poDeliveryDelays(market) {
   // 1) Snapshot current landing dates (append only when a PO shows a date we haven't recorded before).
