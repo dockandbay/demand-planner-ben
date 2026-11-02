@@ -99,3 +99,37 @@ Verified: Vercel-mode boot (VERCEL=1, dummy key) runs no builder queries at boot
 sku-data, DEMAND plan render, no console errors, npm test 29/29.
 Left: balxCheck() (SELECT to_regclass) still runs once at boot (31 'background' slow rows); its answer is needed
 by the first report SQL, so removing it could change a first response. It is one tiny query.
+
+### 6b. GET /api/demand/wssi (34 calls, p50 2.8 s) - FIXED the snapshot write (server.mjs)
+
+Live: the WSSI slow_query rows were the month-end snapshot (DELETE + INSERT planner.wssi_fc_snapshot) spanning
+instance freezes of 5 s to 20 min (1,171 s max). wssiSnapshotCurrent() ran after the response with no hzWaitUntil,
+so Vercel froze it mid-transaction: a pooled connection plus the month's row locks held across the freeze. It also
+wrote one INSERT per key (78 rows = 78 round trips inside the transaction).
+Fix: the call is wrapped in hzWaitUntil, and the 78 INSERTs are one INSERT ... SELECT FROM unnest(...).
+Verified on sandbox: wssi_fc_snapshot rows for the month byte-identical before/after (78 rows, md5 41f739b4...),
+snapshot commit 4 s after the request instead of ~33 s (sandbox pays ~420 ms per round trip); WSSI page renders, no
+console errors. ai-logic wssi fingerprint refreshed (route hash moved; no logic change).
+The 2.8 s build itself (wssiLoad reads) is cached 10 min per instance; left.
+
+### 6c. GET /api/supply/fulfil/grid-status (v_po_finance slow query 4.2 s) - analysed, left
+
+The 4.2 s statement is PO_ROWS_SQL (poRowsCache build) that grid-status needs for completion dates. Non-thaw runs
+were 3.8-4.2 s, and at 21:59:36 on 01-Nov grid-status and /purchase-orders each ran it at the same moment: two
+different Vercel instances, each with its own cold poRowsCache. Sandbox EXPLAIN ANALYZE: 736 ms execution, of which
+~450 ms is the ~40 per-row correlated subqueries over 1,379 POs. Filtering it to the 3 active statuses for
+grid-status would cut that to 240 ms, but on a shared cold instance it would add a second build next to the grid's
+own full build (more DB work, no faster grid render), so not done. A real fix is sharing poRowsCache across
+instances (KV) or slimming PO_ROWS_SQL; both are bigger than a perf-only pass.
+
+### 6d. GET /api/supply/deposits draw CTE (3 s) - analysed, left
+
+Live EXPLAIN ANALYZE of the heaviest part (etot over v_po_finance) runs in 37 ms; the 2-3 s live timings are the
+first-load pile-up (the 4-connection pool plus a thaw), which 1 and 6a address. Section is already SWR-cached.
+
+### 6e. POST /api/supply/fulfil/import-pos (42 calls, 6.5 s) - analysed, left
+
+n8n background job, every ~4 h. Each run does ~400 sequential single-row upserts (209 Fulfil PO mirror rows,
+128 internal shipments, 58 group rows) plus the Fulfil API pages. Batching the upserts would save most of the DB
+round trips, but it rewrites the ERP mirror that drives ERP deviations; it needs a before/after mirror diff
+against a real Fulfil pull before shipping. Not user-facing; left for a follow-up.

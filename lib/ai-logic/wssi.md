@@ -14,13 +14,13 @@ sources:
   - artifact_v16.7.html :: wssiNotePop, wssiNoteVis, wssiNoteRefresh
   - server.mjs :: /api/demand/wssi-notes
   - migrations/400_wssi_notes.sql :: planner.wssi_notes
-verified_version: v28.564
+verified_version: v28.616
 fingerprints:
   lib/wssi.mjs::wssiLoad: 1b15ca802aaa
   lib/wssi.mjs::wssiBuild: 49dc2f86d9c0
   lib/wssi.mjs::CATEGORY_GROUP: 79d466031a2e
   lib/wssi.mjs::COGS_COL: 7adac962c272
-  server.mjs::/api/demand/wssi: 5f8825a8e6cb
+  server.mjs::/api/demand/wssi: ff182b28e3a7
   artifact_v16.7.html::renderWssiView: 8572e750a5fb
   artifact_v16.7.html::wssiCompute: 1aa040d9e745
   artifact_v16.7.html::wssiDerive: db209ab5e2b2

@@ -26265,7 +26265,10 @@ async function wssiSnapshotCurrent(data, curM) {
     const keys = Object.keys(agg).filter(k => agg[k][0] || agg[k][1]); if (!keys.length) return;
     const client = await pool.connect();
     try { await client.query('BEGIN'); await client.query(`DELETE FROM planner.wssi_fc_snapshot WHERE month=($1||'-01')::date`, [curM]);
-      for (const k of keys) { const [mk, ch, cg] = k.split('|'); await client.query(`INSERT INTO planner.wssi_fc_snapshot (month, market, channel, cgroup, units, sales) VALUES (($1||'-01')::date,$2,$3,$4,$5,$6)`, [curM, mk, ch, cg, Math.round(agg[k][0] * 100) / 100, Math.round(agg[k][1] * 100) / 100]); }
+      // v28.6xx (slow pages, 02-Nov-26): one multi-row INSERT (was one INSERT per key, ~80 round trips inside the open transaction). Same rows and values.
+      const A = { mk: [], ch: [], cg: [], u: [], s: [] }; for (const k of keys) { const [mk, ch, cg] = k.split('|'); A.mk.push(mk); A.ch.push(ch); A.cg.push(cg); A.u.push(Math.round(agg[k][0] * 100) / 100); A.s.push(Math.round(agg[k][1] * 100) / 100); }
+      await client.query(`INSERT INTO planner.wssi_fc_snapshot (month, market, channel, cgroup, units, sales)
+        SELECT ($1||'-01')::date, x.mk, x.ch, x.cg, x.u, x.s FROM unnest($2::text[], $3::text[], $4::text[], $5::numeric[], $6::numeric[]) AS x(mk, ch, cg, u, s)`, [curM, A.mk, A.ch, A.cg, A.u, A.s]);
       await client.query('COMMIT'); } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
   } catch (e) { if (!_planMissing(e)) console.error('[wssi snapshot]', e && e.message); }
 }
@@ -26336,7 +26339,7 @@ app.get('/api/demand/wssi', async (req, res) => {
     const data = wssiBuild(await wssiLoad(q, fy), fy, now.toISOString().slice(0, 10));
     data.built_at = now.toISOString(); data.fy_options = [curFy - 1, curFy, curFy + 1];
     _wssiCache.set(fy, { at: Date.now(), data });
-    wssiSnapshotCurrent(data, now.toISOString().slice(0, 7));   // v28.548: month-end forecast snapshot (background)
+    hzWaitUntil(wssiSnapshotCurrent(data, now.toISOString().slice(0, 7)));   // v28.548: month-end forecast snapshot (background). v28.6xx (slow pages, 02-Nov-26): kept alive with hzWaitUntil; it was frozen with the instance mid-transaction (live: INSERT / DELETE wssi_fc_snapshot rows spanning 10 s to 20 min freezes, holding a pooled connection and the month's row locks)
     res.json(data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
