@@ -27789,8 +27789,14 @@ function sbDate(v) { v = sbCell(v); if (v == null || v === '') return null;
   if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
   const s = String(v).trim(); let m;
   if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  // v28.612 (Ben 02-Nov-26): a day past the month's end ("31-Sep-26" on Lixin's Sep-26 DHL invoice) means that month's last day;
+  // Date.parse rolled it into the next month (01-Oct-26).
+  const ymd = (y, mo, d) => { if (!(mo >= 1 && mo <= 12) || !(d >= 1 && d <= 31)) return null; const last = new Date(Date.UTC(+y, mo, 0)).getUTCDate();
+    return y + '-' + String(mo).padStart(2, '0') + '-' + String(Math.min(d, last)).padStart(2, '0'); };
   if ((m = s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/))) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; let d = +m[1], mo = +m[2]; if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }   // supplier files are day/month
-    return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+    return ymd(y, mo, d); }
+  if ((m = s.match(/^(\d{1,2})[\s\-\/.]+([A-Za-z]{3,9})[\s\-\/.,]+(\d{2,4})$/))) { const mo = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].slice(0, 3).toLowerCase()) + 1;
+    if (mo) return ymd(m[3].length === 2 ? '20' + m[3] : m[3], mo, +m[1]); }
   const t = Date.parse(s); return isNaN(t) ? null : new Date(t).toISOString().slice(0, 10); }
 const sbNum = v => { v = sbCell(v); if (v == null || v === '') return null; if (typeof v === 'number') return v; const n = Number(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) && String(v).match(/\d/) ? n : null; };
 // Parse the courier / sample invoice template: header block (SUPPLIER, DATE, Exchange rate, TOTAL DUE) + a table with

@@ -1,3 +1,8 @@
+## v28.612 (02-Nov-26) Other Payments: wider Reference; sample bill import reads "31-Sep-26" as 30-Sep-26
+- SUPPLY > Payments > Other Payments: the Reference box is wide enough for references like PO-DHL-LX-2026-09-C (full text also on hover).
+- Create sample bills: a date with a day past the month's end (Lixin's Sep-26 DHL invoice says "31-Sep-26") now reads as that month's last day (30-Sep-26). It was rolled into the next month (01-Oct-26), so the Sep-26 bills were dated October. Also covers 31/09/2026 style dates.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, lib/ai-logic/reports.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.611 (02-Nov-26) Supplier portal: open action when something is shipped with no tracking code
 - Samples: production status Shipped with no tracking code counts as a sample action (SAMPLES badge, the row count, Home card) and the tracking box is outlined red until a code is saved. Applies even when the sample goes on Dock & Bay's courier account. Saving is not blocked.
 - Shipments: status Shipping with no tracking code and no Flexport booking counts as a shipment action for the supplier who owns the master PO (the one who can edit it); tracking box outlined red.
