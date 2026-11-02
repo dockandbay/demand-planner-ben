@@ -48,8 +48,13 @@
       o.requests=rs.length;
       var d=window.HZ_DEMAND_LAST; if(d&&d.ms!=null)o.demand_build_ms=Math.round(d.ms);
     }catch(_){} return o; }
-  function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0;   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
+  // v28.6xx (slow pages, 02-Nov-26): a view load that ran while the tab was hidden (opened in a background tab, or switched away mid-load)
+  // is not timed: hidden tabs throttle / freeze timers and rendering, so it measured the time away (live 26-Oct to 02-Nov: #/product/products
+  // 981 s, #/buy-move/fba 102 s, #/supply/purchase-orders/:id/shipments 60 s were all such "still loading" timeouts).
+  var svHid=0; document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')svHid++; });
+  function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0, h0=svHid, hid0=document.visibilityState==='hidden';   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
     (function tick(){ if(pend!==id)return; var ms=(first?performance.now():Date.now()-t0);
+      if(hid0||svHid!==h0||document.visibilityState==='hidden'){ pend=null; return; }   // v28.6xx: hidden during the load, not a fair timing
       if(ms>60000){ pend=null; add('slow_view','View still loading after 60s: '+view(),null,ms,{timeout:true,first:!!first}); return; }
       if(document.readyState!=='loading'&&!loading()){ if(!quiet++)qms=ms; if(quiet>=2){ pend=null; if(qms>SLOW_VIEW_MS){ var mt={first:!!first}; if(first){ var ph=phases(qms); for(var k in ph)mt[k]=ph[k]; } add('slow_view','Slow view load: '+view(),null,qms,mt); } return; } } else quiet=0;
       setTimeout(tick,300); })(); }
