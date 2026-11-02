@@ -1,3 +1,6 @@
+## v28.620 (02-Nov-26) PRODUCT: "+ Add component" picker no longer cut off
+- The picker sat inside the expanded product row, which clips anything that overflows, so on a product with no components the Add / Cancel buttons were hidden. It now floats over the page next to the button: below it when it fits, otherwise above, otherwise with its own scroll. It follows the button on scroll. Client only.
+
 ## v28.619 (02-Nov-26) Manage 3PL > UK (ILG): "not in report" badge
 - "not in report" under the SKU is now a small red badge (was grey text), on the desktop table and the phone cards. Client only.
 
