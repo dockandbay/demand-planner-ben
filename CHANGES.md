@@ -1,3 +1,6 @@
+## v28.621 (03-Nov-26) PRODUCT grid: the red count opens the messages
+- The red count beside OPEN only toggled the product row, so on an open product it collapsed it. With unread supplier messages it now goes to that product's Timeline on PRODUCT > SAMPLING (where the message thread lives); with only open actions it opens the product and never closes an open one. Tooltip says which. Any SAMPLING deep link (e.g. from the Inbox) now also switches to the request's season tab, so the opened panel is not left under another season's rows. Client only.
+
 ## v28.620 (02-Nov-26) PRODUCT: "+ Add component" picker no longer cut off
 - The picker sat inside the expanded product row, which clips anything that overflows, so on a product with no components the Add / Cancel buttons were hidden. It now floats over the page next to the button: below it when it fits, otherwise above, otherwise with its own scroll. It follows the button on scroll. Client only.
 

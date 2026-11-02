@@ -17924,7 +17924,7 @@
         b.classList.toggle('active',n>0); b.textContent='⚙ Filters'+(n?' · '+n:'')+(fb.classList.contains('filters-open')?' ▴':''); }
       function draw(){
         if(_smpDeep){ var dl=_smpDeep; _smpDeep=null; var rr=rows.filter(function(x){ var a=String(x.ref).toLowerCase(), b=String(x.item_ref||'').toLowerCase(), qq=String(dl.ref).toLowerCase(); return a===qq||b===qq; })[0];   // v27.735: match request ref OR product item_ref
-          if(rr){ _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false,action:''}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); _smpManagePending={rid:String(rr.id), tab:dl.tab}; } }
+          if(rr){ _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false,action:''}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); _smpManagePending={rid:String(rr.id), tab:dl.tab}; _smpTab={season:rr.season||'',type:''}; _smpTree={season:rr.season||'',type:rr.category||''}; } }   // v28.621: and switch the season tab / tree to the request's own season (the opened panel sat under another season's rows)
         var q=_smpFilt.q.trim().toLowerCase();
         var f=rows.filter(function(r){ if(_smpFilt.supplier&&r.supplier_name!==_smpFilt.supplier)return false; if(_smpFilt.stage&&r.stage!==_smpFilt.stage)return false; if(_smpFilt.season&&r.season!==_smpFilt.season)return false; if(_smpFilt.category&&r.category!==_smpFilt.category)return false;
           if(_smpFilt.mine&&!(r.internal_stakeholders||[]).some(function(e){return String(e).toLowerCase()===me;}))return false; if(_smpFilt.overdue&&!overdue(r))return false;
@@ -19025,7 +19025,12 @@
   // Grid badge = ALL notifications for this product: open actions + unread supplier messages, one combined count.
   function prodComboBadge(r){ var a=prodOpenActs(r), acts=a.n, un=Number(r.unread_supplier)||0, tot=acts+un; if(!tot)return '';
     var note=[]; if(a.note)note.push(a.note); if(un)note.push(un+' unread supplier message'+(un>1?'s':''));
-    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(note.join('\n')+'\n— click to open')+'" style="background:var(--neg);cursor:pointer;border:none">'+tot+'</button>'; }
+    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-un="'+un+'" data-note="'+esc(note.join('\n')+(un?'\n— click to read the messages':'\n— click to open'))+'" style="background:var(--neg);cursor:pointer;border:none">'+tot+'</button>'; }
+  // v28.621 (Ben 03-Nov-26: clicking the "2" collapsed the open product instead of showing the messages): with unread supplier messages the badge
+  // goes to the product's Timeline on SAMPLING (where the thread lives since v27.722); otherwise it opens the product, never closes an open one
+  function pgBadgeGo(b,g){ var ref=b.dataset.ref; if(Number(b.dataset.un)>0){ try{ writeHash(['product','sampling',ref,'timeline']); }catch(e){ location.hash='#/product/sampling/'+encodeURIComponent(ref)+'/timeline'; } _smpDeep={ref:ref,tab:'timeline'}; _smpView='requests'; selectProductSub('sampling'); return; }
+    var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!pb)return; var tr=pb.closest('tr'), card=pb.closest('.pgm-card');
+    if((tr&&tr.classList.contains('pg-openrow'))||(card&&card.classList.contains('open')))return; pb.click(); }
   // Action count for a product from its detail payload (d.sizes/d.item) — used for the Master data sub-tab counter.
   // v27.712 (Ben): a component approval is an ACTION only while a development request covering it is "Sample in review"
   // (the ball is with D&B). While samples are still being made nothing is pending on our side.
@@ -19813,7 +19818,7 @@
         wireProdRequestChips(g);   // v27.703 request chips + [+] per component
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
         // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
-        g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });
+        g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); pgBadgeGo(b,g); }; });
         bindFastTips(g); bindProdActMark(g, function(){ draw(); });   // status-misalignment A marker + SNOOZE on the grid
         g.querySelectorAll('.pg-swatch-zoom').forEach(function(img){ img.onclick=function(e){ e.stopPropagation(); openImgZoom(img.src); }; });   // click swatch → enlarge
         // STAGE dropdown — the driver. Posting the stage derives APPROVAL server-side; we patch the approval pill + owner label in place.
@@ -19826,7 +19831,7 @@
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item)return; var sz=d.sizes||[], ro=rows.filter(function(x){return x.ref===ref;})[0]; if(!ro)return;
               ro.stage=v; ro.status=prodStatusFromStage(v); ro.sizes_unmapped=sz.filter(function(s){return s.approval_status==='approved'&&!s.mapped_sku;}).length; ro.sizes_unappr_sample=sz.filter(function(s){return s.approval_status==='approved'&&!s.approved_sample_id;}).length;
               var rc=g.querySelector('.pg-ref[data-ref="'+esk+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+prodComboBadge(ro);
-                var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+esk+'"]'); if(pb)pb.click(); }; }
+                var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); pgBadgeGo(nb,g); }; }
             }).catch(function(){}); }); }; });
         // Merged STAGE cell: click the chip to reveal the (already-wired) select; its change/blur reverts to the chip.
         g.querySelectorAll('.pg-stagechip').forEach(function(chip){
