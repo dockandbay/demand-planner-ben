@@ -1,3 +1,9 @@
+## v28.623 (03-Nov-26) NEXT carton labels
+- CONFIG > Key Accounts > Carton label format gets "NEXT carton labels". A PO whose client has it shows "⤓ NEXT carton labels" on the Client/FBA tab (Labels row).
+- Label: Supplier name DOCK & BAY, Supplier number A51891, Delivery reference and Contract number as blank write-in lines, the EAN of the product as an EAN-13 barcode. Footer in light grey (not requested by NEXT): SKU, description, pcs per carton and number of cartons.
+- Prints exactly like the product carton barcodes: same portrait cell, 4 labels per A4 page (MOLD_4), one page per SKU; a part carton gets its own page. Cartons come from the existing /api/supply/paperstore-labels/:po (PO line carton qty, else product carton qty).
+- Client only. No migration. To use on live, set NEXT's Carton label format in CONFIG > Key Accounts.
+
 ## v28.622 (03-Nov-26) Payments Due: nothing due without a Final payment due date; copy email matches the Payments Report
 - A PO's completion and balance payments only show on Payments Due (and count in the overdue badges) once it has BOTH a final invoice amount and a Final payment due date. Ben: "no payments due for an invoice until it has a final invoice date". On live this only removes PO-57BUNDLE (Lixin completion, 13,765.46).
 - The green "Paid this session" box: "Copy email" now copies the same Payment detail email as the Payments Report (supplier, amount, SUPPLIER-PAYMENT-<code>-<date> reference, table of Reference / Amount / Type / Production ref / Deposit ref). "Copy subject" copies its first line, e.g. "Payment detail - Lixin of 106,917.30 USD".

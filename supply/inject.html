@@ -5034,6 +5034,7 @@
       +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>', (function(){ var btns=[];
           if(xdList.length) btns.push('<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button>');   // only when crossdock SKUs are assigned
           if(r.client_label_format==='paper_store') btns.push('<button class="save-btn po-dl-ps" data-po="'+esc(r.po)+'" style="background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg-cell);font-weight:700" title="Paper Store carton labels — one label per carton (full + odd/mixed), client PO # / DC format">⤓ Paper Store carton labels</button>');   // only for a key account linked to the Paper Store label format (CONFIG ▸ Key Accounts)
+          if(r.client_label_format==='next') btns.push('<button class="save-btn po-dl-next" data-po="'+esc(r.po)+'" style="background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg-cell);font-weight:700" title="NEXT carton labels: supplier name + number, EAN barcode, SKU / pcs / cartons. One A4 page per SKU, 4 labels (same mould as the product carton barcodes)">⤓ NEXT carton labels</button>');   // v28.623: key account linked to the NEXT label format
           return (btns.length?btns.join(' '):'<span class="mut tiny">— none for this PO</span>')+' <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>'; })())
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
           (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a> <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(r.po)+'" data-name="'+esc(x.filename||'')+'" style="color:var(--neg);cursor:pointer" title="delete this file">✕</button>';}).join(' &nbsp; ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
@@ -6091,6 +6092,7 @@
         bcDownloadCrossdock(rows, po, (poBy[po].dispatch_order_ref||''), (poBy[po].client||''), (poBy[po].final_delivery_address||''), b, po+'_crossdock_labels.zip'); })
         .catch(function(){ b.textContent=orig; b.disabled=false; alert('Could not load crossdock labels'); }); }; });
     document.querySelectorAll('#podet-'+i+' .po-dl-ps').forEach(function(b){ b.onclick=function(){ paperStoreLabels(po,b); }; });   // Paper Store carton labels
+    document.querySelectorAll('#podet-'+i+' .po-dl-next').forEach(function(b){ b.onclick=function(){ nextCartonLabels(po,b); }; });   // v28.623 NEXT carton labels
     document.querySelectorAll('#podet-'+i+' .po-dl-sw').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b); }; });
     document.querySelectorAll('#podet-'+i+' .po-dl-air').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b,true); }; });
     document.querySelectorAll('#podet-'+i+' .po-pdf-dl').forEach(function(b){ b.onclick=function(){ window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); }; });   // SUG-0034 full-PO PDF
@@ -9905,7 +9907,7 @@
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'
               +lblBlk('Delivery address','Full address this client ships to.', ta('address', fieldOf(r,'address'),'Street, city, postcode, country…'))
               +lblBlk('Client requirements','Any special handling / compliance the client demands.', ta('client_requirements', fieldOf(r,'client_requirements'),'e.g. GS1 labels, appointment booking…'))
-              +lblBlk('Carton label format','Client-specific carton labels on this client’s POs (Client/FBA tab).', '<select class="ka-in" data-f="carton_label_format" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><option value="">None (standard)</option><option value="paper_store"'+(fieldOf(r,'carton_label_format')==='paper_store'?' selected':'')+'>Paper Store carton labels</option></select>')
+              +lblBlk('Carton label format','Client-specific carton labels on this client’s POs (Client/FBA tab).', '<select class="ka-in" data-f="carton_label_format" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><option value="">None (standard)</option><option value="paper_store"'+(fieldOf(r,'carton_label_format')==='paper_store'?' selected':'')+'>Paper Store carton labels</option><option value="next"'+(fieldOf(r,'carton_label_format')==='next'?' selected':'')+'>NEXT carton labels</option></select>')
               +lblBlk('Supplier company (seller)','Which Dock & Bay entity is the seller on this client’s Direct-to-Client packing list. Default UK.', (function(){ var se=(fieldOf(r,'seller_entity')||'UK').toUpperCase(); return '<select class="ka-in" data-f="seller_entity" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px">'+[['UK','UK — Dock & Bay LTD'],['AU','AU — Dock & Bay PTY LTD'],['US','US — Dock & Bay Ltd Corp'],['EU','EU — Dock & Bay LTD']].map(function(o){return '<option value="'+o[0]+'"'+(se===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; })())
               +'</div>'
               +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
@@ -14021,6 +14023,46 @@
       });
     }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=orig;} alert('Failed: '+((e&&e.message)||e)); });
   }
+  // ── NEXT carton labels (v28.623, Ben). Supplier name + NEXT supplier number, blank Delivery ref / Contract number to write in,
+  // the EAN of the product in the carton as an EAN-13 barcode, then SKU / pcs / carton count. Same portrait cell + A4 4-up mould as
+  // the product carton barcodes (MOLD_4): one page per SKU (an odd/part carton gets its own page). Cartons from /paperstore-labels.
+  var NEXT_SUPPLIER_NO='A51891';
+  function buildNextLabelSVG(g,opts){ var W=600,H=841,L=40,VX=250,el=[];
+    function T(x,y,s,o){ return svgText(x,y,s,o); }
+    el.push('<rect x="6" y="6" width="'+(W-12)+'" height="'+(H-12)+'" fill="none" stroke="#111" stroke-width="2"/>');
+    var y=80;
+    function row(lbl,val){ el.push(T(L,y,lbl,{size:19,fill:'#444'}));
+      if(val) el.push(T(VX,y,val,{size:24,bold:true}));
+      else el.push('<line x1="'+VX+'" y1="'+(y+4)+'" x2="'+(W-L)+'" y2="'+(y+4)+'" stroke="#111" stroke-width="1.2"/>');
+      y+=62; }
+    row('Supplier name','DOCK & BAY'); row('Supplier number',NEXT_SUPPLIER_NO); row('Delivery reference',''); row('Contract number','');
+    y-=14; el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-L)+'" y2="'+y+'" stroke="#111" stroke-width="1.5"/>'); y+=46;
+    el.push(T(L,y,'EAN',{size:19,fill:'#444'})); y+=24;
+    var m=5, bx=(W-95*m)/2, nH=190, c=String(g.upc||'').replace(/\D/g,''); if(c.length===12)c='0'+c;
+    var bars=c?eanBars(c,bx,y,m,nH,22):'';
+    if(bars && c.length===13){ el.push(bars); var dbl=y+nH+50;
+      el.push(T(bx-8,dbl,c[0],{size:33,anchor:'end'})); el.push(T(bx+24*m,dbl,c.slice(1,7),{size:33,anchor:'middle',ls:3})); el.push(T(bx+71*m,dbl,c.slice(7,13),{size:33,anchor:'middle',ls:3})); y=dbl+40; }
+    else if(bars){ el.push(bars); el.push(T(W/2,y+nH+40,c,{size:28,anchor:'middle',ls:2})); y=y+nH+80; }
+    else { el.push(T(W/2,y+90,'no EAN on file for '+g.sku,{size:18,fill:'#b91c1c',anchor:'middle'})); y=y+nH+80; }
+    el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-L)+'" y2="'+y+'" stroke="#111" stroke-width="1.5"/>'); y+=50;
+    var GR='#9a9a9a';   // Ben: footer in light grey, NEXT didn't ask for it (packer aid only)
+    el.push(T(L,y,g.sku,{size:26,bold:true,fill:GR})); y+=40;
+    var desc=String(g.desc||''); if(desc.length>44)desc=desc.slice(0,42)+'…'; if(desc){ el.push(T(L,y,desc,{size:16,fill:GR})); y+=36; }
+    el.push(T(L,y,g.qty+' pcs'+(g.odd?' (part carton)':' per carton')+'  ·  '+g.n+' carton'+(g.n===1?'':'s'),{size:22,bold:true,fill:GR}));
+    return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
+  function nextCartonLabels(po,btn){ var prog=bcProgress(btn); if(btn)btn.textContent='Loading…';
+    Promise.all([fetch('/api/supply/paperstore-labels/'+encodeURIComponent(po)).then(function(r){return r.json();}),fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')]).then(function(a){
+      var d=a[0]; if(!d||!d.ok||d.error){ prog.done(); alert('Could not load labels: '+((d&&d.error)||'no data')); return; }
+      var groups=[], by={}; (d.cartons||[]).forEach(function(c){ var k=c.sku+'|'+c.master_qty+'|'+(c.odd?1:0); var g=by[k]; if(!g){ g=by[k]={sku:c.sku,desc:c.desc,upc:c.upc,qty:c.master_qty,odd:!!c.odd,n:0}; groups.push(g); } g.n++; });
+      if(!groups.length){ prog.done(); alert('No cartons to label on this PO (need order-plan SKUs with quantities).'); return; }
+      var opts={fontBook:a[1],fontBold:a[2]};
+      preloadFonts(opts).then(function(){ var pages=[], i=0;
+        function next(){ if(i>=groups.length)return finish(); if(prog.cancelled()){ prog.done(); return; } var g=groups[i++]; prog.tick(i,groups.length);
+          rasterizeSVGCanvas(buildNextLabelSVG(g,opts),2.5,function(cv){ if(!cv)return next();
+            cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
+        function finish(){ prog.done(); if(!pages.length){ alert('Nothing rendered'); return; }
+          bcDownloadBlob(zipSafe(po)+'_NEXT_carton_labels.pdf', new Blob([pdfA4Multi(pages,MOLD_4)],{type:'application/pdf'})); }
+        next(); }); }).catch(function(e){ prog.done(); alert('Failed: '+((e&&e.message)||e)); }); }
   // fetch a same-origin image URL → data URI (keeps the rasterised canvas un-tainted)
   function fetchImgDataUri(url){ return fetch(url).then(function(resp){ if(!resp.ok)throw 0; return resp.blob(); }).then(function(blob){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){res(fr.result);}; fr.onerror=function(){res('');}; fr.readAsDataURL(blob); }); }).catch(function(){ return ''; }); }
   // gather the data-URI assets a label needs (swatch / GRS logo / D&B logo), then call cb(opts)
