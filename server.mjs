@@ -27867,11 +27867,19 @@ async function sbSupplier(text) { const t = String(text || '').replace(/[<>]/g, 
   const T = t.toUpperCase(); let hit = rows.find(s => s.code && s.code.toUpperCase() === T) || rows.find(s => s.name.toUpperCase() === T);
   if (!hit) hit = rows.filter(s => s.name.length >= 3 && (T.startsWith(s.name.toUpperCase() + ' ') || s.name.toUpperCase().startsWith(T + ' '))).sort((a, b) => b.name.length - a.name.length)[0];
   return hit || null; }
+// v28.616: a PO's market for the Wholesale COGS account: its branch ("US Geneva", "UK B2B NEXT"), else the market code in the PO ref
+// (PO-59USLX1-DILLARDS, PO-57USLX-SAMPLES), else the courier line's ship-to country (Dillards -> AMERICA), else UK.
+function sbPoMarket(l) {
+  const b = String(l.po_branch || '').trim().toUpperCase().match(/^(UK|US|EU|AU|CA)\b/); if (b) return b[1];
+  const r = String(l.po || '').toUpperCase().match(/^PO-\d*(UK|US|EU|AU|CA)(?=[A-Z0-9]|-|$)/); if (r) return r[1];
+  const st = sbCountry(l.ship_to); if (/^(UK|US|EU|AU|CA)$/.test(st)) return st;
+  return 'UK';
+}
 // Route every line: HORIZON PO -> Fulfil PO (po_links / mirror) or Xero 302/313; samples -> Xero by purpose. Returns lines + checks.
 async function sbResolve(lines) {
   const out = lines.map((l, i) => Object.assign({ seq: i + 1 }, l, { checks: [] }));
   const texts = Array.from(new Set(out.map(l => String(l.po || l.po_text || '').trim().toUpperCase()).filter(sbIsPoText)));
-  const poRows = texts.length ? (await pool.query(`SELECT p.po, upper(p.po) up, upper(coalesce(p.country_code,'')) cc, p.supplier_name,
+  const poRows = texts.length ? (await pool.query(`SELECT p.po, upper(p.po) up, upper(coalesce(p.country_code,'')) cc, p.supplier_name, coalesce(to_jsonb(p)->>'branch','') branch,
       coalesce((SELECT l.external_id FROM planner.po_links l WHERE l.po=p.po AND l.system='fulfil' AND l.status='linked' AND coalesce(l.external_id,'') ~ '^[0-9]+$' LIMIT 1),
                (SELECT m.fulfil_id::text FROM planner.fulfil_purchase_orders m WHERE m.po=p.po AND m.fulfil_id IS NOT NULL LIMIT 1)) fulfil_id
     FROM planner.purchase_orders p WHERE upper(p.po) = ANY($1::text[])
@@ -27885,12 +27893,12 @@ async function sbResolve(lines) {
   for (const l of out) { const t = String(l.po || l.po_text || '').trim().toUpperCase(); if (!sbIsPoText(t)) continue;
     const c = closest(t); if (!c) { l.po = String(l.po || l.po_text).trim(); l.po_found = false; l.po_unknown = true; l.po_cc = l.ship_to || '';   // not in HORIZON: still a PO charge (302 / 313), flagged
       l.checks.push({ level: 'bad', text: l.po + ' is not a HORIZON PO: check the number, or pick the PO' }); if (l.tracking) trackPo[l.tracking] = trackPo[l.tracking] || l; continue; }
-    l.po = c.row.po; l.po_found = true; l.po_cc = c.row.cc;
+    l.po = c.row.po; l.po_found = true; l.po_cc = c.row.cc; l.po_branch = c.row.branch;
     if (!c.exact) l.checks.push({ level: 'warn', text: 'file says ' + (l.po_text || t) + ': no such PO, closest is ' + c.row.po });
     l.fulfil_po_id = c.row.fulfil_id ? Number(c.row.fulfil_id) : null; if (l.tracking) trackPo[l.tracking] = trackPo[l.tracking] || l; }
   // pass 2: same tracking number as a PO line -> follows that PO (Ben 13-Oct-26)
   for (const l of out) { if (l.po_found || l.po_unknown || (l.po && sbIsPoText(l.po)) || !l.tracking || !trackPo[l.tracking]) continue; const p = trackPo[l.tracking];
-    l.po = p.po; l.po_found = !!p.po_found; l.po_unknown = !!p.po_unknown; l.po_cc = p.po_cc; l.fulfil_po_id = p.fulfil_po_id; l.inherited = true; l.checks.push({ level: 'ok', text: 'same tracking as ' + p.po + ': follows that PO' }); }
+    l.po = p.po; l.po_found = !!p.po_found; l.po_unknown = !!p.po_unknown; l.po_cc = p.po_cc; l.po_branch = p.po_branch; l.fulfil_po_id = p.fulfil_po_id; l.inherited = true; l.checks.push({ level: 'ok', text: 'same tracking as ' + p.po + ': follows that PO' }); }
   // sample purposes from SR refs
   const srs = Array.from(new Set(out.map(l => l.sample_ref).filter(x => /^SR-\d+$/i.test(String(x || '')))));
   const srPurpose = {}; if (srs.length) (await pool.query(`SELECT upper(ref) ref, purpose FROM planner.sample_requests WHERE upper(ref) = ANY($1::text[])`, [srs.map(s => s.toUpperCase())])).rows.forEach(r => { srPurpose[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean)[0] : null; });
@@ -27906,8 +27914,11 @@ async function sbResolve(lines) {
         l.checks.push(l.xero_account ? { level: 'info', text: 'Import VAT: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account } : { level: 'bad', text: 'Import VAT goes to Xero ' + l.xero_org.toUpperCase() + ': no import VAT account in the sample accounts mapping, pick the account' });
         continue; }
       if ((l.charge === 'freight' || l.charge === 'duty') && !l.fulfil_po_id) { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk';
-        l.xero_account = acc[(l.xero_org === 'au' ? 'au_' : '') + 'cogs_pre_fulfil'] || null; l.fulfil_company = null; l.fulfil_product = null;
-        l.checks.push(l.xero_account ? { level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil (old PO): Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account + ' COGS' } : { level: 'bad', text: (l.po || 'This PO') + ' is not in Fulfil: no ' + l.xero_org.toUpperCase() + ' COGS account for old POs in the sample accounts mapping, pick the account' });
+        // v28.616 (Ben 02-Nov-26: "allow for cogs us wholesale ... for dillards"): the Wholesale COGS account follows the PO's market (sbPoMarket):
+        // UK -> cogs_pre_fulfil (311.1c), US -> cogs_pre_fulfil_us (311.2c), any other market -> its own row if mapped, else "pick the account".
+        const mkt = l.xero_org === 'au' ? 'AU' : sbPoMarket(l);
+        l.xero_account = (l.xero_org === 'au' ? acc.au_cogs_pre_fulfil : mkt === 'UK' ? acc.cogs_pre_fulfil : acc['cogs_pre_fulfil_' + mkt.toLowerCase()]) || null; l.fulfil_company = null; l.fulfil_product = null;
+        l.checks.push(l.xero_account ? { level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil (old PO): Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account + ' ' + mkt + ' Wholesale COGS' } : { level: 'bad', text: (l.po || 'This PO') + ' is not in Fulfil (' + mkt + '): no ' + mkt + ' Wholesale COGS account in the sample accounts mapping, pick the account' });
         continue; }
       if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
       else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; const pre = l.xero_org === 'au' ? 'au_' : ''; l.xero_account = ((l.charge === 'duty' || l.charge === 'tax') ? acc[pre + 'duty'] : l.charge === 'freight' ? acc[pre + 'freight'] : acc.product) || null;
@@ -27971,7 +27982,7 @@ app.post('/api/supply/sample-bills/parse', async (req, res) => {
 });
 app.post('/api/supply/sample-bills/resolve', async (req, res) => {   // re-route after the user edits PO / sample type / ship-to on a line
   try { const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines.slice(0, 300) : [];
-    const SB_DERIVED = ['po_found', 'po_unknown', 'po_cc', 'inherited', 'purpose', 'checks', 'doc_key'];
+    const SB_DERIVED = ['po_found', 'po_unknown', 'po_cc', 'po_branch', 'inherited', 'purpose', 'checks', 'doc_key'];
     const out = await sbResolve(lines.map(l => { const o = Object.assign({}, l, { description: l.description_locked ? l.description : '' });
       if (!o.link_locked) { SB_DERIVED.forEach(k => { delete o[k]; }); delete o.fulfil_po_id; delete o.link_type; delete o.xero_org; delete o.xero_account; delete o.fulfil_company; delete o.fulfil_product; }
       return o; }));

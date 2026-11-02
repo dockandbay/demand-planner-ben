@@ -1,3 +1,9 @@
+## v28.616 (02-Nov-26) Create sample bills: Wholesale COGS by market (US for Dillards, EU, DE, FR options)
+- Freight / duty on an old PO (not in Fulfil) now go to the Wholesale COGS account of the PO's market: UK 311.1c, US 311.2c (e.g. Dillards), EU 311.3c. Market = the PO's branch ("US Geneva", "UK B2B NEXT"), else the market code in the PO ref (PO-59USLX1-DILLARDS), else the courier line's ship-to country, else UK. Any other market asks to pick the account.
+- The Goes-to dropdown now also offers 311.3d COGS - DE - Wholesale and 311.3b COGS - FR - Wholesale (pick by hand; EU defaults to 311.3c).
+- Migration 409_sample_bill_cogs_us.sql: mapping rows cogs_pre_fulfil_us 311.2c, cogs_pre_fulfil_eu 311.3c, cogs_wholesale_de 311.3d, cogs_wholesale_fr 311.3b. Applied on the sandbox; run on live before the deploy.
+- Files: server.mjs, migrations/409_sample_bill_cogs_us.sql, lib/ai-logic/supply-finance.md, package.json, CHANGES.md. No env vars or cron routes.
+
 ## v28.615 (02-Nov-26) Health report 26-Oct to 02-Nov fixes (part 1)
 - DEMAND > Inputs > Calendar import: a pasted header row ("Date Market Category ...") failed the import with a 500 AFTER "replace" had already deleted the calendar (no transaction). Header rows are now skipped, every row is checked first (bad date or uplift -> nothing imported, the rows are listed), and delete + inserts run in one transaction. Dates also accept dd-mmm-yy and dd/mm/yyyy.
 - ACCOUNTS bank ageing upload: "ON CONFLICT DO UPDATE command cannot affect row a second time" when a line had no reference. The de-dupe key now matches the database key (reference '' when missing).
