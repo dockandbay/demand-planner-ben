@@ -1,3 +1,13 @@
+## v28.615 (02-Nov-26) Health report 26-Oct to 02-Nov fixes (part 1)
+- DEMAND > Inputs > Calendar import: a pasted header row ("Date Market Category ...") failed the import with a 500 AFTER "replace" had already deleted the calendar (no transaction). Header rows are now skipped, every row is checked first (bad date or uplift -> nothing imported, the rows are listed), and delete + inserts run in one transaction. Dates also accept dd-mmm-yy and dd/mm/yyyy.
+- ACCOUNTS bank ageing upload: "ON CONFLICT DO UPDATE command cannot affect row a second time" when a line had no reference. The de-dupe key now matches the database key (reference '' when missing).
+- PO lines push to Fulfil: a Fulfil refusal returned 502 with nothing in the health log; the reason is now logged.
+- SUPPLY purchase orders / shipments grids: "Cannot read properties of null (reading 'style')" when a drawer closed a row the grid had already re-rendered; guarded.
+- DEMAND SA button: "openSADrawer is not defined" when pressed before the DEMAND script finished loading; the early press now does nothing.
+- Health log no longer records the browser's benign "ResizeObserver loop" warning.
+- BUY & MOVE > Inventory > Manage 3PL > UK (ILG): the status call was polled every 8s, forever, while batch #1 has been pending approval since 28-Oct (798 calls, ~2s each, in the week). It now polls every 8s only while a batch is sent to Fulfil, once a minute while one only waits for approval, and never in a hidden tab.
+- Files: server.mjs, supply/inject.html, supply/hz-health.js, artifact_v16.7.html, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.614 (02-Nov-26) Inbox: PRODUCT messages are type Product (were shown as Purchase order)
 - Supplier messages on a product (development requests, e.g. AW27-TEATO-XMAS3PACKSTRIP "Accepted the development request") share the PO notes table under the product ref, so the Inbox showed them as "Purchase order" to everyone with PO in their Inbox types (Zera has PO only). They are now type Product: shown only to people with Product ticked in CONFIG > Permissions > Inbox types (or no Inbox types set), labelled PRODUCT, and clicking one opens PRODUCT > Products > that product.
 - A message counts as Product when its reference is a PRODUCT development item; everything else stays PO.

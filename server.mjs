@@ -3784,7 +3784,7 @@ app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
     const p = await parseXeroReconPack(Buffer.from(b64.replace(/^data:[^,]*,/, ''), 'base64'));
     const by = (req.me && req.me.email) || authUser(req) || null, asAt = p.as_at || (p.period && p.period.to) || new Date().toISOString().slice(0, 10);
     const acct = (await pool.query(`SELECT account_id FROM planner.accounts_bank_accounts WHERE org=$1 AND lower(name)=lower($2) LIMIT 1`, [p.org, p.account])).rows[0];
-    const key = l => l.date + '|' + Number(l.amount).toFixed(2) + '|' + l.reference;
+    const key = l => l.date + '|' + Number(l.amount).toFixed(2) + '|' + (l.reference || '');   // v28.615: same key as the DB conflict target (reference '' when missing); an undefined reference made two rows for one key and failed the upsert
     const unrec = new Map(); p.unreconciled.forEach(l => unrec.set(key(l), l)); p.lines.filter(l => !l.reconciled).forEach(l => { if (!unrec.has(key(l))) unrec.set(key(l), l); });
     const recon = p.lines.filter(l => l.reconciled);
     const c = await pool.connect(); let cleared = 0;
@@ -23272,6 +23272,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
         if (e.code === 'FULFIL_LOOKUP_FAILED') fulfilGuardRefuse(po, 'lookup_failed', e.message);   // health log only (the returned error is discarded)
         return res.status(e.status || 409).json({ error: e.message, code: e.code, reason: e.reason || 'lookup_failed', candidates: e.candidates || [] });
       }
+      if (e.code !== 'NO_FULFIL_CFG' && e.code !== 'FULFIL_PUSH_BUSY') log500(e);   // v28.615: the health log showed these 502s with no message
       return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_PUSH_BUSY' ? 409 : 502).json({ error: e.message }); }
   }
   try {
@@ -27437,17 +27438,28 @@ app.post('/api/trading-calendar', async (req, res) => {     // create a row (bla
 app.post('/api/trading-calendar/import', async (req, res) => {   // declared before /:id so it isn't caught by it
   const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
   const replace = !!(req.body && req.body.replace);
+  // v28.615 (health report 02-Nov-26): a pasted header row ("Date  Market  Category ...") reached the date column and failed the import with
+  // a 500 after "replace" had already DELETED the calendar (no transaction). Now: header rows are skipped, every row is checked before
+  // anything is written (bad dates or uplift -> 400 listing the rows), and the delete + inserts run in one transaction.
+  const isHeader = r => /^\s*date\s*$/i.test(String(r.event_date || '')) || (/^date\b/i.test(String(r.event_date || '')) && /market|title/i.test(String(r.event_date || '')));
+  const keep = [], bad = [];
+  rows.forEach((r, i) => { if (!r || !(r.event_date || r.title || r.event_type) || isHeader(r)) return;
+    const d = r.event_date ? sbDate(r.event_date) : null, up = (r.uplift_pct === '' || r.uplift_pct == null) ? null : Number(String(r.uplift_pct).replace(/%/g, ''));
+    if (r.event_date && !d) bad.push('row ' + (i + 1) + ': date "' + String(r.event_date).slice(0, 30) + '"');
+    else if (up != null && !Number.isFinite(up)) bad.push('row ' + (i + 1) + ': uplift "' + String(r.uplift_pct).slice(0, 20) + '"');
+    else keep.push(Object.assign({}, r, { event_date: d, uplift_pct: up })); });
+  if (bad.length) return res.status(400).json({ error: 'Nothing imported. Fix these rows: ' + bad.slice(0, 10).join('; ') + (bad.length > 10 ? ' (+' + (bad.length - 10) + ' more)' : '') });
+  if (replace && !keep.length) return res.status(400).json({ error: 'Nothing to import, so the calendar was left as it is.' });
+  const client = await pool.connect();
   try {
-    if (replace) await pool.query(`DELETE FROM planner.trading_calendar`);
-    let n = 0;
-    for (const r of rows) {
-      if (!(r.event_date || r.title || r.event_type)) continue;
-      await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [r.event_date || null, r.market || 'ALL', r.category || 'ALL', r.sku_list || null, r.event_type || null, r.title || null,
-         (r.uplift_pct === '' || r.uplift_pct == null ? null : r.uplift_pct), r.notes || null]); n++;
-    }
-    res.json({ ok: true, imported: n });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    await client.query('BEGIN');
+    if (replace) await client.query(`DELETE FROM planner.trading_calendar`);
+    for (const r of keep) await client.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [r.event_date || null, r.market || 'ALL', r.category || 'ALL', r.sku_list || null, r.event_type || null, r.title || null, r.uplift_pct, r.notes || null]);
+    await client.query('COMMIT');
+    res.json({ ok: true, imported: keep.length });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 app.post('/api/trading-calendar/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.trading_calendar WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }

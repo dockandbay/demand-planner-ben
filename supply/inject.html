@@ -4707,7 +4707,7 @@
   function bindPoScrollPin(){ var tw=poGridTw(); if(!tw||tw._pin)return; tw._pin=1; var raf=0;
     tw.addEventListener('scroll',function(){ if(!raf)raf=requestAnimationFrame(function(){ raf=0; applyPoPin(); }); },{passive:true}); }
   function bindExpand(){ document.querySelectorAll('#supply-root .po-exp[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
-    var i=b.dataset.i, ex=document.getElementById('poexp-'+i), open=ex.style.display!=='none';
+    var i=b.dataset.i, ex=document.getElementById('poexp-'+i); if(!ex)return; var open=ex.style.display!=='none';   // v28.615: a sheet's close on a row the grid already re-rendered (health: null 'style')
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
     applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.po, 'po');
     if(typeof writeHash==='function'){ if(open){ writeHash(['supply','purchase-orders']); }   // collapsed → back to the grid URL
@@ -8217,7 +8217,7 @@
       host.innerHTML='<span class="tiny" style="margin-right:6px">'+(lk||('<span class="mut">Fulfil '+esc(rec.is_number)+'</span>'))+':</span>'+(bh||'<span class="mut tiny" style="color:var(--pos)">✓ in sync</span>');
       hzWireFulfil(scope, ref); }); }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
-    var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
+    var i=b.dataset.i, ex=document.getElementById('shipexp-'+i); if(!ex)return; var open=ex.style.display!=='none';   // v28.615: same guard as the PO grid
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
     applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.ref, 'ship');
     if(typeof writeHash==='function')writeHash(open?['supply','purchase-orders','shipments']:['supply','purchase-orders','shipments',b.dataset.ref]);   // v27.868 (Ben): deep-link the expanded shipment (collapse → back to the grid URL)

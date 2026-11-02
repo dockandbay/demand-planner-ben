@@ -25,6 +25,7 @@
     try{ if(navigator.sendBeacon&&navigator.sendBeacon(EP,body))return; }catch(e){}             // string body = text/plain (CORS-safelisted)
     try{ _fetch.call(window,EP,{method:'POST',headers:{'Content-Type':'application/json'},body:body,keepalive:true,credentials:'same-origin'}).catch(function(){}); }catch(e){} }
   window.addEventListener('error',function(e){ try{ if(!e||(!e.error&&!e.message))return; if(e.message==='Script error.'&&!e.error)return;   // opaque cross-origin: nothing useful
+    if(/^ResizeObserver loop/.test(String(e.message||'')))return;   // v28.615: benign browser warning (a resize callback ran past one frame), not an error
     add('client_error',e.message||str(e.error),e.error&&e.error.stack,null,{file:e.filename?String(e.filename).slice(0,200):null,line:e.lineno||null,col:e.colno||null}); }catch(_){} });
   window.addEventListener('unhandledrejection',function(e){ try{ var r=e&&e.reason; add('client_error','Unhandled rejection: '+str(r),r&&r.stack,null,null); }catch(_){} });
   console.error=function(){ try{ var a=[].slice.call(arguments), er=null; a.forEach(function(x){ if(!er&&x instanceof Error)er=x; });
