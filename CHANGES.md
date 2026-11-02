@@ -1,3 +1,6 @@
+## v28.628 (03-Nov-26) Payments Report: email button only
+- Removed the ⬇ Xero bill details download, the Xero copy-to-clipboard button and the ▸ expand button from each Payments Report row (desktop). Only the copy email button stays; click the row to show its payments. Phone cards keep their "lines" button. Client only.
+
 ## v28.627 (03-Nov-26) Flexport: readers off the frozen Airtable mirror
 - Global search (freight: flex id / shipment / MBL / container / AMS) read planner.flexport_shipments, the old Airtable mirror frozen since 07-Oct-26, so newer Flexport shipments could not be found. It now reads flexport_shipments_effective (API data + old rows as fallback).
 - The data-freshness stamp uses flexport_api_shipments instead of the old table. No migration.
