@@ -1,3 +1,6 @@
+## v28.619 (02-Nov-26) Manage 3PL > UK (ILG): "not in report" badge
+- "not in report" under the SKU is now a small red badge (was grey text), on the desktop table and the phone cards. Client only.
+
 ## v28.618 (02-Nov-26) Manage 3PL > UK (ILG): download CSV
 - New "↓ CSV" button on the filter bar. Downloads the rows shown with the current filters (Show / search / status / diff / ignore-under), not capped at 1,500. Columns: SKU, Description, Report qty, Fulfil at report, Moved since, Diff, Storage now, Set to, Other statuses, In Fulfil, In report. File named after the tab and report date, e.g. ILG_UK_ILG_02-Nov-26.csv. Client only; no migration, no env vars.
 
