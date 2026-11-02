@@ -11883,7 +11883,7 @@
   function sbMoney(n){ return (Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function sbBlank(){ return {seq:0,ship_date:'',tracking:'',charge:'freight',description:'',ship_to:'',po:'',sample_type:'',sample_ref:'',amount:'',link_type:'xero',xero_org:'uk',xero_account:'',checks:[]}; }
   function sbGoes(l){ return l.link_type==='fulfil'?'fulfil':('xero:'+(l.xero_org||'uk')+':'+(l.xero_account||'')); }
-  function sbDocs(){ var docs=[],by={}; (SB.lines||[]).forEach(function(l){ if(!l.link_type)return; var k=l.link_type==='fulfil'?'fulfil:'+l.fulfil_po_id:'xero:'+(l.xero_org||'uk');
+  function sbDocs(){ var docs=[],by={}; (SB.lines||[]).forEach(function(l){ if(!l.link_type)return; var k=l.link_type==='fulfil'?'fulfil:'+(l.fulfil_po_id||('co'+(Number(l.fulfil_company)||1))):'xero:'+(l.xero_org||'uk');   // v28.613: POs not in Fulfil share one invoice per company
       if(!by[k]){ by[k]={key:k,system:l.link_type,org:l.link_type==='fulfil'?(Number(l.fulfil_company)===3?'au':'uk'):(l.xero_org||'uk'),po:l.link_type==='fulfil'?l.po:'',seqs:[],amount:0,accts:{}}; docs.push(by[k]); }
       by[k].seqs.push(l.seq); by[k].amount+=Number(l.amount)||0; if(l.link_type==='xero')by[k].accts[l.xero_account||'?']=1; });
     var base=String(SB.head.ref_base||'').trim()||'REF'; docs.forEach(function(d,i){ d.reference=docs.length>1?base+'-'+String.fromCharCode(65+(i%26)):base; }); return docs; }
@@ -11928,7 +11928,7 @@
       +fld('Invoice date',dateField(H.invoice_date,{attrs:'data-k="invoice_date"',cls:'sb-h',width:'100%'}))+fld('Due date',dateField(H.due_date,{attrs:'data-k="due_date"',cls:'sb-h',width:'100%'}))
       +fld('Currency','<select class="fci sb-h" data-k="currency" style="width:100%">'+['USD','GBP','EUR','AUD','CAD','CNY'].map(function(c){return '<option'+(H.currency===c?' selected':'')+'>'+c+'</option>';}).join('')+'</select>','no tax · supplier currency')
       +(H.fx_rate?fld('Source rate (CNY per USD)','<div style="padding:4px 0">'+esc(H.fx_rate)+'</div>','USD = CNY ÷ rate'):'')+'</div>';
-    var goesOpts=function(l){ var o=''; if(l.fulfil_po_id)o+='<option value="fulfil"'+(l.link_type==='fulfil'?' selected':'')+'>Fulfil supplier invoice · '+esc(l.po||'PO')+(Number(l.fulfil_company)===3?' · AU co.':' · UK co.')+'</option>';
+    var goesOpts=function(l){ var o=''; if(l.fulfil_po_id||l.po)o+='<option value="fulfil"'+(l.link_type==='fulfil'?' selected':'')+'>Fulfil supplier invoice · '+esc(l.po||'PO')+(l.fulfil_po_id?'':' (not in Fulfil)')+((Number(l.fulfil_company)||(l.po_cc==='AU'?3:1))===3?' · AU co.':' · UK co.')+'</option>';
       var cur=sbGoes(l), seen=false; SB_XERO.forEach(function(x){ var v='xero:'+x[0]+':'+x[1]; if(v===cur)seen=true; o+='<option value="'+v+'"'+(v===cur?' selected':'')+'>Xero '+x[0].toUpperCase()+' · '+x[1]+' '+esc(x[2])+'</option>'; });
       if(!seen&&l.link_type!=='fulfil')o='<option value="'+esc(cur)+'" selected>'+(l.xero_account?'Xero '+String(l.xero_org||'uk').toUpperCase()+' · '+esc(l.xero_account):'pick where it goes')+'</option>'+o; return o; };
     var chk=function(l){ return (l.checks||[]).map(function(c){ var col=c.level==='bad'?'var(--neg)':c.level==='warn'?'#b45309':c.level==='ok'?'var(--pos)':'var(--muted)'; return '<div class="tiny" style="color:'+col+'">'+esc(c.text)+'</div>'; }).join(''); };
@@ -11973,7 +11973,7 @@
         var dlist=document.getElementById('sb-pol-'+i); if(dlist)dlist.innerHTML=(j.rows||[]).map(function(r){ return '<option value="'+esc(r.po)+'">'+esc([r.cc,r.supplier,r.fulfil_id?'Fulfil':'not in Fulfil'].filter(Boolean).join(' · '))+'</option>'; }).join(''); }).catch(function(){}); };
       var sr=tr.querySelector('.sb-sr'); sr.oninput=function(){ var q=sr.value.trim(); if(!q)return; fetch('/api/supply/sample-bills/sample-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(j){
         var dlist=document.getElementById('sb-srl-'+i); if(dlist)dlist.innerHTML=(j.rows||[]).map(function(r){ return '<option value="'+esc(r.ref)+'">'+esc(r.kind+(r.note?' · '+r.note:''))+'</option>'; }).join(''); }).catch(function(){}); };
-      tr.querySelector('.sb-goes').onchange=function(){ var v=this.value; if(v==='fulfil'){ l.link_type='fulfil'; } else { var p=v.split(':'); l.link_type='xero'; l.xero_org=p[1]; l.xero_account=p[2]; }
+      tr.querySelector('.sb-goes').onchange=function(){ var v=this.value; if(v==='fulfil'){ l.link_type='fulfil'; if(!l.fulfil_company)l.fulfil_company=l.po_cc==='AU'?3:1; } else { var p=v.split(':'); l.link_type='xero'; l.xero_org=p[1]; l.xero_account=p[2]; }
         l.link_locked=true; l.checks=(l.checks||[]).filter(function(c){ return c.level!=='bad'||!/account|pick/i.test(c.text); }); sbDraw(); };
       tr.querySelector('.sb-del').onclick=function(){ SB.lines.splice(i,1); if(!SB.lines.length)SB.lines.push(sbBlank()); SB.lines.forEach(function(x,k){x.seq=k+1;}); sbDraw(); }; });
     P.querySelector('#sb-add').onclick=function(){ var n=sbBlank(); n.seq=SB.lines.length+1; var last=SB.lines[SB.lines.length-1]; if(last){ n.ship_date=last.ship_date; n.ship_to=last.ship_to; } SB.lines.push(n); sbResolveNow(); };

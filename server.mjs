@@ -27874,6 +27874,15 @@ async function sbResolve(lines) {
   for (const l of out) {
     if (l.link_locked) { if (!l.checks.length) l.checks = []; continue; }   // the user picked the route by hand: keep it
     if (l.po_found || l.po_unknown) {
+      // v28.613 (Ben 02-Nov-26): on a PO, freight and duty ALWAYS go on a Fulfil supplier invoice (a PO not in Fulfil too: no landed cost then);
+      // import VAT ("Taxes") always goes to Xero (Xero org by the PO's country, the vat / au_vat account in the sample accounts mapping).
+      if (l.charge === 'tax') { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; l.xero_account = acc[(l.xero_org === 'au' ? 'au_' : '') + 'vat'] || null;
+        l.fulfil_po_id = null; l.fulfil_company = null; l.fulfil_product = null;
+        l.checks.push(l.xero_account ? { level: 'info', text: 'Import VAT: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account } : { level: 'bad', text: 'Import VAT goes to Xero ' + l.xero_org.toUpperCase() + ': no import VAT account in the sample accounts mapping, pick the account' });
+        continue; }
+      if (l.charge === 'freight' || l.charge === 'duty') { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null;
+        if (!l.fulfil_po_id) l.checks.push({ level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil: Fulfil supplier invoice without a PO (books the cost, no landed cost)' });
+        continue; }
       if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
       else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; const pre = l.xero_org === 'au' ? 'au_' : ''; l.xero_account = ((l.charge === 'duty' || l.charge === 'tax') ? acc[pre + 'duty'] : l.charge === 'freight' ? acc[pre + 'freight'] : acc.product) || null;
         if (!l.xero_account) l.checks.push({ level: 'bad', text: 'no Xero ' + l.xero_org.toUpperCase() + ' ' + l.charge + ' account in the sample accounts mapping: pick the account' });
@@ -27892,7 +27901,7 @@ async function sbResolve(lines) {
 // Group lines into documents (one per Fulfil PO, one per Xero org), in file order, and give each its reference.
 function sbGroup(lines, refBase) {
   const docs = [], by = {};
-  lines.forEach(l => { const key = l.link_type === 'fulfil' ? 'fulfil:' + l.fulfil_po_id : 'xero:' + (l.xero_org || 'uk'); l.doc_key = key;
+  lines.forEach(l => { const key = l.link_type === 'fulfil' ? 'fulfil:' + (l.fulfil_po_id || 'co' + (Number(l.fulfil_company) || FULFIL_COMPANY_UK)) : 'xero:' + (l.xero_org || 'uk'); l.doc_key = key;   // v28.613: POs not in Fulfil share one invoice per company
     if (!by[key]) { by[key] = { key, system: l.link_type === 'fulfil' ? 'fulfil' : 'xero', org: l.link_type === 'fulfil' ? (Number(l.fulfil_company) === FULFIL_COMPANY_AU ? 'au' : 'uk') : (l.xero_org || 'uk'),
       fulfil_po_id: l.fulfil_po_id || null, po: l.link_type === 'fulfil' ? l.po : null, company: l.fulfil_company || null, lines: [], amount: 0 }; docs.push(by[key]); }
     by[key].lines.push(l); by[key].amount = sbR2(by[key].amount + Number(l.amount || 0)); });
@@ -27907,7 +27916,7 @@ function sbValidate(head, lines, auCodes) { const p = []; auCodes = auCodes || [
   if (!lines.length) p.push('Add at least one line.');
   lines.forEach((l, i) => { const n = 'Line ' + (i + 1) + ': ';
     if (!(Number(l.amount) > 0)) p.push(n + 'amount must be above 0.');
-    if (l.link_type === 'fulfil') { if (!l.fulfil_po_id) p.push(n + 'pick a Fulfil PO.'); }
+    if (l.link_type === 'fulfil') { if (!l.fulfil_po_id && !String(l.po || '').trim()) p.push(n + 'a Fulfil supplier invoice line needs a PO.'); }   // v28.613: a PO not in Fulfil is allowed (no landed cost)
     else if (l.link_type === 'xero') { if (!/^(uk|au)$/.test(String(l.xero_org || ''))) p.push(n + 'pick the Xero org.'); if (!String(l.xero_account || '').trim()) p.push(n + 'pick the Xero account.');
       if (l.xero_org === 'au' && !auCodes.includes(String(l.xero_account).trim())) p.push(n + 'Xero AU takes only ' + (auCodes.join(' / ') || 'the AU accounts in the sample accounts mapping') + '.'); }
     else p.push(n + 'link it to a Fulfil PO or a Xero account.'); });
@@ -28066,6 +28075,7 @@ async function sbLandedCost(opId, opts) { opts = opts || {};
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was created.'), { status: 423 });
   const invId = Number(dep.doc_id), L0 = (await sbDocLines(opId))[0] || {};
+  if (!Number(L0.fulfil_po_id)) throw Object.assign(new Error('This invoice is for a PO that is not in Fulfil, so there is no Fulfil shipment to spread it over: no landed cost. The invoice books the cost.'), { status: 400 });
   const inv = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['id', '=', invId]], 0, 1, null, ['id', 'state', 'company']]);
   const st = Array.isArray(inv) && inv[0] ? inv[0].state : null; if (!st) throw Object.assign(new Error('Fulfil invoice ' + invId + ' not found.'), { status: 404 });
   if (!['posted', 'paid'].includes(st)) throw Object.assign(new Error('The Fulfil invoice is ' + st + ': post it in Fulfil first, then create the landed cost.'), { status: 409 });
