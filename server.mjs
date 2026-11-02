@@ -26942,6 +26942,14 @@ const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_l
   channels: 'text', status: 'text', intake_date: 'date', intake_reason: 'text', uplift: 'jsonb', target_cover_weeks: 'numeric' };
 const CAMPAIGN_TIERS = ['Hero', 'Supporting', 'Cross-sell'];
 const CAMPAIGN_INTAKE_DAYS = 7;   // required intake = launch date minus 7 days unless overridden on the campaign
+// v28.608 (Kathryn 30-Oct-26, Ben): Amazon (FBA) lines need stock in FBA earlier: FBA intake = the campaign (3PL) intake minus the SKU's
+// 3PL -> FBA transfer time (products.transfer_3pl_to_fba_lead_time_weeks, default 2 weeks, the same default the buy plan uses).
+const CAMP_FBA_LEAD_WK_DEFAULT = 2;
+function campLocIntake(intake, ch, leadWk) {
+  if (ch !== 'FBA' || !intake) return intake;
+  const wk = leadWk == null || leadWk === '' || !Number.isFinite(Number(leadWk)) ? CAMP_FBA_LEAD_WK_DEFAULT : Math.max(0, Number(leadWk));
+  return new Date(Date.parse(intake + 'T00:00:00Z') - Math.round(wk * 7) * 86400000).toISOString().slice(0, 10);
+}
 const _campMissing = e => /campaign_skus|column "(channels|status|intake_date|intake_reason|uplift|target_cover_weeks|updated_by)"/.test(String(e && e.message));
 app.get('/api/trading-calendar', async (req, res) => {
   try {
@@ -27006,12 +27014,13 @@ app.post('/api/trading-calendar/:id/skus', async (req, res) => {
   } finally { client.release(); }
 });
 // Campaign intake deadlines for DEMAND > Analysis > Intake deadlines: every CONFIRMED campaign SKU x (market x channel) location
-// (DTC -> <market>_3pl, FBA -> <market>_fba) gets the campaign's intake date (override, else launch minus 7 days); a SKU in two
-// campaigns keeps the earliest. Computed on read, never written into intake_deadlines (those stay manual overrides).
+// (DTC -> <market>_3pl, FBA -> <market>_fba) gets the campaign's intake date (override, else launch minus 7 days; FBA minus the SKU's
+// transfer time, campLocIntake); a SKU in two campaigns keeps the earliest. Computed on read, never written into intake_deadlines (those stay manual overrides).
 async function campaignIntakeDeadlines() {
   const r = await pool.query(`SELECT c.id, c.title, c.market, coalesce(c.channels,'DTC') channels,
-      to_char(coalesce(c.intake_date, c.event_date - $1::int),'YYYY-MM-DD') deadline, to_char(c.event_date,'YYYY-MM-DD') launch, s.sku, s.tier
-    FROM planner.trading_calendar c JOIN planner.campaign_skus s ON s.event_id=c.id
+      to_char(coalesce(c.intake_date, c.event_date - $1::int),'YYYY-MM-DD') deadline, to_char(c.event_date,'YYYY-MM-DD') launch, s.sku, s.tier,
+      p.transfer_3pl_to_fba_lead_time_weeks lead_wk
+    FROM planner.trading_calendar c JOIN planner.campaign_skus s ON s.event_id=c.id LEFT JOIN planner.products p ON p.sku=s.sku
     WHERE c.status='confirmed' AND c.event_date IS NOT NULL`, [CAMPAIGN_INTAKE_DAYS]);
   const best = {};
   for (const x of r.rows) {
@@ -27019,15 +27028,15 @@ async function campaignIntakeDeadlines() {
     const chs = String(x.channels || '').toUpperCase().split(',').map(s => s.trim());
     for (const m of mkts) for (const ch of chs) {
       const loc = m.toLowerCase() + (ch === 'FBA' ? '_fba' : ch === 'DTC' ? '_3pl' : ''); if (!/_(3pl|fba)$/.test(loc)) continue;
-      const k = x.sku + '|' + loc, o = best[k];
-      if (!o || x.deadline < o.deadline) best[k] = { sku: x.sku, location: loc, deadline: x.deadline, launch: x.launch, campaign: x.title, campaign_id: Number(x.id), tier: x.tier };
+      const k = x.sku + '|' + loc, o = best[k], dl = campLocIntake(x.deadline, ch, x.lead_wk);
+      if (!o || dl < o.deadline) best[k] = { sku: x.sku, location: loc, deadline: dl, launch: x.launch, campaign: x.title, campaign_id: Number(x.id), tier: x.tier };
     }
   }
   return Object.values(best);
 }
 // v28.596 (Ben 31-Oct-26, Kathryn's Launch Readiness spec phase 2): launch READINESS per campaign SKU x market x channel location
 // (DTC = <market>_3pl, Amazon = <market>_fba). At launch = on hand at that location (a negative counts as 0) + open inbound to it with an
-// ETA on or before the intake date (a passed ETA still counts, flagged) - forecast from today to the day before launch (latest SKU run,
+// ETA on or before the line's intake date (FBA: earlier by the SKU's transfer time, campLocIntake; each row carries its own intake) (a passed ETA still counts, flagged) - forecast from today to the day before launch (latest SKU run,
 // months pro-rated by day). Cover = at launch / the launch month's weekly forecast (units / (days in month / 7)). Target = the campaign's
 // target cover, else the SKU's resolved target at that location (products.target_cover_weeks_<loc>). RAG: Red = not sold there
 // (PRODUCT availability), nothing left at launch, or under 2 weeks; Amber = below target, or no launch-month forecast to measure it;
@@ -27071,9 +27080,9 @@ async function campaignReadiness(opts = {}) {
     for (const M of mkts) for (const ch of chs) {
       const m = M.toLowerCase(), loc = m + (ch === 'FBA' ? '_fba' : '_3pl'), other = m + (ch === 'FBA' ? '_3pl' : '_fba');
       const rows = (c.skus || []).map(s => {
-        const p = P[s.sku] || {}, sold = p['available_' + m + '_' + (ch === 'FBA' ? 'fba' : 'dtc')];
+        const p = P[s.sku] || {}, sold = p['available_' + m + '_' + (ch === 'FBA' ? 'fba' : 'dtc')], intake = campLocIntake(c.intake, ch, p.transfer_3pl_to_fba_lead_time_weeks);
         const ohRaw = num(p['inventory_' + loc]), oh = Math.max(0, ohRaw), ohOther = num(p['inventory_' + other]) + (loc === 'us_fba' ? num(p.inventory_us_awd) : 0);
-        const legs = (IN[s.sku + '|' + loc] || []).map(x => ({ ref: x.ref, src: x.src || null, qty: x.qty, eta: x.eta, by: !!(x.eta && x.eta <= c.intake), late: !!(x.eta && x.eta < today) }));
+        const legs = (IN[s.sku + '|' + loc] || []).map(x => ({ ref: x.ref, src: x.src || null, qty: x.qty, eta: x.eta, by: !!(x.eta && x.eta <= intake), late: !!(x.eta && x.eta < today) }));
         const inBy = legs.filter(x => x.by).reduce((a, x) => a + x.qty, 0), inAfter = legs.filter(x => !x.by).reduce((a, x) => a + x.qty, 0), noEta = legs.filter(x => !x.eta).reduce((a, x) => a + x.qty, 0);
         let pre = 0;   // forecast from today to the day before launch, months pro-rated by day
         for (let ym = today.slice(0, 7); ym <= lym; ym = addM(ym, 1)) {
@@ -27094,10 +27103,11 @@ async function campaignReadiness(opts = {}) {
         if (legs.some(x => x.by && x.late)) why += '; ETA passed, counted as in';
         counts[rag]++;
         const short = (target != null && wk > 0) ? Math.max(0, Math.ceil(target * wk - at)) : (at <= 0 ? null : 0);   // v28.597: units short of target cover at launch
-        return { short, sku: s.sku, name: p.product_name || '', tier: s.tier, sold: sold == null ? null : !!sold, on_hand: ohRaw, other_pool: ohOther, in_by: inBy, in_after: inAfter,
+        return { short, intake, sku: s.sku, name: p.product_name || '', tier: s.tier, sold: sold == null ? null : !!sold, on_hand: ohRaw, other_pool: ohOther, in_by: inBy, in_after: inAfter,
           legs, sales_to_launch: Math.round(pre), at_launch: Math.round(at), launch_fc: Math.round(launchFc), cover: cover == null ? null : Math.round(cover * 10) / 10, target, rag, why };
       });
-      groups.push({ market: M, channel: ch, loc, rows });
+      const gIntake = ch === 'FBA' ? (rows.map(r => r.intake).sort()[0] || campLocIntake(c.intake, ch, null)) : c.intake;   // FBA: the earliest SKU date
+      groups.push({ market: M, channel: ch, loc, rows, intake: gIntake });
     }
     const worst = counts.r ? 'r' : counts.a ? 'a' : counts.g ? 'g' : null;
     return { id: Number(c.id), title: c.title, launch: c.launch, intake: c.intake, intake_set: c.intake_set, status: c.status, markets: mkts, channels: chs,
@@ -27117,16 +27127,16 @@ app.get('/api/trading-calendar/readiness', async (req, res) => {
 // byPo / byShipment feed the ◆ badge on the PO and shipment grids. campaignEtaAlert(): daily cron, To-do + email to the
 // campaign_alert_emails list when a leg's ETA moves past its campaign intake date (each leg once per ETA; app_settings.campaign_eta_alerted).
 const CAMP_TIER_ORD = { Hero: 0, Supporting: 1, 'Cross-sell': 2 };
-const CAMP_ALERT_DEFAULT = [];
+const CAMP_ALERT_DEFAULT = ['kathryn@dockandbay.com'];   // v28.608 (Ben 02-Nov-26): Kathryn to start; edited in DEMAND > Config > Campaign alerts
 async function campaignPriority(opts = {}) {
   const d = await campaignReadiness({}), rows = [];
   const dayMs = 86400000, dd = (a, b) => Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / dayMs);
   for (const c of d.campaigns) {
     if (!opts.drafts && c.status !== 'confirmed') continue;
     for (const g of c.groups) for (const r of g.rows) {
-      const base = { campaign: c.title, campaign_id: c.id, status: c.status, tier: r.tier, launch: c.launch, intake: c.intake, market: g.market, channel: g.channel, loc: g.loc,
+      const base = { campaign: c.title, campaign_id: c.id, status: c.status, tier: r.tier, launch: c.launch, intake: r.intake || c.intake, market: g.market, channel: g.channel, loc: g.loc,
         sku: r.sku, name: r.name, rag: r.rag, why: r.why, at_launch: r.at_launch, cover: r.cover, target: r.target };
-      if (r.legs.length) r.legs.forEach(x => rows.push(Object.assign({}, base, { ref: x.ref, src: x.src, qty: x.qty, eta: x.eta, late_days: x.eta ? dd(x.eta, c.intake) : null,
+      if (r.legs.length) r.legs.forEach(x => rows.push(Object.assign({}, base, { ref: x.ref, src: x.src, qty: x.qty, eta: x.eta, late_days: x.eta ? dd(x.eta, base.intake) : null,
         at_risk: x.by ? 0 : x.qty })));
       else if (r.rag !== 'g') rows.push(Object.assign({}, base, { ref: null, qty: 0, eta: null, late_days: null, at_risk: r.short }));
     }
@@ -27158,11 +27168,18 @@ app.get('/api/campaigns/priority', async (req, res) => {
     res.set('Cache-Control', 'no-store').json(out); }
   catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/campaigns/priority/settings', async (req, res) => {   // admin: who gets the ETA-past-intake alert
-  try { const me = await permsFor(req); if (!(me && (me.is_admin || me.live === false))) return res.status(403).json({ error: 'Admins only' });
-    const list = String((req.body && req.body.alert_emails) || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s));
-    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('campaign_alert_emails',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [[...new Set(list)].join(', ')]);
-    res.json({ ok: true, alert_emails: [...new Set(list)] }); }
+app.get('/api/campaigns/alert-settings', async (req, res) => {   // v28.608: DEMAND > Config > Campaign alerts
+  try { res.set('Cache-Control', 'no-store').json({ alert_emails: await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT) }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/campaigns/priority/settings', async (req, res) => {   // who gets the ETA-past-intake alert (v28.608: anyone signed in, @dockandbay.com addresses only)
+  try { const me = await permsFor(req); if (!(me && (me.email || me.live === false))) return res.status(403).json({ error: 'Sign in first' });
+    const raw = String((req.body && req.body.alert_emails) || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    const bad = raw.filter(s => !/^[^@\s]+@dockandbay\.com$/.test(s)); if (bad.length) return res.status(400).json({ error: 'Only @dockandbay.com addresses: ' + bad.join(', ') });
+    const list = [...new Set(raw)];
+    await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('campaign_alert_emails',$1,$2,now())
+      ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [list.join(', '), me.email || authUser(req) || null]);
+    res.json({ ok: true, alert_emails: list }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function campaignEtaAlert(dry) {

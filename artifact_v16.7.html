@@ -5605,6 +5605,25 @@ function aspAdjFactor(co,ch,s,year,mo){ var adj=aspAdjOf(co,ch); if(!adj.red&&!a
 function getASP(co,ch,s,year,mo){ var v=getASPraw(co,ch,s,year,mo); if(!(v>0))return v; var a=ga(co,ch,s), k=ym(year,mo); if(a[k]&&a[k][0]>0)return v; return v*aspAdjFactor(co,ch,s,year,mo); }
 
 // DEMAND ▸ Config ▸ More settings — grid of country × channel with the two ASP percentages; saves app_settings.asp_adjust.
+// v28.608 (Ben 02-Nov-26): DEMAND ▸ Config ▸ Campaign alerts. Who gets the daily (weekdays 08:00) email + To do when a PO line feeding a
+// confirmed campaign now lands after its intake date. @dockandbay.com addresses only; Kathryn by default.
+function renderCampAlertsView(body){ var e=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  body.innerHTML='<div style="padding:22px;color:var(--faint);font-size:13px">Loading…</div>';
+  fetch('/api/campaigns/alert-settings').then(function(r){return r.json();}).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed');
+    body.innerHTML='<div style="padding:2px 2px 24px;max-width:760px">'
+      +'<div class="annot" style="margin-bottom:12px"><b>DEMAND ▸ Config ▸ Campaign alerts.</b> Every weekday at 08:00 HORIZON checks the open POs and transfers feeding <b>confirmed</b> campaigns. When one now lands after its intake date (launch minus 7 days; Amazon lines earlier by the transfer time), the people below get an email and a To do. Each line is sent once, and again only if it slips further. The full list is in SUPPLY ▸ Purchase orders ▸ Campaign priority.</div>'
+      +'<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:4px">Send alerts to</label>'
+      +'<div style="display:flex;gap:8px;align-items:center"><input class="flt" id="ca-emails" style="flex:1" value="'+e((j.alert_emails||[]).join(', '))+'" placeholder="e.g. kathryn@dockandbay.com, zera@dockandbay.com">'
+      +'<button class="save-btn" id="ca-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save</button></div>'
+      +'<div id="ca-msg" class="mut" style="font-size:12px;margin-top:6px">'+((j.alert_emails||[]).length?'':'Nobody is set, so no alert is sent.')+'</div>'
+      +'<div style="font-size:11.5px;color:var(--faint);margin-top:4px">Separate addresses with commas. Only @dockandbay.com addresses.</div></div>';
+    var msg=body.querySelector('#ca-msg'), btn=body.querySelector('#ca-save');
+    btn.onclick=function(){ btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='Saving…';
+      fetch('/api/campaigns/priority/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({alert_emails:body.querySelector('#ca-emails').value})}).then(function(r){return r.json();})
+        .then(function(k){ btn.disabled=false; if(!k||k.error)throw new Error((k&&k.error)||'failed'); body.querySelector('#ca-emails').value=k.alert_emails.join(', '); msg.style.color='var(--pos)'; msg.textContent=k.alert_emails.length?'Saved: '+k.alert_emails.length+' recipient'+(k.alert_emails.length===1?'':'s')+'.':'Saved. Nobody is set, so no alert is sent.'; })
+        .catch(function(err){ btn.disabled=false; msg.style.color='var(--neg)'; msg.textContent='Save failed: '+err.message; }); };
+  }).catch(function(err){ body.innerHTML='<div style="padding:22px;color:var(--neg);font-size:13px">Could not load: '+e(err.message)+'</div>'; });
+}
 function renderAspAdjView(body){ var CHS=['DTC','FBA','B2B','TIK','ZAL']; var e=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
   var cur=JSON.parse(JSON.stringify(ASP_ADJ||{}));
   var TH='padding:6px 10px;border-bottom:2px solid var(--line);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;white-space:nowrap';
@@ -10925,7 +10944,8 @@ function render(){
     else if(DEMAND_VIEW==='buyplan') renderBuyPlanView(body);
     else if(DEMAND_VIEW==='contribmodel'){ if(window.hzCfgContribModel)window.hzCfgContribModel(body); else body.innerHTML='<div style="padding:22px;color:var(--faint);font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
     else if(DEMAND_VIEW==='runoffsubs'){ if(window.hzCfgRunoffSubs)window.hzCfgRunoffSubs(body); else body.innerHTML='<div style="padding:22px;color:var(--faint);font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
-    else if(DEMAND_VIEW==='aspadj') renderAspAdjView(body);   // v27.577 DEMAND ▸ Config ▸ More settings (ASP reduction / discontinued discount per country × channel)
+    else if(DEMAND_VIEW==='aspadj') renderAspAdjView(body);
+    else if(DEMAND_VIEW==='campalerts') renderCampAlertsView(body);   // v28.608 DEMAND ▸ Config ▸ Campaign alerts (who gets the ETA-past-intake alert)   // v27.577 DEMAND ▸ Config ▸ More settings (ASP reduction / discontinued discount per country × channel)
     else if(DEMAND_VIEW==='shipbags') renderShipBagView(body);   // DEMAND ▸ Ship bags — packaging forecast from units→orders
     else if(DEMAND_VIEW==='stockcover') renderStockCoverView(body);   // DEMAND ▸ Stock cover — weeks-of-cover trend per warehouse vs target (cash flow)
     else renderDemandActionsView(body);
@@ -15246,8 +15266,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['campalerts']='Campaign alerts'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
+  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj','campalerts'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -17832,7 +17852,7 @@ function campOpenEditor(ev,onSaved){
         +'<div style="'+lbl+'">Markets<div style="display:flex;gap:4px;flex-wrap:wrap">'+CAMP_MKTS.map(function(m){ return '<button class="ce-mk" data-m="'+m+'" style="'+tog(C.mk.indexOf(m)>=0)+'">'+m+'</button>'; }).join('')+'</div></div>'
         +'<div style="'+lbl+'">Channels<div style="display:flex;gap:4px;flex-wrap:wrap">'+[['DTC','DTC'],['FBA','Amazon']].map(function(c){ return '<button class="ce-ch" data-c="'+c[0]+'" style="'+tog(C.ch.indexOf(c[0])>=0)+'">'+c[1]+'</button>'; }).join('')+'</div></div>'
         +'<label style="'+lbl+'">Status<select id="ce-st" style="'+inp+'"><option value="draft"'+(C.status!=='confirmed'?' selected':'')+'>Draft</option><option value="confirmed"'+(C.status==='confirmed'?' selected':'')+'>Confirmed</option></select></label>'
-        +'<label style="'+lbl+'">Required intake<input id="ce-intake" type="date" value="'+esc(C.intake_date)+'" placeholder="" style="'+inp+'"><span style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--faint)">'+(C.intake_date?'Override. Clear it to use launch minus '+CAMP_INTAKE_DAYS+' days.':'Launch minus '+CAMP_INTAKE_DAYS+' days: <b>'+esc(intake?saDate(intake):'—')+'</b>. Pick a date to override.')+'</span></label>'
+        +'<label style="'+lbl+'">Required intake<input id="ce-intake" type="date" value="'+esc(C.intake_date)+'" placeholder="" style="'+inp+'"><span style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--faint)">'+(C.intake_date?'Override. Clear it to use launch minus '+CAMP_INTAKE_DAYS+' days.':'Launch minus '+CAMP_INTAKE_DAYS+' days: <b>'+esc(intake?saDate(intake):'—')+'</b>. Pick a date to override.')+(C.ch.indexOf('FBA')>=0&&intake?' Amazon (FBA): this date minus each SKU\'s 3PL to FBA transfer time (PRODUCT, 2 weeks unless set), so <b>'+esc(saDate(_ikAddDays(intake,-14)))+'</b> at 2 weeks.':'')+'</span></label>'
         +(C.intake_date?'<label style="'+lbl+'">Reason for override<input id="ce-ireason" value="'+esc(C.intake_reason)+'" style="'+inp+'"></label>':'')
         +'<label style="'+lbl+'">Target cover at launch (wks)<input id="ce-tcw" inputmode="decimal" value="'+esc(C.tcw)+'" placeholder="category target" style="'+inp+'"></label>'
       +'</div>'
@@ -17939,7 +17959,7 @@ function campRdBody(d,f,esc){ var ps=campRdPanels(d,f), cnt={g:0,a:0,r:0}, tot=0
     +(ps.length?ps.map(function(p){ var dr=p.c.status!=='confirmed', pc={g:0,a:0,r:0}; p.rows.forEach(function(r){ pc[r.rag]++; });
       return '<section class="rd-panel" style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--card);'+(dr?'border-style:dashed;':'')+'break-inside:avoid">'
         +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b style="font-size:14px">'+esc(p.c.title)+'</b>'
-        +'<span style="color:var(--muted);font-size:12px">'+esc(p.g.market+' '+campChLbl(p.g.channel))+' · launch '+esc(saDate(p.c.launch))+' · intake '+esc(saDate(p.c.intake))+(p.c.intake_set?' (set)':'')+'</span>'
+        +'<span style="color:var(--muted);font-size:12px">'+esc(p.g.market+' '+campChLbl(p.g.channel))+' · launch '+esc(saDate(p.c.launch))+' · intake '+esc(saDate(p.g.intake||p.c.intake))+(p.g.channel==='FBA'?' (3PL '+esc(saDate(p.c.intake))+' minus transfer time)':'')+(p.c.intake_set?' (set)':'')+'</span>'
         +campStatusPill(p.c.status)+(dr?'<span style="font-size:11px;color:var(--faint)">Draft: shown, not chased</span>':'')
         +'<span style="margin-left:auto;display:flex;gap:4px">'+['r','a','g'].filter(function(k){ return pc[k]; }).map(function(k){ return campRagPill(k,pc[k]); }).join('')+'</span></div>'
         +campRdTable(p,esc)+'</section>'; }).join('')
@@ -17947,7 +17967,7 @@ function campRdBody(d,f,esc){ var ps=campRdPanels(d,f), cnt={g:0,a:0,r:0}, tot=0
     +'<div style="font-size:11.5px;color:var(--faint);max-width:120ch">At launch = on hand at the location (negative counted as 0) + inbound landing there by the intake date (a passed ETA still counts) − forecast from today to the day before launch (latest forecast run). Cover = at launch ÷ the launch month\'s weekly forecast. Red: not sold there (PRODUCT availability), nothing left at launch, or under '+(d.red_weeks||2)+' weeks. Amber: below target (campaign target, else the SKU\'s target cover there) or no launch-month forecast. Uplift is not applied yet. Data as of '+esc(saDate(d.as_of))+'.</div>'; }
 function campRdCsv(d,f){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   var L=[['Campaign','Status','Launch','Intake','Market','Channel','SKU','Product','Tier','On hand','Other pool','In by intake','In after','POs','Sales to launch','At launch','Launch month fcst','Cover wks','Target wks','RAG','Why'].join(',')];
-  campRdPanels(d,f).forEach(function(p){ p.rows.forEach(function(r){ L.push([p.c.title,p.c.status,saDate(p.c.launch),saDate(p.c.intake),p.g.market,campChLbl(p.g.channel),r.sku,r.name,r.tier,r.on_hand,r.other_pool,r.in_by,r.in_after,
+  campRdPanels(d,f).forEach(function(p){ p.rows.forEach(function(r){ L.push([p.c.title,p.c.status,saDate(p.c.launch),saDate(r.intake||p.c.intake),p.g.market,campChLbl(p.g.channel),r.sku,r.name,r.tier,r.on_hand,r.other_pool,r.in_by,r.in_after,
     r.legs.map(function(x){ return x.ref+' '+x.qty+' '+(x.eta?saDate(x.eta):'no ETA'); }).join('; '),r.sales_to_launch,r.at_launch,r.launch_fc,r.cover,r.target,(CAMP_RAG[r.rag]||[''])[0],r.why].map(q).join(',')); }); });
   return L.join('\n'); }
 function campReadinessOpen(opt){ opt=opt||{};

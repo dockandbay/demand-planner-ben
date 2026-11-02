@@ -1,3 +1,14 @@
+## v28.609 (02-Nov-26) Supplier portal > Samples: tracking link beside the code, no "overdue" on finished samples
+- "track here ↗" now sits on the same line as the tracking code box (was underneath).
+- The "📅 Completion required <date> — overdue" badge no longer turns red once the sample is Complete, Shipped or Cancelled (shown as a plain grey date), the same rule HORIZON's own Samples flag already used. Reported on Anthro-Samp-1 (COMPLETED, required 09-Sep-26).
+- Files: supply/portal-view.js, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
+## v28.608 (02-Nov-26) Campaigns: Amazon (FBA) intake earlier by the transfer time; DEMAND > Config > Campaign alerts
+- Kathryn (30-Oct-26): FBA intake = the campaign (3PL) intake minus the SKU's 3PL to FBA transfer time (products.transfer_3pl_to_fba_lead_time_weeks, 2 weeks if not set). Used by Intake deadlines, launch readiness (inbound counted by intake, RAG), Campaign priority (days late), the ETA alert and the portal "need by" date. Readiness shows "intake <FBA date> (3PL <date> minus transfer time)" on Amazon groups; the campaign editor shows the Amazon date when Amazon is ticked. All 9 live campaigns are DTC only, so no live date moves today.
+- New DEMAND > Config > Campaign alerts: who gets the weekday 08:00 email + To do when a confirmed-campaign PO line slips past intake. Kathryn by default (Ben 02-Nov-26). Anyone signed in can edit; @dockandbay.com addresses only. GET /api/campaigns/alert-settings; POST /api/campaigns/priority/settings is no longer admin only.
+- Uplift unchanged: display only (Kathryn / Ben: no uplift in forecast or buy until Abi has data).
+- Files: server.mjs, artifact_v16.7.html, supply/inject.html, lib/ai-logic/reports.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.607 (31-Oct-26) Customer receipts: auto-match bank transfers to open Shopify orders (ACCOUNTS > Reconcile > Bank lines > Money in)
 - Best match per money-in line, with why: (a) order / SO / Fulfil invoice number on the bank line ("INV 59756" or "#59756"; a bare number only with amount or customer), (b) exact amount + customer named, (c) the sum of one customer's open orders (all of them, or the smallest exact set when the customer is named), (d) amount only (weak). Differences show as overpaid / short. Same org and currency only.
 - Reconcile button on strong exact matches: ticks the orders, runs the checks, then the usual confirm before writing (Shopify Mark as paid + Xero Receive Money, as before). Never posts automatically. Weak or inexact matches: Review.
