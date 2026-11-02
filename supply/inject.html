@@ -1381,7 +1381,7 @@
     if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
   var STBG={'bg-neutral':['var(--hover)','var(--muted)'],'bg-amber':['var(--amber-bg)','var(--amber)'],'bg-red':['var(--neg-bg)','var(--neg)'],'bg-green':['var(--pos-bg)','var(--pos)'],'bg-blue':['var(--blue-soft)','var(--blue-ink)']};
   var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
-  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
+  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={},supplierCode={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPoFilter=null;   // v28.412: global search > open the PO grid with filters (prod / batch / sku), all statuses
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
@@ -1769,7 +1769,7 @@
   function fetchLookups(cb){ cb=cb||function(){};
     if(_lookupsAt && (Date.now()-_lookupsAt)<LOOKUPS_TTL){ cb(); return; }   // fresh enough → serve from memory
     if(_lookupsInflight){ _lookupsInflight.then(cb,cb); return; }            // a fetch is already in flight → ride it
-    _lookupsInflight=fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; supplierCcy=d.supplier_ccy||{}; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; _lookupsAt=Date.now(); });
+    _lookupsInflight=fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; supplierCcy=d.supplier_ccy||{}; supplierCode=d.supplier_code||{}; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; _lookupsAt=Date.now(); });
     _lookupsInflight.then(function(){ _lookupsInflight=null; cb(); },function(){ _lookupsInflight=null; cb(); }); }
   // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
   var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
@@ -6900,7 +6900,7 @@
   // Balance still owed = balance owing (after start deposit and completion) less balance payments 1 and 2.
   function balRemaining(p){ var n=function(v){ return Number(v)||0; }; return Math.round((n(p.balance_owing)-n(p.balance_1_amount)-n(p.balance_2_amount)-n(p.balance_x_amount))*100)/100; }   // v28.307: + balance 3 onward
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
-    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(p.master_po)return; if(!p.is_final)return;   // child POs: master owns the money → skip
+    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(p.master_po)return; if(!p.is_final||!p.final_payment_due)return;   // child POs: master owns the money → skip; v28.622: no Final payment due date = nothing due yet
       if(Number(p.completion_calc)>0.009 && p.completion_due && !(Number(p.completion_assigned)>0.009) && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
       if(balRemaining(p)>0.009 && p.balance_due && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });   // v28.294 (Ben): a balance is paid only when fully paid
     (deps||[]).forEach(function(d){ if(d.status==='closed')return; if(!(Number(d.amount)>0.009)&&!d.date_paid&&!d.date_due)return;
@@ -11603,18 +11603,12 @@
     var c=document.getElementById('pdue-paid-clr'); if(c)c.onclick=function(){ PDUE_PAID=[]; pduePaidBox(); };
     // v28.545 (Ben: "can you add a link to copy the payment email on this popup"): per supplier, the payment confirmation email (wording of
     // HORIZON's paid-notification email) with each PO and payment paid this session, copied as rich text (HTML + plain) for Gmail; subject separately.
+    // v28.622 (Ben): same email as the Payments Report "copy email summary" (xbSummaryHtml/Tsv); subject = its first line.
     var mailFor=function(k){ var p=k.split('|'), sup=p[0]||'', ccy=p[1]||'', its=PDUE_PAID.filter(function(x){ return x.sup===sup&&x.ccy===ccy; });
-      var tot=Math.round(its.reduce(function(a,x){ return a+x.amt; },0)*100)/100, m=function(v){ return Number(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }, day=fd(localToday());
-      var subj='Payment made, Dock & Bay ('+m(tot)+' '+ccy+')';
-      var html='<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.5"><p>Hello'+(sup?' '+esc(sup)+' team':'')+',</p>'
-        +'<p>This is to confirm that Dock &amp; Bay has made a payment of <b>'+esc(m(tot))+' '+esc(ccy)+'</b> on <b>'+esc(day)+'</b>, covering:</p>'
-        +'<table style="border-collapse:collapse;font-size:13px"><tr><th style="text-align:left;padding:4px 10px;border-bottom:1px solid #ccc">PO</th><th style="text-align:left;padding:4px 10px;border-bottom:1px solid #ccc">Payment</th><th style="text-align:right;padding:4px 10px;border-bottom:1px solid #ccc">Amount ('+esc(ccy)+')</th></tr>'
-        +its.map(function(x){ return '<tr><td style="padding:3px 10px">'+esc(x.ref)+'</td><td style="padding:3px 10px">'+esc(x.type||'')+'</td><td style="padding:3px 10px;text-align:right">'+esc(m(x.amt))+'</td></tr>'; }).join('')
-        +'<tr><td style="padding:4px 10px;border-top:1px solid #ccc"><b>Total</b></td><td style="border-top:1px solid #ccc"></td><td style="padding:4px 10px;text-align:right;border-top:1px solid #ccc"><b>'+esc(m(tot))+'</b></td></tr></table>'
-        +'<p>Thank you,<br>Dock &amp; Bay Accounts</p></div>';
-      var txt='Hello'+(sup?' '+sup+' team':'')+',\n\nThis is to confirm that Dock & Bay has made a payment of '+m(tot)+' '+ccy+' on '+day+', covering:\n\n'
-        +its.map(function(x){ return x.ref+'  '+(x.type||'')+'  '+m(x.amt); }).join('\n')+'\nTotal  '+m(tot)+' '+ccy+'\n\nThank you,\nDock & Bay Accounts';
-      return {subj:subj,html:html,txt:txt}; };
+      var tot=Math.round(its.reduce(function(a,x){ return a+x.amt; },0)*100)/100;
+      var run={supplier:sup, supplier_code:(supplierCode&&supplierCode[sup])||'', dt:localToday(), total:tot, sum_ccy:ccy||'USD',
+        lines:its.map(function(x){ return {reference:x.ref, amount:Math.round(x.amt*100)/100, type:x.type||'', prod_no:x.prod_no||'', deposit_ref:x.deposit_ref||''}; })};
+      var txt=xbSummaryTsv(run); return {subj:txt.split('\n')[0], html:xbSummaryHtml(run), txt:txt}; };
     var done=function(el,msg){ var o=el.textContent; el.textContent=msg; setTimeout(function(){ el.textContent=o; },1600); };
     el.querySelectorAll('.pdue-mail').forEach(function(a){ a.onclick=function(){ var e=mailFor(a.dataset.k);
       try{ if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){ navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([e.html],{type:'text/html'}),'text/plain':new Blob([e.txt],{type:'text/plain'})})]).then(function(){ done(a,'✓ Email copied'); },function(){ navigator.clipboard.writeText(e.txt).then(function(){ done(a,'✓ Copied (plain)'); }); }); }
@@ -12227,9 +12221,10 @@
     var today=new Date().toISOString().slice(0,10);
     var cutoff4w=(function(){var d=new Date();d.setDate(d.getDate()+28);return d.toISOString().slice(0,10);})();   // "Outstanding +4 weeks" horizon: due on/before today+28d (includes overdue)
     var rows=[];
-    // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
+    // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final), its Final payment due date is set (v28.622, Ben:
+    // "no payments due for an invoice until it has a final invoice date") AND the milestone has a due date.
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
-    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
+    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final||!p.final_payment_due)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
       var _lComp=lmap['comp:'+p.po]||p.likely_completion, _lb1=lmap['bal:'+p.po]||p.likely_balance_1, _lb2=lmap['bal2:'+p.po]||p.likely_balance_2;   // fresh likely-date overlay beats a briefly-stale poRowsCache
       if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:_lComp,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
       if(Number(p.balance_owing)>0.009 && p.balance_due){ var _b1=Number(p.balance_1_amount)||0, _b2=Number(p.balance_2_amount)||0, _rem=balRemaining(p);
@@ -12243,6 +12238,7 @@
           if(_rem>0.009){ var _b2free=!(_b2>0.009)||!p.balance_2_date;
             rows.push(_b2free?{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:Math.round((_b2+_rem)*100)/100,remaining:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:null,dt_field:'pay_balance_2_date',dt_val:null,po:true}
               :{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:_rem,remaining:true,noedit:true,due:p.balance_due,likely:lmap['balrem:'+p.po]||p.likely_balance_rem,lk:'balrem:'+p.po,ep:ep+'/balance-x',amt_field:'amount',amt_val:null,dt_field:'date',dt_val:null,po:true}); } } } });
+    (function(){ var pm={}; pos.forEach(function(p){ pm[p.po]=p; }); rows.forEach(function(r){ var p=pm[r.ref]; if(p){ r.prod_no=p.prod_no||''; r.deposit_ref=p.deposit_ref||''; } }); })();   // v28.622: production + deposit ref for the copy email
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
@@ -12369,7 +12365,7 @@
         var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
         if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
           _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
-        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
+        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',prod_no:(r&&r.prod_no)||'',deposit_ref:(r&&r.deposit_ref)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
         var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
         if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
           var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }
@@ -13432,7 +13428,7 @@
   function xbSummaryTsv(run, ccy, amt){
     // Supplier-facing summary states the BASE currency (USD) — the amount the supplier invoiced. The entered
     // ccy/amt is the bank-settlement currency (e.g. GBP) for the Xero export only, not what we tell the supplier.
-    var amtNum=fmtAmt(run.total), amtCcy='USD';
+    var amtNum=fmtAmt(run.total), amtCcy=run.sum_ccy||'USD';   // run.sum_ccy: Payments Due groups by supplier currency (v28.622)
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var clean=function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');};
@@ -13445,7 +13441,7 @@
   // HTML version of the summary — a basic inline-styled table that pastes neatly into Gmail (and Sheets).
   function xbSummaryHtml(run, ccy, amt){
     // Supplier-facing summary uses the BASE currency (USD), not the entered bank-settlement currency.
-    var amtNum=fmtAmt(run.total), amtCcy='USD';
+    var amtNum=fmtAmt(run.total), amtCcy=run.sum_ccy||'USD';   // run.sum_ccy: Payments Due groups by supplier currency (v28.622)
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var cell='border:1px solid #cccccc;padding:4px 8px', hcell=cell+';background:#f2f2f2;text-align:left;font-weight:bold';

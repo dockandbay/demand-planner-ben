@@ -1,3 +1,8 @@
+## v28.622 (03-Nov-26) Payments Due: nothing due without a Final payment due date; copy email matches the Payments Report
+- A PO's completion and balance payments only show on Payments Due (and count in the overdue badges) once it has BOTH a final invoice amount and a Final payment due date. Ben: "no payments due for an invoice until it has a final invoice date". On live this only removes PO-57BUNDLE (Lixin completion, 13,765.46).
+- The green "Paid this session" box: "Copy email" now copies the same Payment detail email as the Payments Report (supplier, amount, SUPPLIER-PAYMENT-<code>-<date> reference, table of Reference / Amount / Type / Production ref / Deposit ref). "Copy subject" copies its first line, e.g. "Payment detail - Lixin of 106,917.30 USD".
+- Server: /api/supply/lookups adds supplier_code; the overdue count skips POs with no Final payment due date. No migration, no new env vars.
+
 ## v28.621 (03-Nov-26) PRODUCT grid: the red count opens the messages
 - The red count beside OPEN only toggled the product row, so on an open product it collapsed it. With unread supplier messages it now goes to that product's Timeline on PRODUCT > SAMPLING (where the message thread lives); with only open actions it opens the product and never closes an open one. Tooltip says which. Any SAMPLING deep link (e.g. from the Inbox) now also switches to the request's season tab, so the opened panel is not left under another season's rows. Client only.
 

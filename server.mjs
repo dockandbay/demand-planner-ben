@@ -21693,7 +21693,7 @@ async function computeOpenActions() {
         const _MIN = '2026-01-01', _tdy = new Date().toISOString().slice(0, 10);
         const _ov = (paid, due) => !paid && !!due && due >= _MIN && due < _tdy;
         for (const p of _poAll) {
-          if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
+          if (!p.is_final || !p.final_payment_due) continue;   // milestones surface only once the final invoice amount AND its Final payment due date are set (v28.622)
           if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
           if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Math.round((Number(p.balance_owing) - (Number(p.balance_1_amount) || 0) - (Number(p.balance_2_amount) || 0) - (Number(p.balance_x_amount) || 0)) * 100) / 100 <= 0.009, p.balance_due)) payments_overdue++;   // v28.294 (Ben): paid only when fully paid
         }
@@ -30751,7 +30751,7 @@ const lookupsCache = makeCache('lookups', async () => {
     q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
     q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL AND status='ACTIVE' ORDER BY prod_no DESC`),
     q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
-    q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy, coalesce(active,true) active FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
+    q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy, coalesce(active,true) active, coalesce(code,'') code FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
     q(`SELECT name FROM planner.branches ORDER BY name`),
     q(`SELECT sku FROM (
          SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
@@ -30763,6 +30763,7 @@ const lookupsCache = makeCache('lookups', async () => {
     deposits: dep.map((x) => x.reference), batches: bat.map((x) => x.batch), prods: pr.map((x) => x.prod_no),
     shipments: sh.map((x) => x.shipment_ref), suppliers: su.filter((x) => x.active !== false).map((x) => x.name),   // archived suppliers leave the pickers (v27.522); supplier_ccy keeps ALL so old POs still resolve currency
     supplier_ccy: Object.fromEntries(su.map((x) => [x.name, x.ccy])),
+    supplier_code: Object.fromEntries(su.filter((x) => x.code).map((x) => [x.name, x.code])),   // v28.622: Payments Due copy email payment reference
     branches: br.map((x) => x.name), crossdock: xd.map((x) => x.sku), pos: po.map((x) => x.po),
   };
 });
