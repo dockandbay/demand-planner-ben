@@ -1,9 +1,10 @@
-## v28.613 (02-Nov-26) Create sample bills: freight and duty always to Fulfil, import VAT to Xero
-- Ben 02-Nov-26: on a PO line, freight and duty always go on a Fulfil supplier invoice, including POs that are not in Fulfil (old POs): those share one Fulfil invoice per company with no PO link, so it books the cost but has no landed cost ("Create landed cost" explains why). POs in Fulfil keep one invoice each (landed cost as before).
-- Import VAT ("Taxes") on a PO line always goes to Xero (UK, or AU for AU POs) on the import VAT account from the sample accounts mapping (keys vat / au_vat). Until that account is added, the line shows "pick the account".
+## v28.613 (02-Nov-26) Create sample bills: PO freight / duty to Fulfil, old POs to Xero UK Wholesale COGS, import VAT to Xero
+- Ben 02-Nov-26, on a PO line: freight and duty go on a Fulfil supplier invoice when the PO is in Fulfil (one per Fulfil PO, landed cost as before). A PO NOT in Fulfil (old, pre-Fulfil, e.g. PO-1678119, PO-1725132-JL-HW) goes to a Xero UK bill on 311.1c COGS - UK - Wholesale (was 302 / 313).
+- Import VAT ("Taxes") on a PO line always goes to Xero (UK, or AU for AU POs) on the import VAT account (sample accounts mapping keys vat / au_vat). Until that row exists the line shows "pick the account".
 - Lines with no PO (samples) are unchanged: Xero by purpose.
-- The Goes-to picker offers "Fulfil supplier invoice · <PO> (not in Fulfil)" for any PO line.
-- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, package.json, CHANGES.md. No env vars or cron routes. Migration to follow for the import VAT account rows once the Xero code is confirmed.
+- A Fulfil invoice line is allowed on a PO that is not in Fulfil if picked by hand (one invoice per company); "Create landed cost" then explains there is no Fulfil shipment.
+- Migration 408_sample_bill_cogs_account.sql: mapping row cogs_pre_fulfil = 311.1c (UK). Applied on the sandbox; run on live before the deploy.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, migrations/408_sample_bill_cogs_account.sql, package.json, CHANGES.md. No env vars or cron routes.
 
 ## v28.612 (02-Nov-26) Other Payments: wider Reference; sample bill import reads "31-Sep-26" as 30-Sep-26
 - SUPPLY > Payments > Other Payments: the Reference box is wide enough for references like PO-DHL-LX-2026-09-C (full text also on hover).

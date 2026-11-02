@@ -27874,14 +27874,16 @@ async function sbResolve(lines) {
   for (const l of out) {
     if (l.link_locked) { if (!l.checks.length) l.checks = []; continue; }   // the user picked the route by hand: keep it
     if (l.po_found || l.po_unknown) {
-      // v28.613 (Ben 02-Nov-26): on a PO, freight and duty ALWAYS go on a Fulfil supplier invoice (a PO not in Fulfil too: no landed cost then);
-      // import VAT ("Taxes") always goes to Xero (Xero org by the PO's country, the vat / au_vat account in the sample accounts mapping).
+      // v28.613 (Ben 02-Nov-26): on a PO, freight and duty go on a Fulfil supplier invoice when the PO is in Fulfil (landed cost); a PO not in
+      // Fulfil (old, pre-Fulfil) goes to Xero on UK Wholesale COGS (cogs_pre_fulfil, 311.1c). Import VAT ("Taxes") always goes to Xero
+      // (org by the PO's country, the vat / au_vat account in the sample accounts mapping).
       if (l.charge === 'tax') { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; l.xero_account = acc[(l.xero_org === 'au' ? 'au_' : '') + 'vat'] || null;
         l.fulfil_po_id = null; l.fulfil_company = null; l.fulfil_product = null;
         l.checks.push(l.xero_account ? { level: 'info', text: 'Import VAT: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account } : { level: 'bad', text: 'Import VAT goes to Xero ' + l.xero_org.toUpperCase() + ': no import VAT account in the sample accounts mapping, pick the account' });
         continue; }
-      if (l.charge === 'freight' || l.charge === 'duty') { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null;
-        if (!l.fulfil_po_id) l.checks.push({ level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil: Fulfil supplier invoice without a PO (books the cost, no landed cost)' });
+      if ((l.charge === 'freight' || l.charge === 'duty') && !l.fulfil_po_id) { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk';
+        l.xero_account = acc[(l.xero_org === 'au' ? 'au_' : '') + 'cogs_pre_fulfil'] || null; l.fulfil_company = null; l.fulfil_product = null;
+        l.checks.push(l.xero_account ? { level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil (old PO): Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account + ' COGS' } : { level: 'bad', text: (l.po || 'This PO') + ' is not in Fulfil: no ' + l.xero_org.toUpperCase() + ' COGS account for old POs in the sample accounts mapping, pick the account' });
         continue; }
       if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
       else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; const pre = l.xero_org === 'au' ? 'au_' : ''; l.xero_account = ((l.charge === 'duty' || l.charge === 'tax') ? acc[pre + 'duty'] : l.charge === 'freight' ? acc[pre + 'freight'] : acc.product) || null;
