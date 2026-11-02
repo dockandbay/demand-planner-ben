@@ -28024,9 +28024,15 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
     [opId, o.doc_id == null ? null : String(o.doc_id), o.doc_number || null, o.doc_url || null, o.doc_status || null, o.landed_cost_id == null ? null : String(o.landed_cost_id), o.warning || null, opts.who || null]); invalidateSupplyCaches('deposit'); return o; };
   if (L0.link_type === 'xero') {
     const org = xeroRegion(L0.xero_org || 'uk');
+    // v28.613 (Ben 02-Nov-26): import VAT lines on the UK VAT account (mapping key vat, 820) carry Xero's "VAT on Imports" rate (GSTONIMPORTS, 0%
+    // effective, reported on the return); the bill is then Tax Exclusive with every other line on No VAT, so the totals do not change.
+    const vatCode = org === 'uk' ? (await sbAccounts()).byKey.vat : null;
+    const isImpVat = l => !!vatCode && String(l.xero_account || '').trim() === String(vatCode);
+    const anyVat = lines.some(isImpVat);
     const body = { Type: 'ACCPAY', Date: (L0.invoice_date && String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10)) || new Date().toISOString().slice(0, 10),
-      DueDate: L0.due_date ? String(L0.due_date).slice(0, 10) : new Date().toISOString().slice(0, 10), InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',   // v28.328 (Ben): AUTHORISED, ready to pay
-      LineItems: lines.map(l => ({ Description: [l.description, l.po ? 'PO ' + l.po : '', l.sample_ref ? 'Sample ' + l.sample_ref : ''].filter(Boolean).join(' · ').slice(0, 4000), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.xero_account })) };
+      DueDate: L0.due_date ? String(L0.due_date).slice(0, 10) : new Date().toISOString().slice(0, 10), InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'AUTHORISED', LineAmountTypes: anyVat ? 'Exclusive' : 'NoTax',   // v28.328 (Ben): AUTHORISED, ready to pay
+      LineItems: lines.map(l => Object.assign({ Description: [l.description, l.po ? 'PO ' + l.po : '', l.sample_ref ? 'Sample ' + l.sample_ref : ''].filter(Boolean).join(' · ').slice(0, 4000), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.xero_account },
+        anyVat ? { TaxType: isImpVat(l) ? 'GSTONIMPORTS' : 'NONE' } : {})) };
     if (opts.dry) return { dry: true, system: 'xero', org, contact_for: dep.supplier_name, body };
     const xc = await xeroContactFor(org, dep.supplier_name, { fresh: true }); if (!xc.ok) throw Object.assign(new Error(xc.error), { status: 400, code: 'XERO_CONTACT_MISSING' });
     body.Contact = { ContactID: xc.ContactID };
