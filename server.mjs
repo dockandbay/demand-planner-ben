@@ -1805,7 +1805,7 @@ async function _dataFresh(vals) {   // vals = the copy about to be served; swapp
 }
 async function getDataVals() {
   if (!_dataCache && (_dataPending || _dataRefresh)) { try { await (_dataPending || _dataRefresh); } catch (_) {} }   // v28.371: right after a save on THIS instance, wait for its rebuild (never the pre-save KV blob)
-  if (_dataCache) { _dataSrc = 'memory'; if (_bootBlobStale) { _bootBlobStale = false; bgRefresh(); } else if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataFresh(_dataCache.vals); }   // v28.6xx: _bootBlobStale = the boot KV blob was past MAX_BLOB_AGE (rebuild in a request, kept alive)
+  if (_dataCache) { _dataSrc = 'memory'; if (_bootBlobStale) { _bootBlobStale = false; bgRefresh(); } else if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataFresh(_dataCache.vals); }   // v28.617: _bootBlobStale = the boot KV blob was past MAX_BLOB_AGE (rebuild in a request, kept alive)
   if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; _dataSrc = 'kv'; return _dataFresh(v); } } catch (e) { console.error('[kv] read failed:', e.message); } }
   _dataSrc = 'supabase';
   try { await currentDataGen(); } catch (_) {}   // so the build is stamped with the current shared generation
@@ -1819,7 +1819,7 @@ function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoD
   const p = bumpDataGen().then(() => refreshDataCache()).catch((e) => console.error('[cache] rebuild failed:', e.message));   // v28.371: bump the shared generation first, so the rebuild is stamped with it
   const q = _dataPending = p.finally(() => { if (_dataPending === q) _dataPending = null; }); hzWaitUntil(q); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
-// v28.6xx (slow pages, 02-Nov-26): on Vercel the boot warm only reads KV. The Supabase rebuild it used to start here (KV blob past
+// v28.617 (slow pages, 02-Nov-26): on Vercel the boot warm only reads KV. The Supabase rebuild it used to start here (KV blob past
 // MAX_BLOB_AGE, or no blob) ran outside any request, so hzWaitUntil could not keep the instance alive: the instance froze mid-build with
 // its pooled connections checked out, and on the next thaw those 16 builder SELECTs resumed and held all 4 connections (health 26-Oct to
 // 02-Nov: every one of the 119 "requests queued for a DB connection" rows came right after an instance thaw, with these builder queries
@@ -20390,7 +20390,7 @@ const PO_REC_THROTTLE_MS = 600000;   // snapshot at most once / 10 min per insta
 function maybeRecordPoDeliveries() {
   if (_poRecInFlight || Date.now() - _poRecAt < PO_REC_THROTTLE_MS) return;
   _poRecInFlight = true; _poRecAt = Date.now();
-  hzWaitUntil(recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; }));   // v28.6xx (slow pages, 02-Nov-26): kept alive, so a cached PO grid answer no longer leaves this INSERT frozen with the instance holding a pooled connection
+  hzWaitUntil(recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; }));   // v28.617 (slow pages, 02-Nov-26): kept alive, so a cached PO grid answer no longer leaves this INSERT frozen with the instance holding a pooled connection
 }
 async function poDeliveryDelays(market) {
   // 1) Snapshot current landing dates (append only when a PO shows a date we haven't recorded before).
@@ -26265,7 +26265,7 @@ async function wssiSnapshotCurrent(data, curM) {
     const keys = Object.keys(agg).filter(k => agg[k][0] || agg[k][1]); if (!keys.length) return;
     const client = await pool.connect();
     try { await client.query('BEGIN'); await client.query(`DELETE FROM planner.wssi_fc_snapshot WHERE month=($1||'-01')::date`, [curM]);
-      // v28.6xx (slow pages, 02-Nov-26): one multi-row INSERT (was one INSERT per key, ~80 round trips inside the open transaction). Same rows and values.
+      // v28.617 (slow pages, 02-Nov-26): one multi-row INSERT (was one INSERT per key, ~80 round trips inside the open transaction). Same rows and values.
       const A = { mk: [], ch: [], cg: [], u: [], s: [] }; for (const k of keys) { const [mk, ch, cg] = k.split('|'); A.mk.push(mk); A.ch.push(ch); A.cg.push(cg); A.u.push(Math.round(agg[k][0] * 100) / 100); A.s.push(Math.round(agg[k][1] * 100) / 100); }
       await client.query(`INSERT INTO planner.wssi_fc_snapshot (month, market, channel, cgroup, units, sales)
         SELECT ($1||'-01')::date, x.mk, x.ch, x.cg, x.u, x.s FROM unnest($2::text[], $3::text[], $4::text[], $5::numeric[], $6::numeric[]) AS x(mk, ch, cg, u, s)`, [curM, A.mk, A.ch, A.cg, A.u, A.s]);
@@ -26339,7 +26339,7 @@ app.get('/api/demand/wssi', async (req, res) => {
     const data = wssiBuild(await wssiLoad(q, fy), fy, now.toISOString().slice(0, 10));
     data.built_at = now.toISOString(); data.fy_options = [curFy - 1, curFy, curFy + 1];
     _wssiCache.set(fy, { at: Date.now(), data });
-    hzWaitUntil(wssiSnapshotCurrent(data, now.toISOString().slice(0, 7)));   // v28.548: month-end forecast snapshot (background). v28.6xx (slow pages, 02-Nov-26): kept alive with hzWaitUntil; it was frozen with the instance mid-transaction (live: INSERT / DELETE wssi_fc_snapshot rows spanning 10 s to 20 min freezes, holding a pooled connection and the month's row locks)
+    hzWaitUntil(wssiSnapshotCurrent(data, now.toISOString().slice(0, 7)));   // v28.548: month-end forecast snapshot (background). v28.617 (slow pages, 02-Nov-26): kept alive with hzWaitUntil; it was frozen with the instance mid-transaction (live: INSERT / DELETE wssi_fc_snapshot rows spanning 10 s to 20 min freezes, holding a pooled connection and the month's row locks)
     res.json(data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

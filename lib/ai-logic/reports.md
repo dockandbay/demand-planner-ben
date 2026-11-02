@@ -82,7 +82,7 @@ fingerprints:
   server.mjs::campaignIntakeByPo: 04a4cae468fe
   server.mjs::/api/campaigns/priority: 3c8787ebd812
   server.mjs::/api/cron/campaign-eta: d3adb53e13aa
-  supply/inject.html::renderCampPriority: b4e755985a2b
+  supply/inject.html::renderCampPriority: 5d98de9398b2
   supply/inject.html::campDecorate: 4dd500991eed
   supply/inject.html::campPriLoad: 0f203d6ecdc4
   artifact_v16.7.html::campIdx: 6be115d09a48
@@ -141,10 +141,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: 44a8a24e353c
+  supply/inject.html::renderSampleCosts: bec3f2e4c1ef
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
-  supply/inject.html::renderApprovalStats: cfef3802f989
-verified_version: v28.616
+  supply/inject.html::renderApprovalStats: e501f37c15bd
+verified_version: v28.617
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)

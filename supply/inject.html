@@ -1398,7 +1398,7 @@
   var _actInvTimer=null;  // debounce the server Actions-cache invalidation after edits
   // v28.081: hzLate(fn) — badge/count fetches that are NOT needed for first paint run ~3s after page start (or at once later
   // in the page's life), so they stop competing with the grid for the browser's 6 connections and the DB pooler on load.
-  // v28.6xx (slow pages, 02-Nov-26): the delay now counts from when THIS script starts, not from navigation start. On live the
+  // v28.617 (slow pages, 02-Nov-26): the delay now counts from when THIS script starts, not from navigation start. On live the
   // HTML + supply0.js take 2-6 s, so performance.now() was already past 3.2 s when the grid asked for its data and every "late" badge
   // fetch (actions, reallocations, DTC, Xero exceptions, ...) fired in the same burst as /purchase-orders, /grid-status and /deposits,
   // queueing them behind the 4-connection DB pool (health 26-Oct to 02-Nov: PO plan p95 10 s, /actions 2-5 s in the first-load window).
@@ -16187,7 +16187,7 @@
     current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); hzLate(ensureRootData); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); if(typeof hideAccounts==='function')hideAccounts(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} });   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions) — off the first-paint path (v28.081)
-    hzLate(function(){ try{ refreshErpcBadge(); }catch(e){} });   // v28.6xx (slow pages, 02-Nov-26): badge only, off the first-paint burst like its neighbours
+    hzLate(function(){ try{ refreshErpcBadge(); }catch(e){} });   // v28.617 (slow pages, 02-Nov-26): badge only, off the first-paint burst like its neighbours
     hzLate(function(){ try{ refreshReallocBadge(); }catch(e){} });
     hzLate(function(){ try{ if(typeof prewarmActions==='function')prewarmActions(); }catch(e){} });   /* v28.117 (review C13): off the SUPPLY-entry critical path */
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
@@ -16272,7 +16272,7 @@
     var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
-    hzLate(function(){ loadTlNotifs(); }); /* v28.6xx (slow pages, 02-Nov-26): bell count off the first-paint burst */ if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ if(document.hidden)return; loadTlNotifs(); }, 240000); }   // v28.084: no polling while the tab is hidden (hzVisiblePoll refreshes on return)   // 4-min poll (was 60s) — cuts Supabase egress/CPU
+    hzLate(function(){ loadTlNotifs(); }); /* v28.617 (slow pages, 02-Nov-26): bell count off the first-paint burst */ if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ if(document.hidden)return; loadTlNotifs(); }, 240000); }   // v28.084: no polling while the tab is hidden (hzVisiblePoll refreshes on return)   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   // ── Recent changes drawer (top bar 🕘) — last 10 major SUPPLY events, newest first ──────────────────────
   var ACT_ICON={po_created:'🧾',po_confirmed:'✅',shipment_created:'🚢',deposit_added:'💰',sample_created:'🎁',supplier_submission:'📩',erp_push:'⬆️'};
   function actWhen(at){ if(!at)return ''; var d=at.slice(0,10), t=at.slice(11); return fd(d)+(t?' '+t:''); }   // YYYY-MM-DD HH:MI → dd-mmm-yy HH:MI
@@ -18736,7 +18736,7 @@
     if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showProduct(); selectProductSub(PRODUCT_SUB||'plan'); };
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
-    hzLate(loadProductUnread); /* v28.6xx (slow pages, 02-Nov-26): badge off the first-paint burst */ if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(function(){ if(document.hidden)return; loadProductUnread(); },240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
+    hzLate(loadProductUnread); /* v28.617 (slow pages, 02-Nov-26): badge off the first-paint burst */ if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(function(){ if(document.hidden)return; loadProductUnread(); },240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
   function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Stop development','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
   // v28.111 (Ben): product status is a simple 3-state — In development / Approved / Stop development (value 'dropped', kept for DB compat). No sampling stages.
@@ -21043,7 +21043,7 @@
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showClient(); selectClientSub(CLIENT_SUB||'clients'); };
     row.querySelectorAll('.view-toggle:not(.client-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideClient(); }); });
-    hzLate(cpPollUnread); /* v28.6xx (slow pages, 02-Nov-26): badge off the first-paint burst */ if(!window.__cpUnreadPoll)window.__cpUnreadPoll=setInterval(function(){ if(document.hidden)return; cpPollUnread(); },240000); }
+    hzLate(cpPollUnread); /* v28.617 (slow pages, 02-Nov-26): badge off the first-paint burst */ if(!window.__cpUnreadPoll)window.__cpUnreadPoll=setInterval(function(){ if(document.hidden)return; cpPollUnread(); },240000); }
   function cpPollUnread(){ if(!clientCan())return; cpGet('/api/client/threads').then(function(j){ var n=(j.threads||[]).reduce(function(s,t){return s+(t.unread_ops||0);},0); var b=document.getElementById('cp-unread'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } var tb=document.getElementById('client-btn'); if(tb)tb.innerHTML='CLIENT'+(n?' <span class="ex-badge" style="display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg,#e11d48);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px">'+n+'</span>':''); }).catch(function(){}); }
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
   // ── v28.247 (Ben 10-Oct-26): ACCOUNTS top menu (after CLIENT). Own grant (app_permissions.accounts_access) or admin;
@@ -21323,7 +21323,7 @@
       var dr=document.createElement('aside'); dr.id='todo-dr'; dr.setAttribute('aria-label','To do list'); document.body.appendChild(dr); todoWire(dr); }
     // a top menu press leaves HOME (the hash may stay #/home when a module button opens without routing)
     if(!row._hmWired){ row._hmWired=true; row.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('.view-toggle'))hideHome(); },true); }
-    hzLate(function(){ todoLoad(); }); }   // v28.6xx (slow pages, 02-Nov-26): count only, off the first-paint burst (opening the drawer still loads at once)
+    hzLate(function(){ todoLoad(); }); }   // v28.617 (slow pages, 02-Nov-26): count only, off the first-paint burst (opening the drawer still loads at once)
   function todoOpen(){ var dr=document.getElementById('todo-dr'), ov=document.getElementById('todo-ov'); if(!dr)return; dr.classList.add('open'); if(ov)ov.classList.add('open'); todoRender(); todoLoad();
     setTimeout(function(){ var i=document.getElementById('td-new'); if(i)i.focus(); },60); document.addEventListener('keydown',todoEsc); }
   function todoClose(){ var dr=document.getElementById('todo-dr'), ov=document.getElementById('todo-ov'); if(dr)dr.classList.remove('open'); if(ov)ov.classList.remove('open'); TODO.edit=null; TODO.del=null; document.removeEventListener('keydown',todoEsc); }

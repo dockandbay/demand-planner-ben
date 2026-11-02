@@ -48,13 +48,13 @@
       o.requests=rs.length;
       var d=window.HZ_DEMAND_LAST; if(d&&d.ms!=null)o.demand_build_ms=Math.round(d.ms);
     }catch(_){} return o; }
-  // v28.6xx (slow pages, 02-Nov-26): a view load that ran while the tab was hidden (opened in a background tab, or switched away mid-load)
+  // v28.617 (slow pages, 02-Nov-26): a view load that ran while the tab was hidden (opened in a background tab, or switched away mid-load)
   // is not timed: hidden tabs throttle / freeze timers and rendering, so it measured the time away (live 26-Oct to 02-Nov: #/product/products
   // 981 s, #/buy-move/fba 102 s, #/supply/purchase-orders/:id/shipments 60 s were all such "still loading" timeouts).
   var svHid=0; document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')svHid++; });
   function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0, h0=svHid, hid0=document.visibilityState==='hidden';   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
     (function tick(){ if(pend!==id)return; var ms=(first?performance.now():Date.now()-t0);
-      if(hid0||svHid!==h0||document.visibilityState==='hidden'){ pend=null; return; }   // v28.6xx: hidden during the load, not a fair timing
+      if(hid0||svHid!==h0||document.visibilityState==='hidden'){ pend=null; return; }   // v28.617: hidden during the load, not a fair timing
       if(ms>60000){ pend=null; add('slow_view','View still loading after 60s: '+view(),null,ms,{timeout:true,first:!!first}); return; }
       if(document.readyState!=='loading'&&!loading()){ if(!quiet++)qms=ms; if(quiet>=2){ pend=null; if(qms>SLOW_VIEW_MS){ var mt={first:!!first}; if(first){ var ph=phases(qms); for(var k in ph)mt[k]=ph[k]; } add('slow_view','Slow view load: '+view(),null,qms,mt); } return; } } else quiet=0;
       setTimeout(tick,300); })(); }
@@ -89,7 +89,7 @@
   function ltNote(ms,v,st){ try{ if(!(ms>=1000))return false; var now=Date.now(); if(now-ltT>60000){ltT=now;ltN=0;} if(++ltN>10)return false;
     v=v||nview(); var a=LT[v]||(LT[v]={n:0,max:0,sum:0,acts:{}}); a.n++; a.sum+=ms; if(ms>a.max)a.max=ms;
     var b=st!=null?actBefore(st):null, k=b?(b.a+(b.v!==v?' on '+b.v:'')):'no recent action'; a.acts[k]=Math.max(a.acts[k]||0,Math.round(ms)); return true; }catch(e){ return false; } }
-  // v28.6xx (slow pages, 02-Nov-26): a native confirm() / alert() / prompt() blocks the main thread while the person reads it, so the
+  // v28.617 (slow pages, 02-Nov-26): a native confirm() / alert() / prompt() blocks the main thread while the person reads it, so the
   // long task included their reading time (live 26-Oct to 02-Nov: "Update Fulfil Date" 19 s, orderplan "Accept all (3)" 28 s, "Delete
   // this PO" 6.5 s were all confirm() dialogs). The time a dialog is open is now taken off the task; what is left is real work.
   var DLG=[];

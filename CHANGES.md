@@ -1,3 +1,12 @@
+## v28.617 (02-Nov-26) Slow pages (health report 26-Oct to 02-Nov), part 2
+- PO plan first load: the "late" badge fetches (actions, reallocations, DTC, Xero, bell, product / client unread, To do, ERP compare) now wait 3.2 s from when the SUPPLY script starts, and while the view still shows "Loading" (7 s at most), instead of from navigation start. On live they fired in the same burst as the grid's own data against the 4-connection DB pool. Local: grid shown 3.05 s -> about 2 s after DOM ready, calls before render 29 -> 15.
+- DB pool queueing after an instance thaw: on Vercel, boot no longer starts the DEMAND data rebuild outside a request (it froze mid-build holding connections); an over-age KV blob is refreshed from the first request instead (kept alive). Sandbox server unchanged.
+- WSSI month-end snapshot: kept alive after the response (was frozen mid-transaction holding row locks) and written in one INSERT instead of ~80. Same rows.
+- PO grid delivery-date snapshot: kept alive after a cached grid answer.
+- Health log: long tasks no longer include the time a confirm / alert dialog was open (the 19 s / 28 s "freezes" were people reading a confirm), and view loads that ran in a hidden tab are not timed (the 981 s PRODUCT, 102 s FBA "slow views").
+- Left (needs a decision): order plan "All SKUs" renders ~60,000 input cells (needs a UI change + mockup); grid-status cold build per instance (needs a shared cache); import-pos batching (needs a before / after diff against a real Fulfil pull). Detail: docs/SLOW_PAGES_NOTES_2026-11-02.md.
+- Files: server.mjs, supply/inject.html, supply/hz-health.js, lib/ai-logic/reports.md, lib/ai-logic/wssi.md, docs/SLOW_PAGES_NOTES_2026-11-02.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.616 (02-Nov-26) Create sample bills: Wholesale COGS by market (US for Dillards, EU, DE, FR options)
 - Freight / duty on an old PO (not in Fulfil) now go to the Wholesale COGS account of the PO's market: UK 311.1c, US 311.2c (e.g. Dillards), EU 311.3c. Market = the PO's branch ("US Geneva", "UK B2B NEXT"), else the market code in the PO ref (PO-59USLX1-DILLARDS), else the courier line's ship-to country, else UK. Any other market asks to pick the account.
 - The Goes-to dropdown now also offers 311.3d COGS - DE - Wholesale and 311.3b COGS - FR - Wholesale (pick by hand; EU defaults to 311.3c).
