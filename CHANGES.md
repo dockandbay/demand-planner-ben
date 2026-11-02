@@ -1,3 +1,8 @@
+## v28.610 (02-Nov-26) Supplier portal > PO > Shipment tab: "Open shipment ↗" opens the shipment in a popout
+- Was "View in Shipment Plan →", which jumped to the Shipment Plan tab where the supplier had to click the shipment again. Now opens the same editable shipment popout the ships-with links use (carrier, tracking, ship date, status, charges), on top of the PO drawer. Falls back to the Shipment Plan tab if the shipment is not in this supplier's plan.
+- The shipment popout now sits above the PO drawer (was hidden behind it).
+- Files: supply/portal-view.js, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.609 (02-Nov-26) Supplier portal > Samples: tracking link beside the code, no "overdue" on finished samples
 - "track here ↗" now sits on the same line as the tracking code box (was underneath).
 - The "📅 Completion required <date> — overdue" badge no longer turns red once the sample is Complete, Shipped or Cancelled (shown as a plain grey date), the same rule HORIZON's own Samples flag already used. Reported on Anthro-Samp-1 (COMPLETED, required 09-Sep-26).
