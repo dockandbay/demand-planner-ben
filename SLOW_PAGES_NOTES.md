@@ -31,3 +31,19 @@ Measured (local, same HTML-rebuild condition, PO plan cold load):
 Left: the DEMAND shell's own boot reads (preorders-ka, trading-calendar, filter-rules, fba-transfers/list,
 buy-extra-stock) still load with the grid; they feed the artefact's model and moving them needs a wider review.
 lib/ai-logic/reports.md hash refreshed (the checker's source hashes moved; no logic change).
+
+## 1b. PO drawer tabs (:id/order-plan, :id/master-data, :id/dates) and orderplan "Accept all" freezes
+
+Live evidence (long_task meta.actions): the biggest "freezes" were native dialogs, not work:
+- :id/dates 19.3 s and 7.4 s = click #erp-cin7 "Update Fulfil Date" -> confirm('... writes to the LIVE Fulfil ERP')
+- orderplan 28.5 s, 3.9 s, 3.4 s = "Accept all (N)" -> confirm('Accept all exceptions on PO?')
+- :id/master-data 6.6 s = "Delete this PO" -> confirm(); :id/order-plan 5.3 s / 3.4 s = "Update / Create Fulfil PO" (confirm)
+A confirm() blocks the main thread while the person reads it, and the longtask observer counted that.
+
+Fix (supply/hz-health.js, measurement only): confirm / alert / prompt are wrapped to note when a dialog was open,
+and that time is taken off each long task before it is recorded; a task under 1 s after that is dropped.
+App behaviour is unchanged (the wrapper calls the native dialog and returns its answer).
+
+Verified: shell loads, window.confirm / alert are wrapped, orderplan renders, no console errors.
+Left (real but smaller, mostly on v28.52x-v28.54x builds): tr.fpl-row expand 3-5 s, "Approve all partials (16)" 5 s,
+"Use Fulfil qty" 3.3 s. Re-check next week's report with dialog time removed before working on these.

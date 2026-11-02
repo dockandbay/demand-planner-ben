@@ -84,8 +84,15 @@
   function ltNote(ms,v,st){ try{ if(!(ms>=1000))return false; var now=Date.now(); if(now-ltT>60000){ltT=now;ltN=0;} if(++ltN>10)return false;
     v=v||nview(); var a=LT[v]||(LT[v]={n:0,max:0,sum:0,acts:{}}); a.n++; a.sum+=ms; if(ms>a.max)a.max=ms;
     var b=st!=null?actBefore(st):null, k=b?(b.a+(b.v!==v?' on '+b.v:'')):'no recent action'; a.acts[k]=Math.max(a.acts[k]||0,Math.round(ms)); return true; }catch(e){ return false; } }
+  // v28.6xx (slow pages, 02-Nov-26): a native confirm() / alert() / prompt() blocks the main thread while the person reads it, so the
+  // long task included their reading time (live 26-Oct to 02-Nov: "Update Fulfil Date" 19 s, orderplan "Accept all (3)" 28 s, "Delete
+  // this PO" 6.5 s were all confirm() dialogs). The time a dialog is open is now taken off the task; what is left is real work.
+  var DLG=[];
+  function dlgWrap(n){ try{ var f=window[n]; if(typeof f!=='function')return; window[n]=function(){ var t0=performance.now(); try{ return f.apply(window,arguments); } finally { DLG.push([t0,performance.now()]); if(DLG.length>20)DLG.shift(); } }; }catch(e){} }
+  dlgWrap('confirm'); dlgWrap('alert'); dlgWrap('prompt');
+  function dlgOverlap(st,en){ var o=0; for(var i=0;i<DLG.length;i++){ var a=Math.max(st,DLG[i][0]), b=Math.min(en,DLG[i][1]); if(b>a)o+=b-a; } return o; }
   try{ if(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes&&PerformanceObserver.supportedEntryTypes.indexOf('longtask')>=0)
-    new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++)if(es[i].duration>=1000)ltNote(es[i].duration,null,es[i].startTime); }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
+    new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++){ var d=es[i].duration; if(d<1000)continue; d-=dlgOverlap(es[i].startTime,es[i].startTime+d); if(d>=1000)ltNote(d,null,es[i].startTime); } }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
   function apiPath(u){ var s=String(u||''); if(/^https?:/i.test(s)){ if(s.indexOf(location.origin+'/')!==0)return null; s=s.slice(location.origin.length); }
     if(s.indexOf('/api/')!==0||API_SKIP.test(s))return null; return nv(s); }
   // v28.188 (Ben): the supplier portal also records 4xx (session expired 401, "not your shipment" 403, 404, validation 400 / 409):
