@@ -1,3 +1,9 @@
+## v28.625 (03-Nov-26) AU payments flags; bank statement status colours
+- Payments Report: an AU deposit run (own AU run) now shows a green "must pay AU" badge (was "AU"). A UK run that holds AU order payments (Xero 620.00 AU) shows a light blue "includes AU" badge; those can still be paid with the UK ones.
+- The copy email (Payments Report and the Payments Due green box) adds a red line when it includes an AU deposit: "This payment includes an AU deposit. It MUST be paid from the AU bank account."
+- ACCOUNTS > Bank statement: status is a green "✓ up to date" under 3 days, amber "needs update" at 3 to 5 days, red "out of date" over 5 days (statement age on hover).
+- Client only. No migration.
+
 ## v28.624 (03-Nov-26) Client-specific carton quantities (NEXT)
 - CONFIG > Key Accounts: new "Client carton qty" Yes/No (migration 410 sets it Yes for NEXT). That client's POs get two columns on the PO ORDER PLAN tab after Qty: Ctn (the standard, grey) and Client ctn (editable, blank = standard, amber when it differs). Saves per line via POST /api/supply/po-line-ctn and logs "SKU client carton qty 20 → 25" on the PO timeline.
 - When set, the client carton qty drives the carton labels (NEXT and Paper Store) and the shipment-plan carton counts, and the supplier portal ORDER PLAN shows an amber "Carton qty / 装箱数 25 (std 20)" badge on the line.

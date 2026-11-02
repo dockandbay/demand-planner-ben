@@ -11623,7 +11623,7 @@
     // v28.622 (Ben): same email as the Payments Report "copy email summary" (xbSummaryHtml/Tsv); subject = its first line.
     var mailFor=function(k){ var p=k.split('|'), sup=p[0]||'', ccy=p[1]||'', its=PDUE_PAID.filter(function(x){ return x.sup===sup&&x.ccy===ccy; });
       var tot=Math.round(its.reduce(function(a,x){ return a+x.amt; },0)*100)/100;
-      var run={supplier:sup, supplier_code:(supplierCode&&supplierCode[sup])||'', dt:localToday(), total:tot, sum_ccy:ccy||'USD',
+      var run={supplier:sup, supplier_code:(supplierCode&&supplierCode[sup])||'', dt:localToday(), total:tot, sum_ccy:ccy||'USD', au_deposit:its.some(function(x){ return x.au_dep; }),
         lines:its.map(function(x){ return {reference:x.ref, amount:Math.round(x.amt*100)/100, type:x.type||'', prod_no:x.prod_no||'', deposit_ref:x.deposit_ref||''}; })};
       var txt=xbSummaryTsv(run); return {subj:txt.split('\n')[0], html:xbSummaryHtml(run), txt:txt}; };
     var done=function(el,msg){ var o=el.textContent; el.textContent=msg; setTimeout(function(){ el.textContent=o; },1600); };
@@ -12258,7 +12258,7 @@
     (function(){ var pm={}; pos.forEach(function(p){ pm[p.po]=p; }); rows.forEach(function(r){ var p=pm[r.ref]; if(p){ r.prod_no=p.prod_no||''; r.deposit_ref=p.deposit_ref||''; } }); })();   // v28.622: production + deposit ref for the copy email
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
-      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
+      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',au_dep:!!d.is_deposit&&String(d.country||'').toUpperCase()==='AU',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
     rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
     // PO milestone = paid once an AMOUNT is assigned (matches the PO detail); a scheduled date with no amount is NOT paid → still due. Deposits/other = date_paid.
     rows.forEach(function(r){ r.paid = r.po ? (!r.remaining && Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });   // v28.294: a remaining balance is never paid
@@ -12382,7 +12382,7 @@
         var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
         if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
           _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
-        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',prod_no:(r&&r.prod_no)||'',deposit_ref:(r&&r.deposit_ref)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
+        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',prod_no:(r&&r.prod_no)||'',deposit_ref:(r&&r.deposit_ref)||'',au_dep:!!(r&&r.au_dep),amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
         var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
         if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
           var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }
@@ -13442,6 +13442,11 @@
     navigator.clipboard.writeText(tsv).then(function(){ showCopyTip(btn,'Xero details copied ✓'); },function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
   // Payment SUMMARY copy (TAB-separated): supplier + amount + payment reference, then the full line table
   // (Reference, Amount, Type, Production ref, Deposit ref) — ALL lines incl. "other". Pastes into Sheets.
+  // v28.625 (Ben): AU deposits MUST be paid from the AU bank (their own run, region AU). Ordinary AU order payments (620.00 AU) can be paid
+  // together with the UK ones, so a UK run that holds some is only tagged "includes AU".
+  function payInclAu(run){ return (run.lines||[]).some(function(l){ return String(l.account_code||'').toUpperCase()==='620.00 AU'; }); }
+  function payMustAu(run){ return run.region==='AU' || !!run.au_deposit; }
+  var PAY_AU_MSG='This payment includes an AU deposit. It MUST be paid from the AU bank account.';
   function xbSummaryTsv(run, ccy, amt){
     // Supplier-facing summary states the BASE currency (USD) — the amount the supplier invoiced. The entered
     // ccy/amt is the bank-settlement currency (e.g. GBP) for the Xero export only, not what we tell the supplier.
@@ -13449,9 +13454,9 @@
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var clean=function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');};
-    var out=['Payment detail - '+run.supplier+' of '+payAmt,'',
+    var out=['Payment detail - '+run.supplier+' of '+payAmt,''].concat(payMustAu(run)?['*** '+PAY_AU_MSG+' ***','']:[],[
       ['SUPPLIER',run.supplier].join('\t'),['Payment amount',payAmt].join('\t'),['Payment reference',inv].join('\t'),'',
-      ['REFERENCE','AMOUNT','TYPE','PRODUCTION REF','DEPOSIT REF'].join('\t')];
+      ['REFERENCE','AMOUNT','TYPE','PRODUCTION REF','DEPOSIT REF'].join('\t')]);
     (run.lines||[]).forEach(function(l){ out.push([l.reference,l.amount,l.type,l.prod_no||'',l.deposit_ref||''].map(clean).join('\t')); });
     return out.join('\n');
   }
@@ -13470,6 +13475,7 @@
         +'<td style="'+cell+'">'+esc(l.deposit_ref||'')+'</td></tr>'; }).join('');
     return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:var(--ink)">'
       +'<p style="margin:0 0 10px">Payment detail - <b>'+esc(run.supplier)+'</b> of <b>'+esc(amtNum)+'</b> '+esc(amtCcy)+'</p>'
+      +(payMustAu(run)?'<p style="margin:0 0 10px;color:#dc2626;font-weight:bold">'+esc(PAY_AU_MSG)+'</p>':'')
       +'<p style="margin:0 0 10px"><b>Supplier:</b> '+esc(run.supplier)+'<br><b>Payment amount:</b> '+esc(payAmt)+'<br><b>Payment reference:</b> '+esc(inv)+'</p>'
       +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
       +'<th style="'+hcell+'">Reference</th><th style="'+hcell+';text-align:right">Amount</th><th style="'+hcell+'">Type</th><th style="'+hcell+'">Production ref</th><th style="'+hcell+'">Deposit ref</th>'
@@ -13523,7 +13529,7 @@
       var badge='<span class="tool-badge '+((r.base_ccy&&r.base_ccy!=='USD')?'bg-amber':'bg-neutral')+'">'+esc(r.base_ccy||'USD')+'</span>';
       var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+((paidUsdBtn||xeroRunBtn)?mobFld(' ','<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'+paidUsdBtn+xeroRunBtn+'</span>'):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
       return '<div class="mob-card" style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--card)">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:var(--nav)">'+esc(fd(r.dt))+' · '+esc(r.supplier)+(r.region==='AU'?' <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d">AU</span>':'')+'</div>'+badge+'</div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:var(--nav)">'+esc(fd(r.dt))+' · '+esc(r.supplier)+(r.region==='AU'?' <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d">must pay AU</span>':payInclAu(r)?' <span style="font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue-ink)">includes AU</span>':'')+'</div>'+badge+'</div>'
         +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+' lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
     return mobCards(cards)+'<div style="text-align:right;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid var(--line)">TOTAL '+money(tT)+'</div>'; }
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
@@ -13565,7 +13571,7 @@
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
       var xeroRunBtn=payXeroCell(r,i);   // v28.136
       return '<tr'+(_poHit?' style="background:var(--amber-bg)"':'')+'><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+'</button>'+xbBtns+'</td>'
-        +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+(r.region==='AU'?' <span title="AU payment — paid from the AU business, bill in the AU Xero org" style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d;vertical-align:1px">AU</span>':'')+'</td>'
+        +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+(r.region==='AU'?' <span title="AU deposit: must be paid from the AU bank (AU business), bill in the AU Xero org" style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d;vertical-align:1px">must pay AU</span>':payInclAu(r)?' <span title="includes AU order payments (620.00 AU); these can go in the same payment as the UK ones" style="display:inline-block;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue-ink);vertical-align:1px">includes AU</span>':'')+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l"'+((r.base_ccy&&r.base_ccy!=='USD')?' style="background:var(--amber-bg);color:var(--amber);font-weight:700"':'')+'>'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
         +'<td class="l" style="white-space:normal;padding-left:28px;min-width:120px;max-width:230px"><span style="display:inline-flex;flex-wrap:wrap;gap:4px 8px;align-items:center">'+xeroRunBtn+'</span></td>'
@@ -21753,9 +21759,11 @@
     var d=AC_BK.d, today=d.today, ups=d.uploads||[];
     var orgRow=function(o,name){ var u=ups.filter(function(x){ return x.org===o; });
       if(!u.length)return '<tr><td class="l"><b>'+o.toUpperCase()+'</b> <span class="tiny mut">'+name+'</span></td><td class="l" colspan="3"><span style="color:var(--neg)">never uploaded</span></td><td class="l"><span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">upload needed</span></td></tr>';
-      var last=u.reduce(function(a,x){ return String(x.at)>String(a.at)?x:a; }), asAt=u.reduce(function(a,x){ return String(x.as_at)>a?String(x.as_at):a; },''), age=acAge(asAt,today), ok=age<=5;
+      var last=u.reduce(function(a,x){ return String(x.at)>String(a.at)?x:a; }), asAt=u.reduce(function(a,x){ return String(x.as_at)>a?String(x.as_at):a; },''), age=acAge(asAt,today);
       return '<tr><td class="l"><b>'+o.toUpperCase()+'</b> <span class="tiny mut">'+name+'</span></td><td class="l">'+esc(acSynced(last.at))+'</td><td class="l">'+esc(hzTrkDate(asAt))+'</td><td class="l">'+esc(String(last.uploaded_by||'').split('@')[0]+(last.uploaded_by?'@':''))+'</td><td class="l">'
-        +(ok?'<span class="pill" style="cursor:default">up to date</span>':'<span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">'+age+' days old</span>')+'</td></tr>'; };
+        // v28.625 (Ben): under 3 days green ✓ up to date · 3-5 days amber needs update · over 5 days red out of date
+        +(function(){ var t=' title="statement '+age+' day'+(age===1?'':'s')+' old"', st=age<3?['var(--pos)','var(--pos-bg)','✓ up to date']:age<=5?['var(--amber)','var(--amber-bg)','needs update']:['var(--neg)','var(--neg-bg)','out of date'];
+            return '<span class="pill"'+t+' style="cursor:default;color:'+st[0]+';background:'+st[1]+';border-color:'+st[0]+';font-weight:600">'+st[2]+'</span>'; })()+'</td></tr>'; };
     var upOne=function(up){ return up?(up.error?'<span style="color:var(--neg)">'+esc(up.error)+'</span>':'<b>'+esc(String(up.org||'').toUpperCase())+'</b> uploaded'+(up.as_at?' as at '+esc(hzTrkDate(up.as_at)):'')+(up.unreconciled!=null?': '+up.unreconciled+' uncoded line'+(up.unreconciled===1?'':'s')+(up.accounts_with_lines!=null?' in '+up.accounts_with_lines+' of '+up.accounts+' accounts':''):'')):''; };
     var upMsg=(AC_BK.upLog||[]).concat(AC_BK.up&&(AC_BK.upLog||[]).indexOf(AC_BK.up)<0?[AC_BK.up]:[]).map(upOne).filter(Boolean).join('<br>');
     b.innerHTML='<div style="text-align:left;max-width:980px"><div class="sect-h">Bank statement</div><div class="tiny mut" style="margin-bottom:8px">Xero does not give statement lines through its API (confirmed by Xero support), so upload Xero\'s <b>Uncoded statement lines</b> export for UK and for AU at least weekly. Ageing and Reconcile are built from it. rita@, sarah@ and ben@ are emailed when an upload is more than 5 days old.</div>'
