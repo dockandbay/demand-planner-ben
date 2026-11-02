@@ -1805,7 +1805,7 @@ async function _dataFresh(vals) {   // vals = the copy about to be served; swapp
 }
 async function getDataVals() {
   if (!_dataCache && (_dataPending || _dataRefresh)) { try { await (_dataPending || _dataRefresh); } catch (_) {} }   // v28.371: right after a save on THIS instance, wait for its rebuild (never the pre-save KV blob)
-  if (_dataCache) { _dataSrc = 'memory'; if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataFresh(_dataCache.vals); }
+  if (_dataCache) { _dataSrc = 'memory'; if (_bootBlobStale) { _bootBlobStale = false; bgRefresh(); } else if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataFresh(_dataCache.vals); }   // v28.6xx: _bootBlobStale = the boot KV blob was past MAX_BLOB_AGE (rebuild in a request, kept alive)
   if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; _dataSrc = 'kv'; return _dataFresh(v); } } catch (e) { console.error('[kv] read failed:', e.message); } }
   _dataSrc = 'supabase';
   try { await currentDataGen(); } catch (_) {}   // so the build is stamped with the current shared generation
@@ -1819,7 +1819,14 @@ function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoD
   const p = bumpDataGen().then(() => refreshDataCache()).catch((e) => console.error('[cache] rebuild failed:', e.message));   // v28.371: bump the shared generation first, so the rebuild is stamped with it
   const q = _dataPending = p.finally(() => { if (_dataPending === q) _dataPending = null; }); hzWaitUntil(q); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
-(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await currentDataGen().catch(() => {}); await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();   // v28.371: stamp the boot build with the shared generation
+// v28.6xx (slow pages, 02-Nov-26): on Vercel the boot warm only reads KV. The Supabase rebuild it used to start here (KV blob past
+// MAX_BLOB_AGE, or no blob) ran outside any request, so hzWaitUntil could not keep the instance alive: the instance froze mid-build with
+// its pooled connections checked out, and on the next thaw those 16 builder SELECTs resumed and held all 4 connections (health 26-Oct to
+// 02-Nov: every one of the 119 "requests queued for a DB connection" rows came right after an instance thaw, with these builder queries
+// as 'background' slow queries spanning the freeze). Now the over-age rebuild starts from the first getDataVals() in a request (bgRefresh,
+// kept alive with hzWaitUntil), and a missing blob is built by that request as before. Same data; the long-lived sandbox server is unchanged.
+let _bootBlobStale = false;
+(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { if (process.env.VERCEL) _bootBlobStale = true; else refreshDataCache().catch(() => {}); } return; } } if (process.env.VERCEL) return; await currentDataGen().catch(() => {}); await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();   // v28.371: stamp the boot build with the shared generation
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
 // actual band per category × market, then runs the rule set (R1 over-plan, R2 under-plan, R3 step change, R6 zero
 // plan on live range; "no plan" ≠ "plan is low"). Units only, read-only. Cutoff = last complete month (current partial

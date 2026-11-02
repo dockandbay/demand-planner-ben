@@ -79,3 +79,23 @@ static scripts take 3-6 s (dom_ready) and the DEMAND build 4-8 s on zera's machi
 
 Fix (supply/hz-health.js, measurement only): a slow-view timing is dropped when the tab was hidden at the start or
 at any point during the load (counter on visibilitychange). Visible loads are timed exactly as before.
+
+## 6. Server and DB pool
+
+### 6a. DB pool queueing (117 queued events, pool max 4) - FIXED (server.mjs)
+
+Live evidence: every one of the 119 "Requests queued for a DB connection" rows in the week came within 60 s after an
+"instance thaw" (55 also right after a cold start), alongside 'background' slow_query rows that spanned the freeze
+(thaw_gap up to 20 min): forecast_outputs, v_product_availability, category_sales_summary, launch dates, SKU raw,
+v_product_inventory, sales_actuals, freshness. Those are the 16 DEMAND data builders (_buildDataVals).
+Cause: the module-level boot warm started refreshDataCache() outside any request when the KV blob was older than
+MAX_BLOB_AGE (6 h) or missing. With no request context hzWaitUntil cannot keep the instance alive, so Vercel froze
+the instance mid-build with connections checked out; on the next thaw those statements resumed and held the pool.
+A frozen build also never refreshed the KV blob, so the next cold start did the same again.
+Fix: on Vercel the boot warm only reads KV. An over-age blob sets _bootBlobStale and the first getDataVals() (a
+page or sku-data request) starts the rebuild through bgRefresh (hzWaitUntil keeps the instance alive until it ends).
+A missing blob is built by that first request, as the cold path already did. Off Vercel (sandbox server) unchanged.
+Verified: Vercel-mode boot (VERCEL=1, dummy key) runs no builder queries at boot (before: all 16); sandbox GET /,
+sku-data, DEMAND plan render, no console errors, npm test 29/29.
+Left: balxCheck() (SELECT to_regclass) still runs once at boot (31 'background' slow rows); its answer is needed
+by the first report SQL, so removing it could change a first response. It is one tiny query.
