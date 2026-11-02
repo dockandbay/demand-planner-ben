@@ -1,3 +1,6 @@
+## v28.629 (03-Nov-26) Paid > Xero: settle where the PO bill actually lives
+- A completion / balance payment now settles in the Xero org that holds its linked PO bill (xero_bills.region). Before, the org came from the PO's AU/UK tag, so PO-56AULX1 (AU PO, bill booked in Xero UK) was planned as a loan-901 settlement in Xero AU, where no bill exists. It is now a same-org Xero UK payment from its own account. If the bill's org is unknown (not synced yet) the PO-tag rule applies as before. Deposits unchanged. No migration.
+
 ## v28.628 (03-Nov-26) Payments Report: email button only
 - Removed the ⬇ Xero bill details download, the Xero copy-to-clipboard button and the ▸ expand button from each Payments Report row (desktop). Only the copy email button stays; click the row to show its payments. Phone cards keep their "lines" button. Client only.
 

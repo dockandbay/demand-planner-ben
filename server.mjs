@@ -9495,6 +9495,13 @@ async function computeXeroRunPlan(run, ctx) {
   if (poRefs.length) { try { heal = await xeroHealPoLinks(poRefs, { live: true, xget: _xget }); if (heal.healed.length || heal.flagged.some(f => f.changed)) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); } } catch (e) { console.warn('[xero-plan] link heal failed: ' + e.message); } }
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
+  // v28.629 (Ben 03-Nov-26, PO-56AULX1): a completion/balance settles in the Xero org where its LINKED BILL actually lives (xero_bills.region),
+  // not the org the PO's AU/UK tag implies. PO-56AULX1 is an AU PO whose bill was booked in Xero UK: the old rule planned a cross-org
+  // loan-901 settlement in Xero AU, where no bill exists. Unknown bill org (not yet synced) → the PO-tag rule as before.
+  const billOrgById = {};
+  try { const ids = linkRows.map(r => r.external_id).filter(Boolean);
+    if (ids.length) (await pool.query(`SELECT invoice_id, lower(region) org FROM planner.xero_bills WHERE invoice_id = ANY($1::text[]) AND lower(region) IN ('uk','au')`, [ids])).rows.forEach(r => { billOrgById[r.invoice_id] = r.org; });
+  } catch (e) { /* xero_bills unreadable → PO-tag rule */ }
   // Production tracking options live in the PAYING org (the supplier-payment bill is there; only same-org deposits carry tracking).
   let trackOpts = new Set(); let trackOk = true;
   try { const t = await _xget(paying, '/api.xro/2.0/TrackingCategories');
@@ -9511,7 +9518,8 @@ async function computeXeroRunPlan(run, ctx) {
   const depositsMultiOrg = depositOrgs.size > 1;
   const outLines = payLines.map(l => {
     const isDeposit = /deposit/i.test(String(l.type || ''));
-    const home = homeOfLine(l);
+    const _lk = linkByPo[String(l.reference || '')], _bo = (!isDeposit && _lk && billOrgById[_lk.external_id]) || null;
+    const home = _bo || homeOfLine(l);   // v28.629: bill's own org wins for completion/balance
     const cross = home !== paying;
     const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
     const useNew = (home === 'au') || (prodN != null && prodN >= 58);   // AU always new; UK P58+ new, earlier legacy
