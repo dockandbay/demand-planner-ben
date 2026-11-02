@@ -478,7 +478,7 @@ function replaceGlobal(html, name, jsonText) {
 // (forecast_inputs, purchase_orders, deposits) — their updated_at bumps on the user's own edits, which would
 // otherwise force a reload on every edit. Drives EXTRACT_TS + the client's data-freshness auto-reload.
 async function freshness() {
-  const SRC = { sales_actuals: 'loaded_at', products: 'updated_at', inbound_shipments: 'updated_at', flexport_shipments: 'updated_at' };
+  const SRC = { sales_actuals: 'loaded_at', products: 'updated_at', inbound_shipments: 'updated_at', flexport_api_shipments: 'updated_at' };   // v28.627: Flexport API table (the old Airtable flexport_shipments mirror froze 07-Oct-26)
   try {
     const have = (await pool.query(`SELECT table_name, column_name FROM information_schema.columns
       WHERE table_schema='planner' AND table_name=ANY($1) AND column_name=ANY($2)`,
@@ -11373,7 +11373,7 @@ app.get('/api/hz-search', async (req, res) => {
            FROM planner.shipments s WHERE s.shipment_ref ILIKE $1 OR s.carrier_ref ILIKE $1 OR s.master_po ILIKE $1 OR s.delivery_notes ILIKE $1 ORDER BY (s.shipment_ref ILIKE $1) DESC, s.shipment_ref DESC LIMIT 6`,
       freight: `SELECT f.flex_id, f.shipment_name, CASE WHEN f.container_numbers::text ILIKE $1 THEN 'container' WHEN f.mbl_number ILIKE $1 THEN 'MBL' WHEN f.ams_numbers::text ILIKE $1 THEN 'AMS' WHEN f.flex_id ILIKE $1 THEN 'Flexport ID' ELSE 'Flexport name' END why,
              (SELECT string_agg(p.po, ', ' ORDER BY p.po) FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR (coalesce(f.shipment_name,'')<>'' AND p.shipment_ref=f.shipment_name)) pos
-           FROM planner.flexport_shipments f WHERE f.flex_id ILIKE $1 OR f.shipment_name ILIKE $1 OR f.mbl_number ILIKE $1 OR f.container_numbers::text ILIKE $1 OR f.ams_numbers::text ILIKE $1 LIMIT 6`,
+           FROM planner.flexport_shipments_effective f WHERE f.flex_id ILIKE $1 OR f.shipment_name ILIKE $1 OR f.mbl_number ILIKE $1 OR f.container_numbers::text ILIKE $1 OR f.ams_numbers::text ILIKE $1 LIMIT 6`,
       deposits: `SELECT d.reference, coalesce(d.supplier_name,'') supplier, d.prod_no::text prod, CASE WHEN d.reference ILIKE $1 THEN 'deposit' ELSE 'deposit doc' END why,
              (SELECT count(*)::int FROM planner.purchase_orders p WHERE p.deposit_ref=d.reference) pos
            FROM planner.deposits d WHERE d.reference ILIKE $1 OR d.doc_number ILIKE $1 ORDER BY d.reference DESC LIMIT 5`,

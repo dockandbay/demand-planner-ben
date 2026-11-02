@@ -1,3 +1,7 @@
+## v28.627 (03-Nov-26) Flexport: readers off the frozen Airtable mirror
+- Global search (freight: flex id / shipment / MBL / container / AMS) read planner.flexport_shipments, the old Airtable mirror frozen since 07-Oct-26, so newer Flexport shipments could not be found. It now reads flexport_shipments_effective (API data + old rows as fallback).
+- The data-freshness stamp uses flexport_api_shipments instead of the old table. No migration.
+
 ## v28.626 (03-Nov-26) Xero bank accounts sync scheduled daily
 - The Xero bank accounts sync (/api/cron/accounts-bank-sync) had no scheduler on live (last run 14-Oct-26). New n8n flow "Horizon | Xero bank accounts sync (daily 05:15)" (Qlxcr84MXQA1AfGc, tags Horizon + Xero, active). ACCOUNTS > bank statement text now says "Synced daily at 05:15 by n8n".
 - No code change to the route. No migration.
