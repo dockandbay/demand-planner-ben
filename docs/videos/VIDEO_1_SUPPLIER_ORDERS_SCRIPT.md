@@ -26,6 +26,6 @@ Labels in **bold** are the exact on-screen text.
 | 17 | Back to the Purchase Orders grid, slow zoom out. | That is it. Confirm your orders, keep dates and shipments up to date, download your labels from the portal, and add tracking to every sample. If you have any questions, message us from the portal. Thank you. | 以上就是全部内容。请确认订单，保持日期和发运信息最新，从门户下载标签，并为每个样品填写追踪号。如有任何问题，请通过门户联系我们。谢谢！ |
 
 ## Notes for Ben
-- Scene 15: the portal does not have a "ships on Dock & Bay's account" option and tracking is not required by the system; the narration asks for it. Say if you want the portal to require it.
+- Scene 15: from v28.611 a sample marked Shipped with no tracking code shows as an open action (red count, red tracking box) until the code is saved; the narration asks for it even on Dock & Bay's courier account.
 - Scene 5 only appears on POs where Dock & Bay has turned on "require confirmation"; the demo PO will have it on.
 - Ship date and status save straight away (no approval); completion date goes to Dock & Bay for approval.

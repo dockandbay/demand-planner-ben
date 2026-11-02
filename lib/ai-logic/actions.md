@@ -4,6 +4,7 @@ title: Actions and Exceptions
 covers: Action lists and exception reports in HORIZON: DEMAND Exceptions (9 sub-tabs), DEMAND Actions (server rules, client detectors, Trend Gaps), SUPPLY BI & REPORTS Actions, PO action items, Recommendations, ERP Compare, DTC Mismatch, Urgent Buy, Reallocate, Container Fill, Consolidate, BUY & MOVE Actions
 sources:
   - server.mjs :: WF_TEMPLATES, wfRun, wfRunAll, wfApplyItem
+  - supply/portal-view.js :: sampActions, sampTrkMissing, shipActCount, shipTrkMissing
   - server.mjs :: /api/workflows, /api/workflows/items/decide, /api/cron/workflows
   - server.mjs :: applySupplierSubmission, fulfilDateWrite
   - supply/inject.html :: wfDrawer
@@ -48,6 +49,10 @@ fingerprints:
   server.mjs::wfRun: 7d6ef1f12cd6
   server.mjs::wfRunAll: f6ecc9c86402
   server.mjs::wfApplyItem: 55e54d33ed5a
+  supply/portal-view.js::sampActions: 7ace999a0d99
+  supply/portal-view.js::sampTrkMissing: 4053f5f97dff
+  supply/portal-view.js::shipActCount: 3b746d168ada
+  supply/portal-view.js::shipTrkMissing: 544781790337
   server.mjs::/api/workflows: 71dbddfe3273
   server.mjs::/api/workflows/items/decide: d8668114e268
   server.mjs::/api/cron/workflows: cbfc60a675d0
@@ -92,7 +97,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.602
+verified_version: v28.611
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -401,4 +406,8 @@ verified_version: v28.602
 - Suggest a workflow (v28.601): the Workflows page has a "+ Suggest a workflow" form (Name, Area, When, If, Then one step per line, Approval, Who to tell, Example, Why; Name / When / Then required). It files into the Suggestion box with area Workflows and a body starting "[Workflow request]" in fixed WHEN / IF / THEN / APPROVAL lines, ready to build as a template. Same rights as the Suggestion box. (source: wfSuggest; /api/supply/suggestion)
 - Runs: n8n calls POST /api/cron/workflows hourly (enabled workflows, supplier dates first so the Fulfil check sees them); admins can Run now or Run now (dry run) in the drawer. Only admins can change, run, approve or skip. Other users see Workflows as its own CONFIG tab, view only: the cards, the drawer's Setup (greyed out), Waiting (no tick boxes or buttons) and Log. HOME's Workflows line and card stay admin only. (source: wfRunAll; /api/cron/workflows; renderConfig L2; wfDrawer)
 - Q: Why didn't a supplier's new date apply on its own in Auto? A: It moved the production end by more than the workflow's limit (default 14 days), so it waits for approval.
+
+## Supplier portal actions (what the red counts in the supplier portal mean)
+- Sample actions (SAMPLES badge, the count on each sample row, and the Home "sample actions" card): unread Dock & Bay messages, no expected completion date, no production status, expected date passed while still "In production", and (v28.611, Ben 02-Nov-26) marked Shipped with no tracking code. The tracking box is outlined red until a code is saved; this applies even when the sample goes on Dock & Bay's courier account. Tracking is never forced on save. (source: sampActions, sampTrkMissing)
+- Shipment actions (Shipment Plan badge and the count on each shipment card): unread Dock & Bay messages (FOB shipments: also the production end date not yet submitted), and (v28.611) status Shipping with no tracking code and no Flexport booking. Only the supplier whose PO is the shipment's master PO gets this one, since only they can edit the shipment. (source: shipActCount, shipTrkMissing)
 

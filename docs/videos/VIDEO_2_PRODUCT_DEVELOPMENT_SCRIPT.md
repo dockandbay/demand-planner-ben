@@ -23,6 +23,6 @@ Labels in **bold** are the exact on-screen text.
 
 ## Notes for Ben
 - Scene 6: the portal makes an A4 sample card (with QR), not a small sticker. There is an unused ~100x64mm label in the code; I can switch it on as a "⤓ Sticker" button if you want a real sticker for the video.
-- Scene 9: as in Video 1, no "Dock & Bay courier account" option exists and tracking is not enforced.
+- Scene 9: as in Video 1, a shipped sample with no tracking code stays an open action (v28.611) until the code is saved.
 - Scene 12: "Approved for bulk" is a decision on the sample (no separate approve button); the product moves to approved from it.
 - Scene 10 needs a real phone clip (a few seconds); I can record the HORIZON phone view in Chrome's mobile size if no one films it.

@@ -1,3 +1,9 @@
+## v28.611 (02-Nov-26) Supplier portal: open action when something is shipped with no tracking code
+- Samples: production status Shipped with no tracking code counts as a sample action (SAMPLES badge, the row count, Home card) and the tracking box is outlined red until a code is saved. Applies even when the sample goes on Dock & Bay's courier account. Saving is not blocked.
+- Shipments: status Shipping with no tracking code and no Flexport booking counts as a shipment action for the supplier who owns the master PO (the one who can edit it); tracking box outlined red.
+- Logic library: actions.md "Supplier portal actions".
+- Files: supply/portal-view.js, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.610 (02-Nov-26) Supplier portal > PO > Shipment tab: "Open shipment ↗" opens the shipment in a popout
 - Was "View in Shipment Plan →", which jumped to the Shipment Plan tab where the supplier had to click the shipment again. Now opens the same editable shipment popout the ships-with links use (carrier, tracking, ship date, status, charges), on top of the PO drawer. Falls back to the Shipment Plan tab if the shipment is not in this supplier's plan.
 - The shipment popout now sits above the PO drawer (was hidden behind it).
