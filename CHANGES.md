@@ -1,9 +1,9 @@
 ## v28.613 (02-Nov-26) Create sample bills: PO freight / duty to Fulfil, old POs to Xero UK Wholesale COGS, import VAT to Xero
 - Ben 02-Nov-26, on a PO line: freight and duty go on a Fulfil supplier invoice when the PO is in Fulfil (one per Fulfil PO, landed cost as before). A PO NOT in Fulfil (old, pre-Fulfil, e.g. PO-1678119, PO-1725132-JL-HW) goes to a Xero UK bill on 311.1c COGS - UK - Wholesale (was 302 / 313).
-- Import VAT ("Taxes") on a PO line always goes to Xero (UK, or AU for AU POs) on the import VAT account (sample accounts mapping keys vat / au_vat). Until that row exists the line shows "pick the account".
+- Import VAT ("Taxes") on a PO line always goes to Xero UK 820 VAT - UK (mapping key vat; AU POs au_vat, not set yet, so "pick the account"), posted with No VAT: Xero UK has no active "VAT on Imports" rate for bills, so the accountants claim it from the C79 / postponed VAT statement.
 - Lines with no PO (samples) are unchanged: Xero by purpose.
 - A Fulfil invoice line is allowed on a PO that is not in Fulfil if picked by hand (one invoice per company); "Create landed cost" then explains there is no Fulfil shipment.
-- Migration 408_sample_bill_cogs_account.sql: mapping row cogs_pre_fulfil = 311.1c (UK). Applied on the sandbox; run on live before the deploy.
+- Migration 408_sample_bill_cogs_account.sql: mapping rows cogs_pre_fulfil = 311.1c and vat = 820 (UK). Applied on the sandbox; run on live before the deploy.
 - Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, migrations/408_sample_bill_cogs_account.sql, package.json, CHANGES.md. No env vars or cron routes.
 
 ## v28.612 (02-Nov-26) Other Payments: wider Reference; sample bill import reads "31-Sep-26" as 30-Sep-26
