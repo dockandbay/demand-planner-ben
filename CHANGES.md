@@ -1,3 +1,6 @@
+## v28.618 (02-Nov-26) Manage 3PL > UK (ILG): download CSV
+- New "↓ CSV" button on the filter bar. Downloads the rows shown with the current filters (Show / search / status / diff / ignore-under), not capped at 1,500. Columns: SKU, Description, Report qty, Fulfil at report, Moved since, Diff, Storage now, Set to, Other statuses, In Fulfil, In report. File named after the tab and report date, e.g. ILG_UK_ILG_02-Nov-26.csv. Client only; no migration, no env vars.
+
 ## v28.617 (02-Nov-26) Slow pages (health report 26-Oct to 02-Nov), part 2
 - PO plan first load: the "late" badge fetches (actions, reallocations, DTC, Xero, bell, product / client unread, To do, ERP compare) now wait 3.2 s from when the SUPPLY script starts, and while the view still shows "Loading" (7 s at most), instead of from navigation start. On live they fired in the same burst as the grid's own data against the 4-connection DB pool. Local: grid shown 3.05 s -> about 2 s after DOM ready, calls before render 29 -> 15.
 - DB pool queueing after an instance thaw: on Vercel, boot no longer starts the DEMAND data rebuild outside a request (it froze mid-build holding connections); an over-age KV blob is refreshed from the first request instead (kept alive). Sandbox server unchanged.

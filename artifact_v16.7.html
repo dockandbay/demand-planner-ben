@@ -16180,7 +16180,8 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
       +'<input id="ilg-q" value="'+E(f.q)+'" placeholder="Search SKU / description" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;min-width:180px;background:var(--card);color:var(--ink)">'
       +'<span class="mut">Status</span>'+sel('ilg-status',f.status,[['','All']].concat(Object.keys(stats).sort().map(function(s){ return [s,s]; })))
       +'<span class="mut">Diff</span>'+sel('ilg-dir',f.dir,[['','± any'],['ilg','ILG higher (+)'],['ff','Fulfil higher (−)']])
-      +'<span class="mut">Ignore under</span><input id="ilg-min" type="number" min="0" value="'+E(f.min)+'" style="width:56px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><span class="mut">units</span></div>';
+      +'<span class="mut">Ignore under</span><input id="ilg-min" type="number" min="0" value="'+E(f.min)+'" style="width:56px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><span class="mut">units</span>'
+      +'<button class="save-btn light" id="ilg-csv" style="margin-left:auto" title="Download the rows shown (current filters) as CSV">&#8595; CSV</button></div>';   // v28.618 (Ben)
     var ilgReview='';
     if(ILG.review&&selRows.length){ var up=selRows.filter(function(r){ return r.diff>0; }), dn=selRows.filter(function(r){ return r.diff<0; });
       ilgReview='<div style="margin:0 0 8px;padding:12px 14px;border:1px solid var(--amber);border-radius:10px;background:var(--amber-bg)"><div style="font-weight:800;margin-bottom:6px">Review: one stock count in Fulfil warehouse "'+E(P[ILG.pool].warehouse||P[ILG.pool].label)+'" (Storage Zone)</div>'
@@ -16226,6 +16227,12 @@ function ilgWire(panel){ var $=function(id){ return panel.querySelector('#'+id);
   if($('ilg-clear'))$('ilg-clear').onclick=function(){ ILG.sel={}; ILG.review=false; ilgRender(); };
   panel.querySelectorAll('.ilg-ck').forEach(function(c){ c.onchange=function(){ if(c.checked)ILG.sel[c.dataset.s]=1; else delete ILG.sel[c.dataset.s]; ILG.review=false; ilgRender(); }; });
   if($('ilg-rb'))$('ilg-rb').onclick=function(){ ILG.review=true; ilgRender(); };
+  // v28.618 (Ben 02-Nov-26): download the rows shown (same filters as the table, no 1,500 cap) as CSV
+  if($('ilg-csv'))$('ilg-csv').onclick=function(){ var d=ILG.d||{}, rep=d.report||{}, P=d.pools||{}, rows=ilgRows(), q=function(x){ x=(x==null?'':String(x)); return /[",\n\r]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x; };
+    var out=[['SKU','Description','Report qty','Fulfil at report','Moved since','Diff','Storage now','Set to','Other statuses','In Fulfil','In report']].concat(rows.map(function(r){
+      return [r.sku,r.description||'',r.report,r.fulfil_at_report,r.moved_since||0,r.diff,r.storage_now,r.diff?Math.max(0,r.set_to):'',Object.keys(r.statuses||{}).filter(function(s){ return s!=='Good'; }).map(function(s){ return s+' '+r.statuses[s]; }).join('; '),r.in_fulfil?'Y':'N',r.in_report?'Y':'N']; }));
+    var stamp=rep.report_at?inv3plAge(rep.report_at).stamp.slice(0,9):'', name=('ILG '+((P[ILG.pool]&&P[ILG.pool].label)||ILG.pool)+' '+stamp).trim().replace(/[^a-z0-9-]+/gi,'_')+'.csv';
+    var bl=new Blob(['\ufeff'+out.map(function(r){ return r.map(q).join(','); }).join('\r\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(u); },1000); };
   if($('ilg-cancel'))$('ilg-cancel').onclick=function(){ ILG.review=false; ilgRender(); };
   if($('ilg-send'))$('ilg-send').onclick=function(){ if(ILG.busy)return; ILG.busy=true; ilgRender();
     fetch('/api/supply/ilg/rebaseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pool:ILG.pool,report_id:ILG.d.report&&ILG.d.report.id,skus:Object.keys(ILG.sel)})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
