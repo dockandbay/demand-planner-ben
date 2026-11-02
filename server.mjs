@@ -3824,7 +3824,7 @@ app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {
     res.status(202).json({ ok: true, started: true, running: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// PROD SCHEDULE: n8n hourly, POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {} ({ "full": true } rescans).
+// PROD SCHEDULE: n8n Qlxcr84MXQA1AfGc daily 05:15 (03-Nov-26), POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {} ({ "full": true } rescans).
 // 200 ok (or busy: another instance is running it) / 401 secret / 500 failed. Logs etl_runs 'accounts_bank_ageing'. Local server hourly only with HZ_ACCOUNTS_CRON=1 (the sandbox shares live's Xero allowance).
 app.post('/api/cron/accounts-bank-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });

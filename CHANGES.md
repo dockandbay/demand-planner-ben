@@ -1,3 +1,7 @@
+## v28.626 (03-Nov-26) Xero bank accounts sync scheduled daily
+- The Xero bank accounts sync (/api/cron/accounts-bank-sync) had no scheduler on live (last run 14-Oct-26). New n8n flow "Horizon | Xero bank accounts sync (daily 05:15)" (Qlxcr84MXQA1AfGc, tags Horizon + Xero, active). ACCOUNTS > bank statement text now says "Synced daily at 05:15 by n8n".
+- No code change to the route. No migration.
+
 ## v28.625 (03-Nov-26) AU payments flags; bank statement status colours
 - Payments Report: an AU deposit run (own AU run) now shows a green "must pay AU" badge (was "AU"). A UK run that holds AU order payments (Xero 620.00 AU) shows a light blue "includes AU" badge; those can still be paid with the UK ones.
 - The copy email (Payments Report and the Payments Due green box) adds a red line when it includes an AU deposit: "This payment includes an AU deposit. It MUST be paid from the AU bank account."
