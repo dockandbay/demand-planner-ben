@@ -1287,19 +1287,21 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       // ---- ORDER PLAN: amend qty, submit cost, add SKUs (from this supplier's SKU list) + line totals ----
       var lineSkus={}; lines.forEach(function(l){lineSkus[l.sku]=1;});
       var totQ=0, totP=0;
-      function planRow(sku,orderQty,est,c,added){
+      function planRow(sku,orderQty,est,c,added,ln){
         var act=(c&&c.actual_cost!=null&&c.actual_cost!=='')?Number(c.actual_cost):null;
         var aq=(c&&c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;
         var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0)), lt=qn*price; totQ+=qn; totP+=lt;
         var qVal=(aq!=null?aq:(orderQty!=null?orderQty:''));
-        return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:10px">added</span>':'')+'</td>'
+        var cc=(ln&&ln.client_carton_qty!=null&&ln.client_carton_qty!=='')?Number(ln.client_carton_qty):null, cstd=ln?(Number(ln.std_carton_qty)||Number(ln.carton_qty)||0):0;   // v28.624: client carton qty for this order
+        var ccB=(cc!=null)?' <span class="tool-badge" style="font-size:10px;background:var(--amber-bg);color:var(--amber);font-weight:700" title="this client wants this carton quantity on this order">Carton qty / 装箱数 '+esc(cc)+(cstd&&cstd!==cc?' (std '+esc(cstd)+')':'')+'</span>':'';
+        return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:10px">added</span>':'')+ccB+'</td>'
           +'<td style="text-align:right"><input class="fci pp-qty" data-po="'+po+'" data-sku="'+esc(sku)+'" value="'+esc(qVal)+'" style="width:62px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right">'+(est!=null?''+CUR+money(est):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-cost" data-po="'+po+'" data-sku="'+esc(sku)+'" data-est="'+(est!=null?est:0)+'" value="'+(act!=null?esc(act):'')+'" placeholder="'+(est!=null?money(est):'0.00')+'" style="width:80px;text-align:right" inputmode="decimal"></td>'
           +'<td style="text-align:right" class="pp-lt" data-sku="'+esc(sku)+'">'+CUR+money(lt)+'</td>'
           +'<td class="l">'+(added?'<button class="lnk-btn pp-rm" data-po="'+po+'" data-sku="'+esc(sku)+'" title="remove this added SKU" style="color:var(--neg)">✕</button>':'')+'</td></tr>';
       }
-      var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null), costs[l.sku], false); }).join('');
+      var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null), costs[l.sku], false, l); }).join('');
       Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rws+=planRow(sku, null, null, c, true); });
       if(!rws) rws='<tr><td colspan="6" class="mut">no lines</td></tr>';
       var dlId='ppsku-'+i;

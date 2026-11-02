@@ -5293,6 +5293,11 @@
     // per-line risk flags (same set as SUPPLY ▸ Order Plan): partial / supplier risk / discontinued / country risk.
     var _pm=poBy[po]||{}, _poSup=String(_pm.supplier_name||'').trim().toLowerCase(), _poCtry=(_pm.country||''), _poDeliv=(_pm.delivery||_pm.checkin||''), _poLocked=/complete|shipping|deliver/i.test(_pm.status||'');
     var RFIELD={p:'partial',s:'supplier',d:'discontinue',c:'country'};
+    var ctnOn=!!_pm.client_ctn_on;   // v28.624: key account with client-specific carton qty (CONFIG > Key Accounts) → Ctn + Client ctn columns
+    function ctnCells(sku,l){ if(!ctnOn)return ''; if(!l)return '<td></td><td></td>';
+      var std=Number(l.std_carton_qty)||Number(l.carton_qty)||0, cc=(l.client_carton_qty!=null&&l.client_carton_qty!=='')?Number(l.client_carton_qty):null, diff=(cc!=null&&cc!==std);
+      return '<td style="text-align:right;color:var(--faint)" title="standard carton qty">'+(std?units(std):'—')+'</td>'
+        +'<td style="text-align:right"><input class="fci op-cctn" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-std="'+std+'" value="'+(cc!=null?esc(cc):'')+'" placeholder="'+(std||'')+'" title="carton qty this client wants on this order (blank = standard). Used on the carton labels, carton counts and the supplier portal" style="width:56px;text-align:right'+(diff?';background:var(--amber-bg);color:var(--amber);font-weight:700':'')+'" inputmode="numeric"></td>'; }
     function rBadge(kind,label,unap,ap,psku){
       if(ap) return apprBadge(kind,label,RFIELD[kind],psku,'oprisk-undo');
       if(unap) return ' <button class="oprisk-badge oprisk-approve" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="'+label+' — review &amp; approve">'+kind+'</button>';
@@ -5329,7 +5334,7 @@
       var _isPb=/^POLYBAG /i.test(sku), _trBg=lcr.unconfirmed?'#fff7ed':(_isPb?'#ffedd5':'');   // polybag lines → light orange, sorted to the bottom
       return '<tr'+(_trBg?' style="background:'+_trBg+'"':'')+'><td class="l"><button class="lnk-btn op-del-line" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-qty="'+(oq||0)+'" data-added="'+(added?1:0)+'" title="Delete this line from the order plan" style="color:var(--neg);font-weight:700;margin-right:6px">✕</button>'+(_isPb?'<span class="tool-badge" style="background:var(--amber-bg);color:var(--amber);font-size:8px;margin-right:4px">polybag</span>':'')+esc(sku)+'</td>'
         +'<td class="l" style="white-space:nowrap">'+(riskBadges(lineObj)||'<span class="mut">—</span>')+'</td>'
-        +'<td style="text-align:right">'+qtyCell+'</td>'
+        +'<td style="text-align:right">'+qtyCell+'</td>'+ctnCells(sku,lineObj)
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+(sup!=null?('<span'+(disc?' style="background:var(--amber-bg);color:var(--amber);font-weight:700;padding:0 4px;border-radius:3px" title="differs from estimate"':'')+'>$'+money(sup)+(disc?' ⚠':'')+'</span>'):'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right"><input class="fci opfin" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-qty="'+qn+'" data-fallback="'+fb+'" value="'+(fin!=null?esc(fin):'')+'" placeholder="'+(sup!=null?money(sup):(est!=null?money(est):'0'))+'" style="width:88px;text-align:right" inputmode="decimal"></td>'
@@ -5344,7 +5349,7 @@
     var rows=_prodL.map(function(l){ return row(l.sku, l.qty, _ecOf(l), costs[l.sku], false, l); }).join('');
     Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]&&!/^POLYBAG /i.test(sku)) rows+=row(sku, null, null, c, true); });
     rows+=_pbL.map(function(l){ return row(l.sku, l.qty, _ecOf(l), costs[l.sku], false, l); }).join('');   // polybags at the bottom
-    if(!rows) rows='<tr><td colspan="8" class="mut">no lines</td></tr>';
+    if(!rows) rows='<tr><td colspan="'+(ctnOn?10:8)+'" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:var(--amber-bg);border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:var(--amber)">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
         +'<button class="save-btn op-accept-all" data-po="'+esc(po)+'">Accept all changes</button>'
@@ -5409,10 +5414,10 @@
           +'<span class="mut tiny">or remove the SKU / change the destination</span></div>'
           +cr.map(function(l){ return '<div style="display:flex;gap:10px;align-items:center;padding:2px 0;font-size:12px"><span style="min-width:32ch;font-family:ui-monospace,Menlo,monospace">'+esc(l.sku)+'</span><span class="mut">'+units(Number(l.qty)||0)+' units'+(String(l.st||'').toUpperCase()==='CLOSED'?' · CLOSED product':'')+'</span><button class="save-btn light op-ctry-one" data-ps="'+esc(po+'|'+l.sku)+'" style="padding:1px 8px;font-size:11px">✓ Approve</button></div>'; }).join('')+'</div>'; })()
       +banner
-      +'<div class="tw" style="max-width:1240px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th class="l" title="partial (p) / supplier risk (s) / discontinued (d) / country risk (c) — ⚠ needs review, ✓ approved">Exceptions</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:175px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
+      +'<div class="tw" style="max-width:1240px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th class="l" title="partial (p) / supplier risk (s) / discontinued (d) / country risk (c) — ⚠ needs review, ✓ approved">Exceptions</th><th style="text-align:right">Qty</th>'+(ctnOn?'<th style="text-align:right" title="standard carton qty">Ctn</th><th style="text-align:right" title="carton qty for this client order (blank = standard)">Client ctn</th>':'')+'<th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:175px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
       +rows
       +addRowHtml
-      +'<tr class="op-total" style="font-weight:700;border-top:2px solid var(--faint)"><td class="l">TOTAL</td><td></td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
+      +'<tr class="op-total" style="font-weight:700;border-top:2px solid var(--faint)"><td class="l">TOTAL</td><td></td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td>'+(ctnOn?'<td></td><td></td>':'')+'<td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
       +'</tbody></table></div>'
       +'<div class="op-polybags" data-po="'+esc(po)+'" style="margin-top:14px"></div>'   // "Add polybags to order" — populated after render for 3PL branches with a returns %
       +(function(){ if(!xdLines.length)return ''; var tot=xdLines.reduce(function(a,x){return a+(Number(x.qty)||0);},0);
@@ -6005,6 +6010,15 @@
     document.querySelectorAll('#podet-'+i+' .op-cancel').forEach(function(b){ b.onclick=function(){ OP_EDIT=null; rerenderOrderPlan(po,i); }; });
     document.querySelectorAll('#podet-'+i+' .op-copy').forEach(function(b){ b.onclick=function(){ var tsv=decodeURIComponent(b.dataset.copy||''); if(!tsv){alert('No lines to copy.');return;}
       navigator.clipboard.writeText(tsv).then(function(){ var o=b.textContent; b.textContent='✓ Copied'; setTimeout(function(){b.textContent=o;},1200); }).catch(function(){ alert('Copy failed — clipboard blocked.'); }); }; });
+    // v28.624: client carton qty (blank = standard) → /api/supply/po-line-ctn; amber when it differs from the standard
+    document.querySelectorAll('#podet-'+i+' .op-cctn').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim().replace(/[^0-9]/g,''), std=Number(inp.dataset.std)||0;
+      if(v!==''&&!(Number(v)>0)){ inp.value=''; v=''; }
+      var box=document.getElementById('podet-'+i), d=box&&box._poDetail, ln=d&&(d.lines||[]).filter(function(l){ return l.sku===inp.dataset.sku; })[0], prev=ln?ln.client_carton_qty:null;
+      fetch('/api/supply/po-line-ctn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:inp.dataset.po,sku:inp.dataset.sku,client_carton_qty:v})}).then(function(r){return r.json();}).then(function(j){
+        if(!j||!j.ok)throw new Error((j&&j.error)||'save failed');
+        if(ln)ln.client_carton_qty=j.client_carton_qty; var diff=(j.client_carton_qty!=null&&j.client_carton_qty!==std);
+        inp.style.background=diff?'var(--amber-bg)':''; inp.style.color=diff?'var(--amber)':''; inp.style.fontWeight=diff?'700':''; invalidateDerived(); })
+        .catch(function(e){ inp.value=(prev!=null?prev:''); alert('Save failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-add-row').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i), tb=box&&box.querySelector('.op-tbody'); if(!tb)return;
       var tr=document.createElement('tr'); tr.className='op-addrow';
       tr.innerHTML='<td class="l"><input class="op-add-sku" data-po="'+esc(b.dataset.po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:var(--card)" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td>';
@@ -9908,6 +9922,7 @@
               +lblBlk('Delivery address','Full address this client ships to.', ta('address', fieldOf(r,'address'),'Street, city, postcode, country…'))
               +lblBlk('Client requirements','Any special handling / compliance the client demands.', ta('client_requirements', fieldOf(r,'client_requirements'),'e.g. GS1 labels, appointment booking…'))
               +lblBlk('Carton label format','Client-specific carton labels on this client’s POs (Client/FBA tab).', '<select class="ka-in" data-f="carton_label_format" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><option value="">None (standard)</option><option value="paper_store"'+(fieldOf(r,'carton_label_format')==='paper_store'?' selected':'')+'>Paper Store carton labels</option><option value="next"'+(fieldOf(r,'carton_label_format')==='next'?' selected':'')+'>NEXT carton labels</option></select>')
+              +lblBlk('Client carton qty','Adds a Client ctn column to this client’s PO order plans, to enter carton quantities that differ from standard. Used on the carton labels and shown in the supplier portal.', (function(){ var on=isYes(r.client_carton_qty); return '<select class="ka-in ka-bool" data-f="client_carton_qty" style="font-size:12px;padding:6px 9px;border:1px solid var(--line);border-radius:6px"><option value="false"'+(on?'':' selected')+'>No</option><option value="true"'+(on?' selected':'')+'>Yes</option></select>'; })())
               +lblBlk('Supplier company (seller)','Which Dock & Bay entity is the seller on this client’s Direct-to-Client packing list. Default UK.', (function(){ var se=(fieldOf(r,'seller_entity')||'UK').toUpperCase(); return '<select class="ka-in" data-f="seller_entity" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px">'+[['UK','UK — Dock & Bay LTD'],['AU','AU — Dock & Bay PTY LTD'],['US','US — Dock & Bay Ltd Corp'],['EU','EU — Dock & Bay LTD']].map(function(o){return '<option value="'+o[0]+'"'+(se===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; })())
               +'</div>'
               +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'

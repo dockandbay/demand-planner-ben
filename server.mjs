@@ -11506,7 +11506,7 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
     // Weights/dims from the UK (metric) product fields, converted to imperial to match the Paper Store template:
     //  N.W (net)  = prod unit weight × qty          G.W (gross) = net + carton packaging (gross_full − net_full)
     //  MEAS       = UK carton L×W×H (cm → in)        (kg→lb ×2.20462, cm→in ÷2.54)
-    const lines = (await pool.query(`SELECT l.sku, l.qty, coalesce(nullif(l.carton_qty,0), nullif(p.carton_qty,'')::int) carton_qty,
+    const lines = (await pool.query(`SELECT l.sku, l.qty, coalesce(l.client_carton_qty, nullif(l.carton_qty,0), nullif(p.carton_qty,'')::int) carton_qty,   -- v28.624: client carton qty first
         coalesce(p.product_ean,'') ean, coalesce(p.product_name,'') name,
         nullif(p.prod_weight_uk::text,'') net_unit_kg, nullif(p.uk_carton_weight::text,'') gross_full_kg,
         nullif(p.uk_carton_length::text,'') cl, nullif(p.uk_carton_width::text,'') cw, nullif(p.uk_carton_height::text,'') ch
@@ -13554,7 +13554,7 @@ app.get('/api/supply/po-export.xlsx', async (req, res) => {
       LEFT JOIN planner.shipments s ON s.shipment_ref=p.shipment_ref
       WHERE ($1::text[] IS NULL OR upper(coalesce(p.status,'')) = ANY($1::text[])) ORDER BY p.status, p.supplier_name, p.po`, [want.length ? want : null])).rows;
     const poList = pos.map(p => p.po);
-    const lines = poList.length ? (await pool.query(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, nullif(l.carton_qty,0) line_carton_qty,
+    const lines = poList.length ? (await pool.query(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, coalesce(l.client_carton_qty, nullif(l.carton_qty,0)) line_carton_qty,   -- v28.624: client carton qty first
         pr.product_name, pr.size_long, pr.colour_long, pr.product_ean, pr.carton_qty prod_carton_qty, pr.cost, to_jsonb(pr) pj,
         pr.uk_carton_length, pr.uk_carton_width, pr.uk_carton_height, pr.uk_carton_weight, pr.us_carton_length, pr.us_carton_width, pr.us_carton_height, pr.us_carton_weight
       FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po = ANY($1::text[]) AND coalesce(l.qty,0) <> 0 ORDER BY l.po, l.sku`, [poList])).rows : [];
@@ -13866,7 +13866,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
 const KA_FIELDS = {
   name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
-  carton_label_format: 'text', seller_entity: 'text',
+  carton_label_format: 'text', seller_entity: 'text', client_carton_qty: 'boolean',   // v28.624 client carton qty toggle (mig 410)
   forwarder_name: 'text', forwarder_email: 'text', forwarder_phone: 'text',
   consignee: 'text', contact_person: 'text', contact_number: 'text', freight_forwarder: 'text',   // SUG-0041 reuse: default onto a PO's Client/FBA tab when the key account is applied (mig 272)
   pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
@@ -22983,6 +22983,21 @@ app.post('/api/supply/po-lines/approve-partials', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
+// v28.624 (Ben): client-specific carton qty for one order-plan line (blank = standard). Logged on the PO timeline.
+app.post('/api/supply/po-line-ctn', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  const v = (b.client_carton_qty === '' || b.client_carton_qty == null) ? null : parseInt(b.client_carton_qty, 10);
+  if (v !== null && !(v > 0)) return res.status(400).json({ error: 'carton qty must be a whole number above 0' });
+  try {
+    const r = await pool.query(`WITH o AS (SELECT client_carton_qty old FROM planner.purchase_order_lines WHERE po=$1 AND sku=$2)
+      UPDATE planner.purchase_order_lines SET client_carton_qty=$3 WHERE po=$1 AND sku=$2 RETURNING (SELECT old FROM o) old`, [b.po, b.sku, v]);
+    if (!r.rowCount) return res.status(404).json({ error: 'line not found' });
+    const old = r.rows[0].old;
+    if (old !== v) await logPoChange(b.po, 'Order plan', b.sku + ' client carton qty ' + (old == null ? 'standard' : old) + ' → ' + (v == null ? 'standard' : v), authUser(req));
+    res.json({ ok: true, client_carton_qty: v });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.
 app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
   const field = (req.body && req.body.field) || 'partial';
@@ -24329,7 +24344,7 @@ app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
 // unchanged) while poShipObj and the memoised price-list index run alongside. If the batch fails for any reason (an optional
 // table missing pre-migration, an unusual PO ref) the legacy per-query path runs with its original per-query fallbacks.
 const _PO_DETAIL_Q = [
-  ["lines", `SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
+  ["lines", `SELECT l.sku,l.qty,l.carton_qty,pol.client_carton_qty,(SELECT nullif(prc.carton_qty::text,'') FROM planner.products prc WHERE prc.sku=l.sku) std_carton_qty,l.full_carton_check,l.cost_price,
                     coalesce(pol.erp_qty, el.qty) erp_qty, el.cost erp_cost,   -- v28.427: ERP qty = Fulfil (line erp_qty), else the old pushed snapshot
                     (coalesce(l.qty,0) IS DISTINCT FROM coalesce(pol.erp_qty, el.qty, 0) AND ${ERP_DEV_SKU_SQL('l.sku')}) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
@@ -29511,7 +29526,7 @@ const POS_SQL_PORTAL = `
   WHERE coalesce(status,'') NOT ILIKE '%future%' ORDER BY calc4.po`;   // FUTURE POs are hidden from the supplier portal
 // v28.175 (Ben): PO lines + the supplier-default cost for EVERY PO (shared 'portal:lines' base; the build keeps the session's POs).
 // Same SQL as the per-supplier query it replaces, minus `l.po = ANY($1)`; ORDER BY l.po, l.sku keeps the per-supplier order.
-const PORTAL_LINES_SQL = `SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty,   -- v28.151 (review C5): erp_qty dropped, the portal never reads it (internal ERP state)
+const PORTAL_LINES_SQL = `SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty, l.client_carton_qty, nullif(pr.carton_qty::text,'') std_carton_qty,   -- v28.624   -- v28.151 (review C5): erp_qty dropped, the portal never reads it (internal ERP state)
       -- product default cost for the PO's supplier (cost_<code>, e.g. LX→cost_lx), fallback general cost.
       -- The order-plan Est. cost when the line has no negotiated cost_price: mirrors admin (po-detail sku_cost).
       coalesce(
@@ -30510,7 +30525,8 @@ const PO_ROWS_SQL = `
             (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' AND left(coalesce(ss.value,''),10) IS DISTINCT FROM to_char(calc4.eff_prod_end,'YYYY-MM-DD') ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
             (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' AND left(coalesce(ss.value,''),10) IS DISTINCT FROM to_char(calc4.eff_prod_end,'YYYY-MM-DD') ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
-            (SELECT coalesce(ka.carton_label_format,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) client_label_format,   -- key-account link to a client-specific carton-label format (e.g. 'paper_store')
+            (SELECT coalesce(ka.carton_label_format,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) client_label_format,
+            coalesce((SELECT ka.client_carton_qty FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1),false) client_ctn_on,   -- v28.624: client-specific carton qty column on ORDER PLAN (mig 410)   -- key-account link to a client-specific carton-label format (e.g. 'paper_store')
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
             (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
             (SELECT coalesce(ka.forwarder_phone,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_phone,

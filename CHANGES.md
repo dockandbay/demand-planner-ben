@@ -1,3 +1,8 @@
+## v28.624 (03-Nov-26) Client-specific carton quantities (NEXT)
+- CONFIG > Key Accounts: new "Client carton qty" Yes/No (migration 410 sets it Yes for NEXT). That client's POs get two columns on the PO ORDER PLAN tab after Qty: Ctn (the standard, grey) and Client ctn (editable, blank = standard, amber when it differs). Saves per line via POST /api/supply/po-line-ctn and logs "SKU client carton qty 20 → 25" on the PO timeline.
+- When set, the client carton qty drives the carton labels (NEXT and Paper Store) and the shipment-plan carton counts, and the supplier portal ORDER PLAN shows an amber "Carton qty / 装箱数 25 (std 20)" badge on the line.
+- **Migration 410_client_carton_qty.sql** (key_accounts.client_carton_qty, purchase_order_lines.client_carton_qty). Must be applied on prod BEFORE this deploy: the PO drawer, labels and portal queries read the new column. New endpoint /api/supply/po-line-ctn. No new env vars, no new cron routes.
+
 ## v28.623 (03-Nov-26) NEXT carton labels
 - CONFIG > Key Accounts > Carton label format gets "NEXT carton labels". A PO whose client has it shows "⤓ NEXT carton labels" on the Client/FBA tab (Labels row).
 - Label: Supplier name DOCK & BAY, Supplier number A51891, Delivery reference and Contract number as blank write-in lines, the EAN of the product as an EAN-13 barcode. Footer in light grey (not requested by NEXT): SKU, description, pcs per carton and number of cartons.
