@@ -1,3 +1,8 @@
+## v28.614 (02-Nov-26) Inbox: PRODUCT messages are type Product (were shown as Purchase order)
+- Supplier messages on a product (development requests, e.g. AW27-TEATO-XMAS3PACKSTRIP "Accepted the development request") share the PO notes table under the product ref, so the Inbox showed them as "Purchase order" to everyone with PO in their Inbox types (Zera has PO only). They are now type Product: shown only to people with Product ticked in CONFIG > Permissions > Inbox types (or no Inbox types set), labelled PRODUCT, and clicking one opens PRODUCT > Products > that product.
+- A message counts as Product when its reference is a PRODUCT development item; everything else stays PO.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/actions.md, package.json, CHANGES.md. No env vars, migrations or cron routes.
+
 ## v28.613 (02-Nov-26) Create sample bills: PO freight / duty to Fulfil, old POs to Xero UK Wholesale COGS, import VAT to Xero
 - Ben 02-Nov-26, on a PO line: freight and duty go on a Fulfil supplier invoice when the PO is in Fulfil (one per Fulfil PO, landed cost as before). A PO NOT in Fulfil (old, pre-Fulfil, e.g. PO-1678119, PO-1725132-JL-HW) goes to a Xero UK bill on 311.1c COGS - UK - Wholesale (was 302 / 313).
 - Import VAT ("Taxes") on a PO line always goes to Xero UK 820 VAT - UK (mapping key vat; AU POs au_vat, not set yet, so "pick the account"), with Xero's "VAT on Imports" rate (GSTONIMPORTS); a bill with import VAT is Tax Exclusive with every other line on No VAT, so its total is unchanged.

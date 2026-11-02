@@ -97,7 +97,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.611
+verified_version: v28.614
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -410,4 +410,4 @@ verified_version: v28.611
 ## Supplier portal actions (what the red counts in the supplier portal mean)
 - Sample actions (SAMPLES badge, the count on each sample row, and the Home "sample actions" card): unread Dock & Bay messages, no expected completion date, no production status, expected date passed while still "In production", and (v28.611, Ben 02-Nov-26) marked Shipped with no tracking code. The tracking box is outlined red until a code is saved; this applies even when the sample goes on Dock & Bay's courier account. Tracking is never forced on save. (source: sampActions, sampTrkMissing)
 - Shipment actions (Shipment Plan badge and the count on each shipment card): unread Dock & Bay messages (FOB shipments: also the production end date not yet submitted), and (v28.611) status Shipping with no tracking code and no Flexport booking. Only the supplier whose PO is the shipment's master PO gets this one, since only they can edit the shipment. (source: shipActCount, shipTrkMissing)
-
+- HORIZON top-bar Inbox (✉): unread supplier and client messages, filtered by the person's Inbox types in CONFIG > Permissions (Sample / PO / Product / Client; unset = all). Supplier messages on a PO are type PO. Supplier messages on a PRODUCT (development requests, e.g. "Accepted the development request") are saved in the same notes table under the product ref, and from v28.614 (Ben 02-Nov-26) are type Product: they show only to people with Product ticked (they were wrongly shown as "Purchase order" to everyone with PO). Clicking a Product message opens PRODUCT > Products > that product. (source: server.mjs timeline-notifications; supply/inject.html renderTlDrop)

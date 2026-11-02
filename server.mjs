@@ -12606,8 +12606,20 @@ supplySectionHandler = async (req, res, next) => {
           _jobs.push(q(`SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body, to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
             FROM planner.supplier_notes sn LEFT JOIN planner.purchase_orders po ON po.po = sn.po
             LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|'||sn.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL`).then(rows => rows
+            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL
+              AND NOT EXISTS (SELECT 1 FROM planner.product_dev_items x WHERE x.ref = sn.po)`).then(rows => rows   // v28.614: product notes share supplier_notes (keyed by the product ref): not PO messages
             .forEach(r => _out.push({ id: 'po:' + r.id, rid: r.id, src: 'po', type: 'purchase_order', type_label: 'Purchase order', po: r.po, ref: r.po, supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|' + r.id, open: 'po' }))));
+        }
+        // v28.614 (Ben 02-Nov-26): supplier messages on a PRODUCT (development request accepted, etc.) are supplier_notes keyed by the product ref,
+        // not a PO. They were shown as "Purchase order" to everyone with PO in their Inbox types; now they are type 'product' (Inbox types: Product).
+        if (_types.includes('product')) {
+          _jobs.push(q(`SELECT sn.id, sn.po ref, coalesce(i.name,'') supplier_name, sn.body, to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
+            FROM planner.supplier_notes sn
+            LEFT JOIN planner.suppliers i ON i.id::text = sn.supplier_id::text
+            LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|'||sn.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
+            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL
+              AND EXISTS (SELECT 1 FROM planner.product_dev_items x WHERE x.ref = sn.po)`).then(rows => rows
+            .forEach(r => _out.push({ id: 'po:' + r.id, rid: r.id, src: 'po', type: 'product', type_label: 'Product', open: 'product', ref: r.ref, supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|' + r.id }))));
         }
         if (_types.includes('samples')) {
           _jobs.push(q(`SELECT n.id, coalesce(sr.ref,'') ref, coalesce(sr.supplier_name,'') supplier_name, n.body, to_char(n.created_at,'YYYY-MM-DD HH24:MI') created_at

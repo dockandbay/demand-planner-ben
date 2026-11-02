@@ -8478,6 +8478,7 @@
     d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var open=el.dataset.open||'po', ref=el.dataset.ref; if(!ref&&open!=='client')return; closeTlDropdown();
       if(open==='sample'){ if(typeof openSampleDrawer==='function')openSampleDrawer(ref); else if(typeof gotoSample==='function')gotoSample(ref); return; }
       if(open==='client'){ var tid=el.dataset.thread; location.hash='#/client/messages'+(tid?('/'+encodeURIComponent(tid)):''); return; }
+      if(open==='product'){ location.hash='#/product/products/'+encodeURIComponent(ref); return; }   // v28.614: PRODUCT messages open the product
       var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
       if(typeof openPODrawer==='function')openPODrawer(ref,'timeline'); }; });
     d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
