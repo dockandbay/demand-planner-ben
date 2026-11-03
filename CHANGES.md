@@ -1,3 +1,6 @@
+## v28.638 (03-Nov-26) NEXT carton labels: smaller EAN, no product title
+- The EAN-13 barcode is standard size (module 3, bars 95 high; was 5 x 190) with smaller digits. The product title line is removed (Ben never asked for it); the grey footer is now SKU + pcs / cartons only. Client only.
+
 ## v28.637 (03-Nov-26) PO Direct to Client: Edit client drawer
 - PO > CLIENT/FBA: when a client is picked, a "✎ Edit client" button sits next to Client name. It opens that client's key account in a right-hand drawer, the SAME form as CONFIG > Key accounts (packing / labelling, carton label format, client carton qty, address, seller, forwarder, consignee). Save closes the drawer and refreshes the PO (e.g. the NEXT carton labels button appears once its format is set); Cancel / Back / ✕ / Esc close it.
 - The CONFIG editor is now a shared keyAccountsEditor() (CONFIG page unchanged). Client only. No migration.

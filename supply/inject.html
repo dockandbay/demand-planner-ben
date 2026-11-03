@@ -14092,16 +14092,16 @@
     row('Supplier name','DOCK & BAY'); row('Supplier number',NEXT_SUPPLIER_NO); row('Delivery reference',''); row('Contract number','');
     y-=14; el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-L)+'" y2="'+y+'" stroke="#111" stroke-width="1.5"/>'); y+=46;
     el.push(T(L,y,'EAN',{size:19,fill:'#444'})); y+=24;
-    var m=5, bx=(W-95*m)/2, nH=190, c=String(g.upc||'').replace(/\D/g,''); if(c.length===12)c='0'+c;
-    var bars=c?eanBars(c,bx,y,m,nH,22):'';
-    if(bars && c.length===13){ el.push(bars); var dbl=y+nH+50;
-      el.push(T(bx-8,dbl,c[0],{size:33,anchor:'end'})); el.push(T(bx+24*m,dbl,c.slice(1,7),{size:33,anchor:'middle',ls:3})); el.push(T(bx+71*m,dbl,c.slice(7,13),{size:33,anchor:'middle',ls:3})); y=dbl+40; }
-    else if(bars){ el.push(bars); el.push(T(W/2,y+nH+40,c,{size:28,anchor:'middle',ls:2})); y=y+nH+80; }
-    else { el.push(T(W/2,y+90,'no EAN on file for '+g.sku,{size:18,fill:'#b91c1c',anchor:'middle'})); y=y+nH+80; }
+    // v28.638 (Ben: "EAN ... way too big"): standard-size EAN-13 (module 3, bars 95 high, about 60% of the old 5 x 190)
+    var m=3, bx=(W-95*m)/2, nH=95, c=String(g.upc||'').replace(/\D/g,''); if(c.length===12)c='0'+c;
+    var bars=c?eanBars(c,bx,y,m,nH,12):'';
+    if(bars && c.length===13){ el.push(bars); var dbl=y+nH+30;
+      el.push(T(bx-6,dbl,c[0],{size:20,anchor:'end'})); el.push(T(bx+24*m,dbl,c.slice(1,7),{size:20,anchor:'middle',ls:2})); el.push(T(bx+71*m,dbl,c.slice(7,13),{size:20,anchor:'middle',ls:2})); y=dbl+34; }
+    else if(bars){ el.push(bars); el.push(T(W/2,y+nH+28,c,{size:18,anchor:'middle',ls:2})); y=y+nH+60; }
+    else { el.push(T(W/2,y+50,'no EAN on file for '+g.sku,{size:18,fill:'#b91c1c',anchor:'middle'})); y=y+nH+60; }
     el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-L)+'" y2="'+y+'" stroke="#111" stroke-width="1.5"/>'); y+=50;
     var GR='#9a9a9a';   // Ben: footer in light grey, NEXT didn't ask for it (packer aid only)
     el.push(T(L,y,g.sku,{size:26,bold:true,fill:GR})); y+=40;
-    var desc=String(g.desc||''); if(desc.length>44)desc=desc.slice(0,42)+'…'; if(desc){ el.push(T(L,y,desc,{size:16,fill:GR})); y+=36; }
     el.push(T(L,y,g.qty+' pcs'+(g.odd?' (part carton)':' per carton')+'  ·  '+g.n+' carton'+(g.n===1?'':'s'),{size:22,bold:true,fill:GR}));
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   function nextCartonLabels(po,btn){ var prog=bcProgress(btn); if(btn)btn.textContent='Loading…';
