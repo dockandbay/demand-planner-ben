@@ -33846,7 +33846,9 @@ async function cmEngine(month, opts) { opts = opts || {};
     // (up to 180 days) changed since the month started, i.e. paid in or after it. Their payment applications are then taken by date.
     const ids = new Set(), from180 = new Date(Date.parse(ms) - 180 * 864e5).toISOString().slice(0, 10);
     // v28.649: + the native MarketTime channel ("Markettime US"), whose orders carry the MarketTime PO as reference (no "WS-")
-    for (const scope of [['sales.reference', 'ilike', '%WS-%'], ['sales.channel.name', 'ilike', '%faire%'], ['sales.channel.name', 'ilike', '%markettime%']]) {
+    // v28.650 (Ben 03-Nov-26: "should also look at the key accounts and custom channels"): + the Key Accounts and Custom/Co-Brand channels (UK/US/EU/AU)
+    for (const scope of [['sales.reference', 'ilike', '%WS-%'], ['sales.channel.name', 'ilike', '%faire%'], ['sales.channel.name', 'ilike', '%markettime%'],
+      ['sales.channel.name', 'ilike', '%key account%'], ['sales.channel.name', 'ilike', '%custom%']]) {
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', ms], ['invoice_date', '<=', me], scope], ['id'])).forEach(i => ids.add(i.id));
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', from180], ['invoice_date', '<', ms], ['write_date', '>=', ms + ' 00:00:00'], scope], ['id'])).forEach(i => ids.add(i.id)); }
     // Fulfil credit notes (customer invoice with a negative total, e.g. from a return) dated in the month: a negative row against the order
