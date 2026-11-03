@@ -1,5 +1,10 @@
+## v28.644 (03-Nov-26) Supplier invoice email: to Zera, 2 minutes after the supplier submits
+- Ben: when a supplier submits an invoice / final amount in the portal, the "submitted invoice info" email now goes 2 minutes later instead of at once, so the supplier can correct it first. After the wait it reads the PO's latest invoice submission: if the supplier resubmitted in the meantime, only the newest one emails, with the latest amount. Same amount never emailed twice for a PO (app_settings inv_notify_last:<po>). P50 onwards only.
+- Default recipient is now zera@dockandbay.com only (was zera@ + ben@); app_settings.invoice_submit_notify still overrides.
+- The wait runs in the background (hzWaitUntil, inside the 300s function limit). Optional env HZ_INV_NOTIFY_DELAY_MS for testing; not needed in production. No migration, no new cron route.
+
 ## v28.643 (03-Nov-26) PO grid: "Supplier invoiced, Not Processed" exception
-- Ben: new option in the PO grid's All exceptions dropdown. Lists POs where the supplier's final invoice amount is entered but the Final payment due date is blank, so the payment can't reach Payments Due. Skips child POs (the master owns the money), POs whose balance is already paid, COMPLETE POs and 0.00 placeholder invoices. Client only. No migration.
+- Ben: new option in the PO grid's All exceptions dropdown. Lists POs where the supplier's final invoice amount is entered but the Final payment due date is blank, so the payment can't reach Payments Due. Skips child POs (the master owns the money), POs whose balance is already paid, COMPLETE POs and 0.00 placeholder invoices. P50 onwards only. Client only. No migration.
 
 ## v28.642 (03-Nov-26) Amounts: a trailing full stop is ignored
 - Ben: "23,704.37." failed to save. The amount cleaner (browser and server hzNumClean) now drops a trailing full stop, semicolon or colon before parsing, so "23,704.37." saves as 23704.37. No migration.

@@ -14321,13 +14321,34 @@ async function emailInvoiceSubmit(po, value, by) {
   let emails;
   try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
     emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
-  if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+  if (!emails.length) emails = ['zera@dockandbay.com'];   // v28.644 (Ben): Zera only by default; app_settings.invoice_submit_notify still overrides
   const supName = await poSupplierName(po);   // SUG-0011: name the supplier, not the generic word "Supplier"
   const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
   const html = '<p><b>' + escHtml(supName) + '</b> submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
     + '<p>Invoice value: <b>' + value + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
   return sendResendEmail({ to: emails, subject: supName + ' submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po, replyTo: by });   // reply-to = the supplier who submitted
+}
+// v28.644 (Ben): the invoice email goes 2 minutes after the supplier submits, so they can correct it first. After the wait it
+// reads the PO's latest invoice submission: if a newer one arrived in the meantime, that one's own timer sends instead. It
+// sends the latest amount, P50 onwards only, and never the same amount twice for a PO (inv_notify_last:<po>).
+const INV_NOTIFY_DELAY_MS = Number(process.env.HZ_INV_NOTIFY_DELAY_MS) || 120000;
+function scheduleInvoiceSubmitEmail(po) {
+  const job = (async () => {
+    const q = async () => (await pool.query(`SELECT id, value, submitted_by FROM planner.supplier_submissions
+      WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po])).rows[0];
+    const first = await q(); if (!first) return;
+    await new Promise(r => setTimeout(r, INV_NOTIFY_DELAY_MS));
+    const cur = await q(); if (!cur || String(cur.id) !== String(first.id)) return;   // supplier changed it again → the newer timer emails
+    const prod = parseFloat((await pool.query(`SELECT prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.prod_no);
+    if (!(prod >= 50)) return;   // P50 onwards only (Ben)
+    const key = 'inv_notify_last:' + po, num = x => { const v = Number(String(x == null ? '' : x).replace(/[^0-9.\-]/g, '')); return isFinite(v) ? v : null; };
+    const last = await accSettingGet(key), nv = num(cur.value);
+    if (last != null && nv != null && Math.abs(num(last) - nv) < 0.005) return;   // already emailed this amount
+    const r = await emailInvoiceSubmit(po, String(cur.value), cur.submitted_by);
+    if (r && r.sent) await accSettingSet(key, String(cur.value), 'invoice-notify').catch(() => {});
+  })().catch(e => console.error('[invoice-notify]', po, e.message));
+  hzWaitUntil(job); return job;
 }
 // Dedup the "supplier submitted invoice info" email. A supplier clicking Submit repeatedly re-stages the SAME
 // invoice value, which previously fired one email per click (Ben saw 3× for PO-57EULX4). Only email when the
@@ -18154,7 +18175,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       else { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     await client.query('COMMIT');
-    if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
+    if (_invoiceSubmit != null) scheduleInvoiceSubmitEmail(b.po);   // v28.644: emails 2 min later with the latest amount (repeat amounts skipped there)
     res.json(out);
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -37395,7 +37416,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
           WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }   // snapshot the SKUs/qtys the supplier approved, diffed on re-approval
       else { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
-    if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
+    if (_invoiceSubmit != null) scheduleInvoiceSubmitEmail(b.po);   // v28.644: emails 2 min later with the latest amount (repeat amounts skipped there)
     res.json(out);
   } catch (e) { log500(e);
     // v28.191 (Ben, M7): if part of it was already saved, say exactly what (and refresh the caches for it) instead of a bare error
