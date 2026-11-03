@@ -16177,7 +16177,7 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
     var sel=function(id,v,opts){ return '<select id="'+id+'" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'+opts.map(function(o){ return '<option value="'+E(o[0])+'"'+(String(v)===String(o[0])?' selected':'')+'>'+E(o[1])+'</option>'; }).join('')+'</select>'; };
     h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
       +'<span class="mut">Show</span>'+sel('ilg-show',f.show,[['disc','Discrepancies'],['all','All SKUs'],['notff','Not in Fulfil'],['notrep','In Fulfil, not in the report']])
-      +'<input id="ilg-q" value="'+E(f.q)+'" placeholder="Search SKU / description" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;min-width:180px;background:var(--card);color:var(--ink)">'
+      +'<input id="ilg-q" value="'+E(f.q)+'" placeholder="🔍 Search SKU / description" style="font-size:12.5px;padding:5px 10px;border:1.5px solid var(--pos);border-radius:7px;min-width:230px;background:var(--pos-bg);color:var(--ink);font-weight:600">'
       +'<span class="mut">Status</span>'+sel('ilg-status',f.status,[['','All']].concat(Object.keys(stats).sort().map(function(s){ return [s,s]; })))
       +'<span class="mut">Diff</span>'+sel('ilg-dir',f.dir,[['','± any'],['ilg','ILG higher (+)'],['ff','Fulfil higher (−)']])
       +'<span class="mut">Ignore under</span><input id="ilg-min" type="number" min="0" value="'+E(f.min)+'" style="width:56px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><span class="mut">units</span>'
@@ -16315,9 +16315,9 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
         +'</tbody></table></div>'):'<div class="mut" style="font-size:12px;padding:8px 10px">None — every SKU with 3PL stock is in the product list.</div>')
       +'</div>'; }
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
+      +'<input id="inv3pl-q" placeholder="🔍 Search SKU(s), space or comma between" value="'+tHesc(INV_3PL_Q||'')+'" style="width:260px;max-width:70vw;padding:5px 10px;border:1.5px solid var(--pos);border-radius:7px;font-size:12.5px;background:var(--pos-bg);color:var(--ink);font-weight:600">'   // v28.660 (Ben): light green, first in the row, so it is easy to see
       +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink-soft);font-size:12px;cursor:pointer">'
       +[['gaps','All gaps (on-hand)'],['in3pl_not_erp','In 3PL, not in ERP'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
-      +'<input id="inv3pl-q" placeholder="filter SKU(s) — space/comma…" value="'+tHesc(INV_3PL_Q||'')+'" style="width:190px;max-width:60vw;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">'
       +'<button id="inv3pl-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete stock in this warehouse" style="background:'+(INV_3PL_DEAD?'var(--neg)':'var(--neg-bg)')+';color:'+(INV_3PL_DEAD?'#fff':'var(--neg)')+';border:1px solid var(--neg);border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'</div>';   // v28.497 (Ben): Cin7 Stocktake button removed from all Inventory pages

@@ -1,3 +1,6 @@
+## v28.660 (04-Nov-26) BUY & MOVE > Inventory > Manage 3PL: SKU search box easy to see
+- Ben: "have a search box for sku on each page ... make search box green light colour as i couldnt see it". Every Manage 3PL page already had one (US / AU / EU / US Non GRS: several SKUs, space or comma between; UK ILG tabs: SKU or description), but it was small and white. It is now light green with a green border and a 🔍 prompt, wider, and first in the filter row. No migration.
+
 ## v28.659 (04-Nov-26) Supplier portal shipment: Flexport container number, B/L and dates
 - Ben: "include flexport container number if available". The PO > SHIPMENT tab (section 1) and the pallet labels show the Flexport container number(s) when Flexport has them, plus the bill of lading on the tab; the ship date and ETA fall back to Flexport's departure / arrival when the shipment row has none (PO-56UKXR1: 20-Jun-26 / 19-Aug-26, B/L MEDUXV400817; no container number in Flexport yet). Read from flexport_shipments_effective by the shipment's carrier ref or name. No migration.
 
