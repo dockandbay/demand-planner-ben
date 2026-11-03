@@ -1,3 +1,7 @@
+## v28.646 (03-Nov-26) PRODUCT sampling grid: Accepted under Supplier; CLIENT Messages tab removed from the menu
+- Ben: the supplier's "✓ Accepted" / "⏳ Awaiting accept" badge moves from the product ref cell to the Supplier column, under the Development / Custom order tag. Sent / Manage stay under the ref. No migration.
+- Ben: with client messaging off (CP_MSG_OFF), the CLIENT ▸ MESSAGES tab is no longer drawn, so it also leaves the left menu (v28.639 only redirected it). The portal order's Messages button reads Documents (it opens the documents-only drawer).
+
 ## v28.645 (03-Nov-26) PO grid: "Supplier invoiced · no Xero invoice" exception
 - Ben: new option in the PO grid's All exceptions dropdown. Lists POs where the supplier's invoice amount is on the PO or waiting as a portal submission, but no Xero bill is linked (same Xero-link test as "Shipped · no Xero invoice"). P50 onwards, child POs skipped (the master holds the bill). Client only. No migration.
 
