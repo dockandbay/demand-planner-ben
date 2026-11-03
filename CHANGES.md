@@ -1,3 +1,7 @@
+## v28.639 (03-Nov-26) Client portal: messaging hidden (admin and client)
+- Ben: client communication goes only through the sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@ inboxes. Client portal: no Messages menu item, home card or per-order message threads (#/messages falls back to Home). Admin: CLIENT > Messages tab, the CLIENT unread badge, the home "unread client messages" item and the order drawer's messages and composer are hidden; the orders table column shows documents only (📎).
+- One switch per file (CP_MSG_OFF in supply/inject.html, MSG_OFF in supply/client-view.js). Existing threads, documents and the API routes are untouched. Client only. No migration.
+
 ## v28.638 (03-Nov-26) NEXT carton labels: smaller EAN, no product title
 - The EAN-13 barcode is standard size (module 3, bars 95 high; was 5 x 190) with smaller digits. The product title line is removed (Ben never asked for it); the grey footer is now SKU + pcs / cartons only. Client only.
 
