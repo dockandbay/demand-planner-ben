@@ -24690,6 +24690,48 @@ app.get('/api/supply/ships-with/:po', async (req, res) => {
     res.json(r.rows[0] || {});
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.657 (Ben 04-Nov-26): portal PO > SHIPMENT tab. Reads the PO's shipment directly, whatever its status, so a complete PO still shows
+// its shipment (PO-56UKXR1's "Open shipment" went to an empty Shipment Plan, which only lists open shipments). Returns the shipment, the
+// POs aboard (supplier, status, estimated pallets), the destination (master PO's branch), the confirmed pallet count and the caller's role.
+async function portalPoShipment(req, po) {
+  const p = (await pool.query(`SELECT po, coalesce(shipment_ref,'') ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+  if (!p || !p.ref) return { po, shipment: null };
+  const role = await portalShipmentRole(req, p.ref);
+  const sh = (await pool.query(`SELECT s.shipment_ref, coalesce(s.master_po,'') master_po, coalesce(s.mode,'') mode, coalesce(s.carrier,'') carrier, coalesce(s.carrier_ref,'') carrier_ref,
+      to_char(s.departure_date,'YYYY-MM-DD') departure, to_char(s.arrival_date,'YYYY-MM-DD') arrival, to_char(coalesce(s.tracked_delivery_date, s.delivery_date),'YYYY-MM-DD') delivery,
+      (to_jsonb(s)->>'pallets_confirmed')::int pallets_confirmed, to_jsonb(s)->>'pallets_confirmed_by' pallets_confirmed_by, left(to_jsonb(s)->>'pallets_confirmed_at',10) pallets_confirmed_at
+    FROM planner.shipments s WHERE s.shipment_ref=$1`, [p.ref])).rows[0] || { shipment_ref: p.ref, master_po: '' };
+  const members = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status, ${PO_PALLETS_SQL} est_pallets, p.pallets_override, coalesce(p.branch,'') branch
+    FROM planner.purchase_orders p WHERE p.shipment_ref=$1 ORDER BY p.po`, [p.ref])).rows;
+  const master = sh.master_po || (members.some(m => m.po === p.ref) ? p.ref : '');
+  const mine = new Set((req.portal.suppliers || []).map(x => String(x)));
+  const rows = members.map(m => ({ po: m.po, supplier: m.supplier, status: m.status, est_pallets: m.pallets_override != null ? Number(m.pallets_override) : Number(m.est_pallets) || 0, is_master: m.po === master, mine: mine.has(m.supplier) }))
+    .sort((a, b) => (b.is_master - a.is_master) || a.po.localeCompare(b.po));
+  const mb = (members.find(m => m.po === master) || members.find(m => m.po === po) || {}).branch || '';
+  const b = mb ? (await pool.query(`SELECT name, coalesce(address,'') address, coalesce(country_code,'') country, coalesce(delivery_notes,'') notes FROM planner.branches WHERE name=$1`, [mb])).rows[0] : null;
+  const est = Math.round(rows.reduce((a, m) => a + (Number(m.est_pallets) || 0), 0) * 10) / 10;
+  return { po, role, shipment: Object.assign({}, sh, { master_po: master }), members: rows, est_pallets: est, dest: b || { name: mb, address: '', country: '', notes: '' } };
+}
+app.get('/api/portal/po-shipment/:po', portalAuth, async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' }); res.set('Cache-Control', 'no-store').json(await portalPoShipment(req, po)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// The master supplier confirms the shipment's pallet count (blank clears it). Logged on the master PO's timeline.
+app.post('/api/portal/po-shipment/:po/pallets', portalAuth, async (req, res) => {
+  const po = decodeURIComponent(req.params.po || ''), raw = (req.body || {}).pallets;
+  try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+    const d = await portalPoShipment(req, po); if (!d.shipment) return res.status(400).json({ error: 'This PO is not on a shipment yet' });
+    if (d.role !== 'master') return res.status(403).json({ error: 'Only the supplier of the master PO (' + (d.shipment.master_po || d.shipment.shipment_ref) + ') can confirm the pallets' });
+    const n = raw === '' || raw == null ? null : Number(raw); if (n != null && (!Number.isInteger(n) || n < 1 || n > 500)) return res.status(400).json({ error: 'Pallets must be a whole number from 1 to 500' });
+    const who = (req.portal && (req.portal.email || req.portal.user)) || 'supplier';
+    await pool.query(`INSERT INTO planner.shipments (shipment_ref, pallets_confirmed, pallets_confirmed_by, pallets_confirmed_at) VALUES ($1,$2,$3,now())
+      ON CONFLICT (shipment_ref) DO UPDATE SET pallets_confirmed=excluded.pallets_confirmed, pallets_confirmed_by=excluded.pallets_confirmed_by, pallets_confirmed_at=now(), updated_at=now()`, [d.shipment.shipment_ref, n, String(who)]);
+    logPoChange(d.shipment.master_po || po, 'Pallets confirmed', 'Shipment ' + d.shipment.shipment_ref + ': ' + (n == null ? 'cleared' : n + ' pallets') + ' (supplier portal)', String(who));
+    try { invalidateSupplyCaches(); } catch (_) {}
+    res.json(await portalPoShipment(req, po));
+  } catch (e) { if (/pallets_confirmed/.test(String(e.message))) return res.status(503).json({ error: 'Pallet confirmation needs migration 413' }); log500(e); res.status(500).json({ error: e.message }); }
+});
 // Production detail (a prod_no × supplier): SKU × total qty, the POs, and assigned deposits.
 app.get('/api/supply/production-detail/:prod', async (req, res) => {
   const prod = req.params.prod;
@@ -37239,7 +37281,9 @@ app.get('/api/portal/img', portalAuth, proxyImage);
 // SHIPS-WITH shipment-label fields for one PO — supplier-scoped mirror of /api/supply/ships-with/:po.
 app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
   try {
-    if (!await portalOwnsPO(req, req.params.po)) return res.status(403).json({ error: 'not your PO' });
+    // v28.657: the shipment's master supplier may also print the labels for the other suppliers' POs aboard
+    if (!await portalOwnsPO(req, req.params.po)) { const sr = ((await pool.query(`SELECT coalesce(shipment_ref,'') r FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0] || {}).r;
+      if (!sr || await portalShipmentRole(req, sr) !== 'master') return res.status(403).json({ error: 'not your PO' }); }
     const r = await pool.query(`
       SELECT po.po production_ref, coalesce(po.supplier_name,'') source_supplier,
              coalesce(po.shipment_ref,'') ships_with_po, coalesce(po.branch,'') dest_branch,
