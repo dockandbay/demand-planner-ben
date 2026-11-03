@@ -1,3 +1,8 @@
+## v28.654 (04-Nov-26) Workflow "Payment due late in the month": the day test is on today; drawer closes on an outside click
+- Ben: the workflow moved payments whose DUE date was after the 26th. Now: an unpaid payment due in an earlier month moves its likely date to the 1st of THIS month (any day, e.g. on 10-Nov a payment due 25-Sep → 01-Nov); a payment due THIS month moves to the 1st of NEXT month only once today is past the set day (26th); future months are left alone. Only when the likely date is blank or earlier than that 1st (a later likely date is kept). Deposits / freight / duty / tax rules unchanged (Also freight... tick box). Lines whose likely date is their own (a deposit's date_likely_pay) are skipped, as a manual likely date would not override it (cash-flow lines now say likely_src own / manual). Titles show the current likely date.
+- Workflows drawer: a click anywhere outside it closes it (as well as × and Esc).
+- No migration, no new env var, no new cron route.
+
 ## v28.653 (04-Nov-26) Workflows: Fulfil date write uses the linked Fulfil PO; Log = expandable runs; PO search strips "-suffix"
 - Ben: "Completion date moved → update Fulfil" failed 31 POs with "not in Fulfil" (e.g. PO-1842654, linked to Fulfil PO378). The Fulfil date write looked the PO up by Fulfil reference only. It now uses the PO's linked Fulfil PO first, then the Fulfil mirror, then a Fulfil PO numbered or referenced like the HORIZON PO (shared helper fulfilPoIdFor, also used by Update ERP since v28.538). All 31 resolve on live (27 hand links, 4 mirror).
 - A failed change that is still found comes back to Waiting on the next run in Ask first mode (Auto leaves it failed, so a lasting error is not retried every hour).

@@ -2938,7 +2938,7 @@ async function cashflowResponse(pos, q) {
       key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
       amount: Math.round(num(o.amount) * 100) / 100, paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
       src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
-      month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk,
+      month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk, likely_src: o.likely ? 'own' : (lk ? 'manual' : null),   // v28.654: 'own' = the line's own date (e.g. deposit date_likely_pay), beats a manual one
       // deposit reference for this payment (the PO's deposit_ref, else a deposit-pool line's own reference),
       // its production number, and the referenced PO's branch (drives the Direct-to-Client flag in the export).
       deposit_ref: _dref,
@@ -27463,21 +27463,25 @@ const WF_TEMPLATES = {
   // v28.601 (Ben): payments due late in the month are paid in the next month's first run, so set the cash-flow likely date to the 1st.
   pay_month_end: {
     order: 3, area: 'Supply', name: 'Payment due late in the month → likely date the 1st',
-    when: 'An unpaid supplier payment (deposit, completion, balance) due late in THIS month or LAST month (after a set day) has no likely date yet. Future months are left alone.',
-    then: ['Set its likely payment date to the 1st of the next month (the same as typing it in Cash flow / Payments due)', 'Cash flow and Payments due move the payment to that month'],
-    fields: [{ k: 'after_day', sec: 'if', label: 'Due after day', unit: 'of the month', dflt: 26 },
+    when: 'An unpaid supplier payment (deposit, completion, balance) is due in an EARLIER month (checked every day), or is due THIS month once today is past a set day. Payments due in future months are left alone.',
+    then: ['Earlier month: set its likely payment date to the 1st of THIS month. This month (after the set day): the 1st of NEXT month', 'Only when its likely date is blank or earlier than that 1st (a later likely date is kept)', 'Cash flow and Payments due move the payment to that month'],
+    fields: [{ k: 'after_day', sec: 'if', label: 'This month\'s payments move once today is after day', unit: 'of the month', dflt: 26 },
       { k: 'include_landed', sec: 'if', type: 'bool', label: 'Also freight, import duty and import tax', dflt: false }],
     dflt: { mode: 'ask', config: { after_day: 26, include_landed: false, notify: true, recipients: '', max_per_run: 50 } },
+    // v28.654 (Ben 04-Nov-26): the day test is on TODAY, not the due date. Due in an earlier month (overdue) → 1st of the current month,
+    // any day; due this month and today after the set day → 1st of next month; future months untouched. Only when the likely date is
+    // blank or before that target. Lines whose likely date is their own (a deposit's date_likely_pay) are left: a manual date would not win.
     async find(cfg) {
       const d = await cashflowResponse(await poRowsCache.get(), (sql) => pool.query(sql).then(r => r.rows));
       const after = Math.min(30, Math.max(1, Number(cfg.after_day) || 26));
-      // v28.602 (Ben): only payments due in the current month or the month before; future months are left alone.
-      const cy = +d.today.slice(0, 4), cm = +d.today.slice(5, 7), cur = d.today.slice(0, 7), prev = cm === 1 ? (cy - 1) + '-12' : cy + '-' + String(cm - 1).padStart(2, '0');
-      return (d.lines || []).filter(l => !l.paid && !l.likely_date && l.due && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || '')) && Number(l.due.slice(8, 10)) > after && (l.due.slice(0, 7) === cur || l.due.slice(0, 7) === prev)).map(l => {
-        const y = +l.due.slice(0, 4), m = +l.due.slice(5, 7), nx = m === 12 ? (y + 1) + '-01-01' : y + '-' + String(m + 1).padStart(2, '0') + '-01';
-        return { key: 'pay|' + l.key + '|' + nx, type: 'po', ref: l.ref,
-          title: l.type + ' ' + l.ref + (l.supplier ? ' (' + l.supplier + ')' : '') + ': due ' + ddMonYy(l.due) + ' → likely ' + ddMonYy(nx) + ', $' + Math.round(l.amount).toLocaleString('en-GB'),
-          detail: { line_key: l.key, type: l.type, supplier: l.supplier, amount: l.amount, old: l.due, new: nx }, autoOk: true }; });
+      const today = d.today, cy = +today.slice(0, 4), cm = +today.slice(5, 7), cur = today.slice(0, 7), c1 = cur + '-01';
+      const n1 = cm === 12 ? (cy + 1) + '-01-01' : cy + '-' + String(cm + 1).padStart(2, '0') + '-01', late = Number(today.slice(8, 10)) > after;
+      return (d.lines || []).filter(l => !l.paid && l.due && l.likely_src !== 'own' && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || ''))).map(l => {
+        const m = l.due.slice(0, 7), target = m < cur ? c1 : (m === cur && late ? n1 : null);
+        if (!target || (l.likely_date && l.likely_date >= target)) return null;
+        return { key: 'pay|' + l.key + '|' + target, type: 'po', ref: l.ref,
+          title: l.type + ' ' + l.ref + (l.supplier ? ' (' + l.supplier + ')' : '') + ': due ' + ddMonYy(l.due) + (l.likely_date ? ', likely ' + ddMonYy(l.likely_date) : '') + ' → likely ' + ddMonYy(target) + ', $' + Math.round(l.amount).toLocaleString('en-GB'),
+          detail: { line_key: l.key, type: l.type, supplier: l.supplier, amount: l.amount, old: l.likely_date || l.due, new: target }, autoOk: true }; }).filter(Boolean);
     },
     async apply(it) { const d = it.detail || {};
       await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())

@@ -21318,7 +21318,9 @@
   }
   function wfDrawer(w,t,canEdit,tab,onChange){
     var dr=document.getElementById('wf-dr'); if(!dr){ dr=document.createElement('aside'); dr.id='wf-dr'; dr.setAttribute('role','dialog'); dr.setAttribute('aria-label','Workflow'); document.body.appendChild(dr);
-      document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&dr.classList.contains('open'))dr.classList.remove('open'); }); window.addEventListener('hashchange',function(){ dr.classList.remove('open'); }); }
+      document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&dr.classList.contains('open'))dr.classList.remove('open'); }); window.addEventListener('hashchange',function(){ dr.classList.remove('open'); });
+      document.addEventListener('mousedown',function(e){ if(dr.classList.contains('open')&&!dr.contains(e.target))dr.classList.remove('open'); });   // v28.654 (Ben): a click outside the drawer closes it, not just ×
+    }
     var cfg=w.config||{}, TAB=tab||'setup', dis=canEdit?'':' disabled';
     function sec(lbl,body){ return '<section class="wf-sec"><div class="wf-sl">'+lbl+'</div>'+body+'</section>'; }
     function setup(){ var f=(t.fields||[]).filter(function(x){ return x.sec==='if'; });
