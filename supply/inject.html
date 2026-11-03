@@ -1694,6 +1694,7 @@
   function fuzzyFilt(rows,q){ var toks=String(q==null?'':q).split(/[\s,;|]+/).map(function(t){return t.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,'');}).filter(function(t){return t.length>=3;});
     if(!toks.length)return []; toks.sort(function(a,b){ var da=/\d/.test(a)?1:0, db=/\d/.test(b)?1:0; if(da!==db)return db-da; return b.length-a.length; });
     for(var i=0;i<toks.length;i++){ var m=filt(rows,toks[i]); if(m.length){ m.like=toks[i]; return m; } }
+    for(var j=0;j<toks.length;j++){ var pt=toks[j].split(/[-_\/.]/); while(pt.length>1){ pt.pop(); var t=pt.join('-'); if(t.length<3||/^po$/i.test(t))break; var mt=filt(rows,t); if(mt.length){ mt.like=t; return mt; } } }   // "PO-1881864-wer" → PO-1881864
     var dg=(String(q).match(/\d{4,}/g)||[]).sort(function(a,b){ return b.length-a.length; })[0];
     if(dg)for(var n=dg.length;n>=4;n--){ var p=dg.slice(0,n), mm=filt(rows,p); if(mm.length){ mm.like=p; mm.near=n<dg.length; return mm; } }
     return []; }
@@ -21353,7 +21354,7 @@
           body.querySelector('#wf-test').onclick=function(){ run(true); }; body.querySelector('#wf-run').onclick=function(){ run(false); }; }
         return; }
       body.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/workflows/'+w.id+'/items?state='+(TAB==='waiting'?'waiting':'all')+'&limit=200',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
+      fetch('/api/workflows/'+w.id+'/items?state='+(TAB==='waiting'?'waiting':'all')+'&limit='+(TAB==='waiting'?200:500),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
         if(j.error){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(j.error)+'</div>'; return; }
         if(TAB==='waiting'){ body.innerHTML=(canEdit&&j.items.length?'<div class="wf-btns"><label class="wf-row" style="margin:0"><input type="checkbox" id="wf-all"> All</label><span style="flex:1"></span><button id="wf-skip">Skip</button><button id="wf-ok" class="pri">Approve</button></div><div id="wf-msg" class="wf-msg"></div>':'')+itemsHtml(j.items,canEdit);
           var all=body.querySelector('#wf-all'); if(all)all.onchange=function(){ body.querySelectorAll('.wf-sel').forEach(function(x){ x.checked=all.checked; }); };
@@ -21364,9 +21365,14 @@
               var keep=m.textContent, kc=m.style.color; body.querySelectorAll('.wf-sel:checked').forEach(function(x){ var li=x.closest('li'); if(li)li.remove(); }); refresh(); m.textContent=keep; m.style.color=kc; }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=String(e.message||e); }); };
           if(canEdit&&j.items.length){ body.querySelector('#wf-ok').onclick=function(){ decide('approve'); }; body.querySelector('#wf-skip').onclick=function(){ decide('skip'); }; }
           return; }
-        body.innerHTML='<div class="wf-sl">Changes</div>'+itemsHtml(j.items.filter(function(i){ return i.state!=='waiting'; }).slice(0,100),false)
-          +'<div class="wf-sl" style="margin-top:14px">Runs</div><table class="wf-runs"><tr><th class="l">When</th><th class="l">Mode</th><th>Found</th><th>Applied</th><th>Waiting</th><th>Failed</th></tr>'
-          +j.runs.map(function(r){ return '<tr><td class="l">'+esc(fd(r.started))+' '+esc(String(r.started).slice(11))+(r.trigger==='manual'?' <span class="mut">by '+esc(r.by_user||'')+'</span>':'')+'</td><td class="l">'+esc({dry:'Dry run',ask:'Ask first',auto:'Auto'}[r.mode]||r.mode)+'</td><td>'+r.found+'</td><td>'+r.applied+'</td><td>'+r.waiting+'</td><td'+(r.error||r.failed?' class="neg"':'')+(r.error?' title="'+esc(r.error)+'"':'')+'>'+(r.error?'error':r.failed)+'</td></tr>'; }).join('')+'</table>';
+        // v28.653 (Ben: "can log just be this table but expandable to show the results"): one row per run; click a run to see its changes
+        var byRun={}; j.items.forEach(function(i){ (byRun[i.run_id]=byRun[i.run_id]||[]).push(i); });
+        body.innerHTML='<div class="wf-sl">Runs <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">· click a run to see its changes</span></div><table class="wf-runs"><tr><th class="l">When</th><th class="l">Mode</th><th>Found</th><th>Applied</th><th>Waiting</th><th>Failed</th></tr>'
+          +j.runs.map(function(r){ return '<tr class="wf-run" data-run="'+r.id+'" style="cursor:pointer"><td class="l"><span class="wf-car">▸</span> '+esc(fd(r.started))+' '+esc(String(r.started).slice(11))+(r.trigger==='manual'?' <span class="mut">by '+esc(String(r.by_user||'').split('@')[0])+'</span>':'')+'</td><td class="l">'+esc({dry:'Dry run',ask:'Ask first',auto:'Auto'}[r.mode]||r.mode)+'</td><td>'+r.found+'</td><td>'+r.applied+'</td><td>'+r.waiting+'</td><td'+(r.error||r.failed?' class="neg"':'')+(r.error?' title="'+esc(r.error)+'"':'')+'>'+(r.error?'error':r.failed)+'</td></tr>'
+            +'<tr class="wf-runx" data-run="'+r.id+'" hidden><td colspan="6" class="l">'+(r.error?'<div class="neg" style="margin:4px 0">'+esc(r.error)+'</div>':'')
+            +(Array.isArray(r.results)?(r.results.length?'<ul class="wf-items">'+r.results.map(function(x){ return '<li><div><div class="wf-it">'+esc(x.t)+'</div><div class="wf-im"><span class="wf-s wf-s-'+esc(x.s)+'">'+esc(x.s)+'</span>'+(x.r?' · '+esc(x.r):'')+'</div></div></li>'; }).join('')+'</ul>':'<p class="mut" style="padding:6px 0;margin:0">Nothing found.</p>')
+              :(byRun[r.id]||[]).length?itemsHtml(byRun[r.id],false):'<p class="mut" style="padding:6px 0;margin:0">'+(r.found?'No detail kept for this run (runs before 04-Nov-26 only list changes it raised first).':'Nothing found.')+'</p>')+'</td></tr>'; }).join('')+'</table>';
+        body.querySelectorAll('tr.wf-run').forEach(function(tr){ tr.onclick=function(){ var x=body.querySelector('tr.wf-runx[data-run="'+tr.getAttribute('data-run')+'"]'); if(!x)return; x.hidden=!x.hidden; var c=tr.querySelector('.wf-car'); if(c)c.textContent=x.hidden?'▸':'▾'; }; });
       }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; });
     }
     function refresh(note,lines,found){ fetch('/api/workflows',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ var n=(d.workflows||[]).filter(function(x){ return x.id===w.id; })[0]; if(n){ w=n; cfg=w.config||{}; } if(typeof note==='string'&&TAB==='setup'){ draw(); var m=dr.querySelector('#wf-msg'); if(m){ m.textContent=note; if(lines&&lines.length){ var ul=document.createElement('ul'); ul.className='wf-dry'; lines.forEach(function(t){ var li=document.createElement('li'); li.textContent=t; ul.appendChild(li); }); if(found>lines.length){ var mo=document.createElement('li'); mo.className='mut'; mo.textContent='+ '+(found-lines.length)+' more'; ul.appendChild(mo); } m.appendChild(ul); } } } else if(TAB!=='waiting')draw(); else { var t=dr.querySelector('.wf-tabs button[data-tab="waiting"]'); if(t)t.textContent='Waiting'+(w.waiting?' ('+w.waiting+')':''); } if(onChange)onChange(); }).catch(function(){}); }

@@ -1,3 +1,10 @@
+## v28.653 (04-Nov-26) Workflows: Fulfil date write uses the linked Fulfil PO; Log = expandable runs; PO search strips "-suffix"
+- Ben: "Completion date moved → update Fulfil" failed 31 POs with "not in Fulfil" (e.g. PO-1842654, linked to Fulfil PO378). The Fulfil date write looked the PO up by Fulfil reference only. It now uses the PO's linked Fulfil PO first, then the Fulfil mirror, then a Fulfil PO numbered or referenced like the HORIZON PO (shared helper fulfilPoIdFor, also used by Update ERP since v28.538). All 31 resolve on live (27 hand links, 4 mirror).
+- A failed change that is still found comes back to Waiting on the next run in Ask first mode (Auto leaves it failed, so a lasting error is not retried every hour).
+- Log tab: just the Runs table; click a run to expand the changes it found and what happened to each (dry / waiting / applied / failed, with the Fulfil result or error). Each run now stores its results: migration 412_workflow_run_results.sql (workflow_runs.results jsonb). Runs before it show the changes they first raised. Run "by" shows the name only.
+- PO grid search: "PO-1881864-wer", "PO-1881864.wer", "PO-56UKLX3-AIR-old" find the PO (trailing "-part"s dropped one at a time before the number fallback).
+- Migration 412 (apply on live). No new env var, no new cron route.
+
 ## v28.652 (04-Nov-26) PO grid search: punctuation ignored, close numbers shown
 - Ben: searching "PO-1881864:" showed nothing. Punctuation at either end of a search is now ignored ("PO-1881864:", "PO-1881864." or a quoted PO find it), here and in Shipments. When nothing matches exactly, the PO grid tries each word without its punctuation, then the longest number, shortened a digit at a time down to 4 digits, so near numbers show (e.g. PO-1881866 lists PO-1881862 / 64 / 65). A note above the grid says when it is showing close matches. No migration.
 
