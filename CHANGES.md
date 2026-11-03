@@ -1,3 +1,6 @@
+## v28.659 (04-Nov-26) Supplier portal shipment: Flexport container number, B/L and dates
+- Ben: "include flexport container number if available". The PO > SHIPMENT tab (section 1) and the pallet labels show the Flexport container number(s) when Flexport has them, plus the bill of lading on the tab; the ship date and ETA fall back to Flexport's departure / arrival when the shipment row has none (PO-56UKXR1: 20-Jun-26 / 19-Aug-26, B/L MEDUXV400817; no container number in Flexport yet). Read from flexport_shipments_effective by the shipment's carrier ref or name. No migration.
+
 ## v28.658 (04-Nov-26) Admin PO > Shipments shows its charges (and the add form) when opened on that tab; pallet label layout
 - Ben: PO-56UKXR1 opened at #/supply/purchase-orders/PO-56UKXR1/shipments showed no charges and no way to add one. The charges (list, Accept / bill / reject and the add-charge form for any supplier) loaded only on a CLICK of the Shipments tab, so a PO opened straight onto that tab never loaded them. They now load as soon as that tab is the one showing.
 - Ben: pallet labels: the shipment number is the focus (large, centred, under "SHIPMENT"); "Pallet 3 of 4" is smaller with a lower-case "of"; the row below says MASTER PO. No migration.

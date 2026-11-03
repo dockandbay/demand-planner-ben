@@ -24703,6 +24703,11 @@ async function portalPoShipment(req, po) {
     FROM planner.shipments s WHERE s.shipment_ref=$1`, [p.ref])).rows[0] || { shipment_ref: p.ref, master_po: '' };
   const members = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status, ${PO_PALLETS_SQL} est_pallets, p.pallets_override, coalesce(p.branch,'') branch
     FROM planner.purchase_orders p WHERE p.shipment_ref=$1 ORDER BY p.po`, [p.ref])).rows;
+  // v28.658 (Ben: "include flexport container number if available"): the Flexport booking (by the shipment's carrier ref / the shipment name)
+  // gives the container number(s), the bill of lading and the real dates when the shipment row has none.
+  const fx = (await pool.query(`SELECT coalesce(container_numbers,'') containers, coalesce(mbl_number,'') mbl, departure_date::text dep, arrival_date::text arr
+      FROM planner.flexport_shipments_effective WHERE flex_id = nullif($1,'') OR shipment_name = $2 ORDER BY (flex_id = nullif($1,'')) DESC LIMIT 1`, [String(sh.carrier_ref || ''), p.ref]).catch(() => ({ rows: [] }))).rows[0] || null;
+  if (fx) { sh.containers = fx.containers || ''; sh.mbl = fx.mbl || ''; if (!sh.departure && fx.dep) sh.departure = String(fx.dep).slice(0, 10); if (!sh.arrival && fx.arr) sh.arrival = String(fx.arr).slice(0, 10); }
   const master = sh.master_po || (members.some(m => m.po === p.ref) ? p.ref : '');
   const mine = new Set((req.portal.suppliers || []).map(x => String(x)));
   const rows = members.map(m => ({ po: m.po, supplier: m.supplier, status: m.status, est_pallets: m.pallets_override != null ? Number(m.pallets_override) : Number(m.est_pallets) || 0, is_master: m.po === master, mine: mine.has(m.supplier) }))
