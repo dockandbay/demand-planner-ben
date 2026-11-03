@@ -27434,7 +27434,7 @@ const _wfShift = n => n == null ? '' : ' (' + (n > 0 ? '+' : '') + n + ' day' + 
 const WF_TEMPLATES = {
   supplier_completion: {
     order: 1, area: 'Supply', name: 'Supplier completion date → PO production end',
-    when: 'A supplier enters a new completion date for a PO in the supplier portal.',
+    when: 'A supplier enters a new completion date for a PO in the supplier portal (not once the PO is shipping, shipped to master, delivered or complete).',
     then: ['Set the PO\'s production end to the supplier\'s date (the same as pressing Apply on the submission)', 'Logged on the PO timeline'],
     fields: [{ k: 'max_shift_days', sec: 'if', label: 'In Auto, apply on its own only if the date moves by at most', unit: 'days', dflt: 14 }],
     dflt: { mode: 'ask', config: { max_shift_days: 14, notify: true, recipients: '', max_per_run: 50 } },
@@ -27443,7 +27443,9 @@ const WF_TEMPLATES = {
           to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') cur_end,
           coalesce(p.supplier_name, sup.name, '') supplier
         FROM planner.supplier_submissions s JOIN planner.purchase_orders p ON p.po=s.po LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
-        WHERE s.kind='completion_date' AND s.status='pending' AND s.value ~ '^\\d{4}-\\d{2}-\\d{2}' ORDER BY s.submitted_at`)).rows;
+        WHERE s.kind='completion_date' AND s.status='pending' AND s.value ~ '^\\d{4}-\\d{2}-\\d{2}'
+          AND upper(coalesce(p.status,'')) NOT IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE','CANCELLED')   -- v28.656 (Ben): not once shipped or complete
+        ORDER BY s.submitted_at`)).rows;
       const max = Number(cfg.max_shift_days); 
       return rows.map(r => { const shift = _wfDays(r.cur_end, String(r.value).slice(0, 10));
         return { key: 'sub|' + r.id, type: 'po', ref: r.po,
@@ -27479,7 +27481,7 @@ const WF_TEMPLATES = {
   // v28.601 (Ben): payments due late in the month are paid in the next month's first run, so set the cash-flow likely date to the 1st.
   pay_month_end: {
     order: 3, area: 'Supply', name: 'Payment due late in the month → likely date the 1st',
-    when: 'An unpaid supplier payment (deposit, completion, balance) is due in an EARLIER month (checked every day), or is due THIS month once today is past a set day. Payments due in future months are left alone.',
+    when: 'An unpaid supplier completion or balance payment (never the starting deposit) is due in an EARLIER month (checked every day), or is due THIS month once today is past a set day. Payments due in future months are left alone.',
     then: ['Earlier month: set its likely payment date to the 1st of THIS month. This month (after the set day): the 1st of NEXT month', 'Only when its likely date is blank or earlier than that 1st (a later likely date is kept)', 'Cash flow and Payments due move the payment to that month'],
     fields: [{ k: 'after_day', sec: 'if', label: 'This month\'s payments move once today is after day', unit: 'of the month', dflt: 26 },
       { k: 'include_landed', sec: 'if', type: 'bool', label: 'Also freight, import duty and import tax', dflt: false }],
@@ -27492,7 +27494,7 @@ const WF_TEMPLATES = {
       const after = Math.min(30, Math.max(1, Number(cfg.after_day) || 26));
       const today = d.today, cy = +today.slice(0, 4), cm = +today.slice(5, 7), cur = today.slice(0, 7), c1 = cur + '-01';
       const n1 = cm === 12 ? (cy + 1) + '-01-01' : cy + '-' + String(cm + 1).padStart(2, '0') + '-01', late = Number(today.slice(8, 10)) > after;
-      return (d.lines || []).filter(l => !l.paid && l.due && l.likely_src !== 'own' && (cfg.include_landed || /^(Deposit|Completion|Balance)/.test(l.type || ''))).map(l => {
+      return (d.lines || []).filter(l => !l.paid && l.due && l.likely_src !== 'own' && !/^Deposit/i.test(l.type || '') && (cfg.include_landed || /^(Completion|Balance)/.test(l.type || ''))).map(l => {   // v28.656 (Ben): starting deposits never move
         const m = l.due.slice(0, 7), target = m < cur ? c1 : (m === cur && late ? n1 : null);
         if (!target || (l.likely_date && l.likely_date >= target)) return null;
         return { key: 'pay|' + l.key + '|' + target, type: 'po', ref: l.ref,
@@ -27575,14 +27577,14 @@ async function wfRun(wf, opts) {
           RETURNING id`, [wf.id, run, f.key, f.type || null, f.ref || null, String(f.title || '').slice(0, 500), JSON.stringify(det), st, mode === 'ask'])).rows[0];
       if (r && st === 'waiting' && before[f.key] !== 'waiting') fresh.push(r.id);   // new to waiting this run (first seen, or was dry / superseded): only these notify
       if (out.items.length < 50) out.items.push({ ref: f.ref, title: f.title, auto_ok: f.autoOk !== false });
-      if (resl.length < 500) resl.push({ t: String(f.title || '').slice(0, 300), s: st });   // v28.653 run results for the Log tab
+      if (resl.length < 500) resl.push({ t: String(f.title || '').slice(0, 300), s: st, ref: f.ref || null, rt: f.type || null, is: (f.detail && f.detail.is_id) || null });   // v28.653 run results for the Log tab (v28.656 + record for links)
     }
     const appliedNow = [];
     if (mode === 'auto') {
       const cap = Math.max(0, Math.min(500, parseInt(cfg.max_per_run, 10) || 20));
       const waiting = (await pool.query(`SELECT * FROM planner.workflow_items WHERE workflow_id=$1 AND state='waiting' AND coalesce((detail->>'auto_ok')::boolean, true) ORDER BY created_at, id LIMIT $2`, [wf.id, cap])).rows;
       for (const it of waiting) { const r = await wfApplyItem(wf, it, by); if (r.ok) { out.applied++; appliedNow.push(it); } else out.failed++;
-        let e = resl.find(x => x.t === String(it.title || '').slice(0, 300)); if (!e && resl.length < 500) { e = { t: String(it.title || '').slice(0, 300) }; resl.push(e); }
+        let e = resl.find(x => x.t === String(it.title || '').slice(0, 300)); if (!e && resl.length < 500) { e = { t: String(it.title || '').slice(0, 300), ref: it.record_ref || null, rt: it.record_type || null, is: (it.detail && it.detail.is_id) || null }; resl.push(e); }
         if (e) { e.s = r.ok ? 'applied' : 'failed'; e.r = String((r.ok ? r.result : r.error) || '').slice(0, 300); } }
     }
     out.waiting = Number((await pool.query(`SELECT count(*) n FROM planner.workflow_items WHERE workflow_id=$1 AND state='waiting'`, [wf.id])).rows[0].n);
@@ -27631,7 +27633,12 @@ app.get('/api/workflows/:id/items', async (req, res) => {   // ?state=waiting|ap
       FROM planner.workflow_items WHERE workflow_id=$1 ${st === 'all' ? '' : 'AND state=$3'} ORDER BY coalesce(decided_at, created_at) DESC, id DESC LIMIT $2`, st === 'all' ? [req.params.id, lim] : [req.params.id, lim, st])).rows;
     const runs = (await pool.query(`SELECT id, trigger, mode, by_user, found, applied, waiting, failed, error, to_jsonb(r)->'results' results, to_char(started_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') started
       FROM planner.workflow_runs r WHERE workflow_id=$1 ORDER BY started_at DESC LIMIT 30`, [req.params.id])).rows;
-    res.set('Cache-Control', 'no-store').json({ items: rows, runs }); }
+    // v28.656 (Ben: "can the log link to the fulfil and horizon orders"): Fulfil PO ids for the POs in this page (hand link, else mirror)
+    const refs = new Set(); rows.forEach(r => { if (r.record_type === 'po' && r.record_ref) refs.add(r.record_ref); }); runs.forEach(r => (Array.isArray(r.results) ? r.results : []).forEach(x => { if (x.rt === 'po' && x.ref) refs.add(x.ref); }));
+    const fpo = {}; if (refs.size) (await pool.query(`SELECT DISTINCT ON (po) po, external_id FROM (SELECT po, external_id, 1 pri FROM planner.po_links WHERE po = ANY($1) AND system='fulfil' AND status='linked' AND found_by='manual' AND coalesce(external_id,'') ~ '^[0-9]+$'
+        UNION ALL SELECT po, fulfil_id::text, 2 FROM planner.fulfil_purchase_orders WHERE po = ANY($1) AND coalesce(state,'') NOT IN ('cancel','cancelled')) t ORDER BY po, pri`, [[...refs]]).catch(() => ({ rows: [] }))).rows.forEach(r => { fpo[r.po] = Number(r.external_id); });
+    let fbase = null; try { const fc = fulfilConfigFor(await activeFulfilEnv()); if (fc.subdomain) fbase = 'https://' + fc.subdomain + '.fulfil.io/v2/erp/model/'; } catch (_) {}
+    res.set('Cache-Control', 'no-store').json({ items: rows, runs, fulfil_po: fpo, fulfil_base: fbase }); }
   catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/workflows/:id', async (req, res) => {   // admin: name, enabled, mode, config (merged over the template defaults)

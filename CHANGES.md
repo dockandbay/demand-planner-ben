@@ -1,3 +1,8 @@
+## v28.656 (04-Nov-26) Workflows: starting deposits never move; supplier dates skip shipped / complete POs; Log links to HORIZON and Fulfil
+- Ben: "move payments should exclude starting deposits". Deposit lines are never moved; the workflow moves completion and balance payments (plus freight, import duty and import tax when "Also freight..." is ticked). No migration.
+- Ben: "Supplier completion date → PO production end": not for POs that are shipping, shipped to master, delivered, complete or cancelled (a pending submission on one of those is no longer raised; one already waiting is superseded on the next run).
+- Ben: "can the log link to the fulfil and horizon orders (drawer)": each change in an expanded run links to the HORIZON PO (PO ▸ opens the PO) or shipment drawer, and to the Fulfil PO / internal shipment (Fulfil ↗; the PO's hand link, else the Fulfil mirror). Runs keep the record (ref, type, IS id) from now on; older runs link from their raised changes.
+
 ## v28.655 (04-Nov-26) Global search: same close-match logic as the PO grid
 - Ben: "global search should have the same fuzzy logic". The ⌘K search ignores punctuation at either end ("PO-1881864:"). When nothing matches it tries each word (PO-like first), then the word with trailing "-part"s dropped ("PO-1881864-wer" → PO-1881864), then the longest number shortened a digit at a time down to 4 ("PO-1881866" → PO-1881862 / 64 / 65). A note at the top says when results are close matches. Server: hzSearchCore(q) + /api/hz-search retries (at most 12 tries, only when the first search finds nothing). No migration.
 
