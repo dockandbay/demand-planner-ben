@@ -239,6 +239,7 @@
 .wf-seg button{font:inherit;font-size:12px;font-weight:600;border:0;border-right:1px solid var(--line);background:var(--card);color:var(--muted);padding:5px 12px;cursor:pointer}.wf-seg button:last-child{border-right:0}
 .wf-seg button.on{background:var(--ink);color:var(--card)}
 .wf-msg{font-size:12px;color:var(--muted);min-height:16px}
+.wf-dry{margin:6px 0 0;padding-left:18px;max-height:320px;overflow:auto;color:var(--ink)}.wf-dry li{margin:2px 0;line-height:1.4}
 .wf-items{list-style:none;margin:0;padding:0}.wf-items li{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line2,var(--line))}
 .wf-it{font-size:12.5px;font-weight:600}.wf-im{font-size:11.5px;color:var(--muted);margin-top:2px}.wf-im .amb{color:var(--amber);font-weight:600}
 .wf-s{font-size:10.5px;font-weight:700;border-radius:4px;padding:1px 6px;background:var(--hover);color:var(--muted);text-transform:capitalize}
@@ -21341,8 +21342,8 @@
           body.querySelectorAll('.wf-f').forEach(function(x){ c[x.getAttribute('data-k')]=x.getAttribute('data-t')==='bool'?x.checked:x.value; }); return {enabled:body.querySelector('#wf-on').checked,mode:MODE,config:c}; };
         var save=function(){ return fetch('/api/workflows/'+w.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(collect())}).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error); return j; }); };
         var run=function(dry){ msg(dry?'Testing…':'Running…'); save().then(function(){ return fetch('/api/workflows/'+w.id+'/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dry:dry})}); }).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error);
-            var _t=((dry?'Dry run: found '+j.found+' change'+(j.found===1?'':'s')+' (nothing written).':'Found '+j.found+': '+j.applied+' applied, '+j.new_waiting+' new waiting, '+j.waiting+' waiting in total'+(j.failed?', '+j.failed+' failed':'')+'.')+(j.items&&j.items.length?' e.g. '+j.items.slice(0,3).map(function(i){ return i.title; }).join(' · '):''));
-            refresh(_t); }).catch(function(e){ msg(String(e.message||e),true); }); };
+            var _t=(dry?'Dry run: found '+j.found+' change'+(j.found===1?'':'s')+' (nothing written)'+(j.found?':':'.'):'Found '+j.found+': '+j.applied+' applied, '+j.new_waiting+' new waiting, '+j.waiting+' waiting in total'+(j.failed?', '+j.failed+' failed':'')+(j.found?':':'.'));
+            refresh(_t,(j.items||[]).map(function(i){ return i.title; }),j.found); /* v28.651 (Ben): one line per change, not "e.g." in a sentence */ }).catch(function(e){ msg(String(e.message||e),true); }); };
         if(canEdit){ body.querySelector('#wf-save').onclick=function(){ msg('Saving…'); save().then(function(){ refresh('Saved.'); }).catch(function(e){ msg(String(e.message||e),true); }); };
           body.querySelector('#wf-test').onclick=function(){ run(true); }; body.querySelector('#wf-run').onclick=function(){ run(false); }; }
         return; }
@@ -21363,7 +21364,7 @@
           +j.runs.map(function(r){ return '<tr><td class="l">'+esc(fd(r.started))+' '+esc(String(r.started).slice(11))+(r.trigger==='manual'?' <span class="mut">by '+esc(r.by_user||'')+'</span>':'')+'</td><td class="l">'+esc({dry:'Dry run',ask:'Ask first',auto:'Auto'}[r.mode]||r.mode)+'</td><td>'+r.found+'</td><td>'+r.applied+'</td><td>'+r.waiting+'</td><td'+(r.error||r.failed?' class="neg"':'')+(r.error?' title="'+esc(r.error)+'"':'')+'>'+(r.error?'error':r.failed)+'</td></tr>'; }).join('')+'</table>';
       }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; });
     }
-    function refresh(note){ fetch('/api/workflows',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ var n=(d.workflows||[]).filter(function(x){ return x.id===w.id; })[0]; if(n){ w=n; cfg=w.config||{}; } if(typeof note==='string'&&TAB==='setup'){ draw(); var m=dr.querySelector('#wf-msg'); if(m)m.textContent=note; } else if(TAB!=='waiting')draw(); else { var t=dr.querySelector('.wf-tabs button[data-tab="waiting"]'); if(t)t.textContent='Waiting'+(w.waiting?' ('+w.waiting+')':''); } if(onChange)onChange(); }).catch(function(){}); }
+    function refresh(note,lines,found){ fetch('/api/workflows',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ var n=(d.workflows||[]).filter(function(x){ return x.id===w.id; })[0]; if(n){ w=n; cfg=w.config||{}; } if(typeof note==='string'&&TAB==='setup'){ draw(); var m=dr.querySelector('#wf-msg'); if(m){ m.textContent=note; if(lines&&lines.length){ var ul=document.createElement('ul'); ul.className='wf-dry'; lines.forEach(function(t){ var li=document.createElement('li'); li.textContent=t; ul.appendChild(li); }); if(found>lines.length){ var mo=document.createElement('li'); mo.className='mut'; mo.textContent='+ '+(found-lines.length)+' more'; ul.appendChild(mo); } m.appendChild(ul); } } } else if(TAB!=='waiting')draw(); else { var t=dr.querySelector('.wf-tabs button[data-tab="waiting"]'); if(t)t.textContent='Waiting'+(w.waiting?' ('+w.waiting+')':''); } if(onChange)onChange(); }).catch(function(){}); }
     draw(); void dr.offsetWidth; dr.classList.add('open');   // reflow first so it slides in (rAF stalls in a background tab)
   }
   function renderHome(){ var r=document.getElementById('home-root'); if(!r||r.style.display==='none')return;

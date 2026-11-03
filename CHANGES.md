@@ -1,3 +1,6 @@
+## v28.651 (04-Nov-26) Workflows: run results list every change on its own line
+- Ben: "dry run is hard to read, note changes on individual lines". Run now and Run now (dry run) on CONFIG > Admin > Workflows show the summary, then one line per change (all of them, up to the 50 the run returns, then "+ N more"), instead of three examples run together after "e.g.". Same for a real run. No migration, no new env var, no new cron route.
+
 ## v28.650 (03-Nov-26) Commissions: Key Accounts and Custom/Co-Brand channels
 - Ben: "comission engine should also look at the key accounts and custom channels". The engine now also reads Fulfil customer invoices on any Key Accounts or Custom/Co-Brand channel (UK / US / EU / AU), as well as WS-, Faire and Markettime. Key-account and co-brand cash is mostly matched in Xero (already counted for customers in an agent's Xero group), so this only adds payments recorded in Fulfil. Oct-26 on live: 105 invoices read (was 89), same rows and exceptions. No migration, no new env var, no new cron route.
 
