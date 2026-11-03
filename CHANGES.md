@@ -1,3 +1,7 @@
+## v28.641 (03-Nov-26) Amounts accept commas and currency marks; Payments Report shows the payment reference
+- Ben: typing "22,890.00" into a deposit amount showed NaN. Any editable amount now strips thousands commas, currency symbols and ISO codes before saving ("$22,890.00", "USD 22,890", "A$3,834" save as plain numbers; "(1,200)" = -1200). Done in the browser (so the cell shows the clean number at once) and on the server for every numeric field saved through the shared patch (hzNumClean). Text that isn't a number is left as typed.
+- Ben: Payments Report expand view shows "Supplier bill payment reference: SUPPLIER-PAYMENT-<CODE>-<date>" above "Payments in this run (N)", on desktop and mobile. No migration.
+
 ## v28.640 (03-Nov-26) Deposits: + Deposit is a blue button at the left of the toolbar
 - Ben: the + Deposit button on PRODUCTIONS > Deposits (and the SUPPLY Deposits list) now sits first in the toolbar, left of the filters, in the blue primary style. No other change. No migration.
 

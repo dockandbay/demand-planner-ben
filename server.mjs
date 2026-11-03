@@ -13671,14 +13671,18 @@ function _patchScope(table, body) {
   if (table === 'planner.deposits' && 'supplier_name' in body) return 'all';   // the deposit route may have added a new supplier to the master
   return PATCH_CACHE_SCOPE[table] || 'all';
 }
+// v28.641: strip thousands commas, currency symbols and ISO codes from a typed amount; "(1,234)" = -1234. Unparseable text is left as typed so the DB rejects it.
+function hzNumClean(v) { const t = String(v).trim(); if (t === '') return '';
+  const neg = /^\(.*\)$/.test(t); const c = t.replace(/[()\s,]/g, '').replace(/^(?:[A-Z]{3})?[$£€¥]?|(?:[A-Z]{3})$/g, '').replace(/^([A-Z]{1,2})\$/, '').replace(/[$£€¥]/g, '');
+  return /^-?\d*\.?\d+$/.test(c) ? (neg && c[0] !== '-' ? '-' + c : c) : t; }
 async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn) {
   const sets = [], vals = []; let i = 1;
   for (const k of Object.keys(body || {})) {
     if (!allowed[k]) continue;
     sets.push(`${k}=$${i++}::${allowed[k]}`);
     let _v = body[k] === '' ? null : body[k];
-    // numeric fields: tolerate thousands separators ("2,192.25" → "2192.25") so a comma-formatted amount saves
-    if (allowed[k] === 'numeric' && typeof _v === 'string') { _v = _v.replace(/,/g, '').trim(); if (_v === '') _v = null; }
+    // numeric fields: tolerate thousands separators and currency marks ("2,192.25", "$2,192.25", "USD 2,192.25" → "2192.25")
+    if (allowed[k] === 'numeric' && typeof _v === 'string') { _v = hzNumClean(_v); if (_v === '') _v = null; }
     vals.push(_v);
   }
   if (!sets.length) return res.status(400).json({ error: 'no editable fields' });

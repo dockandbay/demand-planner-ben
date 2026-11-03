@@ -1816,7 +1816,13 @@
     if(fld==='mode'){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[val]; el.style.background=col?col[0]:''; el.style.color=col?col[1]:''; el.style.borderColor=col?col[0]:''; return; }
     if(fld==='status'){ var SHIP_PAL={Planned:['#fef3c7','#92710a'],Shipping:['#dcfce7','#15803d'],Completed:['#dbeafe','#1d4ed8']};   // shipment palette (title-case) ▸ PO palette (upper)
       var bg=SHIP_PAL[val]||PO_STATUS_BG[String(val||'').toUpperCase()]; if(bg){ el.style.background=bg[0]; el.style.color=bg[1]; el.style.borderColor=bg[0]; } } }
+  // v28.641 (Ben: "22,890.00" saved but showed NaN): a typed amount with thousands commas, a currency symbol or ISO code
+  // ("$22,890.00", "USD 22,890", "A$3,834") becomes a plain number before it saves; other text is left alone.
+  function hzNumClean(v){ var t=String(v==null?'':v).trim(); if(!t||!/[,$£€¥]|^[A-Z]{3}\s|\s[A-Z]{3}$|^\(.*\)$/.test(t))return v;
+    var neg=/^\(.*\)$/.test(t), c=t.replace(/[()\s]/g,'').replace(/^(?:[A-Z]{3})?(?:[A-Z]{1,2})?[$£€¥]?|(?:[A-Z]{3})$/g,'').replace(/[$£€¥]/g,'');
+    if(!/^-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(c))return v; c=c.replace(/,/g,''); return (neg&&c[0]!=='-')?'-'+c:c; }
   function bindEdits(){ document.querySelectorAll('#supply-root .fci[data-ep]').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
+    if(inp.tagName==='INPUT'&&inp.type!=='checkbox'&&!inp.classList.contains('txt')&&!inp.classList.contains('dateinp')){ var _nc=hzNumClean(inp.value); if(_nc!==inp.value)inp.value=_nc; }
     // text date field: resolve any typed/pasted format to ISO (yyyy-mm-dd) before saving; block invalid input
     if(inp.classList.contains('dateinp')){ var raw=(inp.value||'').trim();
       if(raw){ var iso=parseDateLoose(raw); if(!iso){ inp.classList.add('err'); return; } inp.value=iso; } inp.classList.remove('err'); }
@@ -13523,6 +13529,9 @@
   // master row = one bank payment (date + supplier): base (USD) total + actual bank amount/currency.
   // expand to see the sub-payments (reference · amount · type · deposit ref).
   // mobile: one card per payment run (same pfx inputs / Paid-USD / remittance / notify / expand — bindPayFx attaches by class)
+  // v28.641 (Ben): the run's supplier bill payment reference (the Xero SUPPLIER-PAYMENT bill number) above its payment lines
+  function payRefLine(r){ var ref='SUPPLIER-PAYMENT-'+(r.supplier_code?r.supplier_code+'-':'')+r.dt;
+    return '<div style="font-size:11px;margin:2px 0 4px"><span class="mut">Supplier bill payment reference:</span> <b style="font-variant-numeric:tabular-nums;user-select:all">'+esc(ref)+'</b></div>'; }
   function payReportCards(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();
     var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
@@ -13546,7 +13555,7 @@
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'">'+esc(l.deposit_ref)+'</button>' : '—';
         return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
-      var det='<div id="payexp-'+i+'" style="display:'+(_poHit?'block':'none')+';margin-top:8px;border-top:1px solid var(--line);padding-top:6px"><div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
+      var det='<div id="payexp-'+i+'" style="display:'+(_poHit?'block':'none')+';margin-top:8px;border-top:1px solid var(--line);padding-top:6px">'+payRefLine(r)+'<div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -13592,7 +13601,7 @@
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:'+(_poHit?'':'none')+'"><td colspan="9"><div style="padding:2px">'
-        +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
+        +payRefLine(r)+'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
