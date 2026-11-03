@@ -1,3 +1,7 @@
+## v28.631 (03-Nov-26) Deposit credit note: detect a deposit already settled in Xero
+- The PO "Create deposit credit note" button first reads the PO bill in Xero. If the bill already has a payment from the Stock Deposits account (602, the old way) or a credit note applied, the button is replaced by "✓ Deposit already settled in Xero: payment from 602 Stock Deposits (ref …) amount on date", plus an amber warning when that amount differs from HORIZON's starting deposit. PO-57AUBL1: 3,834.00 from 602 (ref P57-AU-BL1, 23-Oct-26) vs HORIZON 3,009.60.
+- Costs 1 Xero read per bill (plus up to 3 payment reads), cached 6h, only when the button would otherwise show. No migration.
+
 ## v28.630 (03-Nov-26) Payments Report: ▸ expand button back
 - v28.628 removed the ▸ expand button with the Xero buttons; Ben wants it kept. Rows show ▸ + the copy email button; clicking the row still toggles too. Client only.
 

@@ -10100,6 +10100,31 @@ const AU_CN_FROM = '2026-10-01';   // v28.293 (Ben 12-Oct-26): "anything dated o
 const _prodNum = pn => { const m = /(\d+)/.exec(String(pn || '')); return m ? parseInt(m[1], 10) : null; };
 // v28.290 (Ben 12-Oct-26): the deposit credit note from the PO itself (PO drawer and PLAN > PO > Payments), not only Xero payments > Exceptions.
 // Status only, no Xero call: is the PO on the credit-note route (AU always, UK from P58), is there a starting deposit, a linked Xero bill, a credit note already.
+// Xero check behind the deposit credit-note button: 1 call reads the bill (Payments + CreditNotes); a payment within 0.5% of the deposit
+// costs 1 more call to read its account. Cached 6h per bill + amount (Xero's daily allowance is shared with live). Returns null when nothing matches.
+const _depCnXeroCache = new Map();
+async function _depCnSettledInXero(region, billId, amount) {
+  const k = region + '|' + billId + '|' + amount, c = _depCnXeroCache.get(k);
+  if (c && Date.now() - c.at < 6 * 3600000) return c.v;
+  const near = x => Math.abs((Number(x) || 0) - amount) <= Math.max(0.01, amount * 0.005);
+  const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + billId); const inv = bi && bi.Invoices && bi.Invoices[0];
+  let v = null;
+  if (inv) {
+    const cn = (inv.CreditNotes || [])[0];   // any credit note applied to the PO bill in Xero settles the deposit (amount compared below)
+    if (cn) v = { kind: 'credit_note', ref: cn.CreditNoteNumber || '', amount: Number(cn.AppliedAmount != null ? cn.AppliedAmount : cn.Total) || 0, date: _xDate(cn.DateString || cn.Date) };
+    if (!v) {
+      const cfg = await _xeroFinanceCfg(); const sd = String((((cfg.accounts && cfg.accounts[region]) || {}).stock_deposits || {}).code || '602');
+      // the old way: a payment on the bill FROM the Stock Deposits account (e.g. PO-57AUBL1: 3,834 from 602, ref P57-AU-BL1). Any amount;
+      // closest to the deposit first, at most 3 reads.
+      for (const pmt of (inv.Payments || []).slice().sort((a, b) => Math.abs(a.Amount - amount) - Math.abs(b.Amount - amount)).slice(0, 3)) {
+        const pj = await xeroFetch(region, '/api.xro/2.0/Payments/' + pmt.PaymentID); const pp = pj && pj.Payments && pj.Payments[0];
+        if (pp && pp.Account && String(pp.Account.Code || '') === sd && String(pp.Status || '').toUpperCase() !== 'DELETED') { v = { kind: 'payment', account: sd + ' ' + (pp.Account.Name || 'Stock Deposits'), ref: pp.Reference || '', amount: Number(pp.Amount) || 0, date: _xDate(pp.DateString || pp.Date) }; break; }
+      }
+    }
+  }
+  if (v) { v.diff = Math.round((v.amount - amount) * 100) / 100; if (near(v.amount)) v.diff = 0; }   // ≠ 0 → Xero settled a different amount than HORIZON's deposit
+  _depCnXeroCache.set(k, { at: Date.now(), v }); return v;
+}
 app.get('/api/supply/xero/deposit-credit-note/status', async (req, res) => {
   try { const po = String(req.query.po || '');
     const r = (await pool.query(`SELECT p.po, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch, coalesce(p.prod_no,'') prod_no, coalesce(p.pay_start_deposit_assigned,0)::float8 dep, coalesce(p.deposit_ref,'') deposit_ref, to_char(p.pay_start_deposit_date,'YYYY-MM-DD') dep_date,
@@ -10112,7 +10137,10 @@ app.get('/api/supply/xero/deposit-credit-note/status', async (req, res) => {
     const region = _poXeroRegion(r.cc, r.branch), pn = _prodNum(r.prod_no), auNew = region === 'au' && !!r.dep_date && r.dep_date >= AU_CN_FROM, route = auNew || (region !== 'au' && pn != null && pn >= 58), amount = Math.round(r.dep * 100) / 100;
     const out = { po, region, route, amount, deposit_ref: r.deposit_ref, bill: r.bill ? Object.assign(r.bill, { url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill.id }) : null, credit_note: r.cn || null, queued: !!r.queued };
     out.can_create = !!(route && amount > 0.009 && r.bill && !r.cn && !r.queued);
-    out.reason = !route ? (region === 'au' ? 'Drawn down before 01-Oct-26 (settled in Xero UK, before the AU deposits moved to Xero AU)' : 'Draws down the old way (UK before P58)') : !(amount > 0.009) ? 'No starting deposit assigned' : r.cn ? null : r.queued ? 'Queued in Xero payments' : !r.bill ? 'Link the Xero bill first (Linked records)' : null;
+    // v28.631 (Ben, PO-57AUBL1): before offering the button, look at the PO bill in Xero. A payment for the deposit amount from the
+    // Stock Deposits account (602), or a credit note applied in Xero directly, already settles the deposit: show that instead.
+    if (out.can_create) { try { const hit = await _depCnSettledInXero(region, r.bill.id, amount); if (hit) { out.can_create = false; out.settled = hit; } } catch (e) { /* Xero unreadable → button as before */ } }
+    out.reason = out.settled ? null : !route ? (region === 'au' ? 'Drawn down before 01-Oct-26 (settled in Xero UK, before the AU deposits moved to Xero AU)' : 'Draws down the old way (UK before P58)') : !(amount > 0.009) ? 'No starting deposit assigned' : r.cn ? null : r.queued ? 'Queued in Xero payments' : !r.bill ? 'Link the Xero bill first (Linked records)' : null;
     res.set('Cache-Control', 'no-store').json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
