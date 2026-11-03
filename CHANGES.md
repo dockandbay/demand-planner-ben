@@ -1,3 +1,6 @@
+## v28.635 (03-Nov-26) 3PL invoicing: a bill created from HORIZON shows Processed at once
+- Rita: "I've processed the top 2 bills but they are still showing here?". The weekly list marks a week Processed when the Xero bill is in planner.xero_bills, which only the hourly xero-bills-sync (:20) filled. "Create bill in Xero" now records the new bill in xero_bills straight away. No migration.
+
 ## v28.634 (03-Nov-26) 3PL invoicing: Push actuals to Fulfil runs in the background, with a push log
 - Rita (AU Coghlans): the push ran from the browser in 40-reference chunks, so the page showed "loading" for minutes and closing the tab stopped it. Now "Push actuals to Fulfil" starts a SERVER job (POST /api/supply/tpl/push-actuals/:id/start) and returns at once. The job pushes chunk after chunk, saves progress after each, and before Vercel's 300 s limit hands itself to a fresh request (POST /api/cron/tpl-push-continue, x-webhook-secret, called only by HORIZON itself, no n8n flow). The page polls GET .../push-status every 5 s; you can close it.
 - Push log per invoice (last 20 runs): started (when, who, resume point), status (running / done / failed / stopped), hand-overs, finished, references done of total, shipments pushed, error with time. A failed or stopped run offers "Resume from reference N of M"; Push actuals redoes the whole invoice.

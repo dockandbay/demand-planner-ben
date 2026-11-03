@@ -21739,6 +21739,9 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
         const inv = r && r.Invoices && r.Invoices[0];
+        // v28.635 (Ben 03-Nov-26, Rita: "I've processed the top 2 bills but they are still showing here?"): record the new bill in xero_bills now,
+        // so the weekly list shows Processed at once instead of after the next hourly xero-bills-sync (:20).
+        if (inv && inv.InvoiceID) { try { await xbUpsert([Object.assign({ Type: 'ACCPAY' }, inv)], xregion); swrDrop && swrDrop('xero:exc'); } catch (e) { console.warn('[tpl-bill] xero_bills record failed: ' + e.message); } }
         return res.json({ ok: true, created: true, test: isTest, region: xregion, contact: meta.contact, currency: cur,
           xero_id: inv && inv.InvoiceID, invoice_number: inv && inv.InvoiceNumber, reference: ref, status: inv && inv.Status,
           lines: li.length, missing_account_codes: missingAcct,
