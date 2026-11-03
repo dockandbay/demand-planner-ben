@@ -11608,7 +11608,7 @@
   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD). Defaults to the last 60 days so the
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
   var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='', PAY_Q='';
-  var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
+  var OTH_STATE={status:'unpaid',supplier:'',q:''};   // Other Payments filters (persist across re-renders); default to unpaid
   // v28.303 (Ben): running total of what PAY marked paid on Payments Due this session (green box above the table). Kept until the page
   // reloads or Clear; a failed save takes its entry back out. Totals per currency (suppliers pay in USD, GBP, EUR, AUD).
   var PDUE_PAID=[];
@@ -12050,13 +12050,18 @@
       // status filter is inclusive: "unpaid" = anything not paid (incl. overdue); "overdue" = not paid & past due
       function matchStatus(d){ var s=OTH_STATE.status; if(s==='all')return true; var paid=!!d.date_paid;
         if(s==='paid')return paid; if(s==='unpaid')return !paid; if(s==='overdue')return !paid && d.date_due && d.date_due<today; return true; }
-      function filtered(){ return oth.filter(function(d){
+      // v28.633 (Ben): search box overrides the Status + Supplier filters (searches every other payment)
+      function hit(d,q){ return [d.reference,d.supplier_name,d.description,d.amount,d.date_due,d.date_paid,d.date_likely_pay,d.date_due?fd(d.date_due):'',d.date_paid?fd(d.date_paid):''].some(function(v){ return v!=null&&String(v).toLowerCase().indexOf(q)>=0; }); }
+      function filtered(){ var q=String(OTH_STATE.q||'').trim().toLowerCase(); return oth.filter(function(d){
+        if(q)return hit(d,q);
         if(!matchStatus(d))return false;
         if(OTH_STATE.supplier && (d.supplier_name||'')!==OTH_STATE.supplier)return false; return true; }); }
       function draw(){ var f=filtered();
         var stPills=[['all','All'],['paid','Paid'],['overdue','Overdue'],['unpaid','Unpaid']].map(function(o){return '<span class="pill'+(OTH_STATE.status===o[0]?' active':'')+'" data-os="'+o[0]+'">'+o[1]+'</span>';}).join('');
         var supOpts='<option value="">All suppliers</option>'+sups.map(function(s){return '<option value="'+esc(s)+'"'+(OTH_STATE.supplier===s?' selected':'')+'>'+esc(s)+'</option>';}).join('');
-        document.getElementById('oth-wrap').innerHTML='<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
+        document.getElementById('oth-wrap').innerHTML='<div class="bar" style="gap:6px;margin-bottom:4px"><input class="flt" id="oth-q" type="search" placeholder="Search all other payments…" value="'+esc(OTH_STATE.q||'')+'" title="searches reference, supplier, description, amount and dates across ALL other payments (ignores the Status and Supplier filters)" style="width:260px;max-width:100%'+(OTH_STATE.q?';border-color:var(--blue)':'')+'">'
+          +(OTH_STATE.q?'<span class="tiny" style="color:var(--blue)">searching all, filters off · '+f.length+' found</span>':'')+'</div>'
+          +'<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
           +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="oth-sup" style="width:auto">'+supOpts+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' / '+oth.length+'</span><button class="save-btn" id="oth-sb" style="margin-left:8px">+ Create sample bills</button></div>'
           +(actMob()
@@ -12065,6 +12070,7 @@
         bindEdits();
         document.querySelectorAll('#oth-wrap .pill[data-os]').forEach(function(p){p.onclick=function(){OTH_STATE.status=p.dataset.os;draw();};});
         document.getElementById('oth-sup').onchange=function(){OTH_STATE.supplier=this.value;draw();};
+        var qi=document.getElementById('oth-q'); if(qi){ qi.oninput=function(){ var pos=this.selectionStart; OTH_STATE.q=this.value; draw(); var n=document.getElementById('oth-q'); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} } }; }
         document.querySelectorAll('#oth-wrap .oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
           shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
         var sbb=document.getElementById('oth-sb'); if(sbb)sbb.onclick=function(){ sbOpen(function(){ renderOtherPayments(b); }); };

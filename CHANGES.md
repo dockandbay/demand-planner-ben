@@ -1,3 +1,6 @@
+## v28.633 (03-Nov-26) Other Payments: search box
+- PAYMENTS > Other Payments gets an always-visible search box (above the ⚙ Filters bar). While it has text it searches EVERY other payment (reference, supplier, description, amount, due / paid / likely dates) and ignores the Status and Supplier filters; a note says "searching all, filters off · N found". Client only.
+
 ## v28.632 (03-Nov-26) Record of change: same-time changes merge into one entry
 - PO / shipment / product Record of change: every change one person makes within 3 minutes now shows as one entry under one date ("5 changes", one line each as "Event: detail", in the order made). Before, only changes about the same subject merged. Client only.
 
