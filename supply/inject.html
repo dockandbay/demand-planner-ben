@@ -3570,8 +3570,10 @@
     // can't reach Payments Due. Child POs are skipped (the master owns the money), and so is a PO whose balance is already paid.
     // A 0.00 invoice is a legacy placeholder and COMPLETE POs are closed, so both are left out.
     function supInvNotProcessed(r){ return !!r.is_final && Number(r.final_invoice)>0 && String(r.status||'').toUpperCase()!=='COMPLETE' && !r.final_payment_due && !r.master_po && !r.pay_balance_1_date && parseFloat(r.prod_no)>=50; }   // P50+ only (Ben)
+    // v28.645 (Ben): supplier has invoiced (final amount on the PO, or a pending portal submission) but no Xero bill is linked. P50+, masters only.
+    function supInvNoXero(r){ return (Number(r.final_invoice)>0 || Number(r.sup_invoice_pending)>0) && !r.xero_linked && !r.master_po && parseFloat(r.prod_no)>=50; }
     function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
-    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='shipped_no_xero')return shippedNoXeroInvoice(r); if(k==='sup_inv_unproc')return supInvNotProcessed(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; if(k==='reqfields')return poMissingReq(r).length>0; if(k==='campaign')return !!(_campPri&&campAtRisk(_campPri.byPo[r.po])); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
+    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='shipped_no_xero')return shippedNoXeroInvoice(r); if(k==='sup_inv_unproc')return supInvNotProcessed(r); if(k==='sup_inv_noxero')return supInvNoXero(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; if(k==='reqfields')return poMissingReq(r).length>0; if(k==='campaign')return !!(_campPri&&campAtRisk(_campPri.byPo[r.po])); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function _hideCount(){ return (!_poShowSnoozed?1:0)+(_hidePayDue?1:0)+(_hideTimelineUnread?1:0)+(_hideSupApproval?1:0); }   // active Hide toggles → dropdown badge
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
@@ -3630,6 +3632,7 @@
         +'<option value="shipped_no_invoice"'+(state.act.shipped_no_invoice?' selected':'')+'>Shipped · no final invoice ('+rows.filter(shippedNoInvoice).length+')</option>'
         +'<option value="shipped_no_xero"'+(state.act.shipped_no_xero?' selected':'')+'>Shipped · no Xero invoice ('+rows.filter(shippedNoXeroInvoice).length+')</option>'
         +'<option value="sup_inv_unproc"'+(state.act.sup_inv_unproc?' selected':'')+' title="final invoice amount entered but no Final payment due date">Supplier invoiced, Not Processed ('+rows.filter(supInvNotProcessed).length+')</option>'
+        +'<option value="sup_inv_noxero"'+(state.act.sup_inv_noxero?' selected':'')+' title="supplier invoice amount entered or submitted, but no Xero bill linked (P50+)">Supplier invoiced · no Xero invoice ('+rows.filter(supInvNoXero).length+')</option>'
         +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
         +'<option value="timeline_unread"'+(state.act.timeline_unread?' selected':'')+'>Timeline unread ('+rows.filter(function(r){return Number(r.unread_notes)>0;}).length+')</option>'
         +'<option value="reqfields"'+(state.act.reqfields?' selected':'')+'>Master data missing ('+rows.filter(function(r){return poMissingReq(r).length>0;}).length+')</option>'

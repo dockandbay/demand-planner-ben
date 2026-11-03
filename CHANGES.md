@@ -1,3 +1,6 @@
+## v28.645 (03-Nov-26) PO grid: "Supplier invoiced · no Xero invoice" exception
+- Ben: new option in the PO grid's All exceptions dropdown. Lists POs where the supplier's invoice amount is on the PO or waiting as a portal submission, but no Xero bill is linked (same Xero-link test as "Shipped · no Xero invoice"). P50 onwards, child POs skipped (the master holds the bill). Client only. No migration.
+
 ## v28.644 (03-Nov-26) Supplier invoice email: to Zera, 2 minutes after the supplier submits
 - Ben: when a supplier submits an invoice / final amount in the portal, the "submitted invoice info" email now goes 2 minutes later instead of at once, so the supplier can correct it first. After the wait it reads the PO's latest invoice submission: if the supplier resubmitted in the meantime, only the newest one emails, with the latest amount. Same amount never emailed twice for a PO (app_settings inv_notify_last:<po>). P50 onwards only.
 - Default recipient is now zera@dockandbay.com only (was zera@ + ben@); app_settings.invoice_submit_notify still overrides.
