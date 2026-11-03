@@ -4772,10 +4772,10 @@ async function crSuggest(lines) {
   return out;
 }
 // Open WHOLESALE store invoices (UKWS / USWS / EUWS) with no payment after their due date (Fulfil account.invoice, read only). Retail store
-// invoices are left out: they are paid at checkout (Fulfil shows many as posted, not paid). AU stays out.
+// invoices are left out: they are paid at checkout (Fulfil shows many as posted, not paid). AU stays out. v28.649: + native MarketTime orders ("Markettime US").
 async function crOverdue() {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/account.invoice/search_read', [[['type', '=', 'out'], ['state', '=', 'posted'], ['invoice_date', '<', crIso(today)], ['invoice_date', '>=', crIso(crDays(today, -400))], ['sales.channel.name', 'in', ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws']]], 0, 500, [['invoice_date', 'ASC']],
+  const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/account.invoice/search_read', [[['type', '=', 'out'], ['state', '=', 'posted'], ['invoice_date', '<', crIso(today)], ['invoice_date', '>=', crIso(crDays(today, -400))], ['sales.channel.name', 'in', ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws', 'Markettime US']]], 0, 500, [['invoice_date', 'ASC']],
     ['id', 'number', 'reference', 'party.name', 'currency.code', 'total_amount', 'balance_due', 'earliest_due_date', 'invoice_date', 'sales']]);
   const L = (Array.isArray(rows) ? rows : []).map(r => { const o = {}; Object.keys(r).forEach(k => { o[k] = fulfilUnwrap(r[k]); }); const tot = cr2(o.total_amount || 0), bal = cr2(o.balance_due || 0), due = o.earliest_due_date;
     return { invoice: String(o.number || ''), reference: o.reference || '', customer: o['party.name'] || '', currency: o['currency.code'] || '', total: tot, balance: bal, due_date: due, invoice_date: o.invoice_date,
@@ -32954,9 +32954,9 @@ const DH_CHECKS_LIVE = [
       title: sold[id].code + ': ' + _dhN(sold[id].qty) + ' sold in the last 14 days but the kit has no active BOM in Fulfil', detail: 'Its components are not taken out of stock. Orders: ' + [...sold[id].sos].join(', '), link: null, sig: 'x' })); } },
   { key: 'wholesale_no_agent', area: 'sales', label: 'Paid wholesale orders with no agent', live: true, run: async () => {
     const month = new Date().toISOString().slice(0, 7), v = await cmEngine(month, { xero: false });
-    const ex = (v.exceptions || []).filter(e => e.kind === 'no_agent' || e.kind === 'code_vs_customer');
+    const ex = (v.exceptions || []).filter(e => e.kind === 'no_agent' || e.kind === 'code_vs_customer' || e.kind === 'mt_unmapped');   // v28.649 + MarketTime rep group on no agent
     return ex.map(e => ({ record: String(e.order_ref || e.customer || '?'), severity: 'amber',
-      title: (e.order_ref || '') + ' (' + (e.customer || '') + '): ' + (e.kind === 'no_agent' ? 'paid this month' + (e.amount != null ? ' (' + (e.currency || '') + ' ' + _dhN(e.amount) + ')' : '') + ' but has no agent' : 'Fulfil agent code and the customer\'s agent disagree'),
+      title: (e.order_ref || '') + ' (' + (e.customer || '') + '): ' + (e.kind === 'no_agent' ? 'paid this month' + (e.amount != null ? ' (' + (e.currency || '') + ' ' + _dhN(e.amount) + ')' : '') + ' but has no agent' : e.kind === 'mt_unmapped' ? 'MarketTime rep group not mapped to an agent' : 'Fulfil agent code and the customer\'s agent disagree'),
       detail: (e.text || '') + '. Tag it on COMMISSIONS > Orders, or add the customer to an agent.', link: '#/client/commission/orders', sig: e.kind })); } }
 ];
 DH_CHECKS.push(...DH_CHECKS_LIVE);
@@ -33067,8 +33067,9 @@ app.post('/api/admin/data-health/recipients', async (req, res) => {
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
 // v28.477 (Ben 24-Oct-26: "every wholesale channel ... including faire ... and markettime"): the order import pulls these Fulfil
-// sale channels only (by name; CLIENT > Config > Order import). MarketTime orders arrive through the wholesale Shopify stores.
-const CP_IMPORT_CHANNELS_DEFAULT = ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws', 'Faire UK', 'Faire US', 'UK - Key Accounts', 'UK - Custom/Co-Brand',
+// sale channels only (by name; CLIENT > Config > Order import). MarketTime orders arrived through the wholesale Shopify stores until 03-Nov-26;
+// v28.649: they now import natively into Fulfil on channel "Markettime US".
+const CP_IMPORT_CHANNELS_DEFAULT = ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws', 'Markettime US', 'Faire UK', 'Faire US', 'UK - Key Accounts', 'UK - Custom/Co-Brand',
   'International Distributor (UK entity)', 'International Distributor (Co Brand - UK entity)', 'AU - Wholesale', 'AU - Custom/Co-Brand', 'International Distributor (AU entity)',
   'US - Key Accounts', 'US - Custom/Co-Brand', 'EU - Key Accounts', 'EU - Custom/Co-Brand', 'EU - International Distributor'];
 const CP_SETTINGS = ['cp_import_channels', 'cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];
@@ -33227,7 +33228,10 @@ async function fulfilImportSales(days) {
   if (withAgent) { const def = await fulfilSearchOne('metafield.field', [['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], ['id']).catch(() => null);
     if (def) { const res = sales.map(s => 'sale.sale,' + s.id);
       for (let i = 0; i < res.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', res.slice(i, i + 400)]], 0, 500, null, ['resource', 'value_char']]);
-        (rows || []).forEach(r => { const id = String(r.resource || '').split(',')[1]; const v = String(r.value_char || '').trim(); if (id && v) agentBy[id] = v; }); } } }
+        (rows || []).forEach(r => { const id = String(r.resource || '').split(',')[1]; const v = String(r.value_char || '').trim(); if (id && v) agentBy[id] = v; }); } }
+    // v28.649: a native MarketTime order has no agent_code; its SALES_REP_GROUP mapped to an agent stands in as that agent's first Fulfil code
+    try { const miss = sales.filter(s => !agentBy[s.id]).map(s => s.id), rg = await mtRepGroupOf(fulfilFetch, miss);
+      if (Object.keys(rg).length) { const mm = await mtNameMap(); Object.keys(rg).forEach(id => { const h = mm[_mtKey(rg[id])]; if (h && h.code) agentBy[id] = h.code; }); } } catch (_) {} }
   const COLS = ['fulfil_id','number','reference','state','party_name','party_email','ship_name','invoice_name','channel','channel_source','warehouse_code','country_code','currency','total','untaxed','invoice_state','shipment_state','sale_date','fulfil_created','carrier','shipments','lines','metadata','tags','comment'].concat(withAgent ? ['agent_code'] : []);
   const CAST = { shipments: '::jsonb', lines: '::jsonb', metadata: '::jsonb', tags: '::text[]', sale_date: '::date', fulfil_created: '::timestamptz', total: '::numeric', untaxed: '::numeric', fulfil_id: '::bigint' };
   const rowOf = (s) => {
@@ -33537,6 +33541,7 @@ app.post('/api/client/commission/groups', async (req, res) => {
     if (b.id) { const set = [], v = [b.id], add = (col, val) => { v.push(val); set.push(col + '=$' + v.length); };
       if ('currency' in b) { add('currency', String(b.currency || 'USD').toUpperCase().slice(0, 3)); add('currency_checked', true); }
       if ('fulfil_codes' in b) add('fulfil_codes', (Array.isArray(b.fulfil_codes) ? b.fulfil_codes : String(b.fulfil_codes || '').split(/[,\s]+/)).map(x => String(x).trim()).filter(Boolean));
+      if ('markettime_names' in b) add('markettime_names', (Array.isArray(b.markettime_names) ? b.markettime_names : String(b.markettime_names || '').split(/[,;\n]+/)).map(x => String(x).trim().replace(/\s+/g, ' ')).filter(Boolean));   // v28.649: names hold spaces, split on commas only
       ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
       ['portal_on', 'no_commission'].forEach(k => { if (k in b) add(k, !!b[k]); });
       if (set.length) await pool.query(`UPDATE planner.rep_groups SET ${set.join(', ')} WHERE id=$1`, v); }
@@ -33717,6 +33722,23 @@ function _cmClientPo(meta, xref) {
   const r = String(xref || mf['global.xero_reference'] || '').trim(); if (!r) return null;
   const m = /^(?:markettime|brandwise|nuorder|faire|joor|repspark)?\s*([A-Za-z0-9][\w\-\/.&#]*)\s*\[ID:/i.exec(r); return m ? m[1].slice(0, 80) : null;
 }
+// v28.649 (Ben 03-Nov-26: MarketTime now imports natively into Fulfil, channel "Markettime US"): those orders carry the rep group in sale
+// metafield SALES_REP_GROUP (e.g. "SCHAUBEN & CO"), not agent_code, and their reference is the MarketTime PO (no "WS-"). Each agent lists its
+// MarketTime rep group names on its Commission tab (rep_groups.markettime_names, mig 411); a listed name maps the order to that agent.
+const _mtKey = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+async function mtRepGroupOf(fetchFn, saleIds) {   // { sale id: SALES_REP_GROUP } (Fulfil, read only)
+  const out = {}; if (!saleIds.length) return out;
+  const def = ((await fetchFn('PUT', '/model/metafield.field/search_read', [[['code', '=', 'SALES_REP_GROUP'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']])) || [])[0];
+  if (!def) return out;
+  for (let i = 0; i < saleIds.length; i += 400) ((await fetchFn('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', saleIds.slice(i, i + 400).map(x => 'sale.sale,' + x)]], 0, 500, null, ['resource', 'value_char']])) || [])
+    .forEach(v => { const sid = Number(String(v.resource).split(',')[1]), s = String(v.value_char || '').trim(); if (sid && s) out[sid] = s; });
+  return out;
+}
+async function mtNameMap() {   // { normalised MarketTime rep group name: { gid, code = the agent's first Fulfil code } }
+  const m = {}; (await pool.query(`SELECT id, coalesce(to_jsonb(g)->'markettime_names','[]'::jsonb) names, coalesce(to_jsonb(g)->'fulfil_codes','[]'::jsonb) codes FROM planner.rep_groups g WHERE active ORDER BY id`).catch(() => ({ rows: [] }))).rows
+    .forEach(g => (Array.isArray(g.names) ? g.names : []).forEach(n => { const k = _mtKey(n); if (k && !m[k]) m[k] = { gid: g.id, code: String((Array.isArray(g.codes) ? g.codes : [])[0] || '').trim().toLowerCase() || null }; }));
+  return m;
+}
 async function cmEngine(month, opts) { opts = opts || {};
   if (!/^\d{4}-\d{2}$/.test(String(month || ''))) throw Object.assign(new Error('month (YYYY-MM) required'), { status: 400 });
   const env = opts.env === 'live' ? 'live' : await activeFulfilEnv(), key = month + '|' + env + '|' + (opts.xero === false ? 'nox' : 'x') + (opts.debug ? '|d' : '');
@@ -33730,6 +33752,7 @@ async function cmEngine(month, opts) { opts = opts || {};
   const gBy = {}; G.forEach(g => { g.codes = (Array.isArray(g.codes) ? g.codes : []).map(x => String(x).trim().toLowerCase()).filter(Boolean); gBy[g.id] = g; });
   const codeTo = {}; G.forEach(g => g.codes.forEach(c => { if (!codeTo[c]) codeTo[c] = g.id; }));
   const faire = G.filter(g => /faire/i.test(g.name)).map(g => g.id);
+  const mtMap = await mtNameMap();   // v28.649 MarketTime rep group name -> agent
   const cust = (await pool.query(`SELECT lower(coalesce(email,'')) email, lower(trim(customer_name)) name, coalesce(xero_contact_id,'') xid, org, rep_group_id FROM planner.commission_customers WHERE rep_group_id IS NOT NULL`).catch(() => ({ rows: [] }))).rows;
   const byEmail = {}, byName = {}, byXid = {}; cust.forEach(c => { if (c.email && !byEmail[c.email]) byEmail[c.email] = c.rep_group_id; if (c.name && !byName[c.name]) byName[c.name] = c.rep_group_id; if (c.xid) byXid[c.org + '|' + c.xid] = c.rep_group_id; });
   const ownRate = {}; (await pool.query(`SELECT lower(trim(customer_name)) n, rate FROM planner.commission_customer_rates`).catch(() => ({ rows: [] }))).rows.forEach(r => { ownRate[r.n] = Number(r.rate); });
@@ -33761,11 +33784,13 @@ async function cmEngine(month, opts) { opts = opts || {};
     let gid = null, agentSrc = null;
     if (ov && ov.rep_group_id) { gid = ov.rep_group_id; agentSrc = 'override'; }
     else if (o.code && codeTo[o.code]) { gid = codeTo[o.code]; agentSrc = 'Fulfil code ' + o.code; }
+    else if (o.mt_group && mtMap[_mtKey(o.mt_group)]) { gid = mtMap[_mtKey(o.mt_group)].gid; agentSrc = 'MarketTime ' + o.mt_group; }   // v28.649
     else if (o.xid && byXid[o.org + '|' + o.xid]) { gid = byXid[o.org + '|' + o.xid]; agentSrc = 'Xero group'; }
     else if (o.email && byEmail[o.email]) { gid = byEmail[o.email]; agentSrc = 'customer email'; }
     else if (o.customer && byName[String(o.customer).trim().toLowerCase()]) { gid = byName[String(o.customer).trim().toLowerCase()]; agentSrc = 'customer name'; }
     const custAgent = (o.email && byEmail[o.email]) || (o.xid && byXid[o.org + '|' + o.xid]) || (o.customer && byName[String(o.customer).trim().toLowerCase()]) || null;
     if (o.code && codeTo[o.code] && custAgent && custAgent !== codeTo[o.code] && !(ov && ov.rep_group_id)) exc('code_vs_customer', { order_ref: o.order_ref, customer: o.customer, text: 'Fulfil code ' + o.code + ' (' + gBy[codeTo[o.code]].name + ') but the customer is on ' + (gBy[custAgent] || {}).name + '\'s list: paid to the code' });
+    if (o.mt_group && !mtMap[_mtKey(o.mt_group)] && !(ov && ov.rep_group_id)) exc('mt_unmapped', { order_ref: o.order_ref, customer: o.customer, text: 'MarketTime rep group "' + o.mt_group + '" is on no agent' + (gid ? ' (paid to ' + gBy[gid].name + ' from the ' + agentSrc + ')' : '') + ': add it under MarketTime rep groups on the agent\'s Commission tab' });   // v28.649
     const isFaire = /faire/i.test(o.channel || '');
     // v28.334 (Ben): a Faire order of an earning agent's customer is a MONTH-END DECISION (include or exclude), not an automatic exclusion.
     // Until decided it sits on that agent at zero (status exception); the decision is an order override (agent = include, Faire = exclude).
@@ -33820,7 +33845,8 @@ async function cmEngine(month, opts) { opts = opts || {};
     // candidates (Fulfil can't filter by payment date): wholesale (sale ref WS-) and Faire-channel invoices dated in the month, plus older ones
     // (up to 180 days) changed since the month started, i.e. paid in or after it. Their payment applications are then taken by date.
     const ids = new Set(), from180 = new Date(Date.parse(ms) - 180 * 864e5).toISOString().slice(0, 10);
-    for (const scope of [['sales.reference', 'ilike', '%WS-%'], ['sales.channel.name', 'ilike', '%faire%']]) {
+    // v28.649: + the native MarketTime channel ("Markettime US"), whose orders carry the MarketTime PO as reference (no "WS-")
+    for (const scope of [['sales.reference', 'ilike', '%WS-%'], ['sales.channel.name', 'ilike', '%faire%'], ['sales.channel.name', 'ilike', '%markettime%']]) {
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', ms], ['invoice_date', '<=', me], scope], ['id'])).forEach(i => ids.add(i.id));
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', from180], ['invoice_date', '<', ms], ['write_date', '>=', ms + ' 00:00:00'], scope], ['id'])).forEach(i => ids.add(i.id)); }
     // Fulfil credit notes (customer invoice with a negative total, e.g. from a return) dated in the month: a negative row against the order
@@ -33839,6 +33865,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     const codes = {}; try { const def = (await ff('PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']]) || [])[0];
       if (def) for (let i = 0; i < saleIds.length; i += 300) (await fAll('metafield.value', [['field', '=', def.id], ['resource', 'in', saleIds.slice(i, i + 300).map(x => 'sale.sale,' + x)]], ['resource', 'value_char']))
         .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char) codes[sid] = String(v.value_char).trim().toLowerCase(); }); } catch (e) { notes.push('Fulfil agent codes not read: ' + e.message); }
+    let mtg = {}; try { mtg = await mtRepGroupOf(ff, saleIds.filter(id => !codes[id])); } catch (e) { notes.push('MarketTime rep groups not read: ' + e.message); }   // v28.649 SALES_REP_GROUP
     // v28.471: each credit note's applications to invoices, with the invoice's unpaid balance just before (earlier cash + credits, payments first on the same day)
     const cnApps = {}, cnLater = [];
     for (const inv of invs) { const total = _cmNum(inv.total_amount); if (total <= 0) continue; const ccy = String(inv['currency.code'] || 'USD').toUpperCase(), compCcy = Number(inv.company) === FULFIL_COMPANY_AU ? 'AUD' : 'GBP';
@@ -33853,7 +33880,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       const ref = s.reference || s.number || inv.number; seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase());
       if (total < 0) {   // a credit note: one negative row in its own month, at the order's agent and rate (product lines, ex tax)
         [inv.number, inv.reference].forEach(x => { if (x) seenCn.add(String(x).toUpperCase()); });
-        if (invDate >= ms && invDate <= me) cnLater.push({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
+        if (invDate >= ms && invDate <= me) cnLater.push({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, mt_group: mtg[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
           invoice_date: invDate, pay_date: invDate, amount_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0), currency_src: ccy, credit_note: true, quiet: true, allocAmts: cnApps[inv.id] || [], cn_total: -total });
         continue; }
       const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} }));
@@ -33862,7 +33889,7 @@ async function cmEngine(month, opts) { opts = opts || {};
         const amt = ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null);
         if (amt == null || !amt) continue;   // FX difference lines (no invoice-currency amount)
         const earn = invDate && invDate > d ? invDate : d; if (earn < ms || earn > me) continue;
-        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
+        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, mt_group: mtg[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
           invoice_date: invDate, pay_date: d, amount_src: amt * ratio, currency_src: ccy, deposit: invDate && d < invDate, inv_value_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0) }); } }
     cnLater.forEach(add);   // after the invoices, so a credit note sees this month's commission on the invoice it credits
     notes.push('Fulfil ' + env + ': ' + invs.length + ' invoices read');
@@ -34331,12 +34358,13 @@ app.post('/api/client/commission/customers/assign', async (req, res) => {
     else await pool.query(`INSERT INTO planner.commission_customers (org, customer_name, email, rep_group_id, source, updated_by) VALUES ('fulfil',$1,$2,$3,'manual',$4)`, [name, email, b.rep_group_id || null, req.me.email]);
     _cmFu = null; res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// Fulfil wholesale customers (orders with WS in the reference since a date) whose email is on no agent's list: assign them by hand.
+// Fulfil wholesale customers (orders with WS in the reference, or on the native MarketTime channel since v28.649, since a date) whose email is on
+// no agent's list: assign them by hand.
 let _cmFu = null;
 app.get('/api/client/commission/customers/fulfil-unmatched', async (req, res) => {
   try { if (_cmFu && Date.now() - _cmFu.at < 600000 && !req.query.refresh) return res.json(_cmFu.v);
     const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || '')) ? req.query.since : '2025-01-01'; let sales = [];
-    for (let o = 0; o < 20000; o += 500) { const r = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['sale_date', '>=', since], ['reference', 'ilike', '%WS-%']], o, 500, null, ['id', 'reference', 'party.name', 'party.email', 'sale_date', 'untaxed_amount']]); sales = sales.concat(r || []); if (!r || r.length < 500) break; }
+    for (let o = 0; o < 20000; o += 500) { const r = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['sale_date', '>=', since], ['OR', [['reference', 'ilike', '%WS-%']], [['channel.name', 'ilike', '%markettime%']]]], o, 500, null, ['id', 'reference', 'party.name', 'party.email', 'sale_date', 'untaxed_amount']]); sales = sales.concat(r || []); if (!r || r.length < 500) break; }
     const known = new Set((await pool.query(`SELECT lower(email) e FROM planner.commission_customers WHERE email IS NOT NULL`)).rows.map(r => r.e));
     const by = new Map(); sales.forEach(s => { const e = String(s['party.email'] || '').toLowerCase().trim(); const k = e || ('#' + s['party.name']); if (e && known.has(e)) return; if (/dock and bay|dock & bay/i.test(s['party.name'] || '')) return;
       const x = by.get(k) || { name: s['party.name'], email: e || null, orders: 0, last: null, value: 0 }; x.orders++; const d = s.sale_date && (s.sale_date.iso_string || s.sale_date); if (!x.last || d > x.last) x.last = d; x.value += Number((s.untaxed_amount && s.untaxed_amount.decimal) || s.untaxed_amount || 0); by.set(k, x); });
