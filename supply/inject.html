@@ -6142,6 +6142,9 @@
     document.querySelectorAll('#podet-'+i+' .po-pdf-dl').forEach(function(b){ b.onclick=function(){ window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); }; });   // SUG-0034 full-PO PDF
     // PLAN sub-tabs (PAYMENTS / DATES / CLIENT / ORDER PLAN / LANDED COSTS / TIMELINE) — toggle panels
     var root=document.getElementById('podet-'+i);
+    // v28.658 (Ben: PO-56UKXR1 opened on #/…/shipments showed no charges and no way to add one): the charges loaded only on a tab CLICK, so a
+    // PO opened straight onto Shipments never loaded them (no list, no add form). Load them as soon as that panel is the one showing.
+    if(root) setTimeout(function(){ root.querySelectorAll('.potab-panel[data-pt="shipments"]').forEach(function(pn){ if(pn.style.display==='none')return; pn.querySelectorAll('.ship-charges').forEach(function(x){ if(!x._loaded){ x._loaded=1; loadShipCharges(x.dataset.ref); } }); }); },0);
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
       root.querySelectorAll('.potab').forEach(function(x){x.classList.toggle('active',x===b);});
       root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';});

@@ -473,9 +473,13 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     var y=130; el.push(svgText(lx,y,'SHIP TO',{size:13,fill:'#444'})); el.push(svgText(lx+90,y,ds.name||'—',{size:22,bold:true}));
     wrapLines(ds.address||'',46).slice(0,4).forEach(function(ln,i){ el.push(svgText(lx+90,y+26+i*20,ln,{size:15})); }); y+=26+Math.min(4,wrapLines(ds.address||'',46).length)*20+(ds.country?20:0); if(ds.country)el.push(svgText(lx+90,y-20,ds.country,{size:15}));
     el.push('<line x1="34" y1="'+(y+6)+'" x2="'+(W-34)+'" y2="'+(y+6)+'" stroke="#111" stroke-width="1.2"/>');
-    el.push(svgText(cx,y+120,'PALLET',{size:44,bold:true,anchor:'middle'})); el.push(svgText(cx,y+235,n+' OF '+N,{size:104,bold:true,anchor:'middle'}));
-    var y2=y+300; el.push('<line x1="34" y1="'+y2+'" x2="'+(W-34)+'" y2="'+y2+'" stroke="#111" stroke-width="1.2"/>'); y2+=40;
-    var rows=[['SHIPMENT',(sh.master_po||sh.shipment_ref||'')+(sh.master_po?' (master)':'')],['POs ON BOARD',(d.members||[]).map(function(m){ return m.po; }).join(', ')],['CARRIER',[sh.mode?String(sh.mode).toUpperCase():'',sh.carrier,sh.carrier_ref].filter(Boolean).join(' · ')]];
+    // v28.657 (Ben): the SHIPMENT number is the focus; "Pallet n of N" smaller, lower-case "of"
+    var sref=String(sh.shipment_ref||''), fs=Math.max(34,Math.min(80,Math.floor(500/Math.max(1,sref.length*0.66))));
+    el.push(svgText(cx,y+62,'SHIPMENT',{size:16,fill:'#444',anchor:'middle',ls:1}));
+    el.push(svgText(cx,y+62+fs+14,sref,{size:fs,bold:true,anchor:'middle'}));
+    el.push(svgText(cx,y+62+fs+92,'Pallet '+n+' of '+N,{size:40,bold:true,anchor:'middle'}));
+    var y2=y+62+fs+130; el.push('<line x1="34" y1="'+y2+'" x2="'+(W-34)+'" y2="'+y2+'" stroke="#111" stroke-width="1.2"/>'); y2+=40;
+    var rows=[['MASTER PO',sh.master_po||sref],['POs ON BOARD',(d.members||[]).map(function(m){ return m.po; }).join(', ')],['CARRIER',[sh.mode?String(sh.mode).toUpperCase():'',sh.carrier,sh.carrier_ref].filter(Boolean).join(' · ')]];
     rows.forEach(function(r){ el.push(svgText(lx,y2,r[0],{size:13,fill:'#444'})); var ls=wrapLines(r[1]||'—',34).slice(0,3); ls.forEach(function(ln,i){ el.push(svgText(lx+150,y2+i*20,ln,{size:16,bold:true})); }); y2+=Math.max(1,ls.length)*20+18; });
     var ref=sh.shipment_ref||''; if(ref){ el.push(c128SVG(ref,lx+20,H-170,W-2*lx-40,90)); el.push(svgText(cx,H-60,ref,{size:16,anchor:'middle',mono:true})); }
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
