@@ -14245,11 +14245,14 @@ async function logEmail(m) {
 // verified in Resend first); until then it stays PORTAL_FROM. EMAIL_REPLY_TO_ADMIN / _SUPPLIER / _CLIENT override the reply-to defaults.
 // v28.508 (Ben 27-Oct-26: "we dont have an email clientportal@"): client email replies go to the client's owner mailbox (sales-uk@ / sales-us@ /
 // sales-eu@ / keyaccounts@, v28.502) via the `reply` argument; ops@ only when the email is not about one client (or it has no owner).
-const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com' }, supplier: { reply: 'supplierportal@dockandbay.com' }, client: { reply: 'ops@dockandbay.com' } };
+// v28.648 (Ben 03-Nov-26): the supplier portal and the main (admin) account send from horizon@ on the verified Resend domain
+// supplier.dockandbay.com; this beats PORTAL_FROM. Client email still uses PORTAL_FROM. EMAIL_FROM_<CHANNEL> still overrides all.
+const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com', from: 'HORIZON <horizon@supplier.dockandbay.com>' },
+  supplier: { reply: 'supplierportal@dockandbay.com', from: 'Dock & Bay <horizon@supplier.dockandbay.com>' }, client: { reply: 'ops@dockandbay.com' } };
 const emailOk = e => /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(String(e || '').trim());
 function emailSender(channel) {
   const ch = EMAIL_CHANNELS[channel] ? channel : 'admin', K = ch.toUpperCase();
-  return { from: (process.env['EMAIL_FROM_' + K] || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
+  return { from: (process.env['EMAIL_FROM_' + K] || EMAIL_CHANNELS[ch].from || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
     reply_to: (process.env['EMAIL_REPLY_TO_' + K] || EMAIL_CHANNELS[ch].reply).trim() };
 }
 async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel, reply }) {
