@@ -23829,6 +23829,8 @@
       (d.samples||[]).length&&g2.push({label:'Samples',items:d.samples.map(function(s){ return {kind:'sample',primary:s.ref,sub:[s.supplier,s.why?'matched '+s.why:''].filter(Boolean).join(' · '),go:function(){ if(typeof gotoSample==='function')gotoSample(s.ref); closeCmd(); }}; })});
       if(pages.length)g2.push({label:'Pages',items:pages});
       _cmdPaint(g2.filter(function(g){return g.items.length;}));
+      if(d.fuzzy&&d.fuzzy.like){ var _bd=document.getElementById('hzcmd-body'); if(_bd&&_bd.firstChild){ var nt=document.createElement('div'); nt.className='gl'; nt.style.cssText='padding:8px 14px 0;text-transform:none;letter-spacing:0';   // v28.655 close-match note, as the PO grid
+        nt.textContent='No exact match for “'+q+'”: showing '+(d.fuzzy.near?'results close to it (containing “'+d.fuzzy.like+'”)':'results for “'+d.fuzzy.like+'”'); _bd.insertBefore(nt,_bd.firstChild); } }
     }).catch(function(){});
   }
   function _cmdPaint(groups,keepFocus){

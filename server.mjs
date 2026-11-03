@@ -11383,10 +11383,9 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
 // matched and links back to its POs: references on the PO (production, batch, deposit, Flexport, ASN, dispatch, custom dev, client, Fulfil PO
 // and IS numbers, notes), freight (container, MBL, AMS, carrier ref), deposits, payment runs, 3PL invoices, SKUs + barcodes, suppliers,
 // key accounts, samples (incl. tracking). Pages / config come from the client-side catalogue.
-app.get('/api/hz-search', async (req, res) => {
-  const raw = String(req.query.q || '').trim().slice(0, 80);
+async function hzSearchCore(raw) {   // v28.655: the search itself, so the route can retry close forms of the query
   const empty = { q: raw, sos: [], pos: [], productions: [], batches: [], shipments: [], freight: [], deposits: [], payments: [], tpl: [], skus: [], suppliers: [], clients: [], samples: [] };
-  if (raw.length < 2) return res.json(empty);
+  if (raw.length < 2) return empty;
   const like = '%' + raw.replace(/[%_\\]/g, m => '\\' + m) + '%';
   const t0 = Date.now();
   try {
@@ -11440,7 +11439,24 @@ app.get('/api/hz-search', async (req, res) => {
     const pos = R.pos || [], sos = R.sos || [], prods = R.productions || [], batches = R.batches || [], shipments = R.shipments || [], freight = R.freight || [], deposits = R.deposits || [],
       payments = R.payments || [], tpl = R.tpl || [], skus = R.skus || [], suppliers = R.suppliers || [], clients = R.clients || [], samples = R.samples || [];
     const seen = new Set(pos.map(p => p.po)); (R.linked || []).forEach(h => { if (!seen.has(h.po)) { seen.add(h.po); pos.push(h); } });   // Fulfil numbers / messages, one row per PO
-    res.json({ q: raw, ms: Date.now() - t0, sos, pos: pos.slice(0, 15), productions: prods, batches, shipments, freight, deposits, payments, tpl, skus, suppliers, clients, samples });
+    return { q: raw, ms: Date.now() - t0, sos, pos: pos.slice(0, 15), productions: prods, batches, shipments, freight, deposits, payments, tpl, skus, suppliers, clients, samples };
+  } catch (e) { throw e; }
+}
+// v28.655 (Ben: "global search should have the same fuzzy logic"): punctuation at either end is ignored; if nothing matches, the same
+// fallbacks as the PO grid search: each word (PO-like first), the word with trailing "-part"s dropped, then the longest number shortened
+// a digit at a time down to 4. The reply says which form matched (fuzzy: { like, near }).
+const _hzsHits = r => ['sos', 'pos', 'productions', 'batches', 'shipments', 'freight', 'deposits', 'payments', 'tpl', 'skus', 'suppliers', 'clients', 'samples'].some(k => Array.isArray(r[k]) && r[k].length);
+app.get('/api/hz-search', async (req, res) => {
+  try { const orig = String(req.query.q || '').trim().slice(0, 80), raw = orig.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    let r = await hzSearchCore(raw); if (_hzsHits(r) || raw.length < 3) return res.json(Object.assign(r, { q: orig }));
+    const toks = orig.split(/[\s,;|]+/).map(t => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')).filter(t => t.length >= 3).sort((a, b) => (/\d/.test(b) - /\d/.test(a)) || b.length - a.length);
+    const tries = [];
+    toks.forEach(t => { if (t !== raw) tries.push([t, false]); });
+    toks.forEach(t => { const pt = t.split(/[-_\/.]/); while (pt.length > 1) { pt.pop(); const x = pt.join('-'); if (x.length < 3 || /^po$/i.test(x)) break; tries.push([x, false]); } });
+    const dg = (orig.match(/\d{4,}/g) || []).sort((a, b) => b.length - a.length)[0]; if (dg) for (let n = dg.length; n >= 4; n--) tries.push([dg.slice(0, n), n < dg.length]);
+    const seen = new Set([raw]);
+    for (const [t, near] of tries.slice(0, 12)) { if (seen.has(t)) continue; seen.add(t); const x = await hzSearchCore(t); if (_hzsHits(x)) return res.json(Object.assign(x, { q: orig, fuzzy: { like: t, near } })); }
+    res.json(Object.assign(r, { q: orig }));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
