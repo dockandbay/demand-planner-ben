@@ -1,3 +1,6 @@
+## v28.652 (04-Nov-26) PO grid search: punctuation ignored, close numbers shown
+- Ben: searching "PO-1881864:" showed nothing. Punctuation at either end of a search is now ignored ("PO-1881864:", "PO-1881864." or a quoted PO find it), here and in Shipments. When nothing matches exactly, the PO grid tries each word without its punctuation, then the longest number, shortened a digit at a time down to 4 digits, so near numbers show (e.g. PO-1881866 lists PO-1881862 / 64 / 65). A note above the grid says when it is showing close matches. No migration.
+
 ## v28.651 (04-Nov-26) Workflows: run results list every change on its own line
 - Ben: "dry run is hard to read, note changes on individual lines". Run now and Run now (dry run) on CONFIG > Admin > Workflows show the summary, then one line per change (all of them, up to the 50 the run returns, then "+ N more"), instead of three examples run together after "e.g.". Same for a real run. No migration, no new env var, no new cron route.
 

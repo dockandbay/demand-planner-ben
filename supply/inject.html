@@ -1689,16 +1689,21 @@
   function filt(rows,q){ q=nrm(q); if(!q)return rows; return rows.filter(function(r){return Object.keys(r).some(function(k){return nrm(r[k]).indexOf(q)>=0;});}); }
   // Fuzzy fallback when the full query matches nothing (e.g. pasted "Edit Bill PO-56UKLX3-AIR" from Xero):
   // split into words and match on the most PO-like token (contains a digit, then longest). Returns [] if none hit.
-  function fuzzyFilt(rows,q){ var toks=String(q==null?'':q).split(/[\s,;|]+/).map(function(t){return t.trim();}).filter(function(t){return t.length>=3;});
+  // v28.652 (Ben: "should show things like this number"): tokens lose punctuation at either end; if no word hits, the longest digit run
+  // is tried, then shortened one digit at a time (down to 4) so near numbers show (PO-1881899 for "1881864"). m.like = what matched.
+  function fuzzyFilt(rows,q){ var toks=String(q==null?'':q).split(/[\s,;|]+/).map(function(t){return t.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,'');}).filter(function(t){return t.length>=3;});
     if(!toks.length)return []; toks.sort(function(a,b){ var da=/\d/.test(a)?1:0, db=/\d/.test(b)?1:0; if(da!==db)return db-da; return b.length-a.length; });
-    for(var i=0;i<toks.length;i++){ var m=filt(rows,toks[i]); if(m.length)return m; } return []; }
+    for(var i=0;i<toks.length;i++){ var m=filt(rows,toks[i]); if(m.length){ m.like=toks[i]; return m; } }
+    var dg=(String(q).match(/\d{4,}/g)||[]).sort(function(a,b){ return b.length-a.length; })[0];
+    if(dg)for(var n=dg.length;n>=4;n--){ var p=dg.slice(0,n), mm=filt(rows,p); if(mm.length){ mm.like=p; mm.near=n<dg.length; return mm; } }
+    return []; }
   // token match: every whitespace/comma-separated word of q must appear in `hay` (so a stray trailing token
   // like "PO-56AULX1 1" still matches PO-56AULX1). Empty q → true.
   function tokMatch(hay,q){ hay=String(hay==null?'':hay).toLowerCase(); return String(q==null?'':q).toLowerCase().split(/[\s,;|]+/).filter(Boolean).every(function(t){return hay.indexOf(t)>=0;}); }
   // debounce: coalesce rapid keystrokes into one call after `ms` of quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
-  function effQ(q){ q=nrm(q); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }
+  function effQ(q){ q=nrm(q).replace(/^[^a-z0-9]+|[^a-z0-9]+$/g,''); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }   // v28.652 (Ben): punctuation at either end is ignored ("PO-1881864:" finds PO-1881864)
   // v28.165 (Ben): shared "Search overrides filters" tick box (PO grid / Order plan / Shipments). The control + per-screen
   // localStorage live in the DEMAND artifact (window.hzSrchOvr); without it the box is omitted and each screen keeps its old behaviour.
   function _soBox(k,def,id){ return window.hzSrchOvr?window.hzSrchOvr.box(k,def,id):''; }
@@ -3677,7 +3682,7 @@
     function poSearchBase(){ return poSrchOvr()?rows:cur(); }
     function view(){ try{hzFilterSave('po',Object.assign({},state,{q:'',sku:'',qSeed:''}));}catch(e){}   // persist filters (not the search / SKU box)
       var q=effQ(state.q), _base=q?poSearchBase():null; var f=q ? filt(_base,q) : cur(); var fuzzy=false;
-      if(q && !f.length){ var ff=fuzzyFilt(_base,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
+      if(q && !f.length){ var ff=fuzzyFilt(_base,state.q); if(ff.length){ f=ff; fuzzy=ff; } }   // nothing on the exact search → fuzzy fallback on the best token
       var _poHid=(q&&!f.length&&!poSrchOvr())?(filt(rows,q).length||fuzzyFilt(rows,state.q).length):0;   // v28.165 (Ben): matches the filters are hiding
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       f=poGridSort(f);   // status-priority + PROD#-desc BEFORE paging, so the lazy-loaded first 50 surface production/shipping/ready-to-ship/future and push complete to the end
@@ -3691,7 +3696,7 @@
       // Load-more lives INSIDE the grid table (footer row) so it's in the same scroll box as the rows — no second
       // scroll to reach it. Sticky-left keeps the buttons visible when the wide grid is scrolled sideways.
       var _footRow=(shown.length<f.length)?'<tr class="po-loadmore-row"><td colspan="20" style="text-align:center;padding:10px;background:var(--hover);border-top:1px solid var(--line);position:sticky;left:0"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span> <button class="save-btn light" id="po-loadmore" style="margin-left:8px">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button> <button class="save-btn light" id="po-showall" style="margin-left:6px">Show all '+f.length+'</button></td></tr>':'';
-      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp,_footRow)+_soHintHtml(_poHid);   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete). v28.165: + hidden-matches hint
+      document.getElementById('sup-grid').innerHTML=(fuzzy&&fuzzy.like?'<div class="count" style="margin:4px 0 6px">No exact match for “'+esc(String(state.q).trim())+'”: showing '+(fuzzy.near?'POs close to it (containing “'+esc(fuzzy.like)+'”)':'matches for “'+esc(fuzzy.like)+'”')+'.</div>':'')+poTable(shown,q?'status':state.grp,_footRow)+_soHintHtml(_poHid);   // v28.652 close-match note   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete). v28.165: + hidden-matches hint
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
