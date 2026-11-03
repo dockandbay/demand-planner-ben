@@ -1,3 +1,6 @@
+## v28.643 (03-Nov-26) PO grid: "Supplier invoiced, Not Processed" exception
+- Ben: new option in the PO grid's All exceptions dropdown. Lists POs where the supplier's final invoice amount is entered but the Final payment due date is blank, so the payment can't reach Payments Due. Skips child POs (the master owns the money), POs whose balance is already paid, COMPLETE POs and 0.00 placeholder invoices. Client only. No migration.
+
 ## v28.642 (03-Nov-26) Amounts: a trailing full stop is ignored
 - Ben: "23,704.37." failed to save. The amount cleaner (browser and server hzNumClean) now drops a trailing full stop, semicolon or colon before parsing, so "23,704.37." saves as 23704.37. No migration.
 
