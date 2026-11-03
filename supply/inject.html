@@ -5279,13 +5279,18 @@
     function head(c){ var ev=String(c.event||''); var i=ev.indexOf(':'); return (i>0&&!c.detail)?ev.slice(0,i).trim():(c.detail?ev.trim():''); }
     function tail(c){ var ev=String(c.event||''); if(c.detail)return String(c.detail); var i=ev.indexOf(':'); return i>0?ev.slice(i+1).trim():ev; }
     var out=[], cur=null;
+    // v28.632 (Ben, PO-57UKBL-GOLDSEAL): ANY changes by the same user inside the window merge into one entry (not only same-subject ones).
+    // One shared subject keeps the "Subject — N changes" + tail lines; mixed subjects show "N changes" with each line as "Event: detail".
+    function full(c){ return String(c.event||'')+(c.detail?': '+String(c.detail):''); }
     rows.forEach(function(c){ var h=head(c), by=String(c.changed_by||'').toLowerCase();
-      if(cur&&h&&cur.head===h&&cur.by===by&&Math.abs(ts(c.created_at)-cur.lastTs)<=windowSec*1000){ cur.items.push(tail(c)); cur.lastTs=ts(c.created_at); cur.created_at=c.created_at; return; }
-      cur={head:h, by:by, items:[tail(c)], lastTs:ts(c.created_at), created_at:c.created_at, changed_by:c.changed_by, event:c.event, detail:c.detail, id:c.id}; out.push(cur); });
-    return out.map(function(g){ if(g.items.length<2){ return {id:g.id, event:g.event, detail:g.detail, created_at:g.created_at, changed_by:g.changed_by}; } return {id:g.id, event:g.head+': '+g.items.length+' changes', detail:'', head:g.head, items:g.items, n:g.items.length, created_at:g.created_at, changed_by:g.changed_by}; }); }
+      if(cur&&cur.by===by&&Math.abs(ts(c.created_at)-cur.lastTs)<=windowSec*1000){ cur.rows.push(c); if(cur.head!==h)cur.mixed=true; cur.lastTs=ts(c.created_at); cur.created_at=c.created_at; return; }
+      cur={head:h, mixed:!h, by:by, rows:[c], lastTs:ts(c.created_at), created_at:c.created_at, changed_by:c.changed_by, event:c.event, detail:c.detail, id:c.id}; out.push(cur); });
+    return out.map(function(g){ if(g.rows.length<2){ return {id:g.id, event:g.event, detail:g.detail, created_at:g.created_at, changed_by:g.changed_by}; }
+      var hd=g.mixed?'':g.head, items=g.rows.map(function(c){ return g.mixed?full(c):tail(c); });   // in the order they were made
+      return {id:g.id, event:(hd?hd+': ':'')+items.length+' changes', detail:'', head:hd, items:items, n:items.length, created_at:g.created_at, changed_by:g.changed_by}; }); }
   try{ window.hzGroupChanges=hzGroupChanges; }catch(e){}   // jsdom harness hook
   // shared renderer for a (possibly grouped) record-of-change card — used by the PO, shipment and product timelines
-  function hzChangeBodyHtml(c){ if(c.items&&c.items.length>1){ return '<b>'+esc(c.head)+'</b> <span class="mut">— '+c.items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0">'+c.items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'; } return '<b>'+esc(c.event||'')+'</b>'+(c.detail?': '+esc(c.detail):''); }
+  function hzChangeBodyHtml(c){ if(c.items&&c.items.length>1){ return (c.head?'<b>'+esc(c.head)+'</b> <span class="mut">— '+c.items.length+' changes</span>':'<b>'+c.items.length+' changes</b>')+'<ul style="margin:3px 0 0 14px;padding:0">'+c.items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'; } return '<b>'+esc(c.event||'')+'</b>'+(c.detail?': '+esc(c.detail):''); }
   var OP_SKUS={};     // po → supplier SKU rows [{sku,product_name}] for the add-SKU search picker (item 5)
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
@@ -5474,7 +5479,7 @@
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
     function renderChange(c){ var items=c.items||null;
-      var body=items?('<b>'+esc(c.head)+'</b> <span class="mut">— '+items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0;color:var(--ink-soft)">'+items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'):('<b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):''));
+      var body=items?((c.head?'<b>'+esc(c.head)+'</b> <span class="mut">— '+items.length+' changes</span>':'<b>'+items.length+' changes</b>')+'<ul style="margin:3px 0 0 14px;padding:0;color:var(--ink-soft)">'+items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'):('<b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):''));
       return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+body+'</span></div>'; }   // v28.115: record-of-change is its own tab now (no inline hide, roomier)
     // v28.115 (Ben): Messages and Record of change are now SEPARATE tabs (no interleaving, no inline hide toggle).
     var _msgItems=tlDesc(notes).map(function(n){ return {ts:tlTs(n.created_at)+'~'+('000000'+String(n.id||'')).slice(-6), h:renderNote(n)}; });
