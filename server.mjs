@@ -17221,6 +17221,15 @@ app.get('/api/config/coghlans-sftp/list', async (req, res) => {
   try { const out = await coghlansSftpList(dir); res.json({ ready: true, ...out }); }
   catch (e) { log500(e); res.status(e && e.notConfigured ? 200 : 502).json({ ready: !e.notConfigured, error: (e && e.message) || String(e), path: dir }); }
 });
+// v28.647: the one write path for "PO received → COMPLETE" (received-POs feed and the po_received workflow).
+// Only moves a PO that is not already COMPLETE; logs an internal timeline note. Returns true when it changed the PO.
+async function markPoReceivedComplete(po, note) {
+  const r = await pool.query(`UPDATE planner.purchase_orders SET status='COMPLETE' WHERE po=$1 AND upper(coalesce(status,''))<>'COMPLETE'`, [po]);
+  if (!r.rowCount) return false;
+  await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,'system','internal',$2)`, [po, note]);
+  try { invalidateSupplyCaches('po'); } catch (_) {}
+  return true;
+}
 // ── Recently-received POs feed (populated by n8n) → auto-complete + timeline + supply-planner email. ──
 // Idempotent: each row processed once. Action ONLY when a not-yet-COMPLETE PO is received (Ben): already-COMPLETE
 // or PO-not-found → no action, just mark processed. Sandbox has no RESEND_API_KEY → the email logs, doesn't send.
@@ -17239,11 +17248,9 @@ async function processReceivedPos() {
       if (!po) { note = 'PO not found — no action'; out.skipped++; }
       else if (String(po.status || '').toUpperCase() === 'COMPLETE') { note = 'already COMPLETE — no action'; out.skipped++; }
       else {
-        await pool.query(`UPDATE planner.purchase_orders SET status='COMPLETE' WHERE po=$1`, [r.po]);
-        out.completed++;
         const when = r.rd ? ' on ' + r.rd : '';
-        await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,'system','internal',$2)`,
-          [r.po, '📦 Received' + when + ' — automatically marked COMPLETE (recently-received-POs feed).']);
+        await markPoReceivedComplete(r.po, '📦 Received' + when + ' — automatically marked COMPLETE (recently-received-POs feed).');
+        out.completed++;
         if (plannerEmail && /@/.test(plannerEmail)) {
           try {
             await sendResendEmail({ to: plannerEmail, subject: 'PO ' + r.po + ' received — marked complete',
@@ -27468,6 +27475,41 @@ const WF_TEMPLATES = {
       await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())
         ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [d.line_key, d.new]);
       invalidateSupplyCaches('payment'); return d.line_key + ' likely date → ' + ddMonYy(d.new); },
+  },
+  // v28.647 (Ben 03-Nov-26): "PO received in Fulfil, mark HORIZON complete", when received at the MARKET warehouse. Fulfil receives
+  // every PO into China Port first (purchase state done while still at sea), so the trigger is the internal shipment(s) from China
+  // Port to the market 3PL (UK ILG / Geneva / iFulfillment / Coghlans): all of them done. Moves into China Stock / China Port don't count.
+  // Matches IS reference tokens to the PO or its master PO; reads the Fulfil internal-shipment mirror (refreshed by the Fulfil cron).
+  po_received: {
+    order: 4, area: 'Supply', name: 'PO received at the market warehouse → COMPLETE',
+    when: 'Every Fulfil internal shipment taking the PO from China Port to a market warehouse (UK ILG, Geneva, iFulfillment, Coghlans) is received. A PO only received into China Port does not count.',
+    then: ['Set the PO\'s HORIZON status to COMPLETE', 'Logged on the PO timeline with the warehouse, date and IS number'],
+    fields: [{ k: 'wait_days', sec: 'if', label: 'Wait after the last receipt', unit: 'days', dflt: 0 }],
+    dflt: { mode: 'ask', config: { wait_days: 0, notify: true, recipients: '', max_per_run: 50 } },
+    async find(cfg) {
+      const pos = (await pool.query(`SELECT p.po, upper(coalesce(p.status,'')) status, coalesce(p.master_po,'') master_po, coalesce(p.supplier_name,'') supplier
+        FROM planner.purchase_orders p WHERE upper(coalesce(p.status,'')) NOT IN ('COMPLETE','CANCELLED')`)).rows;
+      const iss = (await pool.query(`SELECT number, reference, state, to_location, to_char(effective_date,'YYYY-MM-DD') eff FROM planner.fulfil_internal_shipments
+        WHERE coalesce(reference,'')<>'' AND coalesce(state,'') NOT IN ('cancel','cancelled') AND coalesce(to_location,'') !~* 'china'`)).rows;
+      const byTok = {}; iss.forEach(i => String(i.reference).toUpperCase().split(/[\s,;\/]+/).filter(Boolean).forEach(t => { (byTok[t] = byTok[t] || []).push(i); }));
+      const wait = Math.max(0, Number(cfg.wait_days) || 0), today = new Date().toISOString().slice(0, 10), out = [];
+      for (const p of pos) {
+        const seen = new Set(), list = [];
+        [p.po, p.master_po].filter(Boolean).forEach(k => (byTok[String(k).toUpperCase()] || []).forEach(i => { if (!seen.has(i.number)) { seen.add(i.number); list.push(i); } }));
+        if (!list.length || list.some(i => i.state !== 'done')) continue;
+        const last = list.map(i => i.eff).filter(Boolean).sort().pop() || null;
+        if (wait && last && _wfDays(last, today) < wait) continue;
+        const wh = [...new Set(list.map(i => String(i.to_location || '').replace(/\s*-\s*Storage Zone$/i, '')))].join(', ');
+        const isn = list.map(i => i.number).join(', ');
+        out.push({ key: 'recv|' + p.po, type: 'po', ref: p.po,
+          title: p.po + (p.supplier ? ' (' + p.supplier + ')' : '') + ': received at ' + wh + (last ? ' ' + ddMonYy(last) : '') + ' (' + isn + ') → COMPLETE, now ' + (p.status || 'no status'),
+          detail: { po: p.po, old: p.status, new: 'COMPLETE', warehouse: wh, received: last, shipments: isn, master_po: p.master_po || '' }, autoOk: true });
+      }
+      return out;
+    },
+    async apply(it) { const d = it.detail || {};
+      const ok = await markPoReceivedComplete(d.po, '📦 Received at ' + d.warehouse + (d.received ? ' on ' + ddMonYy(d.received) : '') + ' (' + d.shipments + ') — marked COMPLETE by workflow.');
+      return ok ? d.po + ' → COMPLETE' : d.po + ' was already COMPLETE: nothing changed'; },
   },
 };
 const _wfMissing = e => /relation "planner\.workflow/.test(String(e && e.message));

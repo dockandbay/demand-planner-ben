@@ -1,3 +1,7 @@
+## v28.647 (03-Nov-26) Workflow: PO received at the market warehouse → COMPLETE
+- Ben: new workflow on CONFIG ▸ Admin ▸ Workflows (starts Off, Ask first). Fulfil receives every PO into China Port first (the Fulfil PO shows received while the goods are still at sea), so the trigger is the internal shipment(s) from China Port to the market warehouse (UK ILG, Geneva, iFulfillment, Coghlans): when ALL of them are received the PO is set to COMPLETE, with a timeline note (warehouse, date, IS number). Moves into China Stock / China Port do not count; a PO under a master PO matches the master's shipment. Option: wait N days after the last receipt.
+- Reads the Fulfil internal-shipment mirror (refreshed by the existing Fulfil cron); the complete step is shared with the received-POs feed (markPoReceivedComplete). On live today it would raise PO-57USLX1 and PO-57USLX4 (both DELIVERED). No migration, no new env vars, no new cron routes (runs inside /api/cron/workflows).
+
 ## v28.646 (03-Nov-26) PRODUCT sampling grid: Accepted under Supplier; CLIENT Messages tab removed from the menu
 - Ben: the supplier's "✓ Accepted" / "⏳ Awaiting accept" badge moves from the product ref cell to the Supplier column, under the Development / Custom order tag. Sent / Manage stay under the ref. No migration.
 - Ben: with client messaging off (CP_MSG_OFF), the CLIENT ▸ MESSAGES tab is no longer drawn, so it also leaves the left menu (v28.639 only redirected it). The portal order's Messages button reads Documents (it opens the documents-only drawer).
