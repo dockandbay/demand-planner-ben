@@ -7474,8 +7474,7 @@
     var depSups=Array.from(new Set((deps||[]).map(function(d){return d.supplier_name;}).filter(Boolean))).sort();
     var depPoView='unalloc';   // linked-PO column view: 'unalloc' (default) = only POs with no start deposit yet · 'open' = all non-complete · 'all' = every linked PO
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
-    b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]===st.f?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
-      +'<button class="save-btn" id="dep-new">+ Deposit</button>'
+    b.innerHTML=lookupDatalists()+'<div class="bar"><button class="save-btn primary" id="dep-new">+ Deposit</button>'+FILT.map(function(f){return '<span class="pill'+(f[0]===st.f?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<label style="font-size:12px;margin-left:6px;color:var(--muted)">POs: <select id="dep-poview" style="font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;background:var(--card)" title="Which linked purchase orders to list in the deposit&rsquo;s POs column"><option value="unalloc">Unallocated</option><option value="open">Open</option><option value="all">All linked</option></select></label>'
       +'<span class="pill-lbl" style="margin-left:6px">Supplier</span><select class="flt" id="dep-sup" style="width:auto;max-width:190px" title="filter by supplier"><option value="">All suppliers</option>'+depSups.map(function(s){return '<option value="'+esc(s)+'"'+(st.sup===s?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…" style="margin-left:6px"><span class="count" id="dep-cnt"></span></div>'
@@ -13745,8 +13744,8 @@
     rows=rows.filter(function(r){return r.is_deposit;});   // DEPOSITS tab = deposits only (Other lives under PAYMENTS)
     var state={q:''};
     c.innerHTML=annot('deposits')+lookupDatalists()+'<div class="bar">'
+      +'<button class="save-btn primary" id="dep-new">+ Deposit</button>'
       +'<input class="flt" id="sup-search" placeholder="Filter…">'
-      +'<button class="save-btn" id="dep-new">+ Deposit</button>'
       +'<span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px"><span class="tiny mut">Deposits summary:</span><button class="save-btn" id="dep-sum-copy" title="Copy each deposit (ref, supplier, PROD#, description, amount, FX, date paid, used, remaining) to the clipboard">⧉</button><button class="save-btn" id="dep-sum-csv" style="background:var(--pos-bg);color:var(--pos);border-color:#16a34a" title="Download the deposits summary as CSV (excludes linked POs and due / likely-pay dates)">⬇ CSV</button></span></div><div id="sup-grid"></div>';
     // Deposits Summary export — each deposit without linked POs / due date / likely-pay date.

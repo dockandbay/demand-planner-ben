@@ -1,3 +1,6 @@
+## v28.640 (03-Nov-26) Deposits: + Deposit is a blue button at the left of the toolbar
+- Ben: the + Deposit button on PRODUCTIONS > Deposits (and the SUPPLY Deposits list) now sits first in the toolbar, left of the filters, in the blue primary style. No other change. No migration.
+
 ## v28.639 (03-Nov-26) Client portal: messaging hidden (admin and client)
 - Ben: client communication goes only through the sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@ inboxes. Client portal: no Messages menu item, home card or per-order message threads (#/messages falls back to Home). Admin: CLIENT > Messages tab, the CLIENT unread badge, the home "unread client messages" item and the order drawer's messages and composer are hidden; the orders table column shows documents only (📎).
 - One switch per file (CP_MSG_OFF in supply/inject.html, MSG_OFF in supply/client-view.js). Existing threads, documents and the API routes are untouched. Client only. No migration.
