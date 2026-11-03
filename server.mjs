@@ -18671,6 +18671,15 @@ async function coghlansMailMaybe() {   // from the health-check run: at most eve
 app.post('/api/supply/tpl/coghlans/scan', async (req, res) => {
   try { const me = await permsFor(req).catch(() => ({})); const r = await coghlansMailImport((me && me.email) || 'button'); res.status(r.ok ? 200 : 409).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.636 (Ben 03-Nov-26: "close that May 15 item", DOK50349 with no Xero bill): close / reopen a Coghlans week by hand. ACCOUNTS access.
+app.post('/api/supply/tpl/coghlans/close', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required' });
+    const inv = String((req.body && req.body.invoice_no) || '').toUpperCase().trim(); if (!/^DOK\d+$/.test(inv)) return res.status(400).json({ error: 'invoice_no (DOKnnnnn) required' });
+    const cl = (await accSettingGet('coghlans_closed')) || {}; const by = me.email || authUser(req) || '';
+    if (req.body.reopen) delete cl[inv]; else cl[inv] = { by, at: new Date().toISOString(), note: String(req.body.note || '').slice(0, 300) };
+    await accSettingSet('coghlans_closed', cl, by); res.json({ ok: true, invoice_no: inv, closed: cl[inv] || null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/tpl/coghlans/weekly', async (req, res) => {
   try {
     const rows = (await pool.query(`WITH inv AS (
@@ -18690,7 +18699,8 @@ app.get('/api/supply/tpl/coghlans/weekly', async (req, res) => {
           ORDER BY (upper(b.invoice_number) LIKE '%-' || i.invoice_no) DESC, b.invoice_date DESC LIMIT 1) b ON true
       WHERE i.invoice_no IS NOT NULL
       ORDER BY i.invoice_no DESC`)).rows;
-    rows.forEach(r => { r.status = r.bill_id ? 'processed' : r.file_id ? 'imported' : 'missing'; if (r.bill_id) r.bill_url = xbUrl(r.bill_id); });
+    const closed = (await accSettingGet('coghlans_closed')) || {};   // v28.636: weeks closed by hand (no Xero bill expected) {DOK: {by, at, note}}
+    rows.forEach(r => { r.status = r.bill_id ? 'processed' : closed[r.invoice_no] ? 'closed' : r.file_id ? 'imported' : 'missing'; if (r.bill_id) r.bill_url = xbUrl(r.bill_id); if (closed[r.invoice_no]) r.closed = closed[r.invoice_no]; });
     const scanned = await accSettingGet('coghlans_mail_scanned'), g = await gmailRow().catch(() => null);
     res.set('Cache-Control', 'no-store').json({ rows, scanned, gmail_connected: !!(g && !g.missing) });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }

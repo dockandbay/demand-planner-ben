@@ -1,3 +1,6 @@
+## v28.636 (03-Nov-26) Coghlans weekly bills: close a week by hand
+- ACCOUNTS > 3PL invoicing > AU Coghlans weekly list: a week with no Xero bill gets a small "close" link (asks for a reason). A closed week shows a grey "Closed" badge with the reason, who and when (hover), counts with Processed (off the Unprocessed list) and has "reopen". Stored in app_settings 'coghlans_closed'; ACCOUNTS access. New route POST /api/supply/tpl/coghlans/close. No migration. First use: DOK50349 (week ending 15-May-26).
+
 ## v28.635 (03-Nov-26) 3PL invoicing: a bill created from HORIZON shows Processed at once
 - Rita: "I've processed the top 2 bills but they are still showing here?". The weekly list marks a week Processed when the Xero bill is in planner.xero_bills, which only the hourly xero-bills-sync (:20) filled. "Create bill in Xero" now records the new bill in xero_bills straight away. No migration.
 
