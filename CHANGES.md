@@ -1,3 +1,6 @@
+## v28.630 (03-Nov-26) Payments Report: ▸ expand button back
+- v28.628 removed the ▸ expand button with the Xero buttons; Ben wants it kept. Rows show ▸ + the copy email button; clicking the row still toggles too. Client only.
+
 ## v28.629 (03-Nov-26) Paid > Xero: settle where the PO bill actually lives
 - A completion / balance payment now settles in the Xero org that holds its linked PO bill (xero_bills.region). Before, the org came from the PO's AU/UK tag, so PO-56AULX1 (AU PO, bill booked in Xero UK) was planned as a loan-901 settlement in Xero AU, where no bill exists. It is now a same-org Xero UK payment from its own account. If the bill's org is unknown (not synced yet) the PO-tag rule applies as before. Deposits unchanged. No migration.
 
