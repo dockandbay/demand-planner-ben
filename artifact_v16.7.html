@@ -18923,27 +18923,46 @@ function render3plInvoice(body){
     var pushMsg=function(){ return document.getElementById('tpl-pushact-msg'); };
     var pushPaint=function(P){ var m=pushMsg(), bt=document.getElementById('tpl-pushact'); if(bt)bt.disabled=!!P.running; if(!m)return;
       if(P.running){ var done=P.off||0, tot=P.total||0, per=P.chunks?((Date.now()-P.t0)/P.chunks):45000, left=tot?Math.max(0,Math.ceil((tot-done)/40))*per:0;
-        m.style.color='var(--muted)'; m.textContent='Pushing to Fulfil: '+done+(tot?(' of '+tot+' references ('+Math.round(done/tot*100)+'%)'):' references')+(left?(', about '+Math.max(1,Math.round(left/60000))+' min left'):'')+'. You can use other pages meanwhile; we will tell you when it is done.'; }
+        m.style.color='var(--muted)'; m.textContent='Pushing to Fulfil: '+done+(tot?(' of '+tot+' references ('+Math.round(done/tot*100)+'%)'):' references')+(left?(', about '+Math.max(1,Math.round(left/60000))+' min left'):'')+'. Running on the server: you can close this page or use other pages.'; }
       else if(P.error){ m.style.color='var(--neg)'; m.textContent='Push failed: '+P.error; }
       else if(P.result){ m.style.color='var(--pos)'; m.textContent=P.result; } };
     var pushNotice=function(text,ok){ try{ var d=document.createElement('div'); d.setAttribute('role','status'); d.textContent=text;
       d.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9999;max-width:420px;padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.18);background:'+(ok?'var(--pos-bg,#e7f6ec)':'var(--neg-bg,#fdecec)')+';color:'+(ok?'var(--pos)':'var(--neg)')+';border:1px solid currentColor';
       document.body.appendChild(d); setTimeout(function(){ try{ d.remove(); }catch(_){} },12000); }catch(_){} };
+    // v28.634 (Ben, Rita): the push now runs ON THE SERVER (it carries on if this tab is closed). The page starts it, then polls
+    // /push-status every 5 s; a notice shows when it ends while the poll is running. Opening the invoice again shows where it is.
     window.TPL_PUSH=window.TPL_PUSH||{};
-    (function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid; if(aid&&window.TPL_PUSH[aid])pushPaint(window.TPL_PUSH[aid]); })();   // back on the page: show where it is
+    var pushFromState=function(st){ if(!st)return null; var P={running:!!st.running&&st.alive!==false, off:st.off||0, total:st.total||0, chunks:st.chunks||0, t0:st.started_at?Date.parse(st.started_at):Date.now(), error:st.error||null, result:null};
+      if(st.running&&st.alive===false){ P.running=false; P.error='stopped unexpectedly at '+(st.off||0)+' of '+(st.total||'?')+' references; press Push again to restart'; }
+      if(!st.running&&!st.error) P.result='✓ Pushed to Fulfil ('+(st.env||'')+'): '+(st.cust||0)+' customer shipment(s)'+(st.trans?(' + '+st.trans+' transfer(s)'):'')+(st.unres?(' · '+st.unres+' unmatched'):'')+(st.done_at?' · '+String(st.done_at).slice(0,16).replace('T',' '):'')+'.';
+      return P; };
+    // v28.634 push log: newest first, with a Resume button on the latest run when it failed / stopped part way
+    var pushLogPaint=function(aid,log){ var m=pushMsg(); if(!m)return; var el=document.getElementById('tpl-push-log'); if(!el){ el=document.createElement('div'); el.id='tpl-push-log'; m.parentNode.insertBefore(el,m.nextSibling); }
+      log=log||[]; if(!log.length){ el.innerHTML=''; return; }
+      var t=function(x){ if(!x)return ''; var d=new Date(x); if(isNaN(d))return String(x); var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p2=function(n){return ('0'+n).slice(-2);}; return p2(d.getDate())+'-'+M[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p2(d.getHours())+':'+p2(d.getMinutes()); }, col={done:'var(--pos)',failed:'var(--neg)',stopped:'var(--amber)',running:'var(--blue)'};
+      var last=log[0], canResume=last&&(last.status==='failed'||last.status==='stopped')&&last.total&&last.off<last.total;
+      el.innerHTML='<details style="margin:4px 0 2px;font-size:11.5px"'+(canResume||last.status==='failed'?' open':'')+'><summary style="cursor:pointer;color:var(--muted)">Push log ('+log.length+')</summary>'
+        +'<table style="font-size:11px;margin-top:4px;width:auto"><thead><tr><th class="l">Started</th><th class="l">By</th><th class="l">Status</th><th class="l">Finished</th><th style="text-align:right">References</th><th style="text-align:right">Pushed</th><th class="l">Error</th></tr></thead><tbody>'
+        +log.map(function(r){ return '<tr><td class="l">'+e(t(r.started_at))+(r.from?' <span class="mut">(resume from '+r.from+')</span>':'')+'</td><td class="l">'+e(String(r.by||'').split('@')[0])+'</td>'
+          +'<td class="l" style="color:'+(col[r.status]||'inherit')+';font-weight:600">'+e(r.status||'')+(r.handovers?' <span class="mut" style="font-weight:400">· '+r.handovers+' hand-over'+(r.handovers===1?'':'s')+'</span>':'')+'</td><td class="l">'+e(t(r.finished_at))+'</td>'
+          +'<td style="text-align:right">'+(r.off||0)+(r.total?' / '+r.total:'')+'</td><td style="text-align:right">'+(r.cust||0)+(r.trans?' + '+r.trans+' tr':'')+(r.unres?' <span class="mut">· '+r.unres+' unmatched</span>':'')+'</td>'
+          +'<td class="l" style="color:var(--neg);max-width:340px;white-space:normal">'+(r.error?e(t(r.error_at))+': '+e(r.error):'')+'</td></tr>'; }).join('')+'</tbody></table>'
+        +(canResume?'<div style="margin-top:5px"><button class="save-btn" id="tpl-push-resume" style="font-size:11px">Resume from reference '+last.off+' of '+last.total+'</button> <span class="mut">or press Push actuals to redo the whole invoice</span></div>':'')+'</details>';
+      var rb=document.getElementById('tpl-push-resume'); if(rb)rb.onclick=function(){ if(!confirm('Resume the Fulfil push from reference '+last.off+' of '+last.total+'? (LIVE write to the Active-ERP Fulfil)'))return; pushStart(aid,last.off); }; };
+    var pushPoll=function(aid){ if(window.TPL_PUSH[aid]&&window.TPL_PUSH[aid].polling)return; var W=window.TPL_PUSH[aid]=window.TPL_PUSH[aid]||{}; W.polling=true;
+      (function tick(){ fetch('/api/supply/tpl/push-actuals/'+aid+'/status').then(function(r){return r.json();}).then(function(j){ pushLogPaint(aid,j&&j.log); var P=pushFromState(j&&j.state); if(!P){ W.polling=false; return; }
+          pushPaint(P); if(P.running){ setTimeout(tick,5000); return; } W.polling=false; if(W.notify){ W.notify=false; pushNotice(P.error?('Push actuals to Fulfil failed: '+P.error):P.result,!P.error); } })
+        .catch(function(){ setTimeout(tick,10000); }); })(); };
+    (function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid; if(aid)pushPoll(aid); })();   // back on the page: show where it is (server state)
     if(pab)pab.onclick=function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid, m=pushMsg();
       if(!aid){ m.style.color='var(--amber)'; m.textContent='Analyse a file first (step 3), then push actuals.'; return; }
-      var cur=window.TPL_PUSH[aid]; if(cur&&cur.running){ pushPaint(cur); return; }   // never two pushes of one invoice at once
-      if(!confirm('Push actual freight + processing costs from this invoice onto the Fulfil shipment metafields?\n\nThis is a LIVE write to whichever Fulfil environment is set as Active-ERP (customer shipments and internal transfers).'))return;
-      var P=window.TPL_PUSH[aid]={running:true,cust:0,trans:0,unres:0,off:0,total:0,chunks:0,t0:Date.now(),error:null,result:null}; pushPaint(P);
-      (function step(){
-        fetch('/api/supply/tpl/push-actuals/'+aid,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({offset:P.off,limit:40})}).then(function(r){return r.json();}).then(function(j){
-          if(!j||j.error){ P.running=false; P.error=(j&&j.error)||'error'; pushPaint(P); pushNotice('Push actuals to Fulfil failed: '+P.error,false); return; }
-          P.cust+=j.customer_shipments_pushed||0; P.trans+=j.transfers_pushed||0; P.unres+=j.unresolved||0; P.off=j.processed_to; P.total=j.total||P.total; P.chunks++;
-          if(!j.done){ pushPaint(P); setTimeout(step,1000); /* v28.391: 1s gap between chunks so Fulfil's rate limit recovers */ }
-          else { P.running=false; P.result='✓ Pushed to Fulfil ('+j.env+'): '+P.cust+' customer shipment(s)'+(P.trans?(' + '+P.trans+' transfer(s)'):'')+(P.unres?(' · '+P.unres+' unmatched'):'')+'.'; pushPaint(P); pushNotice(P.result,true); }
-        }).catch(function(er){ P.running=false; P.error=er.message||String(er); pushPaint(P); pushNotice('Push actuals to Fulfil failed: '+P.error,false); }); })();
-    };
+      if(!confirm('Push actual freight + processing costs from this invoice onto the Fulfil shipment metafields?\n\nThis is a LIVE write to whichever Fulfil environment is set as Active-ERP (customer shipments and internal transfers). It runs on the server: you can close this page.'))return;
+      pushStart(aid,0); };
+    function pushStart(aid,from){ pushPaint({running:true,off:from||0,total:0,chunks:0,t0:Date.now()});
+      fetch('/api/supply/tpl/push-actuals/'+aid+'/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from:from||0})}).then(function(r){return r.json();}).then(function(j){
+          if(!j||j.error){ pushPaint({running:false,error:(j&&j.error)||'could not start'}); return; }
+          var W=window.TPL_PUSH[aid]=window.TPL_PUSH[aid]||{}; W.notify=true; pushPoll(aid); })
+        .catch(function(er){ pushPaint({running:false,error:er.message||String(er)}); }); }
     var clb=b.querySelector('#tpl-clear'); if(clb)clb.onclick=function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid, mo=b.querySelector('#tpl-map-out'); try{ if(aid)localStorage.removeItem('tplan_'+aid); localStorage.removeItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); }catch(e){} if(pc){pc.innerHTML='';pc.removeAttribute('data-aid');} if(mo)mo.innerHTML=''; var _cm=b.querySelector('#tpl-csv-msg'); if(_cm)_cm.textContent=''; var _sm=b.querySelector('#tpl-sweep-msg'); if(_sm){_sm.style.color='var(--faint)';_sm.textContent='Analyse a file to check for unmapped orders.';} var _sb=b.querySelector('#tpl-cin7sweep'); if(_sb)_sb.style.display=''; if(cim)cim.textContent=''; };
     b.querySelectorAll('.tpl-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this invoice file?'))return; fetch('/api/supply/tpl/file/'+a.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ load(true); }); }; });   // silent in-place reload (no Loading… flash)
     b.querySelectorAll('.tpl-sum').forEach(function(a){ a.onclick=function(){ renderParse(b.querySelector('#tpl-parse'),a.dataset.id); }; });

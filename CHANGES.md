@@ -1,3 +1,8 @@
+## v28.634 (03-Nov-26) 3PL invoicing: Push actuals to Fulfil runs in the background, with a push log
+- Rita (AU Coghlans): the push ran from the browser in 40-reference chunks, so the page showed "loading" for minutes and closing the tab stopped it. Now "Push actuals to Fulfil" starts a SERVER job (POST /api/supply/tpl/push-actuals/:id/start) and returns at once. The job pushes chunk after chunk, saves progress after each, and before Vercel's 300 s limit hands itself to a fresh request (POST /api/cron/tpl-push-continue, x-webhook-secret, called only by HORIZON itself, no n8n flow). The page polls GET .../push-status every 5 s; you can close it.
+- Push log per invoice (last 20 runs): started (when, who, resume point), status (running / done / failed / stopped), hand-overs, finished, references done of total, shipments pushed, error with time. A failed or stopped run offers "Resume from reference N of M"; Push actuals redoes the whole invoice.
+- The old one-chunk route POST /api/supply/tpl/push-actuals/:id still works. No migration (state in app_settings). New routes: /api/supply/tpl/push-actuals/:id/start, /status, /api/cron/tpl-push-continue (internal hand-over, not scheduled).
+
 ## v28.633 (03-Nov-26) Other Payments: search box
 - PAYMENTS > Other Payments gets an always-visible search box (above the ⚙ Filters bar). While it has text it searches EVERY other payment (reference, supplier, description, amount, due / paid / likely dates) and ignores the Status and Supplier filters; a note says "searching all, filters off · N found". Client only.
 

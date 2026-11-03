@@ -1314,7 +1314,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/tpl-push-continue' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
       || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
@@ -19571,14 +19571,16 @@ async function fulfilShipmentForRef(ref, cache) {
 // `offset` (a whole-invoice push is hundreds of sequential Fulfil writes → would time out), returns a cursor the client
 // re-POSTs until done. `limit` defaults to 40 (~120 Fulfil calls, safe under the timeout). Each order line maps to one
 // shipment, so chunking by order rarely splits a shipment across calls.
-app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
-  try {
-    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
-    if (!row) return res.status(404).json({ error: 'not found' });
+// v28.634: one chunk of the 3PL actuals push, shared by the old per-chunk route and the background job below. Throws {status, message}.
+const _tplErr = (status, message) => Object.assign(new Error(message), { status });
+async function tplPushChunk(id, offset0, limit0) {
+  {
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [id])).rows[0];
+    if (!row) throw _tplErr(404, 'not found');
     const cfg = fulfilConfigFor(await activeFulfilEnv());
-    if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    if (!cfg.configured) throw _tplErr(501, 'Fulfil ' + cfg.env + ' API not configured.');
     const defs = await fulfilShipmentActualDefs();
-    if (!defs.out.freight && !defs.out.process && !defs.internal.freight && !defs.internal.process) return res.status(400).json({ error: 'None of the FULFIL_/TRANSFER_FULFIL_ actual-cost metafields are defined in this Fulfil env.' });
+    if (!defs.out.freight && !defs.out.process && !defs.internal.freight && !defs.internal.process) throw _tplErr(400, 'None of the FULFIL_/TRANSFER_FULFIL_ actual-cost metafields are defined in this Fulfil env.');
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
     // v27.799 (review items 3+4): aggregate the WHOLE invoice by reference first (local, cheap) so a reference whose lines
@@ -19589,8 +19591,8 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
     for (const o of orders) { if (!o || !o.reference) continue; const a = refAgg.get(o.reference) || { freight: 0, process: 0 }; a.freight += Number(o.shipping) || 0; a.process += Number(o.fulfilment) || 0; refAgg.set(o.reference, a); }
     const uniqRefs = [...refAgg.keys()];
     const total = uniqRefs.length;
-    const offset = Math.max(0, Number(req.body && req.body.offset) || 0);
-    const limit = Math.max(1, Number(req.body && req.body.limit) || 40);
+    const offset = Math.max(0, Number(offset0) || 0);
+    const limit = Math.max(1, Number(limit0) || 40);
     const end = Math.min(total, offset + limit);
     const byShip = {}, shipCache = {}; let unresolved = 0; const unref = [];
     for (let i = offset; i < end; i++) { const ref = uniqRefs[i];
@@ -19608,9 +19610,77 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
       await fulfilAddShipmentNote(a.model, a.id, 'Horizon upload - Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
       await new Promise(r => setTimeout(r, 120));   // v28.257: gentle pace (3 to 4 Fulfil calls per shipment) so a chunk stays under Fulfil's request-count gate
       if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
-    res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
-      customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref });
+    return { ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
+      customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref };
+  }
+}
+app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {   // one chunk (kept for scripts / older pages)
+  try { res.json(await tplPushChunk(req.params.id, req.body && req.body.offset, req.body && req.body.limit)); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.634 (Ben 03-Nov-26, Rita: "it just keeps saying loading ... can you find a way to do this push in the background?"): the WHOLE push runs
+// on the server. Start returns at once; the job runs chunk after chunk (state in accounts settings 'tpl_push:<id>', saved after each chunk)
+// and, before Vercel's 300 s cap, hands itself to a fresh request (/api/cron/tpl-push-continue, x-webhook-secret). The page polls GET
+// .../push-status, so closing the tab does not stop it. One job per invoice: a running job with a heartbeat < 3 min blocks a second start.
+const TPL_PUSH_BUDGET_MS = Number(process.env.HZ_TPL_PUSH_BUDGET_MS) || 230000;   // env override only for testing the hand-over locally
+async function tplPushState(id) { return (await accSettingGet('tpl_push:' + id)) || null; }
+async function tplPushSave(id, st) { st.beat = new Date().toISOString(); await accSettingSet('tpl_push:' + id, st); return st; }
+// Push log (Ben 03-Nov-26: "log the fulfil push so we can determine when they start, when they finish, any errors ... we may want to redo"):
+// 'tpl_push_log:<id>' = newest-first list of runs {token, by, started_at, from, finished_at, status running|done|failed|stopped, error, error_at,
+// off, total, cust, trans, unres, handovers}. Kept to the last 20 runs per invoice; also console-logged for the health log.
+async function tplPushLog(id, token, patch) { try { const k = 'tpl_push_log:' + id; const L = (await accSettingGet(k)) || []; let r = L.find(x => x.token === token);
+    if (!r) { r = { token }; L.unshift(r); } Object.assign(r, patch); await accSettingSet(k, L.slice(0, 20)); } catch (e) { console.warn('[tpl-push] log failed: ' + e.message); } }
+function tplPushAlive(st) { return !!(st && st.running && st.beat && (Date.now() - new Date(st.beat).getTime()) < 180000); }
+async function tplPushRun(id, token, origin) {
+  const t0 = Date.now();
+  let st = await tplPushState(id); if (!st || !st.running || st.token !== token) return;
+  try {
+    while (true) {
+      const j = await tplPushChunk(id, st.off, 40);
+      st.cust += j.customer_shipments_pushed || 0; st.trans += j.transfers_pushed || 0; st.unres += j.unresolved || 0; st.off = j.processed_to; st.total = j.total || st.total; st.env = j.env; st.chunks = (st.chunks || 0) + 1;
+      if (j.done) { st.running = false; st.done_at = new Date().toISOString(); await tplPushSave(id, st);
+        await tplPushLog(id, token, { status: 'done', finished_at: st.done_at, off: st.off, total: st.total, cust: st.cust, trans: st.trans, unres: st.unres, env: st.env });
+        console.log('[tpl-push] ' + id + ' done: ' + st.cust + ' customer + ' + st.trans + ' transfers, ' + st.unres + ' unmatched'); return; }
+      await tplPushSave(id, st);
+      await tplPushLog(id, token, { off: st.off, total: st.total, cust: st.cust, trans: st.trans, unres: st.unres, env: st.env });
+      const cur = await tplPushState(id); if (!cur || cur.token !== token || !cur.running) return;   // cancelled / superseded
+      if ((process.env.VERCEL || process.env.HZ_TPL_PUSH_BUDGET_MS) && Date.now() - t0 > TPL_PUSH_BUDGET_MS) {   // hand over before the function is killed
+        const secret = process.env.N8N_WEBHOOK_SECRET;
+        st.handovers = (st.handovers || 0) + 1; await tplPushSave(id, st); await tplPushLog(id, token, { handovers: st.handovers });
+        await fetch(origin + '/api/cron/tpl-push-continue', { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': secret || '' }, body: JSON.stringify({ id, token }) }).catch(e => console.warn('[tpl-push] hand-over failed: ' + e.message));
+        return; }
+      await new Promise(r => setTimeout(r, 1000));   // v28.391: 1 s gap so Fulfil's rate limit recovers
+    }
+  } catch (e) { st.running = false; st.error = e.message || String(e); st.error_at = new Date().toISOString(); await tplPushSave(id, st).catch(() => {});
+    await tplPushLog(id, token, { status: 'failed', error: st.error, error_at: st.error_at, finished_at: st.error_at, off: st.off, total: st.total, cust: st.cust, trans: st.trans, unres: st.unres });
+    console.warn('[tpl-push] ' + id + ' failed at ' + st.off + '/' + st.total + ': ' + st.error); }
+}
+app.post('/api/supply/tpl/push-actuals/:id/start', async (req, res) => {
+  try { const id = req.params.id; const cur = await tplPushState(id);
+    if (tplPushAlive(cur)) { const c = Object.assign({}, cur); delete c.token; return res.json({ ok: true, already: true, state: c }); }
+    if (cur && cur.running && cur.token) await tplPushLog(id, cur.token, { status: 'stopped', error: 'no progress for 3 min (function ended)', error_at: cur.beat, finished_at: cur.beat });
+    const token = crypto.randomBytes(8).toString('hex'), from = Math.max(0, Number(req.body && req.body.from) || 0);   // from > 0 = resume a failed run
+    const by = (req.me && req.me.email) || authUser(req) || '';
+    const st = await tplPushSave(id, { running: true, token, off: from, total: (cur && cur.total) || 0, cust: 0, trans: 0, unres: 0, chunks: 0, started_at: new Date().toISOString(), by, from, error: null });
+    await tplPushLog(id, token, { by, started_at: st.started_at, from, status: 'running', off: from, total: st.total });
+    console.log('[tpl-push] ' + id + ' started by ' + by + (from ? ' (resume from ' + from + ')' : ''));
+    const origin = (req.get('x-forwarded-proto') || req.protocol || 'https') + '://' + req.get('host');
+    hzWaitUntil(tplPushRun(id, token, origin));
+    const pub = Object.assign({}, st); delete pub.token; res.status(202).json({ ok: true, started: true, state: pub });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/tpl/push-actuals/:id/status', async (req, res) => {
+  try { const st = await tplPushState(req.params.id); if (st) { st.alive = tplPushAlive(st); delete st.token; }
+    const log = ((await accSettingGet('tpl_push_log:' + req.params.id)) || []).map(r => { const x = Object.assign({}, r); delete x.token; return x; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, state: st, log }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/tpl-push-continue', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const id = req.body && req.body.id, token = req.body && req.body.token; if (!id || !token) return res.status(400).json({ error: 'id and token required' });
+  const origin = (req.get('x-forwarded-proto') || req.protocol || 'https') + '://' + req.get('host');
+  hzWaitUntil(tplPushRun(String(id), String(token), origin));
+  res.status(202).json({ ok: true });
 });
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
