@@ -1,3 +1,7 @@
+## v28.637 (03-Nov-26) PO Direct to Client: Edit client drawer
+- PO > CLIENT/FBA: when a client is picked, a "✎ Edit client" button sits next to Client name. It opens that client's key account in a right-hand drawer, the SAME form as CONFIG > Key accounts (packing / labelling, carton label format, client carton qty, address, seller, forwarder, consignee). Save closes the drawer and refreshes the PO (e.g. the NEXT carton labels button appears once its format is set); Cancel / Back / ✕ / Esc close it.
+- The CONFIG editor is now a shared keyAccountsEditor() (CONFIG page unchanged). Client only. No migration.
+
 ## v28.636 (03-Nov-26) Coghlans weekly bills: close a week by hand
 - ACCOUNTS > 3PL invoicing > AU Coghlans weekly list: a week with no Xero bill gets a small "close" link (asks for a reason). A closed week shows a grey "Closed" badge with the reason, who and when (hover), counts with Processed (off the Unprocessed list) and has "reopen". Stored in app_settings 'coghlans_closed'; ACCOUNTS access. New route POST /api/supply/tpl/coghlans/close. No migration. First use: DOK50349 (week ending 15-May-26).
 
