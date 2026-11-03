@@ -13672,7 +13672,7 @@ function _patchScope(table, body) {
   return PATCH_CACHE_SCOPE[table] || 'all';
 }
 // v28.641: strip thousands commas, currency symbols and ISO codes from a typed amount; "(1,234)" = -1234. Unparseable text is left as typed so the DB rejects it.
-function hzNumClean(v) { const t = String(v).trim(); if (t === '') return '';
+function hzNumClean(v) { const t = String(v).trim().replace(/[.;:]+$/, ''); if (t === '') return '';   // v28.642: a trailing full stop ("23,704.37.") is dropped
   const neg = /^\(.*\)$/.test(t); const c = t.replace(/[()\s,]/g, '').replace(/^(?:[A-Z]{3})?[$£€¥]?|(?:[A-Z]{3})$/g, '').replace(/^([A-Z]{1,2})\$/, '').replace(/[$£€¥]/g, '');
   return /^-?\d*\.?\d+$/.test(c) ? (neg && c[0] !== '-' ? '-' + c : c) : t; }
 async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn) {

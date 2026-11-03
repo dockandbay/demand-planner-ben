@@ -1818,7 +1818,8 @@
       var bg=SHIP_PAL[val]||PO_STATUS_BG[String(val||'').toUpperCase()]; if(bg){ el.style.background=bg[0]; el.style.color=bg[1]; el.style.borderColor=bg[0]; } } }
   // v28.641 (Ben: "22,890.00" saved but showed NaN): a typed amount with thousands commas, a currency symbol or ISO code
   // ("$22,890.00", "USD 22,890", "A$3,834") becomes a plain number before it saves; other text is left alone.
-  function hzNumClean(v){ var t=String(v==null?'':v).trim(); if(!t||!/[,$£€¥]|^[A-Z]{3}\s|\s[A-Z]{3}$|^\(.*\)$/.test(t))return v;
+  function hzNumClean(v){ var t=String(v==null?'':v).trim(); if(/\d[.;:]+$/.test(t))t=t.replace(/[.;:]+$/,'');   // v28.642: trailing full stop ("23,704.37.") dropped
+    if(!t||!/[,$£€¥]|^[A-Z]{3}\s|\s[A-Z]{3}$|^\(.*\)$/.test(t))return t===String(v==null?'':v).trim()?v:t;
     var neg=/^\(.*\)$/.test(t), c=t.replace(/[()\s]/g,'').replace(/^(?:[A-Z]{3})?(?:[A-Z]{1,2})?[$£€¥]?|(?:[A-Z]{3})$/g,'').replace(/[$£€¥]/g,'');
     if(!/^-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(c))return v; c=c.replace(/,/g,''); return (neg&&c[0]!=='-')?'-'+c:c; }
   function bindEdits(){ document.querySelectorAll('#supply-root .fci[data-ep]').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
