@@ -7,7 +7,7 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 
 ## What it does
 1. **Channel allocation report**: for a month, every Fulfil shipment to a customer, costed (qty x move cost price, company currency), grouped by sales channel / segment / delivery country, mapped to the channel COGS account.
-2. **Month-end journal in Xero, per org**: dated the last day of the month, DRAFT only (the accountants post it, as with the Faire VAT journal):
+2. **Month-end journal in Xero, per org**: dated the last day of the month. UK: DRAFT (Pooja / Harry post it, as with the Faire VAT journal). AU: POSTED as approved, Alex emailed (Ben 04-Nov-26):
    - Dr each channel COGS account (311.x UK; 311.8x / 401.x AU) with its share
    - Cr 9006 Fulfil - Cost of Goods Sold Account (exists in both orgs), same total
    - Reference `HORIZON COGS by channel YYYY-MM`, narration lists the source (Fulfil shipments, run date).
@@ -68,7 +68,7 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 
 ## Rules it follows
 - Nothing before 01-Oct-26 (Fulfil GL did not reach Xero before then); September stays the manual journal already done.
-- Draft journals only; the accountants post (Ascendant UK, Pillar AU).
+- UK: draft only, Ascendant post. AU: HORIZON posts (approved) and emails Pillar (Ben's explicit instruction 04-Nov-26).
 - Xero API calls share live's 1,000/day limit: a full run is about 4 calls per org.
 - Read-only on Fulfil.
 
@@ -79,5 +79,8 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 2c. ~~Co-brand / dropship~~ answered by Ben 04-Nov-26: custom / co-brand sales DO go to the Co-Brand/Custom COGS accounts (UK org: 311.9a UK, 311.9b US, 311.9c CA, 311.9d EU, 311.9e ROTW by where the sale is; AU org: 401.11e, and 401.10e for custom local D2C). NOTHING goes to the Dropship accounts (311.10a-d). How a sale is recognised as custom / co-brand (sale channel or segment, custom SKUs, the HORIZON custom order link) is settled from live Fulfil data at build time and shown to Ben before the first journal.
 3. ~~Airtable~~ answered: the existing COGS "Email to Airtable", weekly via n8n (v28.696).
 4. ~~Zero-cost lines~~ answered by Ben 04-Nov-26: keep the September treatment. Lines Fulfil shipped at cost 0 are costed from HORIZON products.cost (USD, converted at Fulfil's month rate) and flagged; that part is credited to 9008 Fulfil - Inventory Account (September used UK 601 / AU 625 because Fulfil's GL did not reach Xero then; from October the stock sits in 9008). The email lists those lines so the cost can be fixed in Fulfil.
-5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
+5. ~~Email~~ answered by Ben 04-Nov-26:
+   - UK: journal created as a DRAFT; month-end email to Pooja and Harry (Ascendant), who post it.
+   - AU: journal created POSTED (approved) in Xero AU by HORIZON; Alex (Pillar) is emailed that it is posted.
+   - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited) and Alex is emailed again. Recipients of the refresh emails: to confirm (default: same as month end, Ben + Sarah in cc).
 6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
