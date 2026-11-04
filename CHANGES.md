@@ -1,3 +1,9 @@
+## v28.686 (04-Nov-26) Manage 3PL: rebaseline log drawer; a failed rebaseline no longer says "Figures updated"; counted SKUs drop off Discrepancies
+- Ben: "Rebaseline history ... should be in a log pop out drawer from a button on the main panel of buttons". "☰ Rebaseline log (N)" in the status bar (⟳ while one is running, red badge for errors) opens the history in a drawer on the right; click outside or Close.
+- Ben: "something happened incorrect with the message figures updated if it also threw an error". When a batch that was running ends in error, the page says "⚠ Rebaseline #N failed in Fulfil: ... Nothing changed for those SKUs." instead of "✓ Fulfil read ... Figures updated".
+- Ben: "once figures update it should refresh those lines and remove them from discrepancies". A stock count books its change against Lost and Found; that was being counted as stock "moved since" the report and backed out, so a counted SKU stayed a discrepancy. Moves to / from Lost and Found are now ignored there, so after a rebaseline and the automatic Fulfil re-read the SKU matches and leaves Discrepancies.
+- No migration.
+
 ## v28.685 (04-Nov-26) Manage 3PL: old US / US Non GRS tabs retired; Automate dropdown; rebaseline sent to n8n at once; Fulfil re-read when it finishes
 - Ben: "i see tabs for US geneva and us and us non grs. i think the old ones can be removed". The DriveHQ US and US Non GRS tabs are gone; US (Geneva) covers US Geneva STD and FBA. An old link to them opens US (Geneva).
 - Ben: "can the automate details be a pop down from the status bar, next to Check ops@ now". "⚙ Automate: On/Off ▾" in the status bar drops the settings down under it (was a section at the bottom of the page).
