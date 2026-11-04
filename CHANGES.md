@@ -1,3 +1,12 @@
+## v28.698 (04-Nov-26) ACCOUNTS Reconcile: key-account receipt in a side drawer, with steps, progress and a clear result
+- Ben (NEXT live test): "clicking key account originally jumped around the page, suggest a drawer ... when matching it doesn't give confidence that anything was actually matched, wasn't clear it was processing. improve it". "Key account receipt ▸" opens the ACCOUNTS side drawer (the list stays put) with:
+  - a 4-step track: Paste remittance > Check against Xero > Post to Xero > Done;
+  - a working banner with a spinner and a running seconds counter while HORIZON checks Xero or writes to it;
+  - after Check: green "✓ Ready to post: N of N lines match Xero · total = bank line" with the Post button in it; red "Not ready" with the problems; AMBER "⚠ Check first: £X would stay unexplained in 9069 ... Is the remittance complete?" when it is postable but the remittance does not add up to the bank line;
+  - after Post: "✓ Done in Xero" listing the Receive Money (link), the batch payment (invoices, total), the read-back (N of N invoices now at the expected amount due), what is left in 9069, and the next step (reconcile the bank line in Xero). Sandbox dry runs show the same panel as a dry run.
+- Money in payout filter (v28.697) also catches the PayPal / Shopify Payouts bank accounts and PayPal Zettle.
+- Checked on the sandbox with the real NEXT 22-Oct-26 £90,995.40 line: Check (33 invoices, all match), partial remittance (amber), dry-run Post (result panel). No migration.
+
 ## v28.697 (04-Nov-26) ACCOUNTS Reconcile > Money in: hide matched lines and platform payouts (toggles)
 - Ben: "money in needs a filter of things that are matched as well. and also we need to filter OUT items like klarna, amazon, shopify, paypal, faire ... have toggles to hide/show these, default hide". Two toggles on Money in, both off each visit: "Show matched (N)" (Receive Money already created here, or a key-account receipt posted) and "Show Klarna / Amazon / Shopify / PayPal / Faire (N)" (payee / statement line names one of them; those payouts are cleared by their own flows). Sandbox: 10 payout lines hidden by default, shown when ticked.
 - No migration.
