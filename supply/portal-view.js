@@ -1199,12 +1199,18 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       host.querySelectorAll('.po2-po').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); location.hash='#/orders/pos/'+encodeURIComponent(a.dataset.po); }; });
       host.querySelectorAll('.po2-ship').forEach(function(x){ x.onclick=function(){ po2ShipView(x.dataset.ref,host); }; });
       if(PP_LANG==='zh')try{ ppTranslate(host); }catch(e){} }
-    function po2ShipView(ref,listHost,tab){ var s=((PO2.d&&PO2.d.shipments)||[]).filter(function(x){ return x.shipment_ref===ref; })[0]; if(!s)return;
-      var panel=document.getElementById('po2-panel'); if(panel)panel.remove(); panel=document.createElement('div'); panel.id='po2-panel'; (rootEl||document.body).appendChild(panel);
-      var master=s.role==='master', mineM=(s.members||[]).filter(function(m){ return m.mine; })[0], anyPo=(mineM||{}).po, TAB=tab||'main';
-      ppDrawerOpen(panel,{ref:'Shipment '+ref, sub:[master?'★ You consolidate':'Ships with '+(s.master_po||ref), s.mode?String(s.mode).toUpperCase():'', {to_ship:'To ship',shipped:'Shipped',complete:'Complete'}[s.stage]||''].filter(Boolean).join(' · '), link:ppItemLink('orders','shipmentplan',ref), kind:'ship2', close:function(){ panel.remove(); }});
-      var body=document.createElement('div'); body.style.cssText='padding:12px 16px;text-align:left;font-size:12.5px'; panel.appendChild(body);
-      var refresh=function(t){ po2Fetch(function(){ if(listHost&&document.body.contains(listHost))ppOrdersRender(listHost); po2ShipView(ref,listHost,t||TAB); }); };
+    // v28.665 (Ben: "open shipment plan i want BUILT INLINE on shipment tab ... no separate shipment plan"): the same 4-tab shipment view
+    // renders inline in the PO's SHIPMENT tab (po2ShipInline), or as a drawer from the Orders list.
+    function po2ShipInline(host,ref,tab){ if(!host)return; host.innerHTML='<span class="mut tiny">Loading shipment…</span>';
+      fetch('/api/portal/orders?complete=1',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ var s=((d&&d.shipments)||[]).filter(function(x){ return x.shipment_ref===ref; })[0];
+        if(!s){ host.innerHTML='<span class="mut tiny">Shipment '+esc(ref)+' could not be loaded.</span>'; return; } po2ShipView(ref,null,tab,host,s); }).catch(function(){ host.innerHTML='<span class="mut tiny">Could not load the shipment.</span>'; }); }
+    function po2ShipView(ref,listHost,tab,inlineHost,sOver){ var s=sOver||((PO2.d&&PO2.d.shipments)||[]).filter(function(x){ return x.shipment_ref===ref; })[0]; if(!s)return;
+      var master=s.role==='master', mineM=(s.members||[]).filter(function(m){ return m.mine; })[0], anyPo=(mineM||{}).po, TAB=tab||'main', panel;
+      if(inlineHost){ panel=inlineHost; panel.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:6px;text-align:left"><b style="font-size:13px">Shipment '+esc(ref)+'</b><span class="tiny mut">'+esc([master?'★ You consolidate':'Ships with '+(s.master_po||ref), s.mode?String(s.mode).toUpperCase():'', {to_ship:'To ship',shipped:'Shipped',complete:'Complete'}[s.stage]||''].filter(Boolean).join(' · '))+'</span></div>'; }
+      else { panel=document.getElementById('po2-panel'); if(panel)panel.remove(); panel=document.createElement('div'); panel.id='po2-panel'; (rootEl||document.body).appendChild(panel);
+        ppDrawerOpen(panel,{ref:'Shipment '+ref, sub:[master?'★ You consolidate':'Ships with '+(s.master_po||ref), s.mode?String(s.mode).toUpperCase():'', {to_ship:'To ship',shipped:'Shipped',complete:'Complete'}[s.stage]||''].filter(Boolean).join(' · '), link:ppItemLink('orders','orders',ref), kind:'ship2', close:function(){ panel.remove(); }}); }
+      var body=document.createElement('div'); body.style.cssText=(inlineHost?'':'padding:12px 16px;')+'text-align:left;font-size:12.5px'; panel.appendChild(body);
+      var refresh=function(t){ if(inlineHost)return po2ShipInline(inlineHost,ref,t||TAB); po2Fetch(function(){ if(listHost&&document.body.contains(listHost))ppOrdersRender(listHost); po2ShipView(ref,listHost,t||TAB); }); };
       var tabs=[['main','Shipment & POs on board'+((s.members||[]).some(function(m){ return !m.loaded; })&&master&&s.stage==='to_ship'?' ⚠':'')],['labels','Labels & pallets'],['charges','Charges'],['timeline','Timeline']];
       var paint=function(){ body.innerHTML='<div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:12px">'+tabs.map(function(t){ return '<button class="lnk-btn po2-tab" data-t="'+t[0]+'" style="background:none;border:none;border-bottom:2px solid '+(TAB===t[0]?'var(--blue)':'transparent')+';padding:7px 10px;font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:'+(TAB===t[0]?'var(--blue)':'var(--muted)')+';cursor:pointer">'+t[1]+'</button>'; }).join('')+'</div><div class="po2-tb"><span class="mut">Loading…</span></div>';
         body.querySelectorAll('.po2-tab').forEach(function(b){ b.onclick=function(){ TAB=b.dataset.t; paint(); }; });
@@ -1212,7 +1218,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
         if(TAB==='main')return po2Main(tb); if(TAB==='labels')return po2Labels(tb); if(TAB==='charges')return po2Charges(tb); return po2Timeline(tb); };
       var post=function(url,data,ok){ fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.error){ ppNotice(j.error); return; } ok&&ok(j); }).catch(function(){ ppNotice('Could not save'); }); };
       function po2Main(tb){ var M=s.members||[], allL=M.length&&M.every(function(m){ return m.loaded; }), ro=!master||s.stage!=='to_ship';
-        var carOpts='<option value="">—</option>'+((s.carrier&&PO2_CARS.indexOf(s.carrier)<0)?'<option selected>'+esc(s.carrier)+'</option>':'')+PO2_CARS.map(function(c){ return '<option'+(String(s.carrier).toLowerCase()===c.toLowerCase()?' selected':'')+'>'+c+'</option>'; }).join('');
+        var carOpts='<option value="">—</option>'+((s.carrier&&!PO2_CARS.some(function(c){ return c.toLowerCase()===String(s.carrier).toLowerCase(); }))?'<option selected>'+esc(s.carrier)+'</option>':'')+PO2_CARS.map(function(c){ return '<option'+(String(s.carrier).toLowerCase()===c.toLowerCase()?' selected':'')+'>'+c+'</option>'; }).join('');
         var h='<div class="sect-h">Update this shipment</div>'
           +(master&&s.stage!=='complete'?'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:6px"><label class="tiny">Carrier<br><select class="fci po2-car" style="min-width:120px;text-align:left">'+carOpts+'</select></label>'
             +'<label class="tiny">Tracking ref<br><input class="fci po2-trk" value="'+esc(s.carrier_ref||'')+'" style="width:170px;text-align:left"></label>'
@@ -1253,7 +1259,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
           tb.querySelector('.po2-ngo').onclick=function(){ var v=(tb.querySelector('.po2-nb').value||'').trim(); if(!v)return; post('/api/portal/shipment-note',{shipment_ref:ref,body:v},function(){ po2Timeline(tb); }); };
         }).catch(function(){ tb.innerHTML='<span class="mut">Could not load.</span>'; }); }
       paint(); }
-    try{ fetch('/api/portal/orders-enabled',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.enabled)ppAddTab({pt:'orders',label:'Orders (new)',sec:'orders',render:function(host){ ppOrdersRender(host); }}); }).catch(function(){}); }catch(e){}
+    try{ fetch('/api/portal/orders-enabled',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.enabled){ ppAddTab({pt:'orders',label:'Orders (new)',sec:'orders',render:function(host){ ppOrdersRender(host); }}); var spt=tabsEl.querySelector('.rtab[data-pt="shipmentplan"]'); if(spt)spt.style.display='none'; if(PORTAL_TAB==='shipmentplan'){ PORTAL_TAB='orders'; if(_ppData)renderPP(); } } }).catch(function(){}); }catch(e){}   // v28.665 (Ben): no separate Shipment Plan on the new process
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec);
         var n=0; tabsEl.querySelectorAll('.rtab[data-sec="'+sb.dataset.sec+'"] .ex-badge').forEach(function(b){ if(b.classList.contains('done'))return; var v=parseInt(b.textContent,10); if(v>0)n+=v; });   // action count per section (v27.506)
@@ -1603,14 +1609,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
         // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
         // v28.657 (Ben 04-Nov-26): the shipment shows here in 4 sections (details, POs aboard, labels, pallets), read straight from the shipment
         // (any status), filled by ppShipX after render. Was a header + "Open shipment" that went to the Shipment Plan (open shipments only).
-        ? shipPreA+'<div class="pp-shipx" data-po="'+po+'"><span class="mut tiny">Loading shipment…</span></div>'+shipPreB
-          +'<div class="sect-h" style="margin-top:14px">Freight &amp; Handling Charges</div>'
-          +'<div class="tiny mut" style="margin-bottom:6px">Add a freight cost for this shipment. Dock &amp; Bay reviews it; once accepted it becomes a payment to you.</div>'
-          +'<div class="pp-fchg-list" data-ref="'+esc(p.shipment)+'" style="margin-bottom:6px"><span class="mut tiny">…</span></div>'
-          +'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">'
-          +'<label class="tiny">Amount<br><input class="fci pp-fcost" data-ref="'+esc(p.shipment)+'" placeholder="0.00" style="width:110px;text-align:left" inputmode="decimal"></label>'
-          +'<label class="tiny">Note (optional)<br><input class="fci pp-fnote" data-ref="'+esc(p.shipment)+'" placeholder="e.g. extra container" style="width:200px;text-align:left"></label>'
-          +'<button class="save-btn pp-fchg-go" data-ref="'+esc(p.shipment)+'">Add freight charge</button></div>'
+        ? shipPreA+'<div class="pp-shipx" data-po="'+po+'" data-ref="'+esc(p.shipment)+'"><span class="mut tiny">Loading shipment…</span></div>'+shipPreB   /* v28.665: charges live in the inline shipment view's Charges tab */
         // no shipment yet → NOT an action. Only if the supplier ticks "shipped with own carrier" do we reveal
         // the carrier/tracking/charge inputs (submitting then creates the shipment for this PO).
         : shipHead
@@ -3071,10 +3070,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               document.querySelectorAll('.sp-ld-warn[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]').forEach(function(w){ var n=document.querySelectorAll('.sp-ld[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]:not(:checked)').length; w.style.display=n?'':'none'; w.textContent='Tick each PO loaded on this shipment before setting it to Shipping ('+n+' not ticked).'; });
             }).catch(function(){ c.disabled=false; c.checked=!want; ppNotice('Could not save'); }); }); }
           function ppGsInstall(){ var top=document.querySelector('.pv-top'); if(!top||document.getElementById('pp-gs'))return;
-            var w=document.createElement('div'); w.id='pp-gs'; w.style.cssText='position:relative;flex:0 1 340px;min-width:180px;z-index:100002';
-            w.innerHTML='<input id="pp-gs-q" type="search" autocomplete="off" placeholder="'+(PP_LANG==='zh'?'🔍 搜索 采购订单 / 发运 / 样品 / 产品':'🔍 Search POs, shipments, samples, products…')+'" style="width:100%;padding:6px 44px 6px 12px;border-radius:8px;border:1.5px solid #22c55e;background:#ecfdf3;color:#0f172a;font-size:13px;font-weight:600">'
-              +'<button type="button" id="pp-gs-scan" title="Scan a QR code or barcode" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:#22c55e;color:#fff;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer">📷</button>'
-              +'<div id="pp-gs-res" hidden style="position:fixed;top:0;left:0;width:min(520px,94vw);max-height:60vh;overflow:auto;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 30px -10px rgba(15,23,42,.45);z-index:100003;text-align:left"></div>';
+            var w=document.createElement('div'); w.id='pp-gs'; w.style.cssText='position:relative;flex:0 1 340px;min-width:180px';   // v28.665 (Ben): under the drawers, not over them
+            w.innerHTML='<input id="pp-gs-q" type="search" autocomplete="off" placeholder="'+(PP_LANG==='zh'?'搜索 采购订单 / 发运 / 样品 / 产品':'Search POs, shipments, samples, products…')+'" style="width:100%;padding:6px 44px 6px 12px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-size:13px">'
+              +'<button type="button" id="pp-gs-scan" title="Scan a QR code or barcode" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;padding:3px 5px;line-height:0;color:#64748b;display:inline-flex;align-items:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5V5.5A1.5 1.5 0 0 1 5.5 4H7.5"/><path d="M16.5 4h2A1.5 1.5 0 0 1 20 5.5v2"/><path d="M20 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-2"/><path d="M7.5 20h-2A1.5 1.5 0 0 1 4 18.5v-2"/><path d="M7.5 8.5v7M10.5 8.5v7M13.5 8.5v7M16.5 8.5v7" stroke-width="1.5"/></svg></button>'
+              +'<div id="pp-gs-res" hidden style="position:fixed;top:0;left:0;width:min(520px,94vw);max-height:60vh;overflow:auto;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 30px -10px rgba(15,23,42,.45);z-index:99990;text-align:left"></div>';
             var sp=top.querySelector('.sp'); if(sp)top.insertBefore(w,sp); else top.appendChild(w);
             var qi=w.querySelector('#pp-gs-q'), res=w.querySelector('#pp-gs-res'), sel=0, cur=[];
             document.body.appendChild(res);   // fixed on <body> so it shows above the PO / shipment drawers (the top bar is its own stacking layer)
@@ -3646,7 +3645,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                       .then(function(x){ go.disabled=false; go.textContent='Save'; if(x.error){ ppNotice(x.error); return; } paint(x); }).catch(function(){ go.disabled=false; go.textContent='Save'; ppNotice('Could not save the pallets'); }); }; };
                 if(d0)return paint(d0);
                 fetch('/api/portal/po-shipment/'+encodeURIComponent(po),{cache:'no-store'}).then(function(r){ return r.json(); }).then(paint).catch(function(){ paint({error:'Could not load the shipment'}); }); }
-              scope.querySelectorAll('.pp-shipx').forEach(function(el){ ppShipX(el,el.dataset.po); });
+              scope.querySelectorAll('.pp-shipx').forEach(function(el){ if(el.dataset.ref)po2ShipInline(el,el.dataset.ref); else ppShipX(el,el.dataset.po); });   // v28.665: the full shipment view inline (ppShipX kept as fallback)
               scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(e){ if(e)e.stopPropagation(); var ref=btn.dataset.ref||'';
                 // v28.610 (Ben): open the shipment straight in the popout drawer (was: jump to Shipment Plan and click again); falls back to the tab if it is not in the plan
                 if(ref&&((_ppData&&_ppData.shipmentPlan)||[]).some(function(x){ return x.master_po===ref; })){ ppShipDrawer(ref); return; }

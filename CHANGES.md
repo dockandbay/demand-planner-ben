@@ -1,3 +1,9 @@
+## v28.670 (04-Nov-26) Supplier portal: shipment managed inline in the PO's SHIPMENT tab; search box white, under drawers, subtle scan icon
+- (v28.665 to v28.669 skipped: those numbers were used for sandbox cache-busting, so browsers may hold other code under them.)
+- Ben: "open shipment plan i want BUILT INLINE on shipment tab ... no separate shipment plan". A PO on a shipment now shows the full shipment view inside its SHIPMENT tab, the same 4 tabs as ORDERS (new): Shipment & POs on board (update carrier / tracking / ship date, tick each PO loaded, Mark as shipped), Labels & pallets, Charges, Timeline. The "Open in Shipment Plan" link and the separate charges box under it are gone. For anyone on the new process (staff, or suppliers in portal_orders_v2) the Shipment Plan tab is hidden.
+- Ben: the global search box sat on top of the drawer; it is now under drawers, white (was green), and the scan button uses HORIZON's subtle scanner icon (same as PRODUCT sampling). HORIZON's ⌘K scan button uses the same icon. Carrier list: a carrier saved in capitals (FLEXPORT) no longer shows twice.
+- No migration.
+
 ## v28.664 (04-Nov-26) Manage 3PL: search finds every SKU; Refresh Fulfil shows progress
 - Ben: HAIRW-SUE-HBRLINE not shown on Manage 3PL > UK. A SKU search now looks across ALL SKUs; Show (Discrepancies / Not in Fulfil ...), Status and Diff apply only when the search box is empty (a SKU matching Fulfil was hidden by the default Discrepancies view). Same on US / AU / EU / US Non GRS (the search ignores the gaps / dead stock view).
 - Ben: "Refresh Fulfil ... doesnt seem to do anything to indicate". The button reads "⟳ Reading Fulfil…" and is disabled while it runs, then a green "✓ Fulfil read at HH:MM. Figures updated." No migration.
