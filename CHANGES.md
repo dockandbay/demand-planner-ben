@@ -1,3 +1,8 @@
+## v28.702 (05-Nov-26) ACCOUNTS Money in: Stripe and Zalando ZPS payouts hidden with the other payouts
+- Ben 05-Nov-26: Stripe payouts hidden like PayPal / Shopify; ZPS (Zalando) handled by a Xero bank rule, hidden too.
+- Matched on the line text only. The Stripe USD bank accounts carry customer card payments (ch_ / pi_ ids, e.g. USWS-19079), so the account name is not used and charge lines stay visible.
+- Files: supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.701 (05-Nov-26) ACCOUNTS bank sync: Xero UK high-volume fix (daily 05:15 n8n run failing)
 - Ben approved 05-Nov-26. The daily "Horizon | Xero bank accounts sync (05:15)" (n8n Qlxcr84MXQA1AfGc, POST /api/cron/accounts-bank-sync) failed every day with "UK: Your request is not filtering BankTransactions efficiently". Cause (probed read-only on live Xero UK): the re-check of stored spend / receive money by id (BankTransactionID==guid OR ...) is refused by the UK org (HighVolumeException), even with a date range; the incremental If-Modified-Since read, dated windows, Payments and BankTransfers all work.
 - Fix: when Xero refuses the by-id read, re-read the open (IsReconciled==false) BankTransactions for only the calendar months that hold a stored item, monthly windows (halving any window Xero still refuses), and clear stored items missing from that read. AU keeps the by-id check. No Xero writes.
