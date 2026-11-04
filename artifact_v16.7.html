@@ -2308,7 +2308,7 @@ function urgentLeadText(p){
 // Compute buy qtys for a SKU+market (sum over BUY_KEYS)
 function urgCellHtml(sku,v,snz,until,tip,col){   // v28.693: urgent cell; click = snooze menu
   if(v>0)return `<td class="bq urg-c${tip?' tip120':''}"${tip?` data-tip="${tip} · click to snooze"`:''} data-sku="${sku}" data-q="${v}" style="cursor:pointer"><span class="bq-v" style="color:${col};font-weight:700">${fmt(v)}</span></td>`;
-  if(snz>0&&BU_SHOW_SNZ)return `<td class="bq urg-c" data-sku="${sku}" data-q="${snz}" data-snz="1" style="cursor:pointer" title="Snoozed ${until?'until '+fmtD(until):'indefinitely'} · click to change"><span style="color:var(--muted);text-decoration:line-through">${fmt(snz)}</span> <span style="font-size:10px">💤</span></td>`;
+  if(snz>0&&BU_SHOW_SNZ)return `<td class="bq urg-c" data-sku="${sku}" data-q="${snz}" data-snz="1" style="cursor:pointer" title="Snoozed ${until?'until '+fmtD(until):'indefinitely'} · click to change"><span style="color:var(--muted)">${fmt(snz)}</span> <span style="font-size:10px">💤</span></td>`;
   return `<td class="bq"><span class="bq-nil">—</span></td>`; }
 function fmtD(iso){ try{ var d=new Date(iso+'T12:00:00'); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-'); }catch(e){ return iso; } }
 if(!window.__urgSnzWired){ window.__urgSnzWired=1;
