@@ -19324,6 +19324,10 @@ function _tplGridSummary(name, grid) {
   // Fires only on the order sheet (has both a freight col + a consumables cost col).
   const conCol = find('consumables cost');
   let totalHi = (totCol || {}).sum ?? null, conInside = null;
+  // v28.704 (Rita / Ben 05-Nov-26, I-Fulfilment EU Oct-26 bill 177.77 over the invoice): on the iFulfilment returns sheet the billed amount is
+  // Return Charges + Prepaid Label + Consumables. From Oct-26 its "Total" column also carries an amount they do not bill (8.23 on 18 of 30 returns:
+  // Total 336.46 vs invoice Returns 188.32 = Return Charges). Sep-26 had Total = Return Charges (480.80), so this gives the same answer there.
+  { const rc = find('return charges'); if (rc && rc.numeric) { const pl = find('prepaid label'), co = find('consumables'); totalHi = rc.sum + ((pl && pl.numeric) ? pl.sum : 0) + ((co && co.numeric) ? co.sum : 0); } }
   if (totalHi != null && conCol && frCol) {
     conInside = _tplConsumablesInside(headers, nm => { const c = find(nm); return (c && c.numeric) ? c.sum : null; });
     if (conInside !== true) totalHi += conCol.sum;

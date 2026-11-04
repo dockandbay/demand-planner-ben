@@ -1,3 +1,10 @@
+## v28.704 (05-Nov-26) 3PL invoicing EU: returns total = billed charges (Oct-26 I-Fulfilment bill was 177.77 over)
+- Rita / Ben 05-Nov-26: Xero bill preview for FULFILLMENT-EU-2026-10-31 showed 16,497.12 against the invoice's 16,319.35 (tax 2,749.52 vs 2,719.89).
+- Cause: the Returns BOC sheet's Total column sums to 336.46, but I-Fulfilment bills Return Charges (188.32; 18 of 30 returns carry an unbilled 8.23 in Total from Oct-26). Difference 148.14 net + 29.63 VAT = 177.77.
+- Fix: a sheet with a Return Charges column totals Return Charges + Prepaid Label + Consumables. Sep-26 unchanged (480.80 either way). Oct-26 now 16,319.35 / 2,719.89, to the cent.
+- Also: preview heading "Freight &AMP; fulfilment" (escaped twice) now reads "Freight & fulfilment".
+- Files: server.mjs, artifact_v16.7.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.703 (05-Nov-26) Xero calls: sandbox budget, changes-only bank sync, deep pass coded (not scheduled), calls used shown
 - Why: 04-Nov Xero UK fell to 133 calls left (red alert): ~443 sandbox test calls, ~200 the 05:15 bank sync re-checking every stored line, ~175 normal use.
 - Sandbox guard: on the sandbox only, 50 Xero calls per org per Xero day (env XERO_SANDBOX_DAILY) and none once Xero has under 500 left (env XERO_SANDBOX_MIN_LEFT). Live unaffected.
