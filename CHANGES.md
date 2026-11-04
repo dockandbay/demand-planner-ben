@@ -1,3 +1,6 @@
+## v28.674 (04-Nov-26) Supplier portal: no loaded ticks for suppliers who don't consolidate the shipment
+- Ben: "if user cannot tick the boxes as they are not shipment owner, then no need to show them". A supplier riding on another supplier's shipment now sees the POs on board without tick boxes (PO Shipment tab, Shipment Plan, and the old Shipment Plan's Loaded column). The consolidating supplier still sees them, locked once the shipment has shipped or is complete. No migration.
+
 ## v28.673 (04-Nov-26) Supplier portal: the new ORDERS tab is called Shipment Plan
 - Ben: "i think still call this shipment plan". ORDERS > Orders (new) is renamed Shipment Plan (发运计划 in Chinese, the existing translation). It replaces the old Shipment Plan tab, which stays hidden for anyone on the new process. No migration.
 
