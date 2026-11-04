@@ -20306,7 +20306,7 @@ async function ilgQueueBatch(rep, poolKey, cmp, skus, createdBy) {
   if (!lines.length) return { batch_id: null, lines: 0, skipped, nudged: false };
   const ins = (await pool.query(`INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
     [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), createdBy])).rows[0];
-  let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK;   // optional: without it the n8n 15-minute sweep picks it up
+  let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK || (IS_SANDBOX ? '' : 'https://n8n.dockandbay.com/webhook/ilg-stocktake');   // v28.685 (Ben: "can it be more instant?"): live nudges the flow's webhook at once (the 15-minute sweep stays as the fallback); never from the sandbox
   if (hook && process.env.N8N_WEBHOOK_SECRET) { try { const r = await _fetchT(hook, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET }, body: JSON.stringify({ batch_id: ins.id }) }, 8000); nudged = r.ok; } catch (_) {} }
   return { batch_id: ins.id, lines: lines.length, skipped, nudged };
 }

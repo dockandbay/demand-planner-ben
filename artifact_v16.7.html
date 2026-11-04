@@ -15495,7 +15495,8 @@ function renderInventory(){
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
   if(INV_SUB==='manage3pl'&&INV_3PL==='UK_NG')INV_3PL='UK';   // v28.553: UK Non GRS now lives inside UK (ILG report, ILG - FBA tab)
-  if(INV_SUB==='manage3pl') body=pillbar([['US_GV','US (Geneva)'],['UK','UK (ILG)'],'US','AU','EU',['US_NG','US Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  if(INV_SUB==='manage3pl'&&(INV_3PL==='US'||INV_3PL==='US_NG'))INV_3PL='US_GV';   // v28.685 (Ben): the DriveHQ US / US Non GRS tabs are retired; Geneva covers both (STD + FBA)
+  if(INV_SUB==='manage3pl') body=pillbar([['US_GV','US (Geneva)'],['UK','UK (ILG)'],'AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='cogs') body='<div id="cogs-panel"></div>';
@@ -16155,7 +16156,7 @@ function ilgLoad(fresh){ var p=ILG.pool; ILG.loading=true; ILG.fresh=!!fresh; if
 function ilgPollMaybe(){ clearTimeout(ILG.poll); var d=ILG.d; if(!d||!d.batches)return; var sent=d.batches.some(function(b){ return b.status==='sent'; });
   if(!sent&&!d.batches.some(function(b){ return b.status==='pending'; }))return;
   if(document.hidden){ if(!ILG._vis){ ILG._vis=1; document.addEventListener('visibilitychange',function(){ if(!document.hidden&&document.getElementById('ilg-root'))ilgPollMaybe(); }); } return; }
-  ILG.poll=setTimeout(function(){ if(document.hidden){ ilgPollMaybe(); return; } if(document.getElementById('ilg-root'))fetch('/api/supply/ilg/status?pool='+ILG.pool).then(function(r){return r.json();}).then(function(j){ if(!document.getElementById('ilg-root'))return; var was=(ILG.d.batches||[]).filter(function(b){return b.status==='sent'||b.status==='pending';}).length; ILG.d.batches=j.batches; if(was&&!(j.batches||[]).some(function(b){return b.status==='sent'||b.status==='pending';})){ ILG.d=j; } ilgRender(); ilgPollMaybe(); }).catch(function(){}); },sent?8000:60000); }
+  ILG.poll=setTimeout(function(){ if(document.hidden){ ilgPollMaybe(); return; } if(document.getElementById('ilg-root'))fetch('/api/supply/ilg/status?pool='+ILG.pool).then(function(r){return r.json();}).then(function(j){ if(!document.getElementById('ilg-root'))return; var was=(ILG.d.batches||[]).filter(function(b){return b.status==='sent'||b.status==='pending';}).length; ILG.d.batches=j.batches; if(was&&!(j.batches||[]).some(function(b){return b.status==='sent'||b.status==='pending';})){ ILG.d=j; return ilgLoad(true); } ilgRender(); ilgPollMaybe(); }).catch(function(){}); },sent?8000:20000); }   // v28.685 (Ben: "auto refresh fulfil numbers for those items which are updated from the rebaseline"): when the last batch finishes, Fulfil is read again; pending checks every 20s (n8n is nudged at once now)
 function ilgRows(){ var d=ILG.d||{}, f=ILG.f, q=String(f.q||'').trim().toUpperCase(), min=Number(f.min)||0;
   // v28.664 (Ben: HAIRW-SUE-HBRLINE not shown): a search looks across ALL SKUs; Show / Status / Diff only apply when the search box is empty
   // (a SKU that matches Fulfil was hidden by the default "Discrepancies" view, so searching for it found nothing)
@@ -16182,8 +16183,9 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
     +(rep?'<span><b>'+E(rep.filename)+'</b> · report '+E(uk(rep.report_at))+' · '+(rep.source==='upload'?'uploaded':'from ops@')+' '+E(dt(rep.imported_at))+(rep.imported_by?' by '+E(inv3plUser(rep.imported_by)):'')+'</span>':'<span style="color:var(--amber)">No '+SD.name+' report yet.</span>')
     +(d.fulfil_at?'<span class="mut">Fulfil read '+E(dt(d.fulfil_at))+'</span>':'')
     +(d.ignored&&Object.keys(d.ignored).length?'<span class="mut" title="Report lines whose VersionID has no HORIZON pool">Ignored: '+Object.keys(d.ignored).map(function(k){ return E(k)+' '+d.ignored[k]+' lines'; }).join(', ')+'</span>':'')
-    +'<span style="flex:1"></span><button class="save-btn light" id="ilg-check">Check ops@ now</button><button class="save-btn light" id="ilg-up">Upload '+SD.file+'</button><input type="file" id="ilg-file" accept="'+SD.file+'" style="display:none"><button class="save-btn light" id="ilg-fresh"'+(ILG.loading&&ILG.fresh?' disabled style="opacity:.7"':'')+'>'+(ILG.loading&&ILG.fresh?'⟳ Reading Fulfil…':'Refresh Fulfil')+'</button>'
+    +'<span style="flex:1"></span><button class="save-btn light" id="ilg-autot" title="Automated daily rebaseline settings">⚙ Automate: '+(ILG.auto?(ILG.auto.enabled?'<span style="color:var(--pos)">On</span>':'Off'):'…')+' '+(ILG.autoOpen?'▴':'▾')+'</button><button class="save-btn light" id="ilg-check">Check ops@ now</button><button class="save-btn light" id="ilg-up">Upload '+SD.file+'</button><input type="file" id="ilg-file" accept="'+SD.file+'" style="display:none"><button class="save-btn light" id="ilg-fresh"'+(ILG.loading&&ILG.fresh?' disabled style="opacity:.7"':'')+'>'+(ILG.loading&&ILG.fresh?'⟳ Reading Fulfil…':'Refresh Fulfil')+'</button>'
     +(ILG.msg?'<span id="ilg-msg" style="color:var(--amber)">'+E(ILG.msg)+'</span>':'')+(ILG.ok&&!ILG.loading?'<span style="color:var(--pos);font-weight:600">'+E(ILG.ok)+'</span>':'')+'</div>';
+  if(ILG.autoOpen)h+='<div style="margin:-4px 0 12px">'+ilgAutoHtml(P).replace('<div class="sect-h" style="margin-top:18px">Automated daily rebaseline</div>','')+'</div>';   // v28.685 (Ben): automation drops down from the status bar
   if(d.fulfil_error)h+='<div style="color:var(--neg);margin-bottom:8px">Fulfil could not be read: '+E(d.fulfil_error)+'</div>';
   if(rep&&d.rows){ var f=ILG.f, rows=ilgRows(), stats={}; (d.rows||[]).forEach(function(r){ Object.keys(r.statuses||{}).forEach(function(s){ stats[s]=1; }); });
     var selRows=(d.rows||[]).filter(function(r){ return ILG.sel[r.sku]; }), net=selRows.reduce(function(a,r){ return a+(r.diff||0); },0), allOn=rows.length&&rows.every(function(r){ return ILG.sel[r.sku]||!r.diff||r.product_id==null; });
@@ -16229,7 +16231,6 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
   if(B.length){ h+='<div class="sect-h" style="margin-top:18px">Rebaseline history</div><table style="border-collapse:collapse;text-align:left"><tbody>'+B.map(function(b){ var c={pending:'var(--amber)',sent:'var(--blue)',done:'var(--pos)',error:'var(--neg)',cancelled:'var(--muted)'}[b.status]||'var(--muted)';
       return '<tr><td style="padding:3px 10px 3px 0">#'+b.id+'</td><td style="padding:3px 10px 3px 0">'+E(dt(b.created_at))+' '+E(inv3plUser(b.created_by))+'</td><td style="padding:3px 10px 3px 0">'+b.n_lines+' lines · net '+sg(Number(b.net))+'</td>'
         +'<td style="padding:3px 10px 3px 0;color:'+c+';font-weight:700">'+E(b.status==='sent'?'writing in Fulfil…':b.status==='pending'?'waiting for n8n':b.status)+(b.fulfil_number?' · count '+E(b.fulfil_number):'')+'</td><td style="padding:3px 0;color:var(--neg)">'+E(b.error||'')+(b.status==='pending'?' <a href="javascript:void 0" class="ilg-bc" data-id="'+b.id+'" style="color:var(--blue)">cancel</a>':'')+'</td></tr>'; }).join('')+'</tbody></table>'; }
-  h+=ilgAutoHtml(P);
   h+='</div>'; panel.innerHTML=h; ilgWire(panel); }
 // v28.682 (Ben 04-Nov-26): automated daily rebaseline. One config for ILG and Geneva (global threshold, optional per-warehouse override);
 // the daily n8n run queues 0 < |diff| <= threshold per warehouse (created_by auto) and emails the rest. Preview = what the next run would do.
@@ -16260,6 +16261,7 @@ function ilgAutoHtml(P){ var E=tHesc, A=ILG.auto, inp='font-size:12px;padding:3p
   return h; }
 function ilgAutoLoad(){ fetch('/api/supply/ilg/auto').then(function(r){ return r.json(); }).then(function(j){ ILG.auto=j; ilgRender(); }).catch(function(e){ ILG.auto={error:String(e.message||e)}; ilgRender(); }); }
 function ilgWire(panel){ var $=function(id){ return panel.querySelector('#'+id); };
+  if($('ilg-autot'))$('ilg-autot').onclick=function(){ ILG.autoOpen=!ILG.autoOpen; ilgRender(); };
   panel.querySelectorAll('.ilg-pool').forEach(function(b){ b.onclick=function(){ if(ILG.pool===b.dataset.p)return; ILG.pool=b.dataset.p; ILG.sel={}; ILG.review=false; ILG.d=null; ilgLoad(); }; });
   var setF=function(k,v){ ILG.f[k]=v; ilgSaveF(); ILG.review=false; ilgRender(); };
   if($('ilg-show'))$('ilg-show').onchange=function(){ setF('show',this.value); }; if($('ilg-status'))$('ilg-status').onchange=function(){ setF('status',this.value); }; if($('ilg-dir'))$('ilg-dir').onchange=function(){ setF('dir',this.value); };

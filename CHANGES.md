@@ -1,3 +1,10 @@
+## v28.685 (04-Nov-26) Manage 3PL: old US / US Non GRS tabs retired; Automate dropdown; rebaseline sent to n8n at once; Fulfil re-read when it finishes
+- Ben: "i see tabs for US geneva and us and us non grs. i think the old ones can be removed". The DriveHQ US and US Non GRS tabs are gone; US (Geneva) covers US Geneva STD and FBA. An old link to them opens US (Geneva).
+- Ben: "can the automate details be a pop down from the status bar, next to Check ops@ now". "⚙ Automate: On/Off ▾" in the status bar drops the settings down under it (was a section at the bottom of the page).
+- Ben: "Rebaseline #2 queued ... n8n picks it up within 15 minutes. can it be more instant?". Live now calls the "Fulfil | ILG stocktake" flow's own webhook as soon as a batch is queued (it already had one; the address was never set, so every batch waited for the 15-minute sweep, which stays as the fallback). Never from the sandbox. No n8n change.
+- Ben: "can we auto refresh fulfil numbers for those items which are updated from the rebaseline". When the last open batch finishes, the page reads Fulfil again by itself; a waiting batch is checked every 20s (was 60s).
+- No migration.
+
 ## v28.684 (04-Nov-26) Manage FBA: one row per ASIN, our SKU first, Amazon SKUs in their own column
 - Ben (Manage FBA > US): "some duplicate rows ... show the correct sku via ASIN not the incorrect amazon sku (maybe add a new amazon sku list in a column)". Amazon's FBA report repeats an ASIN's stock on every seller SKU listed against it (live US: 1-ACTIVE-LAR-GREY, ACTIVE-LAR-GREY, CA-ACTIVE-LAR-GREY, US-ACTIVE-LAR-GREY and TOWLF-ESS-LG-GREY-R all 93 available on B06XBN3JGG). The CA-/US- names are listings; the figures are that marketplace's stock (US numbers on the US tab), not CA stock. The compare is now one row per ASIN: stock counted once, SKU = ours (the product with that ASIN, else a listing that is one of our SKUs, "via ASIN" badge when matched only by ASIN), ERP = all our SKUs in the group, and a new Amazon SKUs column lists the other listings (searchable). Aged inventory still lists each listing. No migration.
 
