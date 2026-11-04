@@ -7069,7 +7069,12 @@ async function cogsBuild() {
   const cfg = cogsFulfilCfg(), date = upfxLondonToday();
   const [uk, au, R] = await Promise.all([cogsValuation(cfg, 1, date), cogsValuation(cfg, 3, date), cogsRates(cfg)]);
   const rep = { 1: uk, 3: au }, warnings = [];
-  COGS_COLS.forEach(c => { if (c.co) c.wh.forEach(w => { if (!rep[c.co].whId[w]) warnings.push('Fulfil warehouse ' + w + ' not in the ' + (c.co === 1 ? 'UK' : 'AU') + ' report'); }); });
+  // v28.694 (Ben 04-Nov-26, Send blocked: "Fulfil warehouse AMZ_FBA_NL / SE / BE / IE not in the UK report"): Fulfil's valuation report leaves out a
+  // warehouse holding no stock. In a column that averages several warehouses (EU FBA) an empty one adds nothing, so it is a note, not a block;
+  // the send is blocked only when a single-warehouse column, or every warehouse of a column, is missing.
+  COGS_COLS.forEach(c => { if (!c.co) return; const miss = c.wh.filter(w => !rep[c.co].whId[w]), co = c.co === 1 ? 'UK' : 'AU';
+    if (miss.length && miss.length === c.wh.length) miss.forEach(w => warnings.push('Fulfil warehouse ' + w + ' not in the ' + co + ' report'));
+    else if (miss.length) warnings.push(c.col + ': ' + miss.join(', ') + ' hold no stock in Fulfil today (left out of the ' + co + ' report), averaged over the others'); });
   const stored = {}; let storedN = 0;
   try { (await pool.query(`SELECT sku, col, value::float8 v, source, to_char(updated_at,'YYYY-MM-DD') d FROM planner.cogs_values`)).rows.forEach(r => { (stored[r.sku] = stored[r.sku] || {})[r.col] = r; storedN++; }); }
   catch (e) { if (e.code !== '42P01') throw e; warnings.push('Migration 345 not applied: nothing stored yet, so out-of-stock SKUs fall back to supplier cost'); }

@@ -1,3 +1,7 @@
+## v28.694 (04-Nov-26) COGS: an empty EU FBA warehouse no longer blocks Send
+- Ben: Send blocked with "Fulfil warehouse AMZ_FBA_NL / SE / BE / IE not in the UK report". Fulfil's inventory valuation report leaves out warehouses that hold no stock, and those four hold none today (checked live: all exist and are active). EU FBA is a quantity-weighted average over nine Amazon EU warehouses, so an empty one adds nothing. It is now a note ("EU FBA: ... hold no stock in Fulfil today, averaged over the others"); the send is blocked only when a single-warehouse column (e.g. UK ILG), or every warehouse of a column, is missing. Checked on the sandbox against live Fulfil (read only): Analyse returns the note and no block.
+- No migration.
+
 ## v28.693 (04-Nov-26) BUY: snooze an Urgent buy for 30 days or indefinitely
 - Ben: "on urgent buy, would like to add a snooze feature 30 days or indefinite. this can be set on click on the cell with a popup. then in top section a show snoozed which can be toggled". Click an Urgent Sea / Air cell: Snooze 30 days, Snooze indefinitely, or Wake. A snoozed urgent counts as 0 everywhere (grid, Urgent filters, category totals, Create Purchase Orders, CSV, the buy plan saved to the server) until it expires or is woken. "💤 Show snoozed (N)" next to the filters shows them greyed with 💤 and the date (no strike-through, Ben). Snoozes are per SKU x market and shared by everyone (who and when are stored).
 - Sandbox: with no snoozes the buy plan is identical (Buy 3PL 41,076, Urgent 10,418, Buy FBA 60).
