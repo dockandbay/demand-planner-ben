@@ -4411,7 +4411,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const mtd=curMtdActuals(skuKey,mkt);
       const mtdDTC=mtd.DTC||0,mtdB2B=mtd.B2B||0,mtdFBA=mtd.FBA||0;
       return{key,lbl,lbl2,now:true,isActual:true,isForecast:false,
-        dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,pre:(md.pre&&md.pre[key])||0,ka:(md.ka&&md.ka[key])||0,
+        dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:0,pre:0,ka:0,   /* v28.692 (Ben, GIFT-BOX-BEAUTY-SEASOIR: KA 300 showed as actual AND forecast): key-account / preorder figures are forecast, shown in the Remaining column only */
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
