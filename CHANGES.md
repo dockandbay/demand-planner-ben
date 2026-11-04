@@ -1,3 +1,11 @@
+## v28.699 (04-Nov-26) ACCOUNTS Money in: Shopify order match in the side drawer; paid orders + Shopify payment history; "Money in matched" pill; confirms in the drawer
+- Ben: "can this also be in the same pop out drawer style". Review ▸ opens the Shopify order match in the ACCOUNTS side drawer (the list stays put), with a working banner while it checks or posts and a "✓ Matched" panel after (Xero link + next step).
+- Ben: EUWS-3325 "seems to have matched but there is no match". The line names EUWS-3325 but the suggestion was a same-amount order of another customer (EU-49763). When the bank line names an order and the suggestion is not it, the row says in red "⚠ EUWS-3325 is named on the line but is not an unpaid order in Fulfil: this is NOT a match, only a same-amount guess", and there is no one-click Reconcile.
+- Ben: "can it also show PAID orders in shopify and if / when they were marked as paid and by who / how". Search returns paid orders too (green Paid pill, not tickable), and an order number is also looked up in its Shopify store: status, each payment (when, gateway, amount) and the order timeline lines about payment (e.g. EUWS-3325: PAID; 23-Oct-26 11:52 "Rita rita@dockandbay.com manually marked EUR 1,320.33 as paid by Bank Deposit"). Read only.
+- Ben: "can we also have a pill Money in Matched (2)". New pill "Money in matched (N)" (Receive Money created here or key-account receipt posted); Money in now shows only lines still to do (replaces the v28.697 "Show matched" tick box).
+- Ben (screenshot of the browser confirm): the "this writes to live Shopify and live Xero" confirmation is now an amber panel inside the drawer with Confirm and write / Cancel, for the Shopify order match and the key-account receipt.
+- No migration.
+
 ## v28.698 (04-Nov-26) ACCOUNTS Reconcile: key-account receipt in a side drawer, with steps, progress and a clear result
 - Ben (NEXT live test): "clicking key account originally jumped around the page, suggest a drawer ... when matching it doesn't give confidence that anything was actually matched, wasn't clear it was processing. improve it". "Key account receipt ▸" opens the ACCOUNTS side drawer (the list stays put) with:
   - a 4-step track: Paste remittance > Check against Xero > Post to Xero > Done;

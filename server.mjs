@@ -4797,6 +4797,16 @@ async function shopifyGql(store, query, variables) {
   if (j && j.errors && j.errors.length) throw new Error('Shopify ' + store + ': ' + j.errors.map(e => e.message).join('; ').slice(0, 300));
   return (j && j.data) || {};
 }
+async function crShopifyHistory(store, name) {   // v28.699: one order's payment story from Shopify (read only)
+  const d = await shopifyGql(store, 'query($q:String!){ orders(first:3, query:$q){ nodes{ id name createdAt displayFinancialStatus cancelledAt customer{ displayName } totalPriceSet{ shopMoney{ amount currencyCode } } totalOutstandingSet{ shopMoney{ amount } } '
+    + 'transactions(first:20){ createdAt kind status gateway formattedGateway amountSet{ shopMoney{ amount currencyCode } } } events(first:40, reverse:true){ nodes{ createdAt message } } } } }', { q: 'name:' + name });
+  const o = ((d.orders && d.orders.nodes) || []).find(x => String(x.name).toUpperCase() === String(name).toUpperCase()); if (!o) return null;
+  const strip = t => String(t || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  return { id: o.id, name: o.name, created: String(o.createdAt || '').slice(0, 10), status: o.displayFinancialStatus, cancelled: !!o.cancelledAt, customer: (o.customer && o.customer.displayName) || '',
+    currency: (o.totalPriceSet && o.totalPriceSet.shopMoney.currencyCode) || '', total: cr2((o.totalPriceSet && o.totalPriceSet.shopMoney.amount) || 0), outstanding: cr2((o.totalOutstandingSet && o.totalOutstandingSet.shopMoney.amount) || 0),
+    payments: (o.transactions || []).filter(t => t.status === 'SUCCESS' && /SALE|CAPTURE/.test(t.kind || '')).map(t => ({ at: t.createdAt, kind: t.kind, gateway: t.formattedGateway || t.gateway || '', amount: cr2(t.amountSet.shopMoney.amount) })),
+    events: ((o.events && o.events.nodes) || []).map(e => ({ at: e.createdAt, msg: strip(e.message) })).filter(e => /paid|payment|captur|refund|transaction/i.test(e.msg)).slice(0, 8) };
+}
 async function shopifyOrderByName(store, name) {
   const d = await shopifyGql(store, 'query($q:String!){ orders(first:5, query:$q){ nodes{ id name displayFinancialStatus cancelledAt paymentGatewayNames totalOutstandingSet{ shopMoney{ amount currencyCode } } } } }', { q: 'name:"' + String(name).replace(/["\\]/g, '') + '"' });
   const want = String(name).replace(/^#/, '').toUpperCase();
@@ -4884,8 +4894,19 @@ app.get('/api/accounts/receipts/search', async (req, res) => {
   try { const q = String(req.query.q || '').trim().slice(0, 60); if (q.length < 3) return res.status(400).json({ error: 'Type at least 3 characters' });
     const org = String(req.query.org || ''), ccy = String(req.query.currency || ''), e2 = q.replace(/([\\%_])/g, '\\$1'), x = crRefsIn(q), today = new Date().toISOString().slice(0, 10);
     const or = [['OR', [['reference', 'ilike', '%' + e2 + '%']], [['party.name', 'ilike', '%' + e2 + '%']], [['number', '=', q.toUpperCase()]]].concat(x.refs.length ? [[['reference', 'in', x.refs]]] : [])];
+    // v28.699 (Ben: "can it also show PAID orders in shopify and if / when they were marked as paid and by who / how"): paid orders come back too
+    // (flagged, not tickable), and an order number in the search is looked up in its Shopify store directly (EUWS-3325 is not in Fulfil) with
+    // its payment history: Shopify status, each payment (when, gateway, amount) and the order timeline lines about payment (who marked it paid).
     const rows = (await crSearch(CR_BASE.concat([['sale_date', '>=', crIso(crDays(today, -365))]], or), 150, [['sale_date', 'DESC']]))
-      .filter(o => o.due > 0.005 && (!org || o.org === org)).map(o => Object.assign(o, { why: [ccy && o.currency !== ccy ? 'currency ' + o.currency + ', bank ' + ccy : null].filter(Boolean) })).slice(0, 60);
+      .filter(o => !org || o.org === org).map(o => Object.assign(o, { paid_up: !(o.due > 0.005), why: [ccy && o.currency !== ccy ? 'currency ' + o.currency + ', bank ' + ccy : null].filter(Boolean) }))
+      .sort((a, b) => (a.paid_up - b.paid_up)).slice(0, 60);
+    const names = [...new Set(x.refs.concat(/^(UKWS|USWS|EUWS|UK|US|EU)-\d{3,}[A-Z]?$/i.test(q) ? [q.toUpperCase()] : []))].slice(0, 4);
+    for (const nm of names) { const st = (/^(UKWS|USWS|EUWS|UK|US|EU)-/i.exec(nm) || [])[1]; if (!st || !shopifyCfg(st.toUpperCase()).configured) continue;
+      try { const h = await crShopifyHistory(st.toUpperCase(), nm); if (!h) continue;
+        const hit = rows.find(o => String(o.reference || '').toUpperCase() === nm);
+        if (hit) hit.shop = h;
+        else rows.unshift({ sale_id: 'shopify:' + h.id, source: 'shopify', not_in_fulfil: true, store: st.toUpperCase(), reference: h.name, number: '', customer: h.customer, sale_date: h.created, currency: h.currency, total: h.total, paid: cr2(h.total - h.outstanding), due: h.outstanding, paid_up: !(h.outstanding > 0.005), shop: h, why: ['not in Fulfil'] });
+      } catch (e) { rows.unshift({ sale_id: 'shopify-err:' + nm, source: 'shopify', not_in_fulfil: true, store: st.toUpperCase(), reference: nm, paid_up: true, total: 0, paid: 0, due: 0, why: ['Shopify lookup failed: ' + String(e.message).slice(0, 120)] }); } }
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
