@@ -1153,6 +1153,107 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     // v28.572 (Ben: CUSTOM level-2 menu + deep links): a host tab records its open record in the address (#/<sec>/<pt>/<ref>) without a re-render
     function ppSetExtraRef(pt, ref){ PP_EXTRA_REF=ref||''; if(PORTAL_TAB===pt)ppSetHash(pt, ref||''); }
     try{ window.DBPortalView.setRef=ppSetExtraRef; window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; window.DBPortalView.setBilingualNav=ppSetBilingualNav; }catch(e){}
+
+    // ===== v28.663 (Ben 04-Nov-26: "build the supplier portal process"): ORDERS (new), proposal Option A. One list grouped by shipment, POs
+    // nested; POs not yet on a shipment in their own group. A shipment opens a 4-tab view: Shipment & POs on board (update + tick each PO as
+    // loaded + Mark as shipped), Labels & pallets, Charges, Timeline. Shown to staff portal views, and to suppliers listed in the
+    // portal_orders_v2 setting; the old Purchase Orders / Shipment Plan tabs are unchanged alongside it.
+    var PO2={d:null,complete:false,q:'',stage:'open',action:false,busy:false};
+    var PO2_CARS=['DHL','Fedex','Flexport','SF Express','Local Delivery','Other'];
+    function po2Fetch(cb){ PO2.busy=true; fetch('/api/portal/orders'+(PO2.complete?'?complete=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ PO2.busy=false; PO2.d=d; cb&&cb(); }).catch(function(){ PO2.busy=false; PO2.d={error:'Could not load your orders'}; cb&&cb(); }); }
+    function po2Badge(n){ return n?' <span class="ex-badge">'+n+'</span>':''; }
+    function ppOrdersRender(host){ if(!host)return; if(!PO2.d&&!PO2.busy){ host.innerHTML='<div class="count">Loading your orders…</div>'; po2Fetch(function(){ ppOrdersRender(host); }); return; }
+      var d=PO2.d||{}; if(d.error){ host.innerHTML='<div class="count" style="color:var(--neg)">'+esc(d.error)+'</div>'; return; }
+      var q=PO2.q.trim().toLowerCase(), S=d.shipments||[], U=d.unshipped||[];
+      var hitS=function(s){ if(!q)return true; return (s.shipment_ref+' '+s.carrier_ref+' '+(s.members||[]).map(function(m){ return m.po+' '+m.supplier; }).join(' ')).toLowerCase().indexOf(q)>=0; };
+      var stOk=function(s){ return PO2.stage==='all'||(PO2.stage==='open'?s.stage!=='complete':s.stage===PO2.stage); };
+      var shown=S.filter(function(s){ return hitS(s)&&stOk(s)&&(!PO2.action||s.actions>0); }).sort(function(a,b){ return String(a.departure||'9999').localeCompare(String(b.departure||'9999'))||String(a.shipment_ref).localeCompare(String(b.shipment_ref)); });
+      var un=U.filter(function(p){ return (!q||(p.po+' '+p.branch).toLowerCase().indexOf(q)>=0)&&(PO2.stage==='open'||PO2.stage==='all'||PO2.stage==='to_ship')&&!PO2.action; });
+      var nAct=S.reduce(function(a,s){ return a+(s.actions||0); },0);
+      var pill=function(k,l){ return '<button class="save-btn'+(PO2.stage===k?'':' light')+' po2-st" data-k="'+k+'" style="padding:3px 11px;border-radius:99px">'+l+'</button>'; };
+      var h='<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;text-align:left">'
+        +'<input class="fci po2-q" placeholder="🔍 PO, shipment, supplier…" value="'+esc(PO2.q)+'" style="width:230px;text-align:left;background:#ecfdf3;border:1.5px solid #22c55e">'
+        +pill('open','Open')+pill('to_ship','To ship')+pill('shipped','Shipped')+pill('complete','Complete')+pill('all','All')
+        +'<button class="save-btn'+(PO2.action?'':' light')+' po2-act" style="padding:3px 11px;border-radius:99px;'+(nAct?'color:var(--amber);border-color:var(--amber)':'')+'">⚠ Needs action'+po2Badge(nAct)+'</button>'
+        +'<span class="tiny mut" style="margin-left:6px">New view, under review. Purchase Orders and Shipment Plan are unchanged.</span></div>';
+      var row=function(m,ship){ var mine=m.mine!==false; return '<div class="po2-row" style="display:grid;grid-template-columns:150px 110px 64px 1fr 120px;gap:8px;align-items:center;padding:7px 12px;border-top:1px solid var(--line2);font-size:12.5px;text-align:left'+(mine?'':';color:var(--muted);font-style:italic')+'">'
+        +'<span>'+(mine?'<a class="po2-po" data-po="'+esc(m.po)+'" style="cursor:pointer;color:var(--blue);font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(m.po)+'</a>':'<span style="font-family:ui-monospace,Menlo,monospace">'+esc(m.po)+'</span>')+(m.is_master?' ★':'')+'</span>'
+        +'<span>'+esc(m.status||'')+'</span><span>'+(m.prod_no?'P#'+esc(m.prod_no):'')+'</span><span>'+(mine?esc(m.branch||''):esc(m.supplier||'')+' (other supplier)')+'</span>'
+        +'<span>'+(ship?(m.loaded?'<span style="color:var(--pos)">✓ loaded</span>':'<span class="mut">not loaded</span>'):(m.prod_end?'comp '+esc(fd(m.prod_end)):''))+'</span></div>'; };
+      var grp=function(s){ var role=s.role==='master'?'<span class="tiny" style="background:var(--blue-soft);color:var(--blue-ink);border-radius:99px;padding:1px 8px;font-weight:700">★ You consolidate</span>':'<span class="tiny" style="background:var(--line2);border-radius:99px;padding:1px 8px">Ships with '+esc(s.master_po||s.shipment_ref)+'</span>';
+        var stc={to_ship:['To ship','var(--amber)'],shipped:['Shipped','var(--blue)'],complete:['Complete','var(--pos)']}[s.stage]||['',''];
+        return '<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;background:var(--card,#fff)">'
+          +'<div class="po2-ship" data-ref="'+esc(s.shipment_ref)+'" style="cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:9px 12px;background:var(--line2);font-size:12.5px;text-align:left">'
+          +'<b style="font-family:ui-monospace,Menlo,monospace;font-size:13px">'+esc(s.shipment_ref)+'</b>'+role
+          +[s.mode?String(s.mode).toUpperCase():'',[s.carrier,s.carrier_ref].filter(Boolean).join(' '),s.departure?'ship '+fd(s.departure):'',s.arrival?'ETA '+fd(s.arrival):'',(s.pallets_confirmed?s.pallets_confirmed+' pallets':s.est_pallets+' pallets est.'),(s.members||[]).length+' POs · '+s.loaded+' loaded'].filter(Boolean).map(function(x){ return '<span>'+esc(x)+'</span>'; }).join('<span class="mut">·</span>')
+          +'<span style="color:'+stc[1]+';font-weight:700">'+stc[0]+'</span>'+po2Badge(s.actions)+'<span style="margin-left:auto" class="tiny mut">Open shipment ›</span></div>'
+          +(s.members||[]).map(function(m){ return row(m,true); }).join('')+'</div>'; };
+      h+=shown.length?shown.map(grp).join(''):'<div class="count" style="text-align:left">No shipments match.</div>';
+      if(un.length)h+='<div class="sect-h" style="margin:14px 0 6px;text-align:left">Not yet on a shipment</div><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card,#fff)">'+un.map(function(p){ return row(p,false); }).join('')+'</div>';
+      if(!PO2.complete)h+='<div style="margin-top:12px;text-align:left"><button class="save-btn light po2-more">Load complete shipments</button></div>';
+      host.innerHTML=h;
+      var qi=host.querySelector('.po2-q'); qi.oninput=function(){ PO2.q=qi.value; var c=qi.selectionStart; ppOrdersRender(host); var n=host.querySelector('.po2-q'); n.focus(); try{ n.setSelectionRange(c,c); }catch(e){} };
+      host.querySelectorAll('.po2-st').forEach(function(b){ b.onclick=function(){ PO2.stage=b.dataset.k; if(PO2.stage==='complete'||PO2.stage==='all'){ if(!PO2.complete){ PO2.complete=true; PO2.d=null; } } ppOrdersRender(host); }; });
+      host.querySelector('.po2-act').onclick=function(){ PO2.action=!PO2.action; ppOrdersRender(host); };
+      var mo=host.querySelector('.po2-more'); if(mo)mo.onclick=function(){ PO2.complete=true; PO2.d=null; ppOrdersRender(host); };
+      host.querySelectorAll('.po2-po').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); location.hash='#/orders/pos/'+encodeURIComponent(a.dataset.po); }; });
+      host.querySelectorAll('.po2-ship').forEach(function(x){ x.onclick=function(){ po2ShipView(x.dataset.ref,host); }; });
+      if(PP_LANG==='zh')try{ ppTranslate(host); }catch(e){} }
+    function po2ShipView(ref,listHost,tab){ var s=((PO2.d&&PO2.d.shipments)||[]).filter(function(x){ return x.shipment_ref===ref; })[0]; if(!s)return;
+      var panel=document.getElementById('po2-panel'); if(panel)panel.remove(); panel=document.createElement('div'); panel.id='po2-panel'; (rootEl||document.body).appendChild(panel);
+      var master=s.role==='master', mineM=(s.members||[]).filter(function(m){ return m.mine; })[0], anyPo=(mineM||{}).po, TAB=tab||'main';
+      ppDrawerOpen(panel,{ref:'Shipment '+ref, sub:[master?'★ You consolidate':'Ships with '+(s.master_po||ref), s.mode?String(s.mode).toUpperCase():'', {to_ship:'To ship',shipped:'Shipped',complete:'Complete'}[s.stage]||''].filter(Boolean).join(' · '), link:ppItemLink('orders','shipmentplan',ref), kind:'ship2', close:function(){ panel.remove(); }});
+      var body=document.createElement('div'); body.style.cssText='padding:12px 16px;text-align:left;font-size:12.5px'; panel.appendChild(body);
+      var refresh=function(t){ po2Fetch(function(){ if(listHost&&document.body.contains(listHost))ppOrdersRender(listHost); po2ShipView(ref,listHost,t||TAB); }); };
+      var tabs=[['main','Shipment & POs on board'+((s.members||[]).some(function(m){ return !m.loaded; })&&master&&s.stage==='to_ship'?' ⚠':'')],['labels','Labels & pallets'],['charges','Charges'],['timeline','Timeline']];
+      var paint=function(){ body.innerHTML='<div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:12px">'+tabs.map(function(t){ return '<button class="lnk-btn po2-tab" data-t="'+t[0]+'" style="background:none;border:none;border-bottom:2px solid '+(TAB===t[0]?'var(--blue)':'transparent')+';padding:7px 10px;font-weight:700;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:'+(TAB===t[0]?'var(--blue)':'var(--muted)')+';cursor:pointer">'+t[1]+'</button>'; }).join('')+'</div><div class="po2-tb"><span class="mut">Loading…</span></div>';
+        body.querySelectorAll('.po2-tab').forEach(function(b){ b.onclick=function(){ TAB=b.dataset.t; paint(); }; });
+        var tb=body.querySelector('.po2-tb');
+        if(TAB==='main')return po2Main(tb); if(TAB==='labels')return po2Labels(tb); if(TAB==='charges')return po2Charges(tb); return po2Timeline(tb); };
+      var post=function(url,data,ok){ fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.error){ ppNotice(j.error); return; } ok&&ok(j); }).catch(function(){ ppNotice('Could not save'); }); };
+      function po2Main(tb){ var M=s.members||[], allL=M.length&&M.every(function(m){ return m.loaded; }), ro=!master||s.stage!=='to_ship';
+        var carOpts='<option value="">—</option>'+((s.carrier&&PO2_CARS.indexOf(s.carrier)<0)?'<option selected>'+esc(s.carrier)+'</option>':'')+PO2_CARS.map(function(c){ return '<option'+(String(s.carrier).toLowerCase()===c.toLowerCase()?' selected':'')+'>'+c+'</option>'; }).join('');
+        var h='<div class="sect-h">Update this shipment</div>'
+          +(master&&s.stage!=='complete'?'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:6px"><label class="tiny">Carrier<br><select class="fci po2-car" style="min-width:120px;text-align:left">'+carOpts+'</select></label>'
+            +'<label class="tiny">Tracking ref<br><input class="fci po2-trk" value="'+esc(s.carrier_ref||'')+'" style="width:170px;text-align:left"></label>'
+            +'<label class="tiny">Ship date<br><input class="fci po2-dep" type="date" value="'+esc(s.departure||'')+'"></label><button class="save-btn po2-save">Save</button></div>'
+            :'<div style="line-height:1.9">'+[['Carrier',s.carrier],['Tracking',s.carrier_ref],['Ship date',s.departure?fd(s.departure):''],['ETA',s.arrival?fd(s.arrival):'']].map(function(k){ return '<span class="mut">'+k[0]+'</span> <b>'+(k[1]?esc(k[1]):'—')+'</b>'; }).join(' &nbsp;·&nbsp; ')+'</div>'+(master?'':'<div class="tiny mut">Shipping details are updated by the consolidating supplier ('+esc(s.master_po||ref)+').</div>'))
+          +'<div class="po2-det tiny mut" style="margin:4px 0 12px"></div>'
+          +'<div class="sect-h">POs on board'+(master&&s.stage==='to_ship'?' <span class="tiny mut" style="text-transform:none;letter-spacing:0;font-weight:400">tick each PO loaded on this shipment</span>':'')+'</div>'
+          +M.map(function(m){ return '<label style="display:grid;grid-template-columns:22px 160px 1fr 110px;gap:6px;align-items:center;padding:5px 0;border-top:1px solid var(--line2);cursor:'+(ro?'default':'pointer')+'"><input type="checkbox" class="po2-ld" data-po="'+esc(m.po)+'"'+(m.loaded?' checked':'')+(ro?' disabled':'')+'><span style="font-family:ui-monospace,Menlo,monospace;font-weight:700">'+esc(m.po)+(m.is_master?' ★':'')+'</span><span>'+esc(m.supplier)+(m.mine?' <span class="mut">(you)</span>':'')+' · '+esc(m.status)+'</span><span class="mut">'+esc(m.est_pallets)+' pallets est.</span></label>'; }).join('')
+          +(master&&s.stage==='to_ship'?(allL?'':'<div style="margin:8px 0;padding:7px 10px;border-radius:7px;background:var(--amber-bg,#fdf3d7);color:var(--amber,#b45309);font-weight:700">Tick every PO on board before marking the shipment as shipped'+(M.some(function(m){ return m.loaded; })?'':' (none ticked yet)')+'.</div>')
+            +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="save-btn po2-ship-go"'+(allL?'':' disabled')+' style="'+(allL?'background:var(--pos);border-color:var(--pos);color:#fff':'')+'">✓ Mark as shipped</button><span class="tiny mut">Moves every PO on board to SHIPPING and tells Dock &amp; Bay.</span></div>':'');
+        tb.innerHTML=h;
+        if(anyPo)fetch('/api/portal/po-shipment/'+encodeURIComponent(anyPo),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(x){ var e=tb.querySelector('.po2-det'); if(!e||!x||!x.shipment)return; var sh=x.shipment, ds=x.dest||{};
+          e.innerHTML=[ds.name?'Ship to <b>'+esc([ds.name,ds.country].filter(Boolean).join(', '))+'</b>':'',sh.containers?'Container <b>'+esc(sh.containers)+'</b>':'',sh.mbl?'B/L <b>'+esc(sh.mbl)+'</b>':'',sh.arrival?'ETA <b>'+esc(fd(sh.arrival))+'</b>':''].filter(Boolean).join(' &nbsp;·&nbsp; '); }).catch(function(){});
+        var sv=tb.querySelector('.po2-save'); if(sv)sv.onclick=function(){ sv.disabled=true; post('/api/portal/shipment/'+encodeURIComponent(ref),{carrier:tb.querySelector('.po2-car').value,carrier_ref:tb.querySelector('.po2-trk').value,departure_date:tb.querySelector('.po2-dep').value},function(){ refresh('main'); }); };
+        tb.querySelectorAll('.po2-ld').forEach(function(c){ c.onchange=function(){ c.disabled=true; post('/api/portal/shipment/'+encodeURIComponent(ref)+'/loaded',{po:c.dataset.po,loaded:c.checked},function(){ refresh('main'); }); }; });
+        var go=tb.querySelector('.po2-ship-go'); if(go)go.onclick=function(){ go.disabled=true; go.textContent='Saving…'; post('/api/portal/shipment/'+encodeURIComponent(ref),{status:'Shipping'},function(){ refresh('main'); }); }; }
+      function po2Labels(tb){ if(!anyPo){ tb.innerHTML='<span class="mut">No PO of yours on this shipment.</span>'; return; }
+        fetch('/api/portal/po-shipment/'+encodeURIComponent(anyPo),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(x){ if(!x||x.error||!x.shipment){ tb.innerHTML='<span class="mut">'+esc((x&&x.error)||'Not available')+'</span>'; return; }
+          var sh=x.shipment, N=Number(sh.pallets_confirmed)||0, others=(x.members||[]).filter(function(m){ return !m.is_master; });
+          tb.innerHTML='<div class="sect-h">Shipment labels</div>'+(master?(others.length?others.map(function(m){ return '<button class="save-btn po2-lbl" data-po="'+esc(m.po)+'" style="margin:0 6px 6px 0">⤓ '+esc(m.po)+' ('+esc(m.supplier)+')</button>'; }).join('')+'<div class="tiny mut">SHIPS WITH labels for the other suppliers’ cartons on your shipment.</div>':'<span class="tiny mut">No other suppliers’ goods on this shipment.</span>')
+              :'<button class="save-btn po2-lbl" data-po="'+esc(anyPo)+'">⤓ Shipment labels for '+esc(anyPo)+'</button>')
+            +'<div class="sect-h" style="margin-top:14px">Pallets</div><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><span class="mut">Estimated</span> <b>'+esc(x.est_pallets)+'</b> <span class="mut">Confirmed</span> '
+            +(master?'<input class="fci po2-pal" type="number" min="1" max="500" value="'+(N||'')+'" style="width:80px;text-align:left"> <button class="save-btn po2-pal-go">Save</button>':'<b>'+(N||'—')+'</b>')+'</div>'
+            +'<div style="margin-top:8px">'+(master?'<button class="save-btn po2-pl"'+(N?'':' disabled')+'>⤓ Pallet labels'+(N?' ('+N+' pages, QR on each)':'')+'</button>'+(N?'':' <span class="tiny mut">enter the confirmed number of pallets first</span>'):'<span class="tiny mut">The pallet labels are printed by the consolidating supplier.</span>')+'</div>';
+          tb.querySelectorAll('.po2-lbl').forEach(function(b){ b.onclick=function(){ dlShipsWith(b.dataset.po,b,EP.shipsWith); }; });
+          var pb=tb.querySelector('.po2-pl'); if(pb)pb.onclick=function(){ dlPalletLabels(x,pb); };
+          var pg=tb.querySelector('.po2-pal-go'); if(pg)pg.onclick=function(){ pg.disabled=true; pg.textContent='Saving…'; post('/api/portal/po-shipment/'+encodeURIComponent(anyPo)+'/pallets',{pallets:tb.querySelector('.po2-pal').value},function(){ refresh('labels'); }); };
+        }).catch(function(){ tb.innerHTML='<span class="mut">Could not load.</span>'; }); }
+      function po2Charges(tb){ fetch('/api/portal/shipment-charges/'+encodeURIComponent(ref),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(L){ L=Array.isArray(L)?L:[];
+          tb.innerHTML='<div class="sect-h">Freight &amp; handling charges</div><div class="tiny mut" style="margin-bottom:6px">Add a freight cost for this shipment. Dock &amp; Bay reviews it; once accepted it becomes a payment to you.</div>'
+            +(L.length?'<table style="font-size:12px;width:auto"><thead><tr><th class="l">Date</th><th style="text-align:right">Amount</th><th class="l">Note</th><th class="l">Status</th></tr></thead><tbody>'+L.map(function(c){ return '<tr><td class="l">'+esc(fd(c.created_at))+'</td><td style="text-align:right">'+esc((Number(c.freight_cost)+Number(c.product_cost)).toFixed(2))+'</td><td class="l">'+esc(c.description||'')+'</td><td class="l">'+esc(c.status||'')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="mut">No charges yet.</div>')
+            +(s.stage!=='complete'?'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px"><label class="tiny">Amount<br><input class="fci po2-fc" inputmode="decimal" placeholder="0.00" style="width:110px;text-align:left"></label><label class="tiny">Note (optional)<br><input class="fci po2-fn" style="width:220px;text-align:left"></label><button class="save-btn po2-fgo">Add charge</button></div>':'');
+          var g=tb.querySelector('.po2-fgo'); if(g)g.onclick=function(){ var v=Number(String(tb.querySelector('.po2-fc').value||'').replace(/,/g,'')); if(!(v>0)){ ppNotice('Enter the amount'); return; } g.disabled=true; post('/api/portal/shipment-charge',{shipment_ref:ref,freight_cost:v,description:tb.querySelector('.po2-fn').value||null},function(){ po2Charges(tb); }); };
+        }).catch(function(){ tb.innerHTML='<span class="mut">Could not load.</span>'; }); }
+      function po2Timeline(tb){ fetch('/api/portal/shipment-notes/'+encodeURIComponent(ref),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(N){ N=Array.isArray(N)?N:[];
+          tb.innerHTML='<div class="sect-h">Timeline</div><div style="display:flex;gap:6px;margin-bottom:10px"><textarea class="fci po2-nb" rows="2" placeholder="Write to Dock &amp; Bay about this shipment…" style="flex:1;text-align:left"></textarea><button class="save-btn po2-ngo">Post</button></div>'
+            +(N.length?N.slice().reverse().map(function(n){ return '<div style="padding:7px 0;border-top:1px solid var(--line2)"><div class="tiny mut">'+esc(n.author_kind==='internal'?'Dock & Bay':(n.author_email||'Supplier'))+' · '+esc(n.created_at)+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+(n.attachment_id?' <a href="/api/portal/attachment/'+n.attachment_id+'" target="_blank" rel="noopener">📎 '+esc(n.attachment_name||'file')+'</a>':'')+'</div></div>'; }).join(''):'<div class="mut">No notes yet.</div>');
+          tb.querySelector('.po2-ngo').onclick=function(){ var v=(tb.querySelector('.po2-nb').value||'').trim(); if(!v)return; post('/api/portal/shipment-note',{shipment_ref:ref,body:v},function(){ po2Timeline(tb); }); };
+        }).catch(function(){ tb.innerHTML='<span class="mut">Could not load.</span>'; }); }
+      paint(); }
+    try{ fetch('/api/portal/orders-enabled',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.enabled)ppAddTab({pt:'orders',label:'Orders (new)',sec:'orders',render:function(host){ ppOrdersRender(host); }}); }).catch(function(){}); }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec);
         var n=0; tabsEl.querySelectorAll('.rtab[data-sec="'+sb.dataset.sec+'"] .ex-badge').forEach(function(b){ if(b.classList.contains('done'))return; var v=parseInt(b.textContent,10); if(v>0)n+=v; });   // action count per section (v27.506)
@@ -1944,15 +2045,18 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             function cardHtml(s){
               var _dep=s.departure||'';   // shipment departure/ETD — an on-board PO whose production ends on/after this is a risk
               var members=s.members.length?'<div style="font-weight:700;font-size:12px;color:var(--ink-soft);margin-top:8px;margin-bottom:3px">Purchase Orders on Board this shipment</div>'
-                +'<table style="font-size:12px;width:auto;margin-top:2px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
+                +(function(){ var _ms=!!posByPo[s.master_po], _sh=/^shipping$/i.test(s.status||''), _nl=s.members.filter(function(m){ return !m.loaded; }).length;   // v28.663 (Ben): tick each PO loaded before Shipping
+                    return (_ms&&!_sh&&_nl?'<div class="tiny sp-ld-warn" data-ref="'+esc(s.shipment_ref||s.master_po)+'" style="color:var(--amber);font-weight:700;margin:2px 0 4px">Tick each PO loaded on this shipment before setting it to Shipping ('+_nl+' not ticked).</div>':''); })()
+                +'<table style="font-size:12px;width:auto;margin-top:2px"><thead><tr><th class="l">Loaded</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){
                     var mine=!!posByPo[m.po];   // only THIS supplier's POs are hyperlinked (they can't open another supplier's PO)
                     var poCell=mine?poLink(m.po):esc(m.po);
                     var pe=m.prod_end||''; var late=pe&&_dep&&pe>=_dep;   // red if production ends on/after departure
-                    return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:10.5px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
+                    var _ldOk=!!posByPo[s.master_po]&&!/^shipping$/i.test(s.status||'');
+                    return '<tr><td class="l"><input type="checkbox" class="sp-ld" data-ref="'+esc(s.shipment_ref||s.master_po)+'" data-po="'+esc(m.po)+'"'+(m.loaded?' checked':'')+(_ldOk?'':' disabled')+' title="'+(_ldOk?'tick when this PO is loaded on the shipment':'ticked by the consolidating supplier')+'"></td><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:10.5px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
                       +'<td class="l"'+(late?' style="color:var(--neg);font-weight:700" title="production ends on or after the shipment departure date"':'')+'>'+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
                       +'<td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
-                +'<tr style="font-weight:700;border-top:1px solid var(--line)"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
+                +'<tr style="font-weight:700;border-top:1px solid var(--line)"><td></td><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
               // FOB orders — no shipment to us (collected at factory / delivered to a forwarder). Editable:
               // production end date (submitted for D&B approval, like elsewhere) + a timeline of PO notes.
               if(s.is_fob){
@@ -2959,6 +3063,13 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
                   var q=window.jsQR(ctx.getImageData(0,0,w,h).data,w,h,{inversionAttempts:'dontInvert'}); if(q&&q.data)got(q.data); },300); };
               if(window.jsQR)startQr(); else { var sc=document.createElement('script'); sc.src='/api/portal/jsqr.js'; sc.onload=startQr; sc.onerror=function(){ stEl.textContent='QR scanning could not load. Type the code in the search box.'; }; document.head.appendChild(sc); }
             }).catch(function(){ stEl.textContent='Camera blocked. Allow camera access for this site, then try again.'; }); }
+          // v28.663: Shipment Plan "Loaded" ticks (one delegated listener for the tab and the shipment drawer)
+          if(!window.__spLdBound){ window.__spLdBound=1; document.addEventListener('change',function(e){ var c=e.target; if(!c||!c.classList||!c.classList.contains('sp-ld'))return; var ref=c.dataset.ref, po=c.dataset.po, want=c.checked; c.disabled=true;
+            fetch('/api/portal/shipment/'+encodeURIComponent(ref)+'/loaded',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,loaded:want})}).then(function(r){ return r.json(); }).then(function(j){ c.disabled=false;
+              if(j&&j.error){ c.checked=!want; ppNotice(j.error); return; }
+              ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ (s.members||[]).forEach(function(m){ if(m.po===po)m.loaded=want; }); });
+              document.querySelectorAll('.sp-ld-warn[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]').forEach(function(w){ var n=document.querySelectorAll('.sp-ld[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]:not(:checked)').length; w.style.display=n?'':'none'; w.textContent='Tick each PO loaded on this shipment before setting it to Shipping ('+n+' not ticked).'; });
+            }).catch(function(){ c.disabled=false; c.checked=!want; ppNotice('Could not save'); }); }); }
           function ppGsInstall(){ var top=document.querySelector('.pv-top'); if(!top||document.getElementById('pp-gs'))return;
             var w=document.createElement('div'); w.id='pp-gs'; w.style.cssText='position:relative;flex:0 1 340px;min-width:180px;z-index:100002';
             w.innerHTML='<input id="pp-gs-q" type="search" autocomplete="off" placeholder="'+(PP_LANG==='zh'?'🔍 搜索 采购订单 / 发运 / 样品 / 产品':'🔍 Search POs, shipments, samples, products…')+'" style="width:100%;padding:6px 44px 6px 12px;border-radius:8px;border:1.5px solid #22c55e;background:#ecfdf3;color:#0f172a;font-size:13px;font-weight:600">'

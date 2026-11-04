@@ -11733,6 +11733,7 @@ async function buildShipmentPlan() {
       (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
         FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets,
+      coalesce((to_jsonb(p)->>'loaded_on_shipment')::boolean,false) loaded,   -- v28.663 ticked as loaded by the master supplier
       coalesce(sh.delivery_notes,'') sh_delivery_notes,   -- shipment-level override
       coalesce(nullif(p.branch_delivery_notes,''), b.delivery_notes, '') po_delivery_notes   -- this PO's branch delivery notes (used from the master row)
     FROM planner.purchase_orders p
@@ -11753,7 +11754,7 @@ async function buildShipmentPlan() {
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
     if (r.branch && (r.is_master || !s.branch)) s.branch = r.branch;   // destination branch (from the master PO) → shown in the portal delivery-notes heading
     if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; if (!s.delivery_notes) s.delivery_notes = r.po_delivery_notes || ''; }   // shipment inherits the master PO's branch delivery notes (unless overridden on the shipment)
-    s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master, prod_end: r.prod_end || '' });
+    s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master, prod_end: r.prod_end || '', loaded: !!r.loaded });
   });
   // Fill missing shipment dates by inheriting/calculating from the master PO: ship = prod-end + 7 days,
   // landing/arrival = ship + branch transit lead (air vs sea). Flagged *_est so the UI can mark them estimated.
@@ -37230,6 +37231,9 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
     if (!role) return res.status(403).json({ error: 'not your shipment' });
     if (role !== 'master') return res.status(403).json({ error: 'only the consolidating supplier (master PO) can update this shipment' });
     if (b.status != null && b.status !== '' && !STATUSES.includes(b.status)) return res.status(400).json({ error: 'invalid status' });
+    // v28.663 (Ben): every PO on board must be ticked as loaded before the shipment is marked shipped (skipped before migration 414)
+    if (b.status === 'Shipping') { const nl = (await pool.query(`SELECT po FROM planner.purchase_orders p WHERE p.shipment_ref=$1 AND upper(coalesce(p.status,'')) NOT IN ('CANCELLED') AND NOT coalesce((to_jsonb(p)->>'loaded_on_shipment')::boolean, true) ORDER BY po`, [ref])).rows.map(r => r.po);
+      if (nl.length) return res.status(400).json({ error: 'Tick each PO on board as loaded first: ' + nl.join(', '), not_loaded: nl }); }
     // detect a ship-date change so we can drop a timeline note
     const prev = (await pool.query(`SELECT to_char(departure_date,'YYYY-MM-DD') d FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
     const newDate = (b.departure_date === '' ? null : b.departure_date);
@@ -37253,6 +37257,58 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
     }
     res.json({ ok: true, date_note: dateChanged });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.663 (Ben 04-Nov-26: "build the supplier portal process"): the merged ORDERS tab (proposal Option A). Behind a switch: staff portal views
+// always; suppliers when app_settings.portal_orders_v2 lists them (supplier names, comma separated) or says 'all'.
+async function portalOrdersV2On(req) { if (req.portal && req.portal.staff) return true;
+  const v = String(await cpSetting('portal_orders_v2', '') || '').trim(); if (!v) return false; if (/^all$/i.test(v)) return true;
+  const set = new Set(v.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)); return (req.portal.suppliers || []).some(x => set.has(String(x).toLowerCase())); }
+// One list: every shipment the supplier is on (master or rider) with all POs aboard, plus its own POs not yet on a shipment. Open work by default;
+// ?complete=1 adds finished shipments / POs. Each shipment carries the caller's role and an action count (master: production ended and no PO
+// ticked as loaded yet; shipping with no tracking).
+app.get('/api/portal/orders', portalAuth, async (req, res) => {
+  const names = req.portal.suppliers || [], all = req.query.complete === '1';
+  try {
+    const live = `upper(coalesce(p.status,'')) NOT IN ('COMPLETE','CANCELLED')`;
+    const PEND = `to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD')`;
+    const mine = (await pool.query(`SELECT p.po, coalesce(p.shipment_ref,'') ref FROM planner.purchase_orders p WHERE p.supplier_name = ANY($1) AND upper(coalesce(p.status,''))<>'CANCELLED' ${all ? '' : 'AND ' + live}`, [names])).rows;
+    const refs = new Set(mine.filter(r => r.ref).map(r => r.ref)), myPos = mine.map(r => r.po);
+    if (myPos.length) (await pool.query(`SELECT shipment_ref FROM planner.shipments WHERE master_po = ANY($1) OR shipment_ref = ANY($1)`, [myPos])).rows.forEach(r => refs.add(r.shipment_ref));
+    const R = [...refs];
+    const shipRows = R.length ? (await pool.query(`SELECT s.shipment_ref, coalesce(s.master_po,'') master_po, coalesce(s.status,'') status, coalesce(s.mode,'') mode, coalesce(s.carrier,'') carrier, coalesce(s.carrier_ref,'') carrier_ref,
+        to_char(s.departure_date,'YYYY-MM-DD') departure, to_char(s.arrival_date,'YYYY-MM-DD') arrival, (to_jsonb(s)->>'pallets_confirmed')::int pallets_confirmed FROM planner.shipments s WHERE s.shipment_ref = ANY($1)`, [R])).rows : [];
+    const mem = R.length ? (await pool.query(`SELECT p.po, p.shipment_ref ref, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status, coalesce(p.branch,'') branch, p.prod_no, ${PEND} prod_end,
+        ${PO_PALLETS_SQL} est_pallets, p.pallets_override, coalesce((to_jsonb(p)->>'loaded_on_shipment')::boolean,false) loaded
+      FROM planner.purchase_orders p LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id WHERE p.shipment_ref = ANY($1) AND upper(coalesce(p.status,''))<>'CANCELLED' ORDER BY p.po`, [R])).rows : [];
+    const today = new Date().toISOString().slice(0, 10), nm = new Set(names.map(String));
+    // the master PO may not be aboard any more (e.g. complete): its supplier still decides who consolidates
+    const mSup = {}; { const ms = [...new Set(shipRows.map(x => x.master_po || x.shipment_ref).filter(Boolean))]; if (ms.length) (await pool.query(`SELECT po, coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po = ANY($1)`, [ms])).rows.forEach(r => { mSup[r.po] = r.s; }); }
+    const byRef = {}; mem.forEach(m => { (byRef[m.ref] = byRef[m.ref] || []).push(m); });
+    const shipments = R.map(ref => { const s = shipRows.find(x => x.shipment_ref === ref) || { shipment_ref: ref, master_po: '', status: '', mode: '', carrier: '', carrier_ref: '', departure: null, arrival: null, pallets_confirmed: null };
+      const M = (byRef[ref] || []).map(m => ({ po: m.po, supplier: m.supplier, status: m.status, branch: m.branch, prod_no: m.prod_no, prod_end: m.prod_end, est_pallets: m.pallets_override != null ? Number(m.pallets_override) : Number(m.est_pallets) || 0, loaded: !!m.loaded, mine: nm.has(m.supplier) }));
+      const master = s.master_po || (M.some(m => m.po === ref) || mSup[ref] != null ? ref : ''); M.forEach(m => { m.is_master = m.po === master; });
+      const mm = M.find(m => m.is_master), mOwn = mm ? mm.mine : nm.has(mSup[master] || ''), role = mOwn ? 'master' : (M.some(m => m.mine) ? 'rider' : null);
+      const done = M.length && M.every(m => /^complete/i.test(m.status)), shipped = /^shipping$/i.test(s.status) || M.some(m => /shipping|delivered|shipped/i.test(m.status));
+      const ended = M.some(m => m.prod_end && m.prod_end <= today), none = M.length && !M.some(m => m.loaded);
+      const actions = role === 'master' ? ((!shipped && !done && ended && none ? 1 : 0) + (shipped && !done && !s.carrier_ref ? 1 : 0)) : 0;
+      return Object.assign({}, s, { master_po: master, role, members: M, est_pallets: Math.round(M.reduce((a, m) => a + m.est_pallets, 0) * 10) / 10, stage: done ? 'complete' : (shipped ? 'shipped' : 'to_ship'), actions,
+        loaded: M.filter(m => m.loaded).length }); })
+      .filter(x => x.role && (all || x.stage !== 'complete'));
+    const unshipped = (await pool.query(`SELECT p.po, coalesce(p.status,'') status, coalesce(p.branch,'') branch, p.prod_no, ${PEND} prod_end FROM planner.purchase_orders p LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
+      WHERE p.supplier_name = ANY($1) AND coalesce(p.shipment_ref,'')='' AND upper(coalesce(p.status,''))<>'CANCELLED' ${all ? '' : 'AND ' + live} ORDER BY p.po`, [names])).rows;
+    res.set('Cache-Control', 'no-store').json({ enabled: await portalOrdersV2On(req), today, shipments, unshipped });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/portal/orders-enabled', portalAuth, async (req, res) => { res.set('Cache-Control', 'no-store').json({ enabled: await portalOrdersV2On(req).catch(() => false) }); });
+// The master supplier ticks a PO on board as loaded (or unticks it). Needed for every PO before Mark as shipped.
+app.post('/api/portal/shipment/:ref/loaded', portalAuth, async (req, res) => {
+  const ref = req.params.ref, b = req.body || {}, po = String(b.po || '');
+  try { if (await portalShipmentRole(req, ref) !== 'master') return res.status(403).json({ error: 'Only the consolidating supplier (master PO) ticks the POs on board' });
+    const r = await pool.query(`UPDATE planner.purchase_orders SET loaded_on_shipment=$3, loaded_at=CASE WHEN $3 THEN now() END, loaded_by=CASE WHEN $3 THEN $4 END WHERE po=$1 AND (shipment_ref=$2 OR po=(SELECT master_po FROM planner.shipments WHERE shipment_ref=$2)) RETURNING po`, [po, ref, !!b.loaded, req.portal.email || 'supplier']);   // the master PO counts even when not aboard (Shipment Plan lists it)
+    if (!r.rowCount) return res.status(404).json({ error: po + ' is not on shipment ' + ref });
+    logPoChange(po, b.loaded ? 'Loaded on shipment' : 'Unticked as loaded', 'Shipment ' + ref + ' (supplier portal)', req.portal.email || 'supplier');
+    res.json({ ok: true, po, loaded: !!b.loaded });
+  } catch (e) { if (/loaded_on_shipment/.test(String(e.message))) return res.status(503).json({ error: 'Ticking POs needs migration 414' }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];
