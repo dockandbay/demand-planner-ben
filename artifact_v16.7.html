@@ -16136,9 +16136,11 @@ function fbaListTbl(head, rows, cap){ if(!rows.length)return '<div class="mut" s
 var ILG={pool:'UK',d:null,loading:false,sel:{},review:false,msg:'',busy:false,poll:null,f:{show:'disc',q:'',status:'',dir:'',min:2}};
 try{ var _ilf=JSON.parse(localStorage.getItem('hz_ilg_f')||'null'); if(_ilf)ILG.f=Object.assign(ILG.f,_ilf); }catch(e){}
 function ilgSaveF(){ try{ localStorage.setItem('hz_ilg_f',JSON.stringify(ILG.f)); }catch(e){} }
-function ilgLoad(fresh){ var p=ILG.pool; ILG.loading=true; ilgRender();
-  fetch('/api/supply/ilg/status?pool='+p+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(j){ if(ILG.pool!==p)return; ILG.loading=false; ILG.d=j; ilgRender(); ilgPollMaybe(); })
-    .catch(function(e){ ILG.loading=false; ILG.d={error:String(e&&e.message||e)}; ilgRender(); }); }
+function ilgLoad(fresh){ var p=ILG.pool; ILG.loading=true; ILG.fresh=!!fresh; if(fresh)ILG.ok=''; ilgRender();
+  // v28.664 (Ben: "Refresh Fulfil ... doesnt seem to do anything to indicate"): the button shows "Reading Fulfil…" while it runs, then a green done line
+  fetch('/api/supply/ilg/status?pool='+p+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(j){ if(ILG.pool!==p)return; ILG.loading=false; ILG.fresh=false; ILG.d=j;
+      if(fresh)ILG.ok=j&&j.fulfil_error?'':'✓ Fulfil read at '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+'. Figures updated.'; ilgRender(); ilgPollMaybe(); })
+    .catch(function(e){ ILG.loading=false; ILG.fresh=false; ILG.d={error:String(e&&e.message||e)}; ilgRender(); }); }
 // v28.615 (health report 02-Nov-26: 798 status calls in a week): poll every 8s only while a batch is SENT (waiting on Fulfil); a batch that is
 // only PENDING waits for a person to approve it, so check once a minute; never while the tab is hidden (it re-checks when shown again).
 function ilgPollMaybe(){ clearTimeout(ILG.poll); var d=ILG.d; if(!d||!d.batches)return; var sent=d.batches.some(function(b){ return b.status==='sent'; });
@@ -16146,11 +16148,12 @@ function ilgPollMaybe(){ clearTimeout(ILG.poll); var d=ILG.d; if(!d||!d.batches)
   if(document.hidden){ if(!ILG._vis){ ILG._vis=1; document.addEventListener('visibilitychange',function(){ if(!document.hidden&&document.getElementById('ilg-root'))ilgPollMaybe(); }); } return; }
   ILG.poll=setTimeout(function(){ if(document.hidden){ ilgPollMaybe(); return; } if(document.getElementById('ilg-root'))fetch('/api/supply/ilg/status?pool='+ILG.pool).then(function(r){return r.json();}).then(function(j){ if(!document.getElementById('ilg-root'))return; var was=(ILG.d.batches||[]).filter(function(b){return b.status==='sent'||b.status==='pending';}).length; ILG.d.batches=j.batches; if(was&&!(j.batches||[]).some(function(b){return b.status==='sent'||b.status==='pending';})){ ILG.d=j; } ilgRender(); ilgPollMaybe(); }).catch(function(){}); },sent?8000:60000); }
 function ilgRows(){ var d=ILG.d||{}, f=ILG.f, q=String(f.q||'').trim().toUpperCase(), min=Number(f.min)||0;
+  // v28.664 (Ben: HAIRW-SUE-HBRLINE not shown): a search looks across ALL SKUs; Show / Status / Diff only apply when the search box is empty
+  // (a SKU that matches Fulfil was hidden by the default "Discrepancies" view, so searching for it found nothing)
   return (d.rows||[]).filter(function(r){
+    if(q)return String(r.sku).toUpperCase().indexOf(q)>=0||String(r.description||'').toUpperCase().indexOf(q)>=0;
     if(f.show==='disc'&&!(r.diff&&Math.abs(r.diff)>=Math.max(1,min)))return false;
     if(f.show==='notff'&&r.in_fulfil)return false; if(f.show==='notrep'&&r.in_report)return false;
-    if(f.show==='all'&&min&&r.diff&&Math.abs(r.diff)<min&&false)return false;
-    if(q&&String(r.sku).toUpperCase().indexOf(q)<0&&String(r.description||'').toUpperCase().indexOf(q)<0)return false;
     if(f.status&&!(r.statuses&&r.statuses[f.status]))return false;
     if(f.dir==='ilg'&&!(r.diff>0))return false; if(f.dir==='ff'&&!(r.diff<0))return false;
     return true; }); }
@@ -16169,8 +16172,8 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
   h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)">'
     +(rep?'<span><b>'+E(rep.filename)+'</b> · report '+E(uk(rep.report_at))+' · '+(rep.source==='upload'?'uploaded':'from ops@')+' '+E(dt(rep.imported_at))+(rep.imported_by?' by '+E(inv3plUser(rep.imported_by)):'')+'</span>':'<span style="color:var(--amber)">No ILG report yet.</span>')
     +(d.fulfil_at?'<span class="mut">Fulfil read '+E(dt(d.fulfil_at))+'</span>':'')
-    +'<span style="flex:1"></span><button class="save-btn light" id="ilg-check">Check ops@ now</button><button class="save-btn light" id="ilg-up">Upload .xls</button><input type="file" id="ilg-file" accept=".xls" style="display:none"><button class="save-btn light" id="ilg-fresh">Refresh Fulfil</button>'
-    +(ILG.msg?'<span id="ilg-msg" style="color:var(--amber)">'+E(ILG.msg)+'</span>':'')+'</div>';
+    +'<span style="flex:1"></span><button class="save-btn light" id="ilg-check">Check ops@ now</button><button class="save-btn light" id="ilg-up">Upload .xls</button><input type="file" id="ilg-file" accept=".xls" style="display:none"><button class="save-btn light" id="ilg-fresh"'+(ILG.loading&&ILG.fresh?' disabled style="opacity:.7"':'')+'>'+(ILG.loading&&ILG.fresh?'⟳ Reading Fulfil…':'Refresh Fulfil')+'</button>'
+    +(ILG.msg?'<span id="ilg-msg" style="color:var(--amber)">'+E(ILG.msg)+'</span>':'')+(ILG.ok&&!ILG.loading?'<span style="color:var(--pos);font-weight:600">'+E(ILG.ok)+'</span>':'')+'</div>';
   if(d.fulfil_error)h+='<div style="color:var(--neg);margin-bottom:8px">Fulfil could not be read: '+E(d.fulfil_error)+'</div>';
   if(rep&&d.rows){ var f=ILG.f, rows=ilgRows(), stats={}; (d.rows||[]).forEach(function(r){ Object.keys(r.statuses||{}).forEach(function(s){ stats[s]=1; }); });
     var selRows=(d.rows||[]).filter(function(r){ return ILG.sel[r.sku]; }), net=selRows.reduce(function(a,r){ return a+(r.diff||0); },0), allOn=rows.length&&rows.every(function(r){ return ILG.sel[r.sku]||!r.diff||r.product_id==null; });
@@ -16296,7 +16299,8 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       var ck=function(d,e){ if(d==null)return false; if(INV_3PL_GAP==='items10')return Math.abs(d)>10; if(INV_3PL_GAP==='pct20')return (e>0)?(Math.abs(d)/e>0.20):(Math.abs(d)>0); return false; };
       return ck(r.diff_onhand,r.erp_onhand)||ck(r.diff_avail,r.erp_avail); }
     var _q3=String(INV_3PL_Q||'').trim().toLowerCase(); var _toks3=_q3?_q3.split(/[\s,]+/).filter(Boolean):[];   // SKU filter: space/comma-separated, matches any token
-    var fr=(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3)).filter(function(r){ if(!_toks3.length)return true; var s=String(r.sku||'').toLowerCase(); return _toks3.some(function(t){return s.indexOf(t)>=0;}); });
+    var _hit3=function(r){ var s=String(r.sku||'').toLowerCase(); return _toks3.some(function(t){return s.indexOf(t)>=0;}); };
+    var fr=_toks3.length?rows.filter(_hit3):(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3));   // v28.664 (Ben): a SKU search looks across ALL SKUs, not just the gaps / dead-stock view
     // Items in the 3PL report but NOT in the product list, that still hold stock (Ben) — surfaced as a toggled list.
     var _unm=rows.filter(function(r){return !r.matched && ((Number(r.report_onhand)||0)>0 || (Number(r.report_avail)||0)>0);})
       .sort(function(a,b){return ((Number(b.report_avail)||0)+(Number(b.report_onhand)||0))-((Number(a.report_avail)||0)+(Number(a.report_onhand)||0));});
