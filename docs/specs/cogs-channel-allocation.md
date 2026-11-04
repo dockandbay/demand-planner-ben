@@ -21,7 +21,7 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 - Sale order on the move: `channel`, `channel_segment`, delivery country.
 - Customer returns (customer to warehouse): negative COGS on the same channel.
 - Excluded: internal moves (3PL to FBA, transfers, China Port intake), supplier returns, stock counts.
-- Zero-cost lines: costed from HORIZON `products.cost` (USD, converted at Fulfil's rate) and flagged, as in September. Credit for that part goes to Inventory, not 9006 (it was never in 9006). Open question 4.
+- Zero-cost lines: costed from HORIZON `products.cost` (USD, converted at Fulfil's rate) and flagged, as in September. Credit for that part goes to 9008 Fulfil - Inventory Account, not 9006 (it was never in 9006).
 - Reconciliation: the report total must match the movement on Fulfil 9006 for the month within 0.5% (September tied to 0.41 GBP). If it does not, the journal is still drafted but the email and Airtable row carry a "does not reconcile" flag with both totals.
 
 ## Channel to account (Ben's September mapping)
@@ -78,6 +78,6 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 2b. **UK accounts**: checked 04-Nov-26, every code in the table exists in Xero UK with that name, and 9006 too.
 2c. ~~Co-brand / dropship~~ answered by Ben 04-Nov-26: custom / co-brand sales DO go to the Co-Brand/Custom COGS accounts (UK org: 311.9a UK, 311.9b US, 311.9c CA, 311.9d EU, 311.9e ROTW by where the sale is; AU org: 401.11e, and 401.10e for custom local D2C). NOTHING goes to the Dropship accounts (311.10a-d). How a sale is recognised as custom / co-brand (sale channel or segment, custom SKUs, the HORIZON custom order link) is settled from live Fulfil data at build time and shown to Ben before the first journal.
 3. ~~Airtable~~ answered: the existing COGS "Email to Airtable", weekly via n8n (v28.696).
-4. **Zero-cost lines**: keep the September treatment (cost from HORIZON, credit Inventory), or leave them out and only flag them?
+4. ~~Zero-cost lines~~ answered by Ben 04-Nov-26: keep the September treatment. Lines Fulfil shipped at cost 0 are costed from HORIZON products.cost (USD, converted at Fulfil's month rate) and flagged; that part is credited to 9008 Fulfil - Inventory Account (September used UK 601 / AU 625 because Fulfil's GL did not reach Xero then; from October the stock sits in 9008). The email lists those lines so the cost can be fixed in Fulfil.
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
 6. **CA and international**: UK company sales to Canada and distributors use the 311.4x / 311.5c accounts as above, right?
