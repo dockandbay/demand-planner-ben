@@ -1,3 +1,8 @@
+## v28.691 (04-Nov-26) BUY: the Urgent scan counts stock arriving later this month
+- Ben (live, TOWLB-CAB-LG-AMALG-R UK, Buy 3PL URGENT 160): "no reason why we should buy urgent 160 of these items". 1,563 is inbound on 11 / 16-Nov and the projection never drops below 9 weeks' cover until Feb-28. The Urgent scan skipped the current month's "Remaining" slot, so it started from today's stock (0), never saw this month's inbound, and rushed a buy. It now rolls that slot exactly like the main buy pass: inbound still to land this month in, the rest of this month's forecast out.
+- Sandbox before / after (all SKUs, UK US EU AU CA): Buy 3PL 41,076 -> 41,076 and Buy FBA 60 -> 60 (unchanged); Urgent 16,968 -> 10,418. 90 SKU-markets move: 75 urgents gone and 3 smaller (stock already arriving this month), 12 up or new (the rest of this month's forecast now drains stock, e.g. AU going into summer). Needs Ben's OK before deploy (buy plan moves).
+- No migration.
+
 ## v28.690 (04-Nov-26) Supplier portal: PO drawer opens over Productions; clearer Step 1 / Step 2 buttons with a Next link
 - (v28.689 skipped: used for a sandbox build.)
 - Ben: "when clicking po number on PRODUCTIONS the drawer pops out but also goes to the purchase orders page. it should stay on current page". The PO drawer is built on its own over Productions (same card as the Purchase Orders drawer); the page and its batch stay put underneath, and Close returns to it.

@@ -4260,7 +4260,17 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   let ts3=md.i3||0,tsF=md['if_']||0;
   const stockTrace=[];
   PROJ.forEach(({key,isActual,isForecast},i)=>{
-    if(isActual||isForecast)return;
+    if(isActual)return;
+    if(isForecast){
+      // v28.691 (Ben, TOWLB-CAB-LG-AMALG-R UK: "no reason why we should buy urgent 160"): roll the current month's Remaining slot into the
+      // starting stock exactly as pass 1 does (inbound still to land this month in, remaining forecast out). It was skipped, so stock arriving
+      // later THIS month (1,563 on 11 / 16-Nov) never reached the urgent scan: it started from 0 and rushed a buy the plan did not need.
+      const _mtdU=curMtdActuals(skuKey,mkt), _dd=String(TODAY.getDate()).padStart(2,'0');
+      const _uD=Math.max(0,((dem.DTC&&dem.DTC[key])||0)-(_mtdU.DTC||0)), _uB=Math.max(0,((dem.B2B&&dem.B2B[key])||0)-(_mtdU.B2B||0)), _uF=Math.max(0,((dem.FBA&&dem.FBA[key])||0)-(_mtdU.FBA||0));
+      const _uI3=(ib3[key]||[]).filter(x=>x.eta&&x.eta.slice(8,10)>_dd).reduce((a,x)=>a+(x.qty||0),0), _uIF=(ibF[key]||[]).filter(x=>x.eta&&x.eta.slice(8,10)>_dd).reduce((a,x)=>a+(x.qty||0),0);
+      ts3=Math.max(ts3+_uI3-(_uD+_uB),0); tsF=Math.max(tsF+_uIF-_uF,0);
+      return;
+    }
     if(i>MAY_OFFSET+URGENT_LOOKAHEAD)return; // only scan next 3 months
     const afterDisc=discCutoff&&key>=discCutoff;
     const dtc=afterDisc?0:(dem.DTC&&dem.DTC[key])||0;
