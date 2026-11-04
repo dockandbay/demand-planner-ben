@@ -63,6 +63,13 @@ The mapping lives in one HORIZON table so a new channel is added without code.
 
 Each n8n flow only calls a HORIZON cron route (`/api/cron/cogs-channel`, secret-gated); the logic, Fulfil reads and Xero writes live in HORIZON so the same run can be done by hand from ACCOUNTS (Preview / Create draft / Refresh) with the same numbers.
 
+## Journal log on the COGS page (Ben 04-Nov-26)
+BUY & MOVE > Inventory > COGS gets a "Journal log": every journal HORIZON creates, grouped by month and org, so each month-end journal sits with its refreshes:
+- Group header: e.g. "October 2026 · UK" with the month's final COGS total, status (draft / posted) and whether it reconciles to 9006.
+- Rows inside: Month end (1st), Refresh 7th, Refresh 15th; each with run date and who / which flow ran it, what it did (created draft / rebuilt draft / posted / top-up / no change), journal total and the change vs the previous run, status in Xero (draft / posted, read back), and the Xero link.
+- A row expands to its journal lines (account, debit, credit) and the flagged zero-cost and unmapped lines.
+- Kept for ever (one table, runs never deleted); newest month first.
+
 ## Where it shows in HORIZON
 ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account with qty / COGS / share, reconciliation line vs 9006, unmapped lines, zero-cost fills, journal status (none / draft / posted, with the Xero link) and run history.
 
