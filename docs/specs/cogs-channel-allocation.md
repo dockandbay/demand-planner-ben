@@ -14,7 +14,7 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 3. **Refresh on the 7th and 15th** of the following month (late invoices, returns, cost corrections):
    - draft still a DRAFT: rebuild it in place (same journal, new lines);
    - already POSTED by the accountants: never touched; a second DRAFT "top-up" journal for the difference only, and an email saying so.
-4. **Weekly to Airtable**: month to date (and the previous month until its 15th refresh), one row per org x month x channel x account: qty, COGS (company currency), COGS in GBP, share %, and the Fulfil 9006 total it reconciles to.
+4. **Weekly to Airtable** (Ben 04-Nov-26): this is the existing COGS page "Email to Airtable" (per-SKU unit cost, cogs-up-IMPORT.csv), run automatically by n8n every Monday. Built in v28.696 as `/api/cron/cogs-airtable`; it does not depend on the journal work.
 
 ## Source and method (same as September)
 - Fulfil `stock.move` done, from a warehouse to a customer location, effective date in the month; COGS = quantity x cost_price (company currency).
@@ -54,7 +54,7 @@ The mapping lives in one HORIZON table so a new channel is added without code.
 ## Schedule (n8n, Europe/London)
 | When | What |
 |---|---|
-| Every Monday 07:00 | Report month to date (+ previous month until its 15th) to Airtable |
+| Every Monday 07:00 | COGS per-SKU unit cost emailed to Airtable (same as the COGS page button) |
 | 1st of the month 06:30 | Build last month, create the DRAFT journal UK + AU, email the Xero links |
 | 7th 06:30 | Refresh last month (rebuild draft, or top-up draft if posted) |
 | 15th 06:30 | Final refresh, same rules; after this the month is closed in HORIZON |
@@ -75,7 +75,7 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 2. ~~AU accounts~~ CONFIRMED by Ben 04-Nov-26 (read live from Xero AU): 311.8a Shopify, 311.8b Amazon, 401.5 Wholesale & Distributor, 401.6 Marketplace, 401.11e Custom / Co Brand, 401.10e Custom Local D2C, 311.8d Other; credit 9006. The 405.x "Cost of Sales" accounts are fees, not used. The September codes 401.3 / 401.4 / 401.9 do not exist in Xero AU.
 2b. **UK accounts**: checked 04-Nov-26, every code in the table exists in Xero UK with that name, and 9006 too.
 2c. **UK accounts not used yet**: Xero UK also has 311.9a-e COGS Co-Brand/Custom (UK / US / CA / EU / ROTW), 311.10a-d Dropship (UK / US / EU / ROTW), 311.5a EU Distributors, 311.5e EU Marketplace, 311.5g International Distributors (Co Brand). Should custom / co-brand orders (HORIZON knows them: dtc_custom / custom_dev_ref) and dropship orders go to those instead of the channel account?
-3. **Airtable**: which base and table should the weekly rows go to (new table "COGS by channel", or an existing one)?
+3. ~~Airtable~~ answered: the existing COGS "Email to Airtable", weekly via n8n (v28.696).
 4. **Zero-cost lines**: keep the September treatment (cost from HORIZON, credit Inventory), or leave them out and only flag them?
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
 6. **CA and international**: UK company sales to Canada and distributors use the 311.4x / 311.5c accounts as above, right?

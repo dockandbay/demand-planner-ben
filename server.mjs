@@ -1316,7 +1316,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/tpl-push-continue' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
-      || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
+      || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
@@ -7351,22 +7351,31 @@ async function cogsStore(b, by) {   // upsert every Fulfil / supplier-cost cell;
   }
   return s.length;
 }
-app.post('/api/supply/cogs/email', async (req, res) => {
-  const me = await cogsAdminOk(req, res); if (!me) return;
+// v28.696 (Ben 04-Nov-26: "Airtable is the link on the COGS page to email to Airtable. It's an n8n to trigger that automatically"): the send is one
+// function used by the button (admin) and by the weekly n8n cron (/api/cron/cogs-airtable, x-webhook-secret). Returns [httpStatus, body].
+async function cogsSendAirtable(by) {
   const to = await cogsRecipient();
-  if (!to) return res.status(503).json({ error: 'No Airtable email address set: add it in CONFIG > Exports & uploads. Nothing sent.' });
+  if (!to) return [503, { error: 'No Airtable email address set: add it in CONFIG > Exports & uploads. Nothing sent.' }];
   try {
-    const b = await cogsBuild(), by = (me && me.email) || authUser(req) || 'admin';
-    if (b.warnings.some(w => /not in the/.test(w))) return res.status(409).json({ error: 'Fulfil report is missing a warehouse: ' + b.warnings.join('; ') + '. Nothing sent.' });
+    const b = await cogsBuild();
+    if (b.warnings.some(w => /not in the/.test(w))) return [409, { error: 'Fulfil report is missing a warehouse: ' + b.warnings.join('; ') + '. Nothing sent.' }];
     const csv = cogsCsv(b), changed = Object.values(b.stats).reduce((a, s) => a + s.changed, 0);
     const html = '<p>COGS per unit for Airtable, ' + ddMonYy(b.date) + '. ' + b.rows.length + ' SKUs, ' + changed + ' values changed. Rates (1 GBP): USD ' + b.rates.USD + ', EUR ' + b.rates.EUR + ', AUD ' + b.rates.AUD + '.</p><p>Sent by HORIZON (' + by + ').</p>';
     const r = await sendResendEmail({ to, subject: 'COGS per unit ' + ddMonYy(b.date), html, kind: 'cogs-airtable', ref: b.date, by, attachments: [{ filename: 'cogs-up-IMPORT.csv', content: Buffer.from(csv, 'utf8').toString('base64') }] });
     const sent = !!(r && r.sent), sandbox = !!(r && r.sandbox);
-    if (!sent && !sandbox) return res.status(502).json({ error: 'Email failed: ' + ((r && r.error) || 'not sent') + '. Nothing stored.' });
+    if (!sent && !sandbox) return [502, { error: 'Email failed: ' + ((r && r.error) || 'not sent') + '. Nothing stored.' }];
     const n = await cogsStore(b, by);
     try { await pool.query(`INSERT INTO planner.cogs_uploads (kind, created_by, recipient, rows, changed, fx, stats, sent, note) VALUES ('email',$1,$2,$3,$4,$5,$6,$7,$8)`, [by, sandbox ? null : to, b.rows.length, changed, JSON.stringify(b.rates), JSON.stringify(b.stats), sent, sandbox ? 'sandbox: no RESEND_API_KEY, not emailed; values stored' : null]); } catch (e) { /* pre-345 */ }
-    res.json({ ok: true, sent, sandbox, rows: b.rows.length, changed, stored: n });
-  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied. Nothing stored.' }); log500(e); res.status(502).json({ error: String(e.message || e) }); }
+    return [200, { ok: true, sent, sandbox, rows: b.rows.length, changed, stored: n, warnings: b.warnings }];
+  } catch (e) { if (e.code === '42P01') return [503, { error: 'Migration 345 (cogs_values) not applied. Nothing stored.' }]; log500(e); return [502, { error: String(e.message || e) }]; }
+}
+app.post('/api/supply/cogs/email', async (req, res) => {
+  const me = await cogsAdminOk(req, res); if (!me) return;
+  const [st, body] = await cogsSendAirtable((me && me.email) || authUser(req) || 'admin'); res.status(st).json(body);
+});
+app.post('/api/cron/cogs-airtable', async (req, res) => {   // weekly n8n "Horizon | COGS to Airtable": the same send as the button
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const [st, body] = await cogsSendAirtable('n8n (weekly)'); res.status(st).json(body);
 });
 // One-off seed of the stored values from the current Airtable export (only cells with nothing stored, unless replace).
 app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: '5mb' }), async (req, res) => {
