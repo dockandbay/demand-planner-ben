@@ -4808,7 +4808,7 @@ async function crShopifyHistory(store, name) {   // v28.699: one order's payment
     events: ((o.events && o.events.nodes) || []).map(e => ({ at: e.createdAt, msg: strip(e.message) })).filter(e => /paid|payment|captur|refund|transaction/i.test(e.msg)).slice(0, 8) };
 }
 async function shopifyOrderByName(store, name) {
-  const d = await shopifyGql(store, 'query($q:String!){ orders(first:5, query:$q){ nodes{ id name displayFinancialStatus cancelledAt paymentGatewayNames totalOutstandingSet{ shopMoney{ amount currencyCode } } } } }', { q: 'name:"' + String(name).replace(/["\\]/g, '') + '"' });
+  const d = await shopifyGql(store, 'query($q:String!){ orders(first:5, query:$q){ nodes{ id name displayFinancialStatus cancelledAt paymentGatewayNames tags totalOutstandingSet{ shopMoney{ amount currencyCode } } } } }', { q: 'name:"' + String(name).replace(/["\\]/g, '') + '"' });
   const want = String(name).replace(/^#/, '').toUpperCase();
   return ((d.orders && d.orders.nodes) || []).find(n => String(n.name || '').replace(/^#/, '').toUpperCase() === want) || null;
 }
@@ -4852,7 +4852,10 @@ async function crPlan(b, prior) {
       if (!s) { problems.push(lab + 'not found in Shopify ' + o.store); continue; }
       const out = cr2((s.totalOutstandingSet && s.totalOutstandingSet.shopMoney && s.totalOutstandingSet.shopMoney.amount) || 0);
       o.shopify = { id: s.id, name: s.name, status: s.displayFinancialStatus, outstanding: out, gateways: s.paymentGatewayNames || [] }; o.shopify_id = s.id;
-      if (s.cancelledAt) problems.push(lab + 'cancelled in Shopify');
+      // v28.700 (Ben 05-Nov-26, USWS-19079 USD 719.04 counted twice): an order invoiced in Xero (tag xeroInvoiceRequired / dandb_add_to_xero) is paid
+      // against its Xero invoice in Xero. HORIZON's Shopify + Receive Money would book the money a second time, so it is never offered here.
+      if ((s.tags || []).some(t => /^(xeroinvoicerequired|dandb_add_to_xero)$/i.test(String(t).trim()))) problems.push(lab + 'is invoiced in Xero (Shopify tag xeroInvoiceRequired): match this bank line to the payment on its Xero invoice in Xero, not here (a Receive Money would count it twice)');
+      else if (s.cancelledAt) problems.push(lab + 'cancelled in Shopify');
       else if (s.displayFinancialStatus === 'PAID') problems.push(lab + 'already paid in Shopify (Fulfil has not caught up?)');
       else if (Math.abs(out - o.due) > 0.011) problems.push(lab + 'Shopify says ' + out + ' outstanding, Fulfil ' + o.due);
     } catch (e) { problems.push(lab + e.message); } }
@@ -4916,6 +4919,23 @@ app.post('/api/accounts/receipts/preview', async (req, res) => {
 });
 // Body: { line: { org, account_name, date, amount, reference }, sale_ids: [Fulfil sale id, ...], confirm: true }. Writes LIVE Shopify (mark
 // paid) and LIVE Xero (Receive Money). The receipt row is written before either call; a post that stops after Shopify finishes Xero only.
+// v28.700 (Ben 05-Nov-26: "you can delete a duplicate"): undo a posted match. Deletes HORIZON's Receive Money in Xero (only while it is not
+// reconciled), reads it back, marks the run 'undone'. The Shopify "paid" flag is left as it is (the order was paid; only the Xero booking was double).
+app.post('/api/accounts/receipts/:id/undo', async (req, res) => {
+  const id = Number(req.params.id), who = authUser(req) || 'unknown'; if ((req.body || {}).confirm !== true) return res.status(400).json({ error: 'confirm:true required: this deletes a transaction in live Xero' });
+  try { const row = (await pool.query(`SELECT * FROM planner.accounts_customer_receipts WHERE id=$1`, [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'No such match' }); if (row.status !== 'created' || !row.xero_txn_id) return res.status(409).json({ error: 'Only a posted match with a Xero Receive Money can be undone (status ' + row.status + ')' });
+    const g = await xeroFetch(row.org, '/api.xro/2.0/BankTransactions/' + row.xero_txn_id), t = g && g.BankTransactions && g.BankTransactions[0];
+    if (!t) return res.status(404).json({ error: 'Receive Money not found in Xero' });
+    if (t.IsReconciled) return res.status(409).json({ error: 'The Receive Money is already reconciled in Xero: unreconcile it in Xero first, then undo' });
+    if (t.Status !== 'DELETED') await xeroFetch(row.org, '/api.xro/2.0/BankTransactions/' + row.xero_txn_id, { method: 'POST', body: { BankTransactions: [{ BankTransactionID: row.xero_txn_id, Status: 'DELETED' }] } });
+    const b = await xeroFetch(row.org, '/api.xro/2.0/BankTransactions/' + row.xero_txn_id), bt = b && b.BankTransactions && b.BankTransactions[0];
+    if (!bt || bt.Status !== 'DELETED') return res.status(502).json({ error: 'Xero did not confirm the delete (status ' + (bt && bt.Status) + ')' });
+    await pool.query(`UPDATE planner.accounts_customer_receipts SET status='undone', error=$2, updated_at=now() WHERE id=$1`, [id, 'undone by ' + who + ' ' + new Date().toISOString().slice(0, 16) + ': Receive Money ' + row.xero_txn_id + ' deleted in Xero']);
+    console.log('[receipts] undo #' + id + ' by ' + who + ': Xero ' + row.org + ' BankTransaction ' + row.xero_txn_id + ' DELETED');
+    res.json({ ok: true, id, xero: { id: row.xero_txn_id, status: bt.Status, total: bt.Total } });
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
 app.post('/api/accounts/receipts/post', async (req, res) => {
   const b = req.body || {}; if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Shopify and live Xero' });
   let row = null;
