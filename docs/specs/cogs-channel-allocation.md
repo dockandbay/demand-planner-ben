@@ -13,7 +13,7 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
    - Reference `HORIZON COGS by channel YYYY-MM`, narration lists the source (Fulfil shipments, run date).
 3. **Refresh on the 7th and 15th** of the following month (late invoices, returns, cost corrections):
    - draft still a DRAFT: rebuild it in place (same journal, new lines);
-   - already POSTED by the accountants: never touched; a second DRAFT "top-up" journal for the difference only, and an email saying so.
+   - already POSTED: never touched; a "top-up" journal for the difference only (UK draft, AU posted). No email on refreshes.
 4. **Weekly to Airtable** (Ben 04-Nov-26): this is the existing COGS page "Email to Airtable" (per-SKU unit cost, cogs-up-IMPORT.csv), run automatically by n8n every Monday. Built in v28.696 as `/api/cron/cogs-airtable`; it does not depend on the journal work.
 
 ## Source and method (same as September)
@@ -82,5 +82,5 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 5. ~~Email~~ answered by Ben 04-Nov-26:
    - UK: journal created as a DRAFT; month-end email to Pooja and Harry (Ascendant), who post it.
    - AU: journal created POSTED (approved) in Xero AU by HORIZON; Alex (Pillar) is emailed that it is posted.
-   - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited) and Alex is emailed again. Recipients of the refresh emails: to confirm (default: same as month end, Ben + Sarah in cc).
+   - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited). NO emails on refreshes (Ben 04-Nov-26); the result shows in HORIZON ACCOUNTS > COGS by channel.
 6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
