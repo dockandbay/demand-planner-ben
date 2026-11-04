@@ -481,7 +481,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       qr.rows.forEach(function(row,yy){ for(var xx=0;xx<row.length;xx++)if(row.charAt(xx)==='1')cells+='M'+(qx+xx*mod).toFixed(2)+' '+(qy+yy*mod).toFixed(2)+'h'+mod.toFixed(2)+'v'+mod.toFixed(2)+'h-'+mod.toFixed(2)+'z'; });
       el.push('<path d="'+cells+'" fill="#000"/>'); el.push(svgText(cx,H-40,'Scan in HORIZON · '+(sh.shipment_ref||'')+' · pallet '+n+' of '+N,{size:12,anchor:'middle',fill:'#444'})); }
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
-  function dlPalletLabels(d,btn){ var N=Number((d.shipment||{}).pallets_confirmed)||0; if(!N){ ppNotice('Confirm the number of pallets first'); return; }
+  // v28.675 (Ben: "it should download as estimated amounts"): confirmed pallets, else the estimate rounded up
+  function palletN(d){ var M=d.members||[], e=M.length?M.reduce(function(a,m){ return a+(Number(m.est_pallets)||0); },0):(Number(d.est_pallets)||0);
+    return Number((d.shipment||{}).pallets_confirmed)||Math.ceil(e-1e-9); }   // any fraction rounds UP (0.1 -> 1, 22.1 -> 23), from the unrounded sum
+  function dlPalletLabels(d,btn){ var N=palletN(d); if(!N){ ppNotice('No pallet estimate for this shipment: enter the confirmed number of pallets'); return; }
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold'),fetch('/api/portal/po-shipment/'+encodeURIComponent(d.po)+'/pallet-qr',{cache:'no-store'}).then(function(r){ return r.json(); })]).then(function(a){ var opts={fontBook:a[0],fontBold:a[1]}, QR=(a[2]&&a[2].qrs)||[];
       if(a[2]&&a[2].error){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice(a[2].error); return; }
@@ -1242,7 +1245,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               :'<button class="save-btn po2-lbl" data-po="'+esc(anyPo)+'">⤓ Shipment labels for '+esc(anyPo)+'</button>')
             +'<div class="sect-h" style="margin-top:14px">Pallets</div><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><span class="mut">Estimated</span> <b>'+esc(x.est_pallets)+'</b> <span class="mut">Confirmed</span> '
             +(master?'<input class="fci po2-pal" type="number" min="1" max="500" value="'+(N||'')+'" style="width:80px;text-align:left"> <button class="save-btn po2-pal-go">Save</button>':'<b>'+(N||'—')+'</b>')+'</div>'
-            +'<div style="margin-top:8px">'+(master?'<button class="save-btn po2-pl"'+(N?'':' disabled')+'>⤓ Pallet labels'+(N?' ('+N+' pages, QR on each)':'')+'</button>'+(N?'':' <span class="tiny mut">enter the confirmed number of pallets first</span>'):'<span class="tiny mut">The pallet labels are printed by the consolidating supplier.</span>')+'</div>';
+            +'<div style="margin-top:8px">'+(master?'<button class="save-btn po2-pl">⤓ Pallet labels ('+palletN(x)+' pages'+(N?'':', estimated')+', QR on each)</button>':'<span class="tiny mut">The pallet labels are printed by the consolidating supplier.</span>')+'</div>';
           tb.querySelectorAll('.po2-lbl').forEach(function(b){ b.onclick=function(){ dlShipsWith(b.dataset.po,b,EP.shipsWith); }; });
           var pb=tb.querySelector('.po2-pl'); if(pb)pb.onclick=function(){ dlPalletLabels(x,pb); };
           var pg=tb.querySelector('.po2-pal-go'); if(pg)pg.onclick=function(){ pg.disabled=true; pg.textContent='Saving…'; post('/api/portal/po-shipment/'+encodeURIComponent(anyPo)+'/pallets',{pallets:tb.querySelector('.po2-pal').value},function(){ refresh('main'); }); };
@@ -3635,7 +3638,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   h+=box('4. Pallets','<div style="font-size:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">'+kv('Estimated',String(d.est_pallets))+' &nbsp; <span class="mut">Confirmed</span> '
                     +(master?'<input class="fci pp-sx-pal" type="number" min="1" max="500" step="1" value="'+(N||'')+'" placeholder="pallets" style="width:80px;text-align:left"> <button class="save-btn pp-sx-palgo">Save</button>':'<b>'+(N||'—')+'</b>')
                     +(sh.pallets_confirmed_at&&N?' <span class="tiny mut">confirmed '+esc(fd(sh.pallets_confirmed_at))+'</span>':'')+'</div>'
-                    +'<div style="margin-top:8px">'+(master?'<button class="save-btn pp-sx-pl"'+(N?'':' disabled')+'>⤓ Pallet labels'+(N?' ('+N+' pages: 1 of '+N+' … '+N+' of '+N+')':'')+'</button>'+(N?'':' <span class="tiny mut">enter the confirmed number of pallets first</span>'):'<span class="tiny mut">The pallet labels are printed by the supplier of the master PO ('+esc(sh.master_po||sh.shipment_ref)+').</span>')+'</div>');
+                    +'<div style="margin-top:8px">'+(master?'<button class="save-btn pp-sx-pl">⤓ Pallet labels ('+palletN(d)+' pages'+(N?'':', estimated')+')</button>':'<span class="tiny mut">The pallet labels are printed by the supplier of the master PO ('+esc(sh.master_po||sh.shipment_ref)+').</span>')+'</div>');
                   el.innerHTML=h;
                   var pl=el.querySelector('.pp-sx-plan'); if(pl)pl.onclick=function(e){ if(e)e.stopPropagation(); ppShipDrawer(sh.shipment_ref); };
                   el.querySelectorAll('.pp-sx-lbl').forEach(function(b){ b.onclick=function(){ dlShipsWith(b.dataset.po,b,EP.shipsWith); }; });

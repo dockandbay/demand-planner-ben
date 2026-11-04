@@ -1,3 +1,6 @@
+## v28.675 (04-Nov-26) Supplier portal: pallet labels download from the estimate when pallets are not confirmed
+- Ben: on PO-56UKXR1 "Pallet labels ... nothing downloaded" (the button was disabled until a confirmed pallet count was saved). "it should download as estimated amounts ... rounded UP to the nearest 1. even if 0.1 or 22.1". With no confirmed count the labels use the shipment's estimated pallets rounded up from the unrounded sum of the POs aboard (0.2 -> 1, 18.8 -> 19, 21.9 -> 22, 5.0 -> 5); a confirmed count still wins. The button says "(19 pages, estimated, QR on each)". Same in the PO Shipment tab and the older shipment view, and the server's pallet QR endpoint. No migration.
+
 ## v28.674 (04-Nov-26) Supplier portal: no loaded ticks for suppliers who don't consolidate the shipment
 - Ben: "if user cannot tick the boxes as they are not shipment owner, then no need to show them". A supplier riding on another supplier's shipment now sees the POs on board without tick boxes (PO Shipment tab, Shipment Plan, and the old Shipment Plan's Loaded column). The consolidating supplier still sees them, locked once the shipment has shipped or is complete. No migration.
 
