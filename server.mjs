@@ -35703,9 +35703,12 @@ async function portalShipmentRole(req, ref) {
   const r = (await pool.query(`SELECT
       EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.shipment_ref=$1) OR EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1) real_ship,
       EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce((SELECT nullif(sh.master_po,'') FROM planner.shipments sh WHERE sh.shipment_ref=$1), $1) AND mp.supplier_name = ANY($2)) is_master,
-      EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1 AND p.supplier_name = ANY($2)) is_rider`, [ref, sups])).rows[0];
+      EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1 AND p.supplier_name = ANY($2)) is_rider,
+      NOT EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce((SELECT nullif(sh.master_po,'') FROM planner.shipments sh WHERE sh.shipment_ref=$1), $1))
+        AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1 AND upper(coalesce(p.status,''))<>'CANCELLED' AND NOT (coalesce(p.supplier_name,'') = ANY($2))) sole`, [ref, sups])).rows[0];
   if (!r || !r.real_ship) return null;
-  return r.is_master ? 'master' : r.is_rider ? 'rider' : null;
+  // v28.672: no master PO (e.g. a Fulfil IS ref like IS288) and every PO aboard is theirs: they consolidate
+  return (r.is_master || (r.is_rider && r.sole)) ? 'master' : r.is_rider ? 'rider' : null;
 }
 async function portalOwnsShipmentRef(req, ref) { return !!(await portalShipmentRole(req, ref)); }
 // v28.186 (Ben, deep dive C1 / M8): may this portal session read portal_attachments row `id`? One rule for the file route and for
@@ -37282,12 +37285,12 @@ app.get('/api/portal/orders', portalAuth, async (req, res) => {
       FROM planner.purchase_orders p LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id WHERE p.shipment_ref = ANY($1) AND upper(coalesce(p.status,''))<>'CANCELLED' ORDER BY p.po`, [R])).rows : [];
     const today = new Date().toISOString().slice(0, 10), nm = new Set(names.map(String));
     // the master PO may not be aboard any more (e.g. complete): its supplier still decides who consolidates
-    const mSup = {}; { const ms = [...new Set(shipRows.map(x => x.master_po || x.shipment_ref).filter(Boolean))]; if (ms.length) (await pool.query(`SELECT po, coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po = ANY($1)`, [ms])).rows.forEach(r => { mSup[r.po] = r.s; }); }
+    const mSup = {}; { const ms = [...new Set(R.map(ref => (shipRows.find(x => x.shipment_ref === ref) || {}).master_po || ref).filter(Boolean))];   /* v28.672: refs with no shipments row too */ if (ms.length) (await pool.query(`SELECT po, coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po = ANY($1)`, [ms])).rows.forEach(r => { mSup[r.po] = r.s; }); }
     const byRef = {}; mem.forEach(m => { (byRef[m.ref] = byRef[m.ref] || []).push(m); });
     const shipments = R.map(ref => { const s = shipRows.find(x => x.shipment_ref === ref) || { shipment_ref: ref, master_po: '', status: '', mode: '', carrier: '', carrier_ref: '', departure: null, arrival: null, pallets_confirmed: null };
       const M = (byRef[ref] || []).map(m => ({ po: m.po, supplier: m.supplier, status: m.status, branch: m.branch, prod_no: m.prod_no, prod_end: m.prod_end, est_pallets: m.pallets_override != null ? Number(m.pallets_override) : Number(m.est_pallets) || 0, loaded: !!m.loaded, mine: nm.has(m.supplier) }));
       const master = s.master_po || (M.some(m => m.po === ref) || mSup[ref] != null ? ref : ''); M.forEach(m => { m.is_master = m.po === master; });
-      const mm = M.find(m => m.is_master), mOwn = mm ? mm.mine : nm.has(mSup[master] || ''), role = mOwn ? 'master' : (M.some(m => m.mine) ? 'rider' : null);
+      const mm = M.find(m => m.is_master), mOwn = mm ? mm.mine : nm.has(mSup[master] || ''), role = (mOwn || (!mm && mSup[master] == null && M.length && M.every(m => m.mine))) ? 'master' : (M.some(m => m.mine) ? 'rider' : null);   // v28.672: master PO not found and every PO aboard is theirs: they consolidate
       const done = M.length && M.every(m => /^complete/i.test(m.status)), shipped = /^shipping$/i.test(s.status) || M.some(m => /shipping|delivered|shipped/i.test(m.status));
       const ended = M.some(m => m.prod_end && m.prod_end <= today), none = M.length && !M.some(m => m.loaded);
       const actions = role === 'master' ? ((!shipped && !done && ended && none ? 1 : 0) + (shipped && !done && !s.carrier_ref ? 1 : 0)) : 0;
