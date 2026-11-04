@@ -122,7 +122,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     if(_ppdCur&&_ppdCur.panel===panel)_ppdCur=null; if(!_ppdCur){ var bk=document.getElementById('ppd-back'); if(bk)bk.style.display='none'; document.body.style.overflow=''; } }
   // v28.683: ORDER PLAN & INVOICE sub-tabs (Step 1 / Step 2)
   window.ppOpSub=function(b){ var w=b.closest('.pp-opwrap'); if(!w)return; var k=b.getAttribute('data-k'); window.__ppOpSub=k;
-    w.querySelectorAll('.pp-opsub-b').forEach(function(x){ var on=x.getAttribute('data-k')===k; x.style.borderBottomColor=on?'var(--blue)':'transparent'; x.style.color=on?'var(--blue)':'var(--muted)'; });
+    w.querySelectorAll('.pp-opsub-b').forEach(function(x){ var on=x.getAttribute('data-k')===k; x.style.borderColor=on?'var(--blue)':'var(--line)'; x.style.background=on?'var(--blue)':'var(--card,#fff)'; x.style.color=on?'#fff':'var(--ink)'; });
     w.querySelectorAll('[data-opp]').forEach(function(x){ x.style.display=x.getAttribute('data-opp')===k?'':'none'; }); };
   function ppDrawerOpen(panel,o){ if(!panel)return; o=o||{};
     if(_ppdCur&&_ppdCur.panel!==panel){ var prev=_ppdCur; _ppdCur=null; try{ prev.close(); }catch(e){} ppDrawerStrip(prev.panel); }
@@ -1596,9 +1596,9 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       // v28.683 (Ben: "can step 1 and 2 be tabs so step 2 can be top of page"): Step 1 / Step 2 are sub-tabs of ORDER PLAN & INVOICE.
       // Opens on Step 2 when the invoice is due and the order is already confirmed; the choice is kept while the portal is open.
       var _opK=window.__ppOpSub||((invoiceDue(p,subs)&&!(needConfirm&&!confirmed))?'inv':'plan');
-      var _opB=function(k,t,warn){ var on=_opK===k; return '<button type="button" class="pp-opsub-b" data-k="'+k+'" onclick="ppOpSub(this)" style="background:none;border:none;border-bottom:2px solid '+(on?'var(--blue)':'transparent')+';padding:7px 12px;font-weight:700;font-size:12px;letter-spacing:.03em;color:'+(on?'var(--blue)':'var(--muted)')+';cursor:pointer;font-family:inherit">'+t+(warn?' <span class="ex-badge">!</span>':'')+'</button>'; };
-      var orderInvoice=_cdevBanner+'<div class="pp-opwrap"><div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 12px">'+_opB('plan','STEP 1 · ORDER PLAN',(needConfirm&&!confirmed)||_chgs.length)+_opB('inv','STEP 2 · INVOICE',invoiceDue(p,subs))+'</div>'
-        +'<div data-opp="plan"'+(_opK==='plan'?'':' style="display:none"')+'>'+skus+'</div><div data-opp="inv"'+(_opK==='inv'?'':' style="display:none"')+'>'+invStep2+'</div></div>';
+      var _opB=function(k,t,warn){ var on=_opK===k; return '<button type="button" class="pp-opsub-b" data-k="'+k+'" onclick="ppOpSub(this)" style="border:1px solid '+(on?'var(--blue)':'var(--line)')+';background:'+(on?'var(--blue)':'var(--card,#fff)')+';color:'+(on?'#fff':'var(--ink)')+';border-radius:8px;padding:8px 16px;font-weight:800;font-size:13px;letter-spacing:.02em;cursor:pointer;font-family:inherit">'+t+(warn?' <span class="ex-badge">!</span>':'')+'</button>'; };   /* v28.689 (Ben: "quite hard to see"): filled buttons */
+      var orderInvoice=_cdevBanner+'<div class="pp-opwrap"><div style="display:flex;gap:8px;margin:0 0 14px">'+_opB('plan','STEP 1 · ORDER PLAN',(needConfirm&&!confirmed)||_chgs.length)+_opB('inv','STEP 2 · INVOICE',invoiceDue(p,subs))+'</div>'
+        +'<div data-opp="plan"'+(_opK==='plan'?'':' style="display:none"')+'>'+skus+'<div style="margin:16px 0 4px;padding-top:12px;border-top:1px solid var(--line)"><button type="button" data-k="inv" onclick="ppOpSub(this);var d=this.closest(\'.ppd-wrap\');if(d)d.scrollTop=0;" style="border:1px solid var(--blue);background:var(--blue-soft,#eef4ff);color:var(--blue);border-radius:8px;padding:9px 18px;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit">Next: Step 2 · Invoice →</button></div></div><div data-opp="inv"'+(_opK==='inv'?'':' style="display:none"')+'>'+invStep2+'</div></div>';
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
@@ -3246,7 +3246,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               return; }
             if(PORTAL_TAB==='productions'){ body.innerHTML=ppProductions();
               var pb=body.querySelector('.pv-prod-batch'); if(pb)pb.onchange=function(){ PORTAL_PROD_BATCH=this.value; renderPP(); };
-              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });   // v28.676 (Ben): a PO in the batch plan opens its drawer
+              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); ppPoDrawerHere(b.dataset.po); }; });   // v28.689 (Ben): the PO drawer opens over Productions; the page stays put
               body.querySelectorAll('.pv-prod-approve').forEach(function(btn){ btn.onclick=function(){ prodApprove(btn.dataset.all?prodBatchPending(prodBatchPOs()).map(function(p){return p.po;}):[btn.dataset.po], btn); }; });
               var pdl=body.querySelector('.pv-prod-dl'); if(pdl)pdl.onclick=function(){ downloadProductionPlan(); };
               var bcBtn=body.querySelector('.pv-bc-dl'), bcMenu=body.querySelector('.pv-bc-menu');
@@ -3418,6 +3418,15 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po); }
             wireDetail(body);
             // detail-level handlers, bound within a scope (whole body on render, or one cell after a targeted re-render)
+            // v28.689 (Ben: "when clicking po number on PRODUCTIONS the drawer pops out but also goes to the purchase orders page. it should stay on
+            // current page"): the same PO card as the Purchase Orders drawer, built in a stand-alone drawer over whatever page is open.
+            function ppPoDrawerHere(po){ var p=(_ppData.pos||[]).filter(function(x){ return x.po===po; })[0]; if(!p)return;
+              var old=document.getElementById('pp-po-here'); if(old)old.remove();
+              var holder=document.createElement('div'); holder.id='pp-po-here'; holder.className='ppd-wrap'; holder.setAttribute('data-po',po); holder.innerHTML='<div class="ppd-c"><div class="count">Loading…</div></div>';
+              (document.getElementById('supply-root')||document.body).appendChild(holder); var cell=holder.querySelector('.ppd-c');   /* outside #pp-body: a re-render of the page must not drop it */
+              var build=function(){ if(!cell.isConnected)return; try{ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],'h',_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); loadFreightCharges(holder); }catch(err){ cell.innerHTML='<div class="count" style="color:var(--neg)">Could not show this order: '+esc(String(err&&err.message||err))+'</div>'; } };
+              if(ppNeedsDetail([p],true))ppEnsureDetail([p],true,build,function(){ cell.innerHTML='<div class="count" style="color:var(--neg)">Could not load this order. Close it and open it again.</div>'; }); else build();
+              ppDrawerOpen(holder,{ref:po, sub:[p.branch, p.prod_no?('P# '+p.prod_no):''].filter(Boolean).join(' · '), link:ppItemLink('orders','pos',po), kind:'po', close:function(){ holder.remove(); }}); }
             function wireDetail(scope){
               var sid=_ppData.sid, by='preview (acting as '+STATE.supplierName+')';
               var pick=function(cls,po){ return scope.querySelector('.'+cls+'[data-po="'+CSS.escape(po)+'"]'); };

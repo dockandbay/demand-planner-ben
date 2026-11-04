@@ -1,3 +1,9 @@
+## v28.690 (04-Nov-26) Supplier portal: PO drawer opens over Productions; clearer Step 1 / Step 2 buttons with a Next link
+- (v28.689 skipped: used for a sandbox build.)
+- Ben: "when clicking po number on PRODUCTIONS the drawer pops out but also goes to the purchase orders page. it should stay on current page". The PO drawer is built on its own over Productions (same card as the Purchase Orders drawer); the page and its batch stay put underneath, and Close returns to it.
+- Ben: "STEP 1 · ORDER PLAN / STEP 2 · INVOICE quite hard to see ... maybe a link at the bottom of step 1 as well". The two are filled buttons (selected = blue), and the bottom of Step 1 has "Next: Step 2 · Invoice →".
+- No migration.
+
 ## v28.688 (04-Nov-26) Manage 3PL: messages above the button bar; log links to the Fulfil count; queued line cleared when done
 - (v28.687 skipped: used for a sandbox build.)
 - Ben: "can the message be above the buttons so the buttons dont move as things wrap". Queued / Fulfil read / error lines sit on their own line above the status bar; the buttons are one group on the right.
