@@ -8,8 +8,8 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 ## What it does
 1. **Channel allocation report**: for a month, every Fulfil shipment to a customer, costed (qty x move cost price, company currency), grouped by sales channel / segment / delivery country, mapped to the channel COGS account.
 2. **Month-end journal in Xero, per org**: dated the last day of the month, DRAFT only (the accountants post it, as with the Faire VAT journal):
-   - Dr each channel COGS account (311.x UK, 401.x AU) with its share
-   - Cr the Xero account Fulfil's 9006 maps to (the generic COGS), same total
+   - Dr each channel COGS account (311.x UK; 311.8x / 401.x AU) with its share
+   - Cr 9006 Fulfil - Cost of Goods Sold Account (exists in both orgs), same total
    - Reference `HORIZON COGS by channel YYYY-MM`, narration lists the source (Fulfil shipments, run date).
 3. **Refresh on the 7th and 15th** of the following month (late invoices, returns, cost corrections):
    - draft still a DRAFT: rebuild it in place (same journal, new lines);
@@ -40,10 +40,13 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 | EU wholesale | FR 311.3b, DE 311.3d, others 311.3c |
 | Amazon.de / .fr / .it / .es | 311.3e / 311.3g / 311.3f / 311.3h |
 | Shopify CA / Amazon.ca / CA wholesale | 311.4a / 311.4b / 311.4c |
-| Shopify AU | 401.3 COGS - AU - Shopify |
-| Amazon.com.au | 401.4 COGS - AU - Amazon |
+| Shopify AU | 311.8a COGS - AU - Shopify |
+| Amazon.com.au | 311.8b COGS - AU - Amazon |
 | AU wholesale & distributors | 401.5 COGS - AU - Wholesale & Distributor |
-| Anything else in AU | 401.9 COGS - AU - Other |
+| TikTok AU / other AU marketplaces | 401.6 COGS - AU - Marketplace |
+| AU custom / co-brand orders | 401.11e COGS - Custom / Co Brand - AU |
+| AU custom local, sold direct | 401.10e COGS - Custom Local - D2C - AU |
+| Anything else in AU | 311.8d COGS - AU - Other |
 | A channel not in this table | not guessed: listed as "unmapped", held out of the journal, flagged in the email |
 
 The mapping lives in one HORIZON table so a new channel is added without code.
@@ -69,7 +72,8 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 
 ## Questions for Ben
 1. **Credit account**: confirm the Xero account Fulfil's 9006 maps to in each org (UK and AU) is the one to credit.
-2. **AU accounts**: 401.3 / 401.4 / 401.5 / 401.9 as in September? (The 405.x "Cost of Sales" accounts created 29-Oct are fees, not COGS.)
+2. ~~AU accounts~~ CONFIRMED by Ben 04-Nov-26 (read live from Xero AU): 311.8a Shopify, 311.8b Amazon, 401.5 Wholesale & Distributor, 401.6 Marketplace, 401.11e Custom / Co Brand, 401.10e Custom Local D2C, 311.8d Other; credit 9006. The 405.x "Cost of Sales" accounts are fees, not used. The September codes 401.3 / 401.4 / 401.9 do not exist in Xero AU.
+2b. **UK accounts**: to be checked against Xero UK the same way before building.
 3. **Airtable**: which base and table should the weekly rows go to (new table "COGS by channel", or an existing one)?
 4. **Zero-cost lines**: keep the September treatment (cost from HORIZON, credit Inventory), or leave them out and only flag them?
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
