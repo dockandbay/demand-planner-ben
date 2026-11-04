@@ -3674,11 +3674,19 @@ async function accountsBankSyncOrg(org, opts) {
     const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
     const modified = accBankRowsFrom(org, bank, bt, pays, tr);   // every transfer is re-read (cheap), so transfer rows are complete
     // stored spend / receive / payment items not in the modified set: re-check by id and drop the ones now reconciled, voided or deleted
-    const stored = (await pool.query(`SELECT kind, xero_id FROM planner.accounts_bank_items WHERE org=$1 AND kind IN ('spend','receive','payment')`, [org])).rows;
-    const seen = new Set(modified.map(r => r[1] + '|' + r[2])), check = { bt: [], pay: [] };
-    stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); });
+    const stored = (await pool.query(`SELECT kind, xero_id, to_char(txn_date,'YYYY-MM-DD') d FROM planner.accounts_bank_items WHERE org=$1 AND kind IN ('spend','receive','payment')`, [org])).rows;
+    const seen = new Set(modified.map(r => r[1] + '|' + r[2])), check = { bt: [], pay: [] }, btDates = [];
+    stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); if (r.kind !== 'payment' && r.d) btDates.push(r.d); });
     dropIds = [];
-    if (check.bt.length) { const m = await accXeroByIds(org, 'BankTransactions', 'BankTransactionID', check.bt); check.bt.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
+    if (check.bt.length) { let m;
+      try { m = await accXeroByIds(org, 'BankTransactions', 'BankTransactionID', check.bt); }
+      catch (e) { if (!_xHighVol(e)) throw e;   // v28.701 (Ben 05-Nov-26): the UK org refuses any guid OR filter on BankTransactions (HighVolumeException, even with a date range). Re-read the open (unreconciled) BankTransactions over the stored items' date range in dated windows instead: an id missing from that read is reconciled, voided or deleted
+        // only the calendar months that hold a stored item (one old 2018 item must not cost a 2018-to-now scan)
+        const months = [...new Set(btDates.map(d => d.slice(0, 7)))].sort(); if (!months.length) months.push(new Date().toISOString().slice(0, 7));
+        m = new Map();
+        for (const ym of months) { const a = new Date(ym + '-01T00:00:00Z'), b = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + 1, 1));
+          (await accXeroBtRange(org, a, b, 'IsReconciled==false', { stepMonths: 1 })).forEach(x => m.set(x.BankTransactionID, x)); } }
+      check.bt.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
     if (check.pay.length) { const m = await accXeroByIds(org, 'Payments', 'PaymentID', check.pay); check.pay.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
     rows = modified;
   }
