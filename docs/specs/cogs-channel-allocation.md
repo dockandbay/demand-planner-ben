@@ -47,6 +47,8 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 | AU custom / co-brand orders | 401.11e COGS - Custom / Co Brand - AU |
 | AU custom local, sold direct | 401.10e COGS - Custom Local - D2C - AU |
 | Anything else in AU | 311.8d COGS - AU - Other |
+| Custom / co-brand sale (any channel) | UK org: 311.9a UK / 311.9b US / 311.9c CA / 311.9d EU / 311.9e ROTW; AU org: 401.11e (401.10e custom local D2C) |
+| Dropship | not used |
 | A channel not in this table | not guessed: listed as "unmapped", held out of the journal, flagged in the email |
 
 The mapping lives in one HORIZON table so a new channel is added without code.
@@ -74,7 +76,7 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 1. **Credit account**: confirm the Xero account Fulfil's 9006 maps to in each org (UK and AU) is the one to credit.
 2. ~~AU accounts~~ CONFIRMED by Ben 04-Nov-26 (read live from Xero AU): 311.8a Shopify, 311.8b Amazon, 401.5 Wholesale & Distributor, 401.6 Marketplace, 401.11e Custom / Co Brand, 401.10e Custom Local D2C, 311.8d Other; credit 9006. The 405.x "Cost of Sales" accounts are fees, not used. The September codes 401.3 / 401.4 / 401.9 do not exist in Xero AU.
 2b. **UK accounts**: checked 04-Nov-26, every code in the table exists in Xero UK with that name, and 9006 too.
-2c. **UK accounts not used yet**: Xero UK also has 311.9a-e COGS Co-Brand/Custom (UK / US / CA / EU / ROTW), 311.10a-d Dropship (UK / US / EU / ROTW), 311.5a EU Distributors, 311.5e EU Marketplace, 311.5g International Distributors (Co Brand). Should custom / co-brand orders (HORIZON knows them: dtc_custom / custom_dev_ref) and dropship orders go to those instead of the channel account?
+2c. ~~Co-brand / dropship~~ answered by Ben 04-Nov-26: custom / co-brand sales DO go to the Co-Brand/Custom COGS accounts (UK org: 311.9a UK, 311.9b US, 311.9c CA, 311.9d EU, 311.9e ROTW by where the sale is; AU org: 401.11e, and 401.10e for custom local D2C). NOTHING goes to the Dropship accounts (311.10a-d). How a sale is recognised as custom / co-brand (sale channel or segment, custom SKUs, the HORIZON custom order link) is settled from live Fulfil data at build time and shown to Ben before the first journal.
 3. ~~Airtable~~ answered: the existing COGS "Email to Airtable", weekly via n8n (v28.696).
 4. **Zero-cost lines**: keep the September treatment (cost from HORIZON, credit Inventory), or leave them out and only flag them?
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
