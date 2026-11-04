@@ -1,3 +1,10 @@
+## v28.688 (04-Nov-26) Manage 3PL: messages above the button bar; log links to the Fulfil count; queued line cleared when done
+- (v28.687 skipped: used for a sandbox build.)
+- Ben: "can the message be above the buttons so the buttons dont move as things wrap". Queued / Fulfil read / error lines sit on their own line above the status bar; the buttons are one group on the right.
+- Ben: "can a successful rebaseline log link to a record in Fulfil?". In the Rebaseline log, "count 985 ↗" opens that stock count in Fulfil.
+- Ben: after #4 the "queued ... n8n is writing it now" line came back after the refresh. It is cleared when the batch finishes, and the line reads "✓ Rebaseline #4 done in Fulfil (count 985). Fulfil read at ...".
+- No migration.
+
 ## v28.686 (04-Nov-26) Manage 3PL: rebaseline log drawer; a failed rebaseline no longer says "Figures updated"; counted SKUs drop off Discrepancies
 - Ben: "Rebaseline history ... should be in a log pop out drawer from a button on the main panel of buttons". "☰ Rebaseline log (N)" in the status bar (⟳ while one is running, red badge for errors) opens the history in a drawer on the right; click outside or Close.
 - Ben: "something happened incorrect with the message figures updated if it also threw an error". When a batch that was running ends in error, the page says "⚠ Rebaseline #N failed in Fulfil: ... Nothing changed for those SKUs." instead of "✓ Fulfil read ... Figures updated".
