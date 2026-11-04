@@ -11144,11 +11144,20 @@ async function runFlexportImport(opts) {
         FROM planner.flexport_api_shipments f
         WHERE coalesce(p.flexport_reference,'')='' AND coalesce(p.fulfil_is_number,'')<>''
           AND f.shipment_name ~ ('(^|[^0-9A-Za-z])' || p.fulfil_is_number || '([^0-9]|$)')`)).rowCount; } catch (e) { if (!/fulfil_is_number/.test(String(e.message))) console.error('[flexport] IS link failed:', e.message); }
+    // v28.680 (Ben: IS291 "is linked to flexport automatically but the carrier and tracking ref is blank"): a shipment linked to a
+    // Flexport booking (by its name, or a PO aboard carrying the Flexport reference) with no tracking ref gets the FLEX id as its
+    // tracking ref, and carrier Flexport when blank. Never overwrites a tracking ref someone typed.
+    let carrier_filled = 0;
+    try { carrier_filled = (await pool.query(`UPDATE planner.shipments sh SET carrier_ref=x.flex_id, carrier=coalesce(nullif(sh.carrier,''),'Flexport'), updated_at=now()
+        FROM (SELECT DISTINCT ON (s.shipment_ref) s.shipment_ref, f.flex_id FROM planner.shipments s JOIN planner.flexport_shipments_effective f
+            ON f.shipment_name=s.shipment_ref OR f.flex_id IN (SELECT p.flexport_reference FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref AND coalesce(p.flexport_reference,'')<>'')
+          WHERE coalesce(s.carrier_ref,'')='' ORDER BY s.shipment_ref, (f.shipment_name=s.shipment_ref) DESC, f.flex_id) x
+        WHERE sh.shipment_ref=x.shipment_ref AND coalesce(sh.carrier_ref,'')=''`)).rowCount; if (carrier_filled) invalidateSupplyCaches(); } catch (e) { console.error('[flexport] carrier fill failed:', e.message); }
     const apiCount = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments`)).rows[0].n;
     const matched = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments f WHERE EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`)).rows[0].n;
     const at = new Date().toISOString();
     await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_last_sync',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [at]);
-    return { ok: true, pages: page, seen, imported, containers_filled, is_linked, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
+    return { ok: true, pages: page, seen, imported, containers_filled, is_linked, carrier_filled, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
   }
 }
 app.post('/api/supply/flexport/import', async (req, res) => {
@@ -37287,14 +37296,16 @@ app.get('/api/portal/orders', portalAuth, async (req, res) => {
     // the master PO may not be aboard any more (e.g. complete): its supplier still decides who consolidates
     const mSup = {}; { const ms = [...new Set(R.map(ref => (shipRows.find(x => x.shipment_ref === ref) || {}).master_po || ref).filter(Boolean))];   /* v28.672: refs with no shipments row too */ if (ms.length) (await pool.query(`SELECT po, coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po = ANY($1)`, [ms])).rows.forEach(r => { mSup[r.po] = r.s; }); }
     const byRef = {}; mem.forEach(m => { (byRef[m.ref] = byRef[m.ref] || []).push(m); });
+    /* v28.680: shipments linked to a Flexport booking already have tracking (the Flexport import fills the ref) */
+    const flexLinked = new Set(R.length ? (await pool.query(`SELECT r FROM unnest($1::text[]) r WHERE EXISTS (SELECT 1 FROM planner.flexport_shipments_effective f WHERE f.shipment_name=r OR f.flex_id IN (SELECT p.flexport_reference FROM planner.purchase_orders p WHERE p.shipment_ref=r AND coalesce(p.flexport_reference,'')<>''))`, [R]).catch(() => ({ rows: [] }))).rows.map(x => x.r) : []);
     const shipments = R.map(ref => { const s = shipRows.find(x => x.shipment_ref === ref) || { shipment_ref: ref, master_po: '', status: '', mode: '', carrier: '', carrier_ref: '', departure: null, arrival: null, pallets_confirmed: null };
       const M = (byRef[ref] || []).map(m => ({ po: m.po, supplier: m.supplier, status: m.status, branch: m.branch, prod_no: m.prod_no, prod_end: m.prod_end, est_pallets: m.pallets_override != null ? Number(m.pallets_override) : Number(m.est_pallets) || 0, loaded: !!m.loaded, mine: nm.has(m.supplier) }));
       const master = s.master_po || (M.some(m => m.po === ref) || mSup[ref] != null ? ref : ''); M.forEach(m => { m.is_master = m.po === master; });
       const mm = M.find(m => m.is_master), mOwn = mm ? mm.mine : nm.has(mSup[master] || ''), role = (mOwn || (!mm && mSup[master] == null && M.length && M.every(m => m.mine))) ? 'master' : (M.some(m => m.mine) ? 'rider' : null);   // v28.672: master PO not found and every PO aboard is theirs: they consolidate
       const done = M.length && M.every(m => /^complete/i.test(m.status)), shipped = /^shipping$/i.test(s.status) || M.some(m => /shipping|delivered|shipped/i.test(m.status));
       const ended = M.some(m => m.prod_end && m.prod_end <= today), none = M.length && !M.some(m => m.loaded);
-      const actions = role === 'master' ? ((!shipped && !done && ended && none ? 1 : 0) + (shipped && !done && !s.carrier_ref ? 1 : 0)) : 0;
-      return Object.assign({}, s, { master_po: master, role, members: M, est_pallets: Math.round(M.reduce((a, m) => a + m.est_pallets, 0) * 10) / 10, stage: done ? 'complete' : (shipped ? 'shipped' : 'to_ship'), actions,
+      const actions = role === 'master' ? ((!shipped && !done && ended && none ? 1 : 0) + (shipped && !done && !s.carrier_ref && !flexLinked.has(ref) ? 1 : 0)) : 0;
+      return Object.assign({}, s, { master_po: master, role, flex_linked: flexLinked.has(ref), members: M, est_pallets: Math.round(M.reduce((a, m) => a + m.est_pallets, 0) * 10) / 10, stage: done ? 'complete' : (shipped ? 'shipped' : 'to_ship'), actions,
         loaded: M.filter(m => m.loaded).length }); })
       .filter(x => x.role && (all || x.stage !== 'complete'));
     const unshipped = (await pool.query(`SELECT p.po, coalesce(p.status,'') status, coalesce(p.branch,'') branch, p.prod_no, ${PEND} prod_end FROM planner.purchase_orders p LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id

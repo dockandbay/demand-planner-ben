@@ -1,3 +1,12 @@
+## v28.681 (04-Nov-26) Supplier portal: shipment actions go to the new Shipment Plan; labels on each PO row; ticks open until complete; Flexport fills carrier + tracking
+- (v28.679 and v28.680 skipped: used for sandbox builds.)
+- Ben: "home page takes user to SHIPMENT PLAN (old) ... it should only go to new shipment plan with actions filtered". On the new process the home "N shipment actions" card opens the new Shipment Plan with Needs action on, and its count is the new view's own actions (production ended with no PO ticked loaded; shipped with no tracking). Go to > Shipment plan opens the new one too. The "New view, under review" note is gone.
+- Ben: the SHIPS WITH label downloads "should be on the same rows as the PO's on board". Each PO row has its own ⤓ Shipment labels (consolidating supplier: the other POs aboard; a rider: its own PO); the separate Shipment labels list is gone.
+- Ben: "still cannot click" (IS291, Shipping). The consolidating supplier can tick POs loaded until the shipment is complete (was: locked once shipped).
+- Ben: IS291 "has (1) action ... no actions highlighted anywhere". A shipped shipment with no tracking shows "⚠ Action: this shipment has shipped. Add the tracking ref (and carrier), then Save." with the tracking box outlined.
+- Ben: IS291 "is linked to flexport automatically but the carrier and tracking ref is blank". The Flexport import (4-hourly) now fills a linked shipment's tracking ref with its FLEX id, and carrier Flexport when blank; it never overwrites a typed tracking ref (on live today: 6 shipments, incl. IS290 and IS291). A Flexport-linked shipment no longer counts as missing tracking.
+- No migration.
+
 ## v28.678 (04-Nov-26) Supplier portal Productions: smaller APPROVE, no approval cards
 - Ben: "the new approve button is good but way too large. and then remove all the orange boxes". APPROVE under each PO is a small tag (9px). The row of orange "Awaiting your approval" cards is gone; the Approvals line keeps the count and Approve all. No migration.
 
