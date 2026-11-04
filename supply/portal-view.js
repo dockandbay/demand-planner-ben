@@ -460,13 +460,8 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
   function rasterizeSVG(svg,scale,cb){ var img=new Image(); var url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
     img.onload=function(){ var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height; var cv=document.createElement('canvas'); cv.width=w*scale; cv.height=h*scale; var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.scale(scale,scale); ctx.drawImage(img,0,0); URL.revokeObjectURL(url); try{ cv.toBlob(function(b){cb(b);},'image/png'); }catch(e){ cb(null); } };
     img.onerror=function(){ URL.revokeObjectURL(url); cb(null); }; img.src=url; }
-  // v28.657 (Ben 04-Nov-26): PALLET LABELS for a master shipment, A4 portrait, one per page: PALLET n OF N, ship-to, shipment, POs, carrier,
-  // Code 128 (set B) barcode of the shipment ref. c128B returns the bar widths; palletLabelSVG draws one label.
-  var C128=['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112'];
-  function c128B(txt){ var codes=[104], sum=104; String(txt).split('').forEach(function(ch,i){ var v=ch.charCodeAt(0)-32; if(v<0||v>94)v=0; codes.push(v); sum+=v*(i+1); }); codes.push(sum%103); codes.push(106);
-    return codes.map(function(c){ return C128[c]; }).join(''); }
-  function c128SVG(txt,x,y,w,h){ var pat=c128B(txt), units=0; for(var i=0;i<pat.length;i++)units+=+pat[i]; var m=w/units, cx=x, out='';
-    for(var j=0;j<pat.length;j++){ var bw=(+pat[j])*m; if(j%2===0)out+='<rect x="'+cx.toFixed(2)+'" y="'+y+'" width="'+bw.toFixed(2)+'" height="'+h+'" fill="#000"/>'; cx+=bw; } return out; }
+  // v28.657 (Ben 04-Nov-26): PALLET LABELS for a master shipment, A4 portrait, one per page: shipment number, Pallet n of N, ship-to, POs,
+  // carrier; v28.662: a QR per pallet (HORIZON link) instead of a Code 128.
   function palletLabelSVG(d,n,N,opts){ opts=opts||{}; var W=600,H=841,el=[],lx=46,cx=W/2,sh=d.shipment||{},ds=d.dest||{};
     el.push('<rect x="22" y="22" width="'+(W-44)+'" height="'+(H-44)+'" fill="none" stroke="#111" stroke-width="1.5"/>');
     el.push(svgText(lx,78,'DOCK & BAY',{size:30,bold:true,ls:0.5}));
@@ -481,14 +476,18 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     var y2=y+62+fs+130; el.push('<line x1="34" y1="'+y2+'" x2="'+(W-34)+'" y2="'+y2+'" stroke="#111" stroke-width="1.2"/>'); y2+=40;
     var rows=[['MASTER PO',sh.master_po||sref],['POs ON BOARD',(d.members||[]).map(function(m){ return m.po; }).join(', ')],['CARRIER',[sh.mode?String(sh.mode).toUpperCase():'',sh.carrier,sh.carrier_ref].filter(Boolean).join(' · ')]].concat(sh.containers?[['CONTAINER',sh.containers]]:[]);   // v28.658 Flexport container number(s) when known
     rows.forEach(function(r){ el.push(svgText(lx,y2,r[0],{size:13,fill:'#444'})); var ls=wrapLines(r[1]||'—',34).slice(0,3); ls.forEach(function(ln,i){ el.push(svgText(lx+150,y2+i*20,ln,{size:16,bold:true})); }); y2+=Math.max(1,ls.length)*20+18; });
-    var ref=sh.shipment_ref||''; if(ref){ el.push(c128SVG(ref,lx+20,H-170,W-2*lx-40,90)); el.push(svgText(cx,H-60,ref,{size:16,anchor:'middle',mono:true})); }
+    // v28.662 (Ben): a QR per pallet (HORIZON link to this shipment + pallet n-of-N) replaces the Code 128, for identification when scanned in HORIZON
+    var qr=opts.qr; if(qr&&qr.rows&&qr.rows.length){ var qs=150, mod=qs/qr.size, qx=cx-qs/2, qy=H-210, cells='';
+      qr.rows.forEach(function(row,yy){ for(var xx=0;xx<row.length;xx++)if(row.charAt(xx)==='1')cells+='M'+(qx+xx*mod).toFixed(2)+' '+(qy+yy*mod).toFixed(2)+'h'+mod.toFixed(2)+'v'+mod.toFixed(2)+'h-'+mod.toFixed(2)+'z'; });
+      el.push('<path d="'+cells+'" fill="#000"/>'); el.push(svgText(cx,H-40,'Scan in HORIZON · '+(sh.shipment_ref||'')+' · pallet '+n+' of '+N,{size:12,anchor:'middle',fill:'#444'})); }
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   function dlPalletLabels(d,btn){ var N=Number((d.shipment||{}).pallets_confirmed)||0; if(!N){ ppNotice('Confirm the number of pallets first'); return; }
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
-    Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold')]).then(function(a){ var opts={fontBook:a[0],fontBold:a[1]};
+    Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold'),fetch('/api/portal/po-shipment/'+encodeURIComponent(d.po)+'/pallet-qr',{cache:'no-store'}).then(function(r){ return r.json(); })]).then(function(a){ var opts={fontBook:a[0],fontBold:a[1]}, QR=(a[2]&&a[2].qrs)||[];
+      if(a[2]&&a[2].error){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice(a[2].error); return; }
       preloadFonts(opts).then(function(){ var pages=[], i=0;
         function next(){ if(i>=N)return finish(); i++; if(btn)btn.textContent='Rendering '+i+'/'+N+'…';
-          rasterizeSVGCanvas(palletLabelSVG(d,i,N,opts),2.5,function(cv){ if(!cv)return next(); cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
+          rasterizeSVGCanvas(palletLabelSVG(d,i,N,Object.assign({},opts,{qr:QR[i-1]})),2.5,function(cv){ if(!cv)return next(); cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
         function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!pages.length){ ppNotice('Could not render the labels'); return; }
           bcDownloadBlob('PALLETS-'+zipSafe((d.shipment||{}).shipment_ref||d.po)+'_'+N+'.pdf',new Blob([pdfA4Multi(pages,[[0,0,2480,3505]])],{type:'application/pdf'})); }
         next(); }); }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice('Could not load the label fonts'); }); }
@@ -2940,9 +2939,30 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             if(dg)for(var n=dg.length;n>=4;n--){ r=hit(dg.slice(0,n)); if(r.length)return {rows:r,like:dg.slice(0,n),near:n<dg.length}; }
             if(toks[0]&&/\d/.test(toks[0]))for(var c=toks[0].length-1;c>=6;c--){ var tc=toks[0].slice(0,c); r=hit(tc); if(r.length)return {rows:r,like:tc,near:true}; }   // "PO-56UKXR9" → PO-56UKXR1 (letters after the number)
             return {rows:[]}; }
+          // v28.662 (Ben: "global search for supplier portal and admin both need qr scan search capability"): camera scan for the global search.
+          // BarcodeDetector where the browser has it (Chrome / Android), else jsQR (iPhone) from /api/portal/jsqr.js; hands the text to onCode.
+          function ppScanOpen(onCode){ var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:100010;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:16px';
+            ov.innerHTML='<div style="background:#fff;color:#0f172a;border-radius:12px;width:min(440px,100%);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)"><div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e2e8f0"><b>📷 Scan</b><span class="pp-sc-st" style="font-size:12px;color:#64748b;flex:1">Starting the camera…</span><button class="pp-sc-x" style="border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:3px 9px;cursor:pointer">✕</button></div>'
+              +'<div class="pp-sc-cam" style="position:relative;background:#111;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:12px;text-align:center;padding:0"></div>'
+              +'<div style="padding:10px 12px;font-size:12px;color:#64748b">Point the camera at a pallet label QR, a sample card or a barcode.</div></div>';
+            document.body.appendChild(ov); var st=null, timer=null, done=false, stEl=ov.querySelector('.pp-sc-st'), cam=ov.querySelector('.pp-sc-cam');
+            var close=function(){ done=true; try{ if(timer)clearInterval(timer); }catch(e){} try{ if(st)st.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} ov.remove(); };
+            var got=function(v){ v=String(v||'').trim(); if(!v||done)return; close(); onCode(v); };
+            ov.querySelector('.pp-sc-x').onclick=close; ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+            if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ stEl.textContent='No camera on this device or browser.'; return; }
+            navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false}).then(function(s2){ if(done){ s2.getTracks().forEach(function(t){ t.stop(); }); return; } st=s2;
+              cam.innerHTML='<video autoplay muted playsinline style="width:100%;height:100%;object-fit:cover"></video>'; var v=cam.querySelector('video'); v.srcObject=s2; stEl.textContent='Hold the code in the frame';
+              if('BarcodeDetector' in window){ var det; try{ det=new window.BarcodeDetector({formats:['qr_code','code_128','ean_13','ean_8','code_39','upc_a']}); }catch(e){ try{ det=new window.BarcodeDetector(); }catch(e2){ det=null; } }
+                if(det){ var busy=false; timer=setInterval(function(){ if(busy||!v.videoWidth)return; busy=true; det.detect(v).then(function(c){ busy=false; if(c&&c.length)got(c[0].rawValue); }).catch(function(){ busy=false; }); },300); return; } }
+              var startQr=function(){ var cv=document.createElement('canvas'), ctx=cv.getContext('2d',{willReadFrequently:true});
+                timer=setInterval(function(){ if(!v.videoWidth||!window.jsQR)return; var w=v.videoWidth, h=v.videoHeight; if(w>640){ h=Math.round(h*640/w); w=640; } cv.width=w; cv.height=h; ctx.drawImage(v,0,0,w,h);
+                  var q=window.jsQR(ctx.getImageData(0,0,w,h).data,w,h,{inversionAttempts:'dontInvert'}); if(q&&q.data)got(q.data); },300); };
+              if(window.jsQR)startQr(); else { var sc=document.createElement('script'); sc.src='/api/portal/jsqr.js'; sc.onload=startQr; sc.onerror=function(){ stEl.textContent='QR scanning could not load. Type the code in the search box.'; }; document.head.appendChild(sc); }
+            }).catch(function(){ stEl.textContent='Camera blocked. Allow camera access for this site, then try again.'; }); }
           function ppGsInstall(){ var top=document.querySelector('.pv-top'); if(!top||document.getElementById('pp-gs'))return;
             var w=document.createElement('div'); w.id='pp-gs'; w.style.cssText='position:relative;flex:0 1 340px;min-width:180px;z-index:100002';
-            w.innerHTML='<input id="pp-gs-q" type="search" autocomplete="off" placeholder="'+(PP_LANG==='zh'?'🔍 搜索 采购订单 / 发运 / 样品 / 产品':'🔍 Search POs, shipments, samples, products…')+'" style="width:100%;padding:6px 12px;border-radius:8px;border:1.5px solid #22c55e;background:#ecfdf3;color:#0f172a;font-size:13px;font-weight:600">'
+            w.innerHTML='<input id="pp-gs-q" type="search" autocomplete="off" placeholder="'+(PP_LANG==='zh'?'🔍 搜索 采购订单 / 发运 / 样品 / 产品':'🔍 Search POs, shipments, samples, products…')+'" style="width:100%;padding:6px 44px 6px 12px;border-radius:8px;border:1.5px solid #22c55e;background:#ecfdf3;color:#0f172a;font-size:13px;font-weight:600">'
+              +'<button type="button" id="pp-gs-scan" title="Scan a QR code or barcode" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:#22c55e;color:#fff;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer">📷</button>'
               +'<div id="pp-gs-res" hidden style="position:fixed;top:0;left:0;width:min(520px,94vw);max-height:60vh;overflow:auto;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 30px -10px rgba(15,23,42,.45);z-index:100003;text-align:left"></div>';
             var sp=top.querySelector('.sp'); if(sp)top.insertBefore(w,sp); else top.appendChild(w);
             var qi=w.querySelector('#pp-gs-q'), res=w.querySelector('#pp-gs-res'), sel=0, cur=[];
@@ -2957,6 +2977,11 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               res.hidden=false; place(); if(PP_LANG==='zh')try{ ppTranslate(res); }catch(e){}
               res.querySelectorAll('.pp-gs-it').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); go(cur[+el.dataset.i]); }; }); };
             var mark=function(){ res.querySelectorAll('.pp-gs-it').forEach(function(el,i){ el.style.background=i===sel?'#f1f5f9':''; }); };
+            // a scanned code: a portal link opens; a HORIZON pallet QR (…/shipments/<ref>/pallet/3-of-10) searches the shipment and names the pallet; anything else is searched
+            w.querySelector('#pp-gs-scan').onclick=function(){ ppScanOpen(function(code){ var pm=/\/shipments\/([^\/?#]+)\/pallet\/(\d+)-of-(\d+)/.exec(code), hm=/#\/((orders|samples|product|finance|profile)\/.+)$/.exec(code);
+              if(hm&&!pm){ location.hash='#/'+hm[1]; return; }
+              qi.value=pm?decodeURIComponent(pm[1]):code; qi.focus(); paint();
+              if(pm){ var nt=document.createElement('div'); nt.style.cssText='padding:8px 12px;font-weight:700;background:#0f172a;color:#fff'; nt.textContent='📦 Pallet '+pm[2]+' of '+pm[3]+' · shipment '+decodeURIComponent(pm[1]); res.insertBefore(nt,res.firstChild); } }); };
             qi.oninput=paint; qi.onfocus=function(){ if(qi.value.trim().length>=2)paint(); }; qi.onblur=function(){ setTimeout(function(){ res.hidden=true; },150); };
             qi.onkeydown=function(e){ if(e.key==='Escape'){ res.hidden=true; qi.blur(); } else if(e.key==='ArrowDown'){ e.preventDefault(); if(cur.length){ sel=Math.min(cur.length-1,sel+1); mark(); } } else if(e.key==='ArrowUp'){ e.preventDefault(); sel=Math.max(0,sel-1); mark(); } else if(e.key==='Enter'){ e.preventDefault(); go(cur[sel]); } };
             document.addEventListener('keydown',function(e){ if(e.key==='/'&&!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||'')){ e.preventDefault(); qi.focus(); } }); }

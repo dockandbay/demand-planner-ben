@@ -5544,7 +5544,7 @@ const HZ_THEME_LINK = () => '<link rel="stylesheet" href="/hz-theme.css?v=' + AP
 try { app.use('/vendor/pdfjs', express.static(fileURLToPath(new URL('./node_modules/pdfjs-dist/build/', import.meta.url)), { maxAge: '365d', immutable: true })); } catch (e) { console.warn('[vendor/pdfjs] not mounted:', e.message); }
 // v27.828 (Ben): vendored jsQR — camera QR decoding for iOS (Safari/Chrome are both WebKit, which has no BarcodeDetector).
 // Lets the barcode scanner read sample-card QR codes on a phone. Gate-bypassed like /vendor/pdfjs (see the no-key list).
-app.get('/vendor/jsqr.js', (_req, res) => {
+app.get(['/vendor/jsqr.js', '/api/portal/jsqr.js'], (_req, res) => {   // v28.662: also under /api/portal/ (the supplier host only forwards /portal* and /api/portal/*)
   try { res.setHeader('content-type', 'application/javascript; charset=utf-8'); res.setHeader('cache-control', 'public, max-age=31536000, immutable');
     res.end(readFileSync(new URL('./supply/vendor/jsqr.min.js', import.meta.url))); }
   catch (e) { res.status(404).end(); }
@@ -24721,6 +24721,21 @@ app.get('/api/portal/po-shipment/:po', portalAuth, async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' }); res.set('Cache-Control', 'no-store').json(await portalPoShipment(req, po)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.662 (Ben 04-Nov-26: "QR code on each pallet for identification in HORIZON of what shipment and pallet number it is"): one QR per pallet,
+// the HORIZON link #/supply/purchase-orders/shipments/<ref>/pallet/<n>-of-<N> (scanning it in HORIZON opens the shipment and says which pallet).
+// Returns each QR as rows of '0'/'1' for the portal's label renderer (qrcode.mjs runs server side). Master supplier only, as the pallet labels.
+app.get('/api/portal/po-shipment/:po/pallet-qr', portalAuth, async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+    const d = await portalPoShipment(req, po); if (!d.shipment) return res.status(400).json({ error: 'This PO is not on a shipment yet' });
+    if (d.role !== 'master') return res.status(403).json({ error: 'Only the supplier of the master PO prints the pallet labels' });
+    const N = Number(d.shipment.pallets_confirmed) || 0; if (!N) return res.status(400).json({ error: 'Confirm the number of pallets first' });
+    const { qrMatrix } = await import('./lib/qrcode.mjs'); const base = (process.env.APP_BASE_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '');
+    const qrs = []; for (let n = 1; n <= N; n++) { const url = base + '/#/supply/purchase-orders/shipments/' + encodeURIComponent(d.shipment.shipment_ref) + '/pallet/' + n + '-of-' + N;
+      const m = qrMatrix(url, 'M'); qrs.push({ n, url, size: m.size, rows: m.modules.map(r => r.map(b => b ? '1' : '0').join('')) }); }
+    res.set('Cache-Control', 'no-store').json({ ref: d.shipment.shipment_ref, total: N, qrs });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // The master supplier confirms the shipment's pallet count (blank clears it). Logged on the master PO's timeline.
 app.post('/api/portal/po-shipment/:po/pallets', portalAuth, async (req, res) => {

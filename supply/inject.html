@@ -14346,7 +14346,14 @@
   // v27.748 (P4d): scanned/typed value → a sample short code, if it is one. Accepts a scan URL (…/product/scan/A31)
   // or a bare 3-char Crockford code. Product/carton/inner barcodes are long numeric strings, so they never collide.
   function _sampleScanCode(v){ v=String(v||'').trim(); var m=/\/product\/scan\/([0-9A-Za-z]{3})(?:$|[/?#])/.exec(v); if(m)return m[1].toUpperCase(); if(/^[0-9A-Za-z]{3}$/.test(v)&&/[A-Za-z]/.test(v))return v.toUpperCase(); return null; }
+  // v28.662 (Ben): a pallet label QR opens #/supply/purchase-orders/shipments/<ref>/pallet/<n>-of-<N>: the shipment expands and this banner says which pallet
+  function hzPalletBanner(ref,n,N){ var old=document.getElementById('hz-pallet-ban'); if(old)old.remove(); var b=document.createElement('div'); b.id='hz-pallet-ban';
+    b.style.cssText='position:fixed;top:calc(env(safe-area-inset-top,0px) + 64px);left:50%;transform:translateX(-50%);z-index:200090;background:var(--nav,#0f172a);color:#fff;border-radius:12px;padding:12px 18px;box-shadow:0 14px 34px rgba(0,0,0,.35);display:flex;gap:14px;align-items:center;font-size:14px;max-width:92vw';
+    b.innerHTML='<span style="font-size:22px">📦</span><div><div style="font-weight:800;font-size:17px">Pallet '+n+' of '+N+'</div><div style="opacity:.85">Shipment <b>'+esc(ref)+'</b></div></div><button style="background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:7px;padding:3px 9px;cursor:pointer" aria-label="Close">✕</button>';
+    b.querySelector('button').onclick=function(){ b.remove(); }; document.body.appendChild(b); }
+  window.hzPalletBanner=hzPalletBanner;
   function _bscAutoRecv(){ try{ return localStorage.getItem('hzSampleAutoReceive')==='1'; }catch(e){ return false; } }
+  window.hzOpenBarcodeScanner=function(o){ return openBarcodeScanner(o); };   // v28.662: the ⌘K search's 📷 Scan uses this scanner
   function openBarcodeScanner(opts){ opts=opts||{}; closeBarcodeScanner(); var ph=isPhone();   // v27.842 (Ben): opts.onCode(code) → hand the scanned/typed code back to the caller (e.g. batch review) instead of the default SKU/sample lookup
     var ov=document.createElement('div'); ov.id='bsc-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200080;background:rgba(15,23,42,.55);display:flex;align-items:'+(ph?'stretch':'flex-start')+';justify-content:center;padding:'+(ph?'0':'40px 16px');
     ov.innerHTML='<div id="bsc-box" style="background:var(--card);border-radius:'+(ph?'0':'12px')+';width:'+(ph?'100%':'min(920px,100%)')+';max-height:'+(ph?'100%':'calc(100vh - 80px)')+';overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column">'
@@ -14823,6 +14830,7 @@
       else if(sec==='payments'){ var _ps=(seg[2]==='payments-due')?'paydue':seg[2]; showPoSub(_ps&&PAY_SUB_KEYS.indexOf(_ps)>=0?_ps:'paydue'); }   // PAYMENTS umbrella (default Payments Due); 'payments-due' = its URL slug (v28.129)
       else if(sec==='config'){ if(seg[2]==='portal'&&seg[3])_pendingPortalSup=decodeURIComponent(seg[3]); if(seg[2]==='onboarding'&&seg[3])window._pendingOnbRef=decodeURIComponent(seg[3]); enterSupplyConfig(seg[2]); }   // v27.895: #/supply/config/onboarding/<ref> opens that request   // #/supply/config/<item> — SUPPLY ▸ CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
+        if(_s2==='shipments'&&_s3&&seg[4]==='pallet'&&seg[5]){ var _pm=/^(\d+)-of-(\d+)$/.exec(seg[5]); if(_pm&&window.hzPalletBanner)setTimeout(function(){ window.hzPalletBanner(_s3,+_pm[1],+_pm[2]); },300); }   // v28.662: a scanned pallet label QR names the pallet
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // LEGACY deep-link: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ if(_s2==='shipments' && _s3)_pendingShip=_s3; showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab; .../shipments/<ref> deep-links + expands that shipment (v27.868)
         else if(_s2 && PAY_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // legacy /supply/purchase-orders/<deposits|other|paydue|payreport> → PAYMENTS umbrella
@@ -23781,11 +23789,17 @@
   var _cmdSel=0, _cmdItems=[], _cmdT=null;
   function openCmd(){ var sc=document.getElementById('hzcmd-scrim');
     if(!sc){ sc=document.createElement('div'); sc.id='hzcmd-scrim';
-      sc.innerHTML='<div id="hzcmd" role="dialog" aria-label="Search"><div class="hd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="hzcmd-q" placeholder="Search POs, sales orders, productions, shipments, containers, SKUs, barcodes, notes, pages…" autocomplete="off" spellcheck="false"><span class="esc">esc</span></div><div class="body" id="hzcmd-body"></div><div class="ft"><span><b>↑↓</b> move</span><span><b>↵</b> open</span><span><b>esc</b> close</span><span style="margin-left:auto">Global search</span></div></div>';
+      sc.innerHTML='<div id="hzcmd" role="dialog" aria-label="Search"><div class="hd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="hzcmd-q" placeholder="Search POs, sales orders, productions, shipments, containers, SKUs, barcodes, notes, pages…" autocomplete="off" spellcheck="false"><button type="button" id="hzcmd-scan" title="Scan a QR code or barcode (pallet labels, sample cards, product barcodes)" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;border-radius:7px;padding:3px 9px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">📷 Scan</button><span class="esc">esc</span></div><div class="body" id="hzcmd-body"></div><div class="ft"><span><b>↑↓</b> move</span><span><b>↵</b> open</span><span><b>esc</b> close</span><span style="margin-left:auto">Global search</span></div></div>';
       document.body.appendChild(sc);
       sc.addEventListener('mousedown',function(e){ if(e.target===sc)closeCmd(); });
       var qi=document.getElementById('hzcmd-q');
       qi.addEventListener('input',function(){ clearTimeout(_cmdT); _cmdT=setTimeout(function(){ runCmd(qi.value); },170); });
+      // v28.662 (Ben: "global search ... need qr scan search capability"): scan with the camera. A HORIZON link (e.g. a pallet label QR,
+      // #/supply/purchase-orders/shipments/<ref>/pallet/3-of-10) opens straight away; anything else (barcode, SKU, PO) becomes the search.
+      document.getElementById('hzcmd-scan').onclick=function(){ closeCmd(); if(!window.hzOpenBarcodeScanner)return;
+        window.hzOpenBarcodeScanner({onCode:function(code){ code=String(code||'').trim(); var m=/#\/(.+)$/.exec(code);
+          if(m&&(/^#\//.test(code)||/dockandbay|horizon|localhost|127\.0\.0\.1/i.test(code))){ location.hash='#/'+m[1]; return; }
+          openCmd(); var q2=document.getElementById('hzcmd-q'); if(q2){ q2.value=code; runCmd(code); } }}); };
       qi.addEventListener('keydown',function(e){
         if(e.key==='ArrowDown'){ e.preventDefault(); _cmdMove(1); }
         else if(e.key==='ArrowUp'){ e.preventDefault(); _cmdMove(-1); }
