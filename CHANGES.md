@@ -1,3 +1,6 @@
+## v28.673 (04-Nov-26) Supplier portal: the new ORDERS tab is called Shipment Plan
+- Ben: "i think still call this shipment plan". ORDERS > Orders (new) is renamed Shipment Plan (发运计划 in Chinese, the existing translation). It replaces the old Shipment Plan tab, which stays hidden for anyone on the new process. No migration.
+
 ## v28.672 (04-Nov-26) Supplier portal: the supplier who owns every PO on a shipment consolidates it; labels & pallets merged into the shipment tab
 - Ben: on PO-57UKXR1 (shipment IS288) the POs on board could not be ticked and there was nowhere to enter the number of pallets. IS288 has no master PO (a Fulfil IS ref, no shipments row) so XR Textile was treated as a rider (read only, no pallets box) although all three POs aboard are theirs. Now, when the master PO is not found and every PO aboard belongs to the supplier, they are the consolidating supplier (ticks, pallets, pallet labels, Mark as shipped). Same rule on the server for saving. Also fixed: the Orders list missed the master PO's supplier for a shipment with no shipments row, so it could show "Ships with" where the save endpoints said master (sandbox: 87 XR shipments, both now agree).
 - The loaded ticks are still locked once a shipment has shipped or is complete (IS288 is COMPLETE); the tab now says why.
