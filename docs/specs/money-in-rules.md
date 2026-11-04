@@ -18,10 +18,10 @@ Builds on v28.607 (customer receipts auto-match) and keeps its limits: AU out, S
 - **Distributor / Xero-invoiced deposit** (e.g. Ntovas EUR 15,009.97 = 40% of SO55836): Xero PREPAYMENT on the customer's contact, applied to the final Xero invoice when it is raised. HORIZON also adds a note on the Fulfil sale order: "Partial payment received as deposit: <amount> <ccy> on <date> (Xero prepayment)". Both writes only on the user's confirm in the drawer.
 - **Unidentified payers** (National Pen, Airwallex, PITT AE / Uber Eats, WPLATA OSS): left as they are for now. No suggestion shown.
 - **ZPS** ("...ZPS/01") is Zalando and is handled by a Xero bank rule: hide it with the payouts (add `zps` to the payout filter).
+- **Stripe payouts**: hidden with the other payouts (like PayPal and Shopify); add `stripe` to the payout filter. R1 still pairs them when the toggle shows payouts.
+- **Rule order** as above: approved for now.
 
 ## Still open
-- Stripe payouts: hide with the other payouts (suggested) or show as one-click transfers?
-- Rule order above: OK?
 - Herm-Island-27-Custom: Xero invoice 56978 is GBP 540 but the order is GBP 1,777.50. Is the invoice wrong?
 - Already-paid orders: target = store clearing account, contact "Shopify <store>" (as Rita did 05-Oct)? EU-49850 57.40 (pre cut-over): 9035 or 200D?
 - USWS-19079: Xero invoice paid, Fulfil invoice 56453 open for the same order. Which stays?
