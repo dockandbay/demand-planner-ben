@@ -73,7 +73,8 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 ## Questions for Ben
 1. **Credit account**: confirm the Xero account Fulfil's 9006 maps to in each org (UK and AU) is the one to credit.
 2. ~~AU accounts~~ CONFIRMED by Ben 04-Nov-26 (read live from Xero AU): 311.8a Shopify, 311.8b Amazon, 401.5 Wholesale & Distributor, 401.6 Marketplace, 401.11e Custom / Co Brand, 401.10e Custom Local D2C, 311.8d Other; credit 9006. The 405.x "Cost of Sales" accounts are fees, not used. The September codes 401.3 / 401.4 / 401.9 do not exist in Xero AU.
-2b. **UK accounts**: to be checked against Xero UK the same way before building.
+2b. **UK accounts**: checked 04-Nov-26, every code in the table exists in Xero UK with that name, and 9006 too.
+2c. **UK accounts not used yet**: Xero UK also has 311.9a-e COGS Co-Brand/Custom (UK / US / CA / EU / ROTW), 311.10a-d Dropship (UK / US / EU / ROTW), 311.5a EU Distributors, 311.5e EU Marketplace, 311.5g International Distributors (Co Brand). Should custom / co-brand orders (HORIZON knows them: dtc_custom / custom_dev_ref) and dropship orders go to those instead of the channel account?
 3. **Airtable**: which base and table should the weekly rows go to (new table "COGS by channel", or an existing one)?
 4. **Zero-cost lines**: keep the September treatment (cost from HORIZON, credit Inventory), or leave them out and only flag them?
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
