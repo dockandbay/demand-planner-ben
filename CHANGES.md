@@ -1,3 +1,9 @@
+## v28.705 (05-Nov-26) Xero UK bank transfers read: stop re-reading the same unpaged list (~190 calls a day saved)
+- Found in the v28.703 sandbox test after the reset: 47 of the 50 UK calls were GET BankTransfers. Xero does not page that list (each page returns all 1,000+ UK transfers), and accXeroList treated a full page as "more to come", up to page 199. AU (under 1,000 transfers) was 1 call.
+- This is the bulk of the ~200 UK calls of the daily 05:15 bank sync.
+- Fix: a page whose first item equals the previous page's first item ends the read (2 calls instead of up to 199). Tested with mocked replies: unpaged 1,200 items in 2 calls; a normally paged 2,300 items in 3 calls.
+- Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.704 (05-Nov-26) 3PL invoicing EU: returns total = billed charges (Oct-26 I-Fulfilment bill was 177.77 over)
 - Rita / Ben 05-Nov-26: Xero bill preview for FULFILLMENT-EU-2026-10-31 showed 16,497.12 against the invoice's 16,319.35 (tax 2,749.52 vs 2,719.89).
 - Cause: the Returns BOC sheet's Total column sums to 336.46, but I-Fulfilment bills Return Charges (188.32; 18 of 30 returns carry an unbilled 8.23 in Total from Oct-26). Difference 148.14 net + 29.63 VAT = 177.77.

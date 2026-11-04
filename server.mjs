@@ -3607,11 +3607,17 @@ async function accProgressGet(name) { const v = await accSettingGet('job_progres
 // Paged Xero list (GET only). opts.since = If-Modified-Since (Date); 45 s per call, one retry on a timeout (xeroFetch).
 let _accReserve = null;   // v28.703: { org, min } while a deep pass runs: stop before Xero's remaining count drops below min (live keeps the rest)
 async function accXeroList(org, resource, where, opts) {
-  opts = opts || {}; const out = [];
+  opts = opts || {}; const out = []; let prevFirst = null;
   if (_accReserve && _accReserve.org === org) { const q = xeroQuota(org); if (q && q.day != null && q.day < _accReserve.min) { const e = new Error('deep pass stopped: Xero ' + org.toUpperCase() + ' down to ' + q.day + ' calls left (reserve ' + _accReserve.min + ')'); e.acc_reserve = true; throw e; } } const headers = opts.since ? { 'If-Modified-Since': new Date(opts.since).toUTCString() } : {};
   for (let p = 1; p < 200; p++) {
     const j = await xeroFetch(org, '/api.xro/2.0/' + resource + '?' + (where ? 'where=' + encodeURIComponent(where) + '&' : '') + 'pageSize=1000&page=' + p, { headers, timeoutMs: 45000 });
-    const x = (j && j[resource]) || []; out.push(...x); if (x.length < 1000) break;
+    const x = (j && j[resource]) || [];
+    // v28.705 (05-Nov-26): Xero does not page some lists (BankTransfers): every page returns the whole list, so a 1,000+ list looped
+    // until page 199 (47 of 50 UK calls in the v28.703 sandbox test; the ~200-call daily 05:15 run). A page that starts with the same
+    // item as the one before is the same answer again: stop.
+    const first = x.length ? JSON.stringify(x[0]).slice(0, 400) : '';
+    if (p > 1 && first && first === prevFirst) break;
+    prevFirst = first; out.push(...x); if (x.length < 1000) break;
   }
   return out;
 }
