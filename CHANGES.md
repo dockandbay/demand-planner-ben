@@ -1,3 +1,11 @@
+## v28.677 (04-Nov-26) Supplier portal Productions: APPROVE under each PO, PO opens its drawer, "POs to approve" view, wider SKU column
+- (v28.676 skipped: used for a sandbox build.)
+- Ben: "put APPROVE in a little button under the po". In the batch order plan each PO column header has a small APPROVE button when the PO awaits approval (✓ approved once done); same confirm and save as the Approvals cards.
+- Ben: "clicking on the PO should open the draw". The PO name in the header opens that PO's drawer (over Purchase Orders, as other PO links in the portal).
+- Ben: "clicking open productions from home page on 15 to approve ... should have po to approve as a filter view under BATCH". BATCH now has "POs to approve (N)" first: every PO awaiting approval across all batches, with Approve all. The home card's Open goes straight to it. The XLSX / barcode downloads stay per batch.
+- Ben: "the sku column needs to be twice as wide because they are being cut off". The SKU column is 380px (was 190) and the EAN column no longer pins over it (it inherited the PO grid's second sticky column at 104px).
+- No migration.
+
 ## v28.675 (04-Nov-26) Supplier portal: pallet labels download from the estimate when pallets are not confirmed
 - Ben: on PO-56UKXR1 "Pallet labels ... nothing downloaded" (the button was disabled until a confirmed pallet count was saved). "it should download as estimated amounts ... rounded UP to the nearest 1. even if 0.1 or 22.1". With no confirmed count the labels use the shipment's estimated pallets rounded up from the unrounded sum of the POs aboard (0.2 -> 1, 18.8 -> 19, 21.9 -> 22, 5.0 -> 5); a confirmed count still wins. The button says "(19 pages, estimated, QR on each)". Same in the PO Shipment tab and the older shipment view, and the server's pallet QR endpoint. No migration.
 

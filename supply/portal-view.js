@@ -807,6 +807,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
 #supply-root .pp-exp:hover{background:#f1f5f9}
 #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
 #supply-root .ex-badge.done{background:#9ca3af}
+/* v28.676 (Ben: SKUs cut off): the Productions order plan is not the PO grid: only the SKU column is pinned, 380px wide; EAN scrolls (it sat 104px in, over the SKU) */
+#supply-root table.pp-tbl.pp-prod thead th:first-child,#supply-root table.pp-tbl.pp-prod tbody tr:not([id]):not(.pp-grp) td:first-child,#supply-root table.pp-tbl.pp-prod tfoot td:first-child{width:380px;min-width:380px;max-width:none;padding-left:8px;padding-right:8px;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.pp-tbl.pp-prod thead th:nth-child(2){position:static;box-shadow:none}
+#supply-root table.pp-tbl.pp-prod tbody tr:not([id]) td:nth-child(2){position:static;box-shadow:none;background:transparent}
 /* Production sub-heading row spanning the portal PO grid. NOT position:sticky — a sticky <td> drops its
    background in Chrome (border-collapse), which left this banner white; a normal full-width row paints grey. */
 #supply-root table.pp-tbl tr.pp-grp td{background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
@@ -1919,7 +1923,8 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     // ── PRODUCTIONS tab: pick a batch → order-plan pivot (SKUs × POs × qty) for that batch, + XLSX download ──
     function prodBatchesList(){ var s={}; (_ppData.pos||[]).forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b)s[b]=1; }); return Object.keys(s).sort().reverse(); }
     function prodPOsInBatch(b){ return (_ppData.pos||[]).filter(function(p){ return ((p.batch_id==null?'':String(p.batch_id)).trim())===b; }); }
-    function prodBatchPOs(){ return prodPOsInBatch(PORTAL_PROD_BATCH); }
+    // v28.676 (Ben): '__pending__' = the "POs to approve" view under BATCH: every PO awaiting approval, across all batches (home "N to approve" opens it)
+    function prodBatchPOs(){ if(PORTAL_PROD_BATCH==='__pending__')return prodBatchPending((_ppData.pos||[]).filter(function(p){ return (p.batch_id==null?'':String(p.batch_id)).trim(); })); return prodPOsInBatch(PORTAL_PROD_BATCH); }
     // v27.757 (Ben): PO approval from the PRODUCTIONS tab. Same state as the PO card's "Confirm order" (supplier_confirmed_at) —
     // one approval, two doors. 'pending' = Dock & Bay asked for confirmation and the supplier hasn't given it (or a change cleared it).
     function prodApprovalState(p){ if(!p.require_confirmation) return 'none'; return p.supplier_confirmed?'approved':'pending'; }
@@ -1942,7 +1947,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
         +'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px">'+rows+'</div>'; }
     // Approve one PO (or every pending PO in the batch) — same EP.submit {po_confirmed:true} the PO card posts, run sequentially, then re-render.
     async function prodApprove(list, btn){ if(!list.length)return;
-      var msg=list.length===1?'Approve '+list[0]+'? You’re accepting the SKUs, quantities and dates as shown.':'Approve all '+list.length+' orders in batch '+PORTAL_PROD_BATCH+'? You’re accepting the SKUs, quantities and dates as shown.';
+      var msg=list.length===1?'Approve '+list[0]+'? You’re accepting the SKUs, quantities and dates as shown.':'Approve all '+list.length+' orders'+(PORTAL_PROD_BATCH==='__pending__'?'':' in batch '+PORTAL_PROD_BATCH)+'? You’re accepting the SKUs, quantities and dates as shown.';
       if(!(await _ppConfirm(msg)))return; btn.disabled=true;
       var _sid=(_ppData&&_ppData.sid)||sid, _by=by||('preview (acting as '+STATE.supplierName+')'); var i=0, fails=[];
       // v28.151 (review C4): a failed PO no longer stops the run silently with the button stuck disabled; the rest continue, then re-render + summary
@@ -1956,29 +1961,32 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       var batches=prodBatchesList();
       var sel='<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="pill-lbl" style="width:auto">Batch</span>'
         +'<select class="fci pv-prod-batch" style="width:auto;min-width:0;max-width:220px;text-align:left"><option value="">— choose —</option>'
+        +(function(){ var n=prodBatchPending((_ppData.pos||[]).filter(function(p){ return (p.batch_id==null?'':String(p.batch_id)).trim(); })).length; return n||PORTAL_PROD_BATCH==='__pending__'?'<option value="__pending__"'+(PORTAL_PROD_BATCH==='__pending__'?' selected':'')+'>POs to approve ('+n+')</option>':''; })()
         +batches.map(function(b){ var n=prodBatchPending(prodPOsInBatch(b)).length; return '<option value="'+esc(b)+'"'+(PORTAL_PROD_BATCH===b?' selected':'')+'>'+esc(b)+(n?' · '+n+' to approve':'')+'</option>';}).join('')+'</select>'
-        +(PORTAL_PROD_BATCH?'<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
+        +(PORTAL_PROD_BATCH&&PORTAL_PROD_BATCH!=='__pending__'?'<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
           +'<span style="position:relative;display:inline-block"><button class="save-btn pv-bc-dl">⤓ Download barcodes ▾</button>'
           +'<span class="pv-bc-menu" style="display:none;position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:190px;text-align:left">'
           +[['product','Product barcodes'],['carton','Carton barcodes'],['inner','Inner barcodes']].map(function(o,i){return '<div class="pv-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px'+(i?';border-top:1px solid var(--line2)':'')+'">'+o[1]+'</div>';}).join('')
           +'</span></span></span>':'')+'</div>';
       if(!batches.length) return sel+'<div class="count">No batches on your purchase orders yet.</div>';
       if(!PORTAL_PROD_BATCH) return sel+'<div class="count">Choose a batch to see its order plan.</div>';
-      var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
+      var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">'+(PORTAL_PROD_BATCH==='__pending__'?'No POs waiting for your approval.':'No purchase orders in that batch.')+'</div>';
       // v28.189 (Ben): a batch with completed POs (light rows) loads their lines + SKU details first, then draws the same order plan.
       if(ppNeedsDetail(bp,false)){ var _b=PORTAL_PROD_BATCH; ppEnsureDetail(bp,false,function(){ if(PORTAL_TAB==='productions'&&PORTAL_PROD_BATCH===_b)renderPP(); },function(){ var c=document.querySelector('#pp-body .pv-prod-wait'); if(c){ c.style.color='var(--neg)'; c.textContent='Could not load the order plan for batch '+_b+'. Choose the batch again to retry.'; } });
         return sel+'<div class="count pv-prod-wait">Loading…</div>'; }
       var d=prodPivotData(bp);
       if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
       // v27.705 (Ben): TOTAL column after Size = the SKU's units across every PO in the batch; footer row = per-PO totals + grand total
-      var th='<th class="l" style="position:sticky;left:0;background:var(--hover);z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th><th style="text-align:right;min-width:76px;font-weight:800">Total</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
+      var _st={}; bp.forEach(function(p){ _st[p.po]=prodApprovalState(p); });
+      var th='<th class="l" style="position:sticky;left:0;background:var(--hover);z-index:3;min-width:380px">SKU</th><th class="l">EAN</th><th class="l">Size</th><th style="text-align:right;min-width:76px;font-weight:800">Total</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px;vertical-align:top"><button class="lnk-btn pp-go-po" data-po="'+esc(po)+'" title="open '+esc(po)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(po)+'</button>'
+        +(_st[po]==='pending'?'<br><button class="save-btn pv-prod-approve" data-po="'+esc(po)+'" style="margin-top:3px;padding:1px 7px;font-size:10.5px;background:var(--pos);border-color:var(--pos);color:#fff">APPROVE</button>':_st[po]==='approved'?'<br><span class="tiny" style="color:var(--pos);font-weight:600">✓ approved</span>':'')+'</th>';}).join('');
       var poTot={}, grand=0;
       var body=d.skus.map(function(sku){ var a=d.attr[sku]||{}; var rowTot=0; d.poList.forEach(function(po){ var q=Number(d.qmap[sku+'|'+po])||0; rowTot+=q; poTot[po]=(poTot[po]||0)+q; }); grand+=rowTot;
-        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:190px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td><td style="text-align:right;font-weight:800;background:var(--hover)">'+(rowTot?units(rowTot):'<span class="mut">—</span>')+'</td>'
+        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:380px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td><td style="text-align:right;font-weight:800;background:var(--hover)">'+(rowTot?units(rowTot):'<span class="mut">—</span>')+'</td>'
           +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
       var foot='<tr style="font-weight:800;border-top:2px solid var(--line)"><td class="l" style="position:sticky;left:0;background:var(--hover);z-index:1">TOTAL</td><td></td><td></td><td style="text-align:right;background:var(--hover)">'+units(grand)+'</td>'+d.poList.map(function(po){ return '<td style="text-align:right">'+(poTot[po]?units(poTot[po]):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>';
-      return sel+prodApprovalHtml(bp)+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' · '+units(grand)+' units in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
-        +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody><tfoot>'+foot+'</tfoot></table></div>'; }
+      return sel+prodApprovalHtml(bp)+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' · '+units(grand)+(PORTAL_PROD_BATCH==='__pending__'?' units waiting for your approval':' units in batch '+esc(PORTAL_PROD_BATCH))+'</div>'
+        +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl pp-prod"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody><tfoot>'+foot+'</tfoot></table></div>'; }
     function prodBatchBarcodeDl(kind,btn){ if(!PORTAL_PROD_BATCH)return; if(BC.placeholder){BC.note();return;} var orig=btn.textContent; btn.disabled=true; btn.textContent='Preparing…';
       fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_PROD_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; btn.textContent=orig;
         if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No '+kind+' barcodes found for batch '+PORTAL_PROD_BATCH);return;}
@@ -2977,7 +2985,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             var shN=(D.shipmentPlan||[]).reduce(function(a,s){ return a+shipActCount(s); },0); if(shN)A.push({sev:'amb',t:shN+' shipment action'+(shN>1?'s':''),s:'Production end dates and messages on your shipments',go:'shipmentplan'});
             var saN=(D.samples||[]).reduce(function(a,s){ return a+sampActions(s); },0); if(saN)A.push({sev:'amb',t:saN+' sample action'+(saN>1?'s':''),s:'Dates, status, tracking codes and messages on your samples',go:'samples'});
             var pdN=D.productEnabled?(D.products||[]).reduce(function(a,p){ return a+(Number(p.unread_dnb)||0)+(Number(p.dev_unaccepted)>0?1:0); },0):0; if(pdN)A.push({sev:'amb',t:pdN+' product development action'+(pdN>1?'s':''),s:'New development requests to accept and messages',go:'product'});
-            var pnN=0; try{ pnN=prodBatchPending(pos.filter(function(p){ return (p.batch_id==null?'':String(p.batch_id)).trim(); })).length; }catch(e){} if(pnN)A.push({sev:'amb',t:pnN+' production'+(pnN>1?'s':'')+' to approve',s:'Order plans waiting for your approval',go:'productions'});
+            var pnN=0; try{ pnN=prodBatchPending(pos.filter(function(p){ return (p.batch_id==null?'':String(p.batch_id)).trim(); })).length; }catch(e){} if(pnN)A.push({sev:'amb',t:pnN+' production'+(pnN>1?'s':'')+' to approve',s:'Order plans waiting for your approval',go:'productions',ref:'__pending__'});
             // CUSTOM (host tabs, only for suppliers linked in the Customiser): batches waiting on you + lines ready to batch, from their tab badges
             try{ var _cb=function(pt){ var e=tabsEl.querySelector('.rtab[data-pt="'+pt+'"] .ex-badge'); return e?(parseInt(e.textContent,10)||0):0; };
               var cuB=_cb('batches'), cuR=_cb('ready');
@@ -3024,7 +3032,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               if(b.dataset.prof){ var pt=document.querySelector('#pp-tabs .rtab[data-pt="profile"]'); if(pt){ pt.click(); return; } }
               var go=b.dataset.go, ref=b.dataset.ref||''; if(!go)return;
               if(go==='__inbox'){ var ub=document.getElementById('pp-unread-btn'); if(ub)ub.click(); return; }
-              ppHealthWatch(); PORTAL_TAB=go; _ppOpenPO=null; _ppOpenProd=null; if(go==='pos'&&ref){ _ppOpenPO=ref; PORTAL_PO_Q=ref; } ppSetHash(go, go==='pos'?ref:''); renderPP(); window.scrollTo(0,0); }; }); }
+              ppHealthWatch(); PORTAL_TAB=go; _ppOpenPO=null; _ppOpenProd=null; if(go==='pos'&&ref){ _ppOpenPO=ref; PORTAL_PO_Q=ref; } if(go==='productions'&&ref==='__pending__')PORTAL_PROD_BATCH=ref; ppSetHash(go, go==='pos'?ref:''); renderPP(); window.scrollTo(0,0); }; }); }
           // v28.661 (Ben 04-Nov-26: "on supplier portal add a global search"): one search box in the top bar over the supplier's own POs,
           // shipments, samples, products and pages (already loaded; no server call). Same close-match rules as HORIZON's search: punctuation at
           // either end ignored, then each word, then the word without trailing "-parts", then the longest number shortened to 4 digits.
@@ -3226,6 +3234,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               return; }
             if(PORTAL_TAB==='productions'){ body.innerHTML=ppProductions();
               var pb=body.querySelector('.pv-prod-batch'); if(pb)pb.onchange=function(){ PORTAL_PROD_BATCH=this.value; renderPP(); };
+              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });   // v28.676 (Ben): a PO in the batch plan opens its drawer
               body.querySelectorAll('.pv-prod-approve').forEach(function(btn){ btn.onclick=function(){ prodApprove(btn.dataset.all?prodBatchPending(prodBatchPOs()).map(function(p){return p.po;}):[btn.dataset.po], btn); }; });
               var pdl=body.querySelector('.pv-prod-dl'); if(pdl)pdl.onclick=function(){ downloadProductionPlan(); };
               var bcBtn=body.querySelector('.pv-bc-dl'), bcMenu=body.querySelector('.pv-bc-menu');
