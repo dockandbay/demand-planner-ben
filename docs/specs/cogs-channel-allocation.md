@@ -39,7 +39,7 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 | Shopify EU | 311.3a COGS - EU - Shopify; segment Zalando: 311.5d COGS - EU - Zalando |
 | EU wholesale | FR 311.3b, DE 311.3d, others 311.3c |
 | Amazon.de / .fr / .it / .es | 311.3e / 311.3g / 311.3f / 311.3h |
-| Shopify CA / Amazon.ca / CA wholesale | 311.4a / 311.4b / 311.4c |
+| Amazon.ca | 311.4b COGS - CA - Amazon (the only Canadian sales channel; an order shipped from the UK to a Canadian address stays on its own channel's account) |
 | Shopify AU | 311.8a COGS - AU - Shopify |
 | Amazon.com.au | 311.8b COGS - AU - Amazon |
 | AU wholesale & distributors | 401.5 COGS - AU - Wholesale & Distributor |
@@ -80,4 +80,4 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
 3. ~~Airtable~~ answered: the existing COGS "Email to Airtable", weekly via n8n (v28.696).
 4. ~~Zero-cost lines~~ answered by Ben 04-Nov-26: keep the September treatment. Lines Fulfil shipped at cost 0 are costed from HORIZON products.cost (USD, converted at Fulfil's month rate) and flagged; that part is credited to 9008 Fulfil - Inventory Account (September used UK 601 / AU 625 because Fulfil's GL did not reach Xero then; from October the stock sits in 9008). The email lists those lines so the cost can be fixed in Fulfil.
 5. **Email**: who gets the month-end and refresh emails (Ben + Sarah, and the accountants Harry / Pooja for UK, Alex for AU)?
-6. **CA and international**: UK company sales to Canada and distributors use the 311.4x / 311.5c accounts as above, right?
+6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
