@@ -1,3 +1,6 @@
+## v28.678 (04-Nov-26) Supplier portal Productions: smaller APPROVE, no approval cards
+- Ben: "the new approve button is good but way too large. and then remove all the orange boxes". APPROVE under each PO is a small tag (9px). The row of orange "Awaiting your approval" cards is gone; the Approvals line keeps the count and Approve all. No migration.
+
 ## v28.677 (04-Nov-26) Supplier portal Productions: APPROVE under each PO, PO opens its drawer, "POs to approve" view, wider SKU column
 - (v28.676 skipped: used for a sandbox build.)
 - Ben: "put APPROVE in a little button under the po". In the batch order plan each PO column header has a small APPROVE button when the PO awaits approval (✓ approved once done); same confirm and save as the Approvals cards.
