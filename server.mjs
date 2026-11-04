@@ -15,7 +15,7 @@ import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
 import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
 import { B2B_TYPES, B2B_CURRENCIES, B2B_STATUSES, B2B_COGS_DEFAULT, b2bRate, b2bCalc, b2bChecks, b2bSummary, b2bParseSheet, b2bSplitText, b2bParseDate, b2bDateSuspect, b2bNum, b2bPct, b2bFy, b2bCsv } from './lib/b2b_forecast.mjs';   // v28.603 CLIENT > B2B forecast
-import { ILG_POOLS, ILG_FILE_RE, ILG_GMAIL_Q, ilgReportAt, parseIlgReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline
+import { ILG_POOLS, ILG_SITES, ilgPoolsOf, ILG_FILE_RE, ILG_GMAIL_Q, GENEVA_FILE_RE, GENEVA_GMAIL_Q, ilgReportAt, parseIlgReport, parseGenevaReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline; v28.682 + US Geneva
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -1316,7 +1316,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/tpl-push-continue' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
-      || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
+      || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
@@ -20172,10 +20172,37 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
 const ILG_POOL_KEYS = Object.keys(ILG_POOLS);
 const _ilgCmp = new Map();   // pool|report_id -> { at, v }  (Fulfil reads, 90 s)
 async function ilgStore(meta, rows, by) {
-  const r = await pool.query(`INSERT INTO planner.ilg_stock_reports (message_id, filename, report_at, received_at, source, rows, imported_by)
-    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING RETURNING id`,
-    [meta.message_id || null, meta.filename, meta.report_at, meta.received_at || null, meta.source, JSON.stringify(rows), by || null]);
+  const site = meta.site || 'ILG';   // v28.682: ILG (UK) or GENEVA (US); the site column comes from migration 415
+  const r = site === 'ILG'
+    ? await pool.query(`INSERT INTO planner.ilg_stock_reports (message_id, filename, report_at, received_at, source, rows, imported_by)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING RETURNING id`,
+        [meta.message_id || null, meta.filename, meta.report_at, meta.received_at || null, meta.source, JSON.stringify(rows), by || null])
+    : await pool.query(`INSERT INTO planner.ilg_stock_reports (message_id, filename, report_at, received_at, source, rows, imported_by, site)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8) ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING RETURNING id`,
+        [meta.message_id || null, meta.filename, meta.report_at, meta.received_at || null, meta.source, JSON.stringify(rows), by || null, site]);
   _ilgCmp.clear(); return r.rows[0] ? r.rows[0].id : null;
+}
+// v28.682 (Ben 04-Nov-26): newest Geneva report in ops@ (reports@geneva10.com, ~17:00 US Central). WithOutOfStock (lists zeros) is preferred;
+// the Daily report (non-zero rows only) is used when it is the only file for the newest day. The report time is the Gmail received time.
+async function genevaImportFromGmail(by) {
+  const list = await gmailGetPaced('messages?' + new URLSearchParams({ q: GENEVA_GMAIL_Q, maxResults: '10' }).toString(), null, 'ops');
+  const found = [];
+  for (const m of (list.messages || [])) {
+    const full = await gmailGetPaced('messages/' + m.id + '?format=full', null, 'ops'); const parts = [];
+    const walk = (p) => { if (!p) return; if (p.filename && GENEVA_FILE_RE.test(p.filename) && p.body && p.body.attachmentId) parts.push(p); (p.parts || []).forEach(walk); }; walk(full.payload);
+    const at = full.internalDate ? new Date(Number(full.internalDate)).toISOString() : null;
+    parts.forEach(p => found.push({ message_id: m.id, filename: p.filename, att: p.body.attachmentId, report_at: at, received_at: at, oos: /OutOfStock/i.test(p.filename) }));
+  }
+  if (!found.length) return { imported: false, reason: 'no Geneva inventory report in ops@ in the last 4 days' };
+  found.sort((a, b) => String(b.report_at).localeCompare(String(a.report_at)));
+  const newest = found[0], oos = found.find(f => f.oos);   // same day = within 6 hours of the newest file
+  const f = oos && Date.parse(newest.report_at) - Date.parse(oos.report_at) < 6 * 3600000 ? oos : newest;
+  const have = (await pool.query(`SELECT id FROM planner.ilg_stock_reports WHERE message_id=$1 LIMIT 1`, [f.message_id])).rows[0];
+  if (have) return { imported: false, skipped: true, report_id: have.id, filename: f.filename, report_at: f.report_at };
+  const a = await gmailGetPaced('messages/' + f.message_id + '/attachments/' + f.att, null, 'ops');
+  const rows = parseGenevaReport(Buffer.from(String(a.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  const id = await ilgStore({ ...f, source: 'gmail', site: 'GENEVA' }, rows, by);
+  return { imported: !!id, report_id: id, filename: f.filename, report_at: f.report_at, rows: rows.length };
 }
 // newest ILG report in ops@ (last 4 days) → stored once per Gmail message. Returns { imported, skipped, report_id, filename, report_at }
 async function ilgImportFromGmail(by) {
@@ -20196,9 +20223,16 @@ async function ilgImportFromGmail(by) {
   const id = await ilgStore({ ...f, source: 'gmail' }, rows, by);
   return { imported: !!id, report_id: id, filename: f.filename, report_at: f.report_at, rows: rows.length };
 }
-async function ilgLatest(id) {
+async function ilgLatest(id, site) {   // v28.682: newest report for one site (ILG / GENEVA); a site-less database (no migration 415) is ILG only
+  site = site || 'ILG';
+  if (site === 'ILG') { try {
+    return (await pool.query(`SELECT id, filename, report_at, received_at, source, imported_at, imported_by, rows FROM planner.ilg_stock_reports
+      WHERE site='ILG' ${id ? 'AND id=$1' : ''} ORDER BY report_at DESC, id DESC LIMIT 1`, id ? [id] : [])).rows[0] || null;
+  } catch (e) { if (!/column "site" does not exist/.test(e.message)) throw e; }
+    return (await pool.query(`SELECT id, filename, report_at, received_at, source, imported_at, imported_by, rows FROM planner.ilg_stock_reports
+      ${id ? 'WHERE id=$1' : ''} ORDER BY report_at DESC, id DESC LIMIT 1`, id ? [id] : [])).rows[0] || null; }
   return (await pool.query(`SELECT id, filename, report_at, received_at, source, imported_at, imported_by, rows FROM planner.ilg_stock_reports
-    ${id ? 'WHERE id=$1' : ''} ORDER BY report_at DESC, id DESC LIMIT 1`, id ? [id] : [])).rows[0] || null;
+    WHERE site=$1 ${id ? 'AND id=$2' : ''} ORDER BY report_at DESC, id DESC LIMIT 1`, id ? [site, id] : [site])).rows[0] || null;
 }
 async function ilgPoolCompare(rep, poolKey, fresh) {
   const k = poolKey + '|' + rep.id, c = _ilgCmp.get(k); if (!fresh && c && Date.now() - c.at < 90000) return c.v;
@@ -20207,22 +20241,34 @@ async function ilgPoolCompare(rep, poolKey, fresh) {
 }
 app.get('/api/supply/ilg/status', async (req, res) => {
   const poolKey = String(req.query.pool || 'UK').toUpperCase(); if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool ' + poolKey });
-  try { const rep = await ilgLatest(req.query.report_id ? Number(req.query.report_id) : null);
-    const counts = {}; if (rep) ILG_POOL_KEYS.forEach(k => { counts[k] = Object.keys(ilgPoolReport(rep.rows, k)).length; });
+  const site = ILG_POOLS[poolKey].site, sitePools = ilgPoolsOf(site), poolsOut = Object.fromEntries(sitePools.map(k => [k, ILG_POOLS[k]]));   // v28.682: one site per panel
+  try { const rep = await ilgLatest(req.query.report_id ? Number(req.query.report_id) : null, site);
+    const counts = {}; if (rep) sitePools.forEach(k => { counts[k] = Object.keys(ilgPoolReport(rep.rows, k)).length; });
+    const ignored = rep && site === 'GENEVA' ? rep.rows.filter(r => !sitePools.some(k => ILG_POOLS[k].owner === r.owner)).reduce((a, r) => { a[r.owner] = (a[r.owner] || 0) + 1; return a; }, {}) : {};   // e.g. Geneva B2B rows
     const batches = (await pool.query(`SELECT id, pool, status, created_at, created_by, sent_at, done_at, fulfil_count_id, fulfil_number, error, jsonb_array_length(lines) n_lines,
-      (SELECT coalesce(sum((l->>'set_to')::numeric - (l->>'storage_now')::numeric),0) FROM jsonb_array_elements(lines) l) net FROM planner.ilg_rebaseline_batches ORDER BY id DESC LIMIT 15`)).rows;
-    if (!rep) return res.set('Cache-Control', 'no-store').json({ pools: ILG_POOLS, pool: poolKey, report: null, batches });
+      (SELECT coalesce(sum((l->>'set_to')::numeric - (l->>'storage_now')::numeric),0) FROM jsonb_array_elements(lines) l) net FROM planner.ilg_rebaseline_batches WHERE pool = ANY($1) ORDER BY id DESC LIMIT 15`, [sitePools])).rows;
+    if (!rep) return res.set('Cache-Control', 'no-store').json({ site, pools: poolsOut, pool: poolKey, report: null, batches });
     let cmp = null, fulfil_error = null; try { cmp = await ilgPoolCompare(rep, poolKey, req.query.fresh === '1'); } catch (e) { fulfil_error = e.message; }
-    res.set('Cache-Control', 'no-store').json({ pools: ILG_POOLS, pool: poolKey, counts, batches, fulfil_error,
+    res.set('Cache-Control', 'no-store').json({ site, pools: poolsOut, pool: poolKey, counts, ignored, batches, fulfil_error,
       report: { id: rep.id, filename: rep.filename, report_at: rep.report_at, received_at: rep.received_at, source: rep.source, imported_at: rep.imported_at, imported_by: rep.imported_by },
       ...(cmp || {}) });
-  } catch (e) { if (/ilg_stock_reports" does not exist/.test(e.message)) return res.json({ pools: ILG_POOLS, missing: 'migration 399' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/ilg_stock_reports" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 399' });
+    if (/column "site" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 415' }); log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/ilg/import', async (req, res) => {   // "Check ops@ now"
-  try { res.json(await ilgImportFromGmail(authUser(req))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+app.post('/api/supply/ilg/import', async (req, res) => {   // "Check ops@ now" (body.site GENEVA = the US Geneva report)
+  try { const site = String((req.body && req.body.site) || 'ILG').toUpperCase();
+    res.json(site === 'GENEVA' ? await genevaImportFromGmail(authUser(req)) : await ilgImportFromGmail(authUser(req))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/ilg/upload', async (req, res) => {   // manual fallback: upload the .xls
-  try { const b = req.body || {}, fn = String(b.filename || ''); const at = ilgReportAt(fn) || b.report_at;
+app.post('/api/supply/ilg/upload', async (req, res) => {   // manual fallback: upload the .xls (ILG) or the .csv (Geneva)
+  try { const b = req.body || {}, fn = String(b.filename || ''), site = String(b.site || 'ILG').toUpperCase();
+    if (site === 'GENEVA') {   // v28.682: no time in the Geneva file name, so the report time is the upload time (or report_at if sent)
+      if (!/\.csv$/i.test(fn)) return res.status(400).json({ error: 'Upload the Geneva CSV (DockandBayInventoryWithOutOfStock.csv, or DockAndBayDailyInventoryReport.csv)' });
+      const at = b.report_at && !isNaN(Date.parse(b.report_at)) ? new Date(b.report_at).toISOString() : new Date().toISOString();
+      const rows = parseGenevaReport(Buffer.from(String(b.file_b64 || ''), 'base64').toString('utf8'));
+      const id = await ilgStore({ filename: fn, report_at: at, source: 'upload', site: 'GENEVA' }, rows, authUser(req));
+      return res.json({ imported: true, report_id: id, rows: rows.length, report_at: at });
+    }
+    const at = ilgReportAt(fn) || b.report_at;
     if (!at) return res.status(400).json({ error: 'The file name must look like DOCKBAY_DAILYSTOCKREPORT_yyyymmdd_hhmm.xls (that is where the report time comes from)' });
     const rows = parseIlgReport(Buffer.from(String(b.file_b64 || ''), 'base64'));
     const id = await ilgStore({ filename: fn, report_at: at, source: 'upload' }, rows, authUser(req));
@@ -20233,24 +20279,126 @@ app.post('/api/cron/ilg-stock-import', async (req, res) => {   // n8n "Ops | ILG
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { res.json(await ilgImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+app.post('/api/cron/geneva-stock-import', async (req, res) => {   // v28.682: n8n "Ops | Geneva stock report import (hourly)"
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await genevaImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Rebaseline: recompute the ticked SKUs against Fulfil now, queue one batch (count) for the pool's warehouse, nudge n8n.
 app.post('/api/supply/ilg/rebaseline', async (req, res) => {
   const b = req.body || {}, poolKey = String(b.pool || '').toUpperCase(), skus = Array.from(new Set((Array.isArray(b.skus) ? b.skus : []).map(String)));
   if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool' }); if (!skus.length) return res.status(400).json({ error: 'Tick at least one SKU' });
   if (skus.length > 500) return res.status(400).json({ error: 'At most 500 SKUs per rebaseline (Fulfil reads 500 rows a page); send the rest as a second batch' });   // v28.554
-  try { const rep = await ilgLatest(b.report_id ? Number(b.report_id) : null); if (!rep) return res.status(400).json({ error: 'No ILG report imported yet' });
+  try { const rep = await ilgLatest(b.report_id ? Number(b.report_id) : null, ILG_POOLS[poolKey].site); if (!rep) return res.status(400).json({ error: 'No ' + ILG_SITES[ILG_POOLS[poolKey].site].label + ' report imported yet' });
     const open = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND status IN ('pending','sent') LIMIT 1`, [poolKey])).rows[0];
     if (open) return res.status(409).json({ error: 'Rebaseline #' + open.id + ' for this warehouse is still being written to Fulfil. Wait for it to finish (or cancel it if it is still pending).' });
-    const cmp = await ilgPoolCompare(rep, poolKey, true), by = {}; cmp.rows.forEach(r => { by[r.sku] = r; });
-    const lines = [], skipped = [];
-    skus.forEach(s => { const r = by[s]; if (!r || r.product_id == null) return skipped.push(s + ' (not in Fulfil)'); if (!r.diff) return skipped.push(s + ' (no difference now)');
-      lines.push({ sku: s, product_id: r.product_id, report_qty: r.report, fulfil_at_report: r.fulfil_at_report, moved_since: r.moved_since, storage_now: r.storage_now, set_to: Math.max(0, r.set_to) }); });
-    if (!lines.length) return res.status(400).json({ error: 'Nothing to rebaseline: ' + skipped.join('; ') });
-    const ins = (await pool.query(`INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
-      [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), authUser(req) || null])).rows[0];
-    let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK;   // optional: without it the n8n 15-minute sweep picks it up
-    if (hook && process.env.N8N_WEBHOOK_SECRET) { try { const r = await _fetchT(hook, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET }, body: JSON.stringify({ batch_id: ins.id }) }, 8000); nudged = r.ok; } catch (_) {} }
-    res.json({ ok: true, batch_id: ins.id, lines: lines.length, skipped, nudged });
+    const cmp = await ilgPoolCompare(rep, poolKey, true);
+    const q = await ilgQueueBatch(rep, poolKey, cmp, skus, authUser(req) || null);
+    if (!q.batch_id) return res.status(400).json({ error: 'Nothing to rebaseline: ' + q.skipped.join('; ') });
+    res.json({ ok: true, batch_id: q.batch_id, lines: q.lines, skipped: q.skipped, nudged: q.nudged });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.682: one batch path for the manual "Send to Fulfil" and the automated daily run: lines from the fresh compare, insert 'pending', nudge n8n
+async function ilgQueueBatch(rep, poolKey, cmp, skus, createdBy) {
+  const by = {}; cmp.rows.forEach(r => { by[r.sku] = r; });
+  const lines = [], skipped = [];
+  skus.forEach(s => { const r = by[s]; if (!r || r.product_id == null) return skipped.push(s + ' (not in Fulfil)'); if (!r.diff) return skipped.push(s + ' (no difference now)');
+    lines.push({ sku: s, product_id: r.product_id, report_qty: r.report, fulfil_at_report: r.fulfil_at_report, moved_since: r.moved_since, storage_now: r.storage_now, set_to: Math.max(0, r.set_to) }); });
+  if (!lines.length) return { batch_id: null, lines: 0, skipped, nudged: false };
+  const ins = (await pool.query(`INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
+    [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), createdBy])).rows[0];
+  let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK;   // optional: without it the n8n 15-minute sweep picks it up
+  if (hook && process.env.N8N_WEBHOOK_SECRET) { try { const r = await _fetchT(hook, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET }, body: JSON.stringify({ batch_id: ins.id }) }, 8000); nudged = r.ok; } catch (_) {} }
+  return { batch_id: ins.id, lines: lines.length, skipped, nudged };
+}
+// ═══ v28.682 (Ben 04-Nov-26): automated daily rebaseline (cycle count) per pool, ILG and Geneva. After the day's report: SKUs with
+// 0 < |diff| <= threshold are queued as one batch per pool (created_by 'auto', same path as Send to Fulfil, so the n8n stocktake flow
+// writes them); SKUs above the threshold are emailed for action. OFF until switched on in Manage 3PL. Config in app_settings
+// 'ilg_auto_rebaseline'. Safety: skip a pool whose report is missing or older than max_age_h (emailed), with an open batch, or already
+// auto-run in the last 20 hours; at most cap lines per pool per run; never a SKU that is not in Fulfil.
+const ILG_AUTO_DEF = { enabled: false, threshold: 50, pool_threshold: {}, cap: 200, max_age_h: 36,
+  to: ['zera@dockandbay.com', 'kathryn@dockandbay.com'], cc: ['sarah@dockandbay.com', 'ben@dockandbay.com'] };
+async function ilgAutoCfg() {
+  let v = {}; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ilg_auto_rebaseline'`)).rows[0]; if (r && r.value) v = JSON.parse(r.value); } catch (_) {}
+  return { ...ILG_AUTO_DEF, ...v, pool_threshold: { ...(v.pool_threshold || {}) } };
+}
+function ilgAutoClean(b, cur) {   // validated config from the UI
+  const num = (x, d, lo, hi) => { const n = Number(x); return isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d; };
+  const mails = (x, d) => (Array.isArray(x) ? x : String(x == null ? '' : x).split(/[,;\s]+/)).map(s => String(s).trim()).filter(emailOk).slice(0, 10);
+  const pt = {}; Object.entries(b.pool_threshold || {}).forEach(([k, v]) => { if (ILG_POOLS[k] && v !== '' && v != null && isFinite(Number(v))) pt[k] = num(v, cur.threshold, 1, 100000); });
+  return { enabled: b.enabled === true, threshold: num(b.threshold, cur.threshold, 1, 100000), pool_threshold: pt, cap: num(b.cap, cur.cap, 1, 500),
+    max_age_h: num(b.max_age_h, cur.max_age_h, 1, 240), to: b.to != null ? mails(b.to, cur.to) : cur.to, cc: b.cc != null ? mails(b.cc, cur.cc) : cur.cc };
+}
+// plan (dry run) or run one site. Returns { site, run, pools: [{ pool, label, status, reason, report_at, threshold, queued: [rows], over: [rows], capped: n, batch_id }] }
+async function ilgAutoRun(site, run, cfg) {
+  cfg = cfg || await ilgAutoCfg();
+  const out = { site, run, enabled: cfg.enabled, pools: [] };
+  const rep = await ilgLatest(null, site), ageH = rep ? (Date.now() - new Date(rep.report_at).getTime()) / 3600000 : null;
+  for (const k of ilgPoolsOf(site)) {
+    const P = ILG_POOLS[k], thr = cfg.pool_threshold[k] || cfg.threshold, o = { pool: k, label: P.label, warehouse: P.warehouse, threshold: thr, report_at: rep ? rep.report_at : null, queued: [], over: [], capped: 0 };
+    out.pools.push(o);
+    if (!rep) { o.status = 'skipped'; o.reason = 'no ' + ILG_SITES[site].label + ' report imported'; continue; }
+    if (ageH > cfg.max_age_h) { o.status = 'skipped'; o.reason = 'report is ' + Math.round(ageH) + ' hours old (limit ' + cfg.max_age_h + ')'; continue; }
+    const open = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND status IN ('pending','sent') LIMIT 1`, [k])).rows[0];
+    if (open) { o.status = 'skipped'; o.reason = 'rebaseline #' + open.id + ' is still open for this warehouse'; continue; }
+    if (run) { const done = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND created_by='auto' AND created_at > now() - interval '20 hours' LIMIT 1`, [k])).rows[0];
+      if (done) { o.status = 'skipped'; o.reason = 'already auto-run today (#' + done.id + ')'; continue; } }
+    let cmp; try { cmp = await ilgPoolCompare(rep, k, true); } catch (e) { o.status = 'skipped'; o.reason = 'Fulfil could not be read: ' + e.message; continue; }
+    const pick = r => ({ sku: r.sku, description: r.description, report: r.report, fulfil_at_report: r.fulfil_at_report, diff: r.diff, set_to: r.set_to == null ? null : Math.max(0, r.set_to), in_fulfil: r.in_fulfil });
+    const withDiff = cmp.rows.filter(r => r.diff && r.product_id != null);
+    const small = withDiff.filter(r => Math.abs(r.diff) <= thr).sort((a, b) => Math.abs(a.diff) - Math.abs(b.diff) || a.sku.localeCompare(b.sku));
+    o.over = withDiff.filter(r => Math.abs(r.diff) > thr).map(pick);
+    o.not_in_fulfil = cmp.rows.filter(r => r.product_id == null && r.report).map(pick);
+    o.queued = small.slice(0, cfg.cap).map(pick); o.capped = Math.max(0, small.length - cfg.cap);
+    if (!o.queued.length) { o.status = 'nothing to queue'; continue; }
+    if (!run) { o.status = 'would queue'; continue; }
+    const q = await ilgQueueBatch(rep, k, cmp, o.queued.map(r => r.sku), 'auto');
+    o.batch_id = q.batch_id; o.status = q.batch_id ? 'queued' : 'nothing to queue'; o.nudged = q.nudged;
+  }
+  return out;
+}
+function ilgAutoEmailHtml(res) {
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dd = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getUTCDate()).padStart(2, '0') + '-' + MN[d.getUTCMonth()] + '-' + String(d.getUTCFullYear()).slice(2); };
+  const n = v => v == null ? '' : Math.round(v).toLocaleString('en-GB'), sg = v => v == null ? '' : (v > 0 ? '+' : '') + Math.round(v).toLocaleString('en-GB');
+  const td = 'padding:3px 8px;border:1px solid #ddd;text-align:left';
+  let h = '<p>Daily ' + E(ILG_SITES[res.site].label) + ' stock check against Fulfil.</p>';
+  res.pools.forEach(o => {
+    h += '<p><b>' + E(o.label) + ' (' + E(o.warehouse) + ')' + (o.report_at ? ', report ' + dd(o.report_at) : '') + '</b><br>';
+    if (o.status === 'skipped') { h += 'Not checked: ' + E(o.reason) + '.</p>'; return; }
+    h += o.queued.length + ' SKU' + (o.queued.length === 1 ? '' : 's') + ' with a difference of ' + o.threshold + ' units or less auto-queued for rebaseline' + (o.batch_id ? ' (#' + o.batch_id + ')' : '')
+      + (o.capped ? '; ' + o.capped + ' more not queued (limit ' + o.queued.length + ' a day)' : '') + '.<br>'
+      + o.over.length + ' SKU' + (o.over.length === 1 ? '' : 's') + ' over ' + o.threshold + ' units need action:</p>';
+    if (o.over.length) h += '<table style="border-collapse:collapse;font-size:12px"><tr>' + ['SKU', 'Report qty', 'Fulfil at report', 'Difference', 'Set to'].map(t => '<th style="' + td + ';background:#f2f2f2">' + t + '</th>').join('') + '</tr>'
+      + o.over.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff)).slice(0, 300).map(r => '<tr><td style="' + td + '">' + E(r.sku) + '</td><td style="' + td + '">' + n(r.report) + '</td><td style="' + td + '">' + n(r.fulfil_at_report) + '</td><td style="' + td + '">' + sg(r.diff) + '</td><td style="' + td + '">' + n(r.set_to) + '</td></tr>').join('') + '</table>'
+      + (o.over.length > 300 ? '<p>and ' + (o.over.length - 300) + ' more (see HORIZON).</p>' : '');
+    if (o.not_in_fulfil && o.not_in_fulfil.length) h += '<p>In the report but not in Fulfil (never auto-adjusted): ' + o.not_in_fulfil.slice(0, 50).map(r => E(r.sku) + ' ' + n(r.report)).join(', ') + (o.not_in_fulfil.length > 50 ? ' and ' + (o.not_in_fulfil.length - 50) + ' more' : '') + '.</p>';
+  });
+  return h + '<p>Review or rebaseline these in HORIZON: Buy &amp; Move, Inventory, Manage 3PL, ' + (res.site === 'GENEVA' ? 'US (Geneva)' : 'UK (ILG)') + '.</p>';
+}
+app.get('/api/supply/ilg/auto', async (req, res) => { try { res.set('Cache-Control', 'no-store').json(await ilgAutoCfg()); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/ilg/auto', async (req, res) => {
+  try { const v = ilgAutoClean(req.body || {}, await ilgAutoCfg());
+    await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES ('ilg_auto_rebaseline', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify(v)]);
+    res.json({ ok: true, ...v });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/ilg/auto/preview', async (req, res) => {   // dry run: what the next daily run would do for this site (nothing is queued or emailed)
+  const site = String(req.query.site || 'ILG').toUpperCase(); if (!ILG_SITES[site]) return res.status(400).json({ error: 'Unknown site' });
+  try { res.set('Cache-Control', 'no-store').json(await ilgAutoRun(site, false)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/ilg-auto-rebaseline', async (req, res) => {   // n8n daily: ?site=ILG (21:00 UK) / ?site=GENEVA (01:00 UK)
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const site = String(req.query.site || (req.body && req.body.site) || '').toUpperCase(); if (!ILG_SITES[site]) return res.status(400).json({ error: 'site=ILG or site=GENEVA' });
+  try { const cfg = await ilgAutoCfg(); if (!cfg.enabled) return res.json({ ok: true, site, skipped: 'automated rebaseline is switched off' });
+    let imported = null; try { imported = site === 'GENEVA' ? await genevaImportFromGmail('n8n') : await ilgImportFromGmail('n8n'); } catch (e) { imported = { error: e.message }; }   // pick up today's report first
+    const r = await ilgAutoRun(site, true, cfg);
+    const anyMail = r.pools.some(o => o.status === 'skipped' || o.over.length || o.queued.length);
+    let mail = null; if (anyMail && cfg.to.length) {
+      const nq = r.pools.reduce((a, o) => a + (o.batch_id ? o.queued.length : 0), 0), nov = r.pools.reduce((a, o) => a + o.over.length, 0);
+      mail = await sendResendEmail({ to: cfg.to, cc: cfg.cc, channel: 'admin', kind: 'ilg-auto-rebaseline', ref: site,
+        subject: ILG_SITES[site].label + ' daily stock check: ' + (r.pools.every(o => o.status === 'skipped') ? 'not run, see reasons' : nq + ' auto-queued, ' + nov + ' need action'), html: ilgAutoEmailHtml(r) }); }
+    res.json({ ok: true, imported, mail: mail ? { sent: mail.sent, sandbox: !!mail.sandbox } : null, ...r });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/ilg/rebaseline/:id/cancel', async (req, res) => {
@@ -20267,7 +20415,7 @@ app.post('/api/cron/ilg-rebaseline/claim', async (req, res) => {
         SELECT id FROM planner.ilg_rebaseline_batches WHERE (status='pending' OR (status='sent' AND sent_at < now() - interval '30 minutes')) ${only ? 'AND id=$1' : ''} ORDER BY id LIMIT 5 FOR UPDATE SKIP LOCKED)
       RETURNING id, pool, lines, created_by, to_char(created_at,'YYYY-MM-DD') date`, only ? [only] : [])).rows;
     res.json({ batches: rows.map(r => ({ id: r.id, pool: r.pool, warehouse: ILG_POOLS[r.pool].warehouse, date: r.date, created_by: r.created_by,
-      reason: 'HORIZON ILG rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')', lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
+      reason: 'HORIZON ' + ILG_SITES[ILG_POOLS[r.pool].site].label + ' rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')', lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
