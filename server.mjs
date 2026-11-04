@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { readFileSync, readdirSync, appendFile } from 'fs';
+import { readFileSync, readdirSync, appendFile, writeFileSync } from 'fs';
 import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
@@ -3605,8 +3605,10 @@ async function accJobLocked(name) { const v = await accSettingGet('job_lock:' + 
 async function accProgress(name, text) { try { await accSettingSet('job_progress:' + name, { text: String(text || ''), at: new Date().toISOString() }); } catch (_) {} }
 async function accProgressGet(name) { const v = await accSettingGet('job_progress:' + name); return v && v.text || ''; }
 // Paged Xero list (GET only). opts.since = If-Modified-Since (Date); 45 s per call, one retry on a timeout (xeroFetch).
+let _accReserve = null;   // v28.703: { org, min } while a deep pass runs: stop before Xero's remaining count drops below min (live keeps the rest)
 async function accXeroList(org, resource, where, opts) {
-  opts = opts || {}; const out = []; const headers = opts.since ? { 'If-Modified-Since': new Date(opts.since).toUTCString() } : {};
+  opts = opts || {}; const out = [];
+  if (_accReserve && _accReserve.org === org) { const q = xeroQuota(org); if (q && q.day != null && q.day < _accReserve.min) { const e = new Error('deep pass stopped: Xero ' + org.toUpperCase() + ' down to ' + q.day + ' calls left (reserve ' + _accReserve.min + ')'); e.acc_reserve = true; throw e; } } const headers = opts.since ? { 'If-Modified-Since': new Date(opts.since).toUTCString() } : {};
   for (let p = 1; p < 200; p++) {
     const j = await xeroFetch(org, '/api.xro/2.0/' + resource + '?' + (where ? 'where=' + encodeURIComponent(where) + '&' : '') + 'pageSize=1000&page=' + p, { headers, timeoutMs: 45000 });
     const x = (j && j[resource]) || []; out.push(...x); if (x.length < 1000) break;
@@ -3618,7 +3620,7 @@ const _xHighVol = e => e && e.code === 400 && /efficient|HighVolume/i.test(e.mes
 async function accXeroBtRange(org, from, to, where, opts) {
   opts = opts || {}; const stepM = opts.stepMonths || 12;   // yearly windows (the UK org halves a few of them); the learn job passes 1
   const win = async (a, b) => {
-    try { return await accXeroList(org, 'BankTransactions', `Date>=${_xDT(a)} AND Date<${_xDT(b)} AND ${where}`, opts); }
+    try { return await accXeroList(org, 'BankTransactions', `Date>=${_xDT(a)} AND Date<${_xDT(b)}` + (where ? ` AND ${where}` : ''), opts); }
     catch (e) { const days = (b - a) / 864e5; if (_xHighVol(e) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 864e5); return (await win(a, m)).concat(await win(m, b)); } throw e; } };
   const all = []; for (let a = new Date(from); a < to;) { const b = new Date(Math.min(to, Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + stepM, 1))); all.push(...await win(a, b)); a = b; }
   return all;
@@ -3668,16 +3670,23 @@ async function accountsBankSyncOrg(org, opts) {
   } else {
     mode = wm && wm.at ? 'incremental' : 'first'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + (mode === 'first' ? ' (first run: items updated in the last ' + ACC_BANK_FIRST_DAYS + ' days)' : ' (changes since ' + since.toISOString().slice(0, 16).replace('T', ' ') + ')'));
     let bt, pays;
-    try { bt = await accXeroList(org, 'BankTransactions', 'IsReconciled==false', { since }); }
-    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
-    pays = await accXeroList(org, 'Payments', 'IsReconciled==false AND Status=="AUTHORISED"', { since });
+    // v28.703 (Ben 05-Nov-26, Xero calls plan item 2): the daily read is CHANGES ONLY and no longer filters on IsReconciled / Status, so an item
+    // reconciled, voided or deleted in Xero since the last run comes back as a change and is cleared here. That replaces the per-item re-check
+    // of every stored line on every run (~200 UK calls on 04-Nov-26); the re-check now runs only in the deep pass (opts.deep, see accountsBankDeep).
+    try { bt = await accXeroList(org, 'BankTransactions', '', { since }); }
+    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), '', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
+    pays = await accXeroList(org, 'Payments', '', { since });
     const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
     const modified = accBankRowsFrom(org, bank, bt, pays, tr);   // every transfer is re-read (cheap), so transfer rows are complete
+    dropIds = bt.filter(t => t.IsReconciled || t.Status !== 'AUTHORISED').map(t => t.BankTransactionID)
+      .concat(pays.filter(x => x.IsReconciled || x.Status !== 'AUTHORISED').map(x => x.PaymentID));   // v28.703: changed in Xero to reconciled / voided / deleted
+    if (!opts.deep) { rows = modified; }
+    else {
     // stored spend / receive / payment items not in the modified set: re-check by id and drop the ones now reconciled, voided or deleted
     const stored = (await pool.query(`SELECT kind, xero_id, to_char(txn_date,'YYYY-MM-DD') d FROM planner.accounts_bank_items WHERE org=$1 AND kind IN ('spend','receive','payment')`, [org])).rows;
     const seen = new Set(modified.map(r => r[1] + '|' + r[2])), check = { bt: [], pay: [] }, btDates = [];
-    stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); if (r.kind !== 'payment' && r.d) btDates.push(r.d); });
-    dropIds = [];
+    const cut = opts.deepAll ? '' : new Date(Date.now() - ACC_DEEP_DAYS * 864e5).toISOString().slice(0, 10);   // v28.703: deep pass = items dated in the last 60 days; deepAll = every stored item
+    stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id) || dropIds.includes(r.xero_id)) return; if (cut && (!r.d || r.d < cut)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); if (r.kind !== 'payment' && r.d) btDates.push(r.d); });
     if (check.bt.length) { let m;
       try { m = await accXeroByIds(org, 'BankTransactions', 'BankTransactionID', check.bt); }
       catch (e) { if (!_xHighVol(e)) throw e;   // v28.701 (Ben 05-Nov-26): the UK org refuses any guid OR filter on BankTransactions (HighVolumeException, even with a date range). Re-read the open (unreconciled) BankTransactions over the stored items' date range in dated windows instead: an id missing from that read is reconciled, voided or deleted
@@ -3688,7 +3697,7 @@ async function accountsBankSyncOrg(org, opts) {
           (await accXeroBtRange(org, a, b, 'IsReconciled==false', { stepMonths: 1 })).forEach(x => m.set(x.BankTransactionID, x)); } }
       check.bt.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
     if (check.pay.length) { const m = await accXeroByIds(org, 'Payments', 'PaymentID', check.pay); check.pay.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
-    rows = modified;
+    rows = modified; }
   }
   const c = await pool.connect();
   try { await c.query('BEGIN');
@@ -3706,15 +3715,46 @@ async function accountsBankSyncOrg(org, opts) {
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
   await accSettingSet('accounts_bank_wm:' + org, { at: t0.toISOString(), mode });
   const total = (await pool.query('SELECT count(*)::int n FROM planner.accounts_bank_items WHERE org=$1', [org])).rows[0].n;
-  return { org, mode, changed: rows.length, dropped: dropIds ? dropIds.length : 0, items: total, accounts: accs.length };
+  return { org, mode: mode === 'incremental' && opts.deep ? (opts.deepAll ? 'deep-all' : 'deep') : mode, changed: rows.length, dropped: dropIds ? dropIds.length : 0, items: total, accounts: accs.length };
+}
+// v28.703 (Ben 05-Nov-26, Xero calls plan items 2-3 + "trigger the more expensive checks at the end of each day when there is capacity"):
+// Xero's day resets at a fixed time (UK ~23:20-23:45 UTC, AU ~22:20-23:20 UTC), so calls left late in the day are lost anyway. The deep pass
+// (cron { "deep": true }, n8n nightly ~22:40 UTC) spends them: per org, only when Xero has at least ACC_DEEP_MIN_LEFT calls left, and it
+// stops before the remaining count drops below ACC_DEEP_RESERVE. It re-checks stored open items dated in the last ACC_DEEP_DAYS days; once
+// every ACC_DEEPALL_DAYS days (or when the last one is older) it re-checks every stored item (full history). An org skipped for lack of
+// capacity is simply tried again the next night; the daily changes-only run keeps the list current in between.
+const ACC_DEEP_DAYS = 60, ACC_DEEPALL_DAYS = 7;
+const ACC_DEEP_MIN_LEFT = Number(process.env.ACC_DEEP_MIN_LEFT) || 300, ACC_DEEP_RESERVE = Number(process.env.ACC_DEEP_RESERVE) || 150;
+async function accDeepPlan(org) {   // null = run (with deepAll flag) | string = why skipped
+  try { await xeroFetch(org, '/api.xro/2.0/Organisation', { timeoutMs: 20000 }); } catch (e) { if (e && e.xero_daily) return 'Xero daily allowance used up'; }
+  const q = xeroQuota(org); if (!q || q.day == null) return 'Xero remaining count unknown';
+  if (q.day < ACC_DEEP_MIN_LEFT) return 'only ' + q.day + ' Xero calls left (needs ' + ACC_DEEP_MIN_LEFT + ')';
+  const last = await accSettingGet('accounts_bank_deepall:' + org);
+  return { deepAll: !(last && last.at && Date.now() - Date.parse(last.at) < (ACC_DEEPALL_DAYS - 0.5) * 864e5), left: q.day };
+}
+async function xbWeeklyRescan() {   // v28.703 (plan item 3c): full Xero bill status re-scan once a week, inside the nightly deep pass and only with spare capacity
+  const last = await accSettingGet('xero_bills_fullscan_at');
+  if (last && last.at && Date.now() - Date.parse(last.at) < (ACC_DEEPALL_DAYS - 0.5) * 864e5) return { skipped: 'done ' + last.at.slice(0, 10) };
+  for (const g of XERO_REGIONS) { const q = xeroQuota(g); if (!q || q.day == null || q.day < ACC_DEEP_MIN_LEFT) return { skipped: 'Xero ' + g.toUpperCase() + ' ' + (q && q.day != null ? q.day + ' calls left' : 'remaining count unknown') }; }
+  const r = await syncXeroBills({ full: true });
+  if (!(r.uk && r.uk.error) && !(r.au && r.au.error) && !(r.uk && r.uk.truncated) && !(r.au && r.au.truncated)) await accSettingSet('xero_bills_fullscan_at', { at: new Date().toISOString() });
+  return { uk: r.uk, au: r.au, changed: r.changed };
 }
 async function accountsBankSync(by, opts) {
   opts = opts || {};
   if (!(await accJobLock('accounts_bank_ageing', ACC_BANK_LOCK_MS, by))) return { ok: false, busy: true, error: 'A bank ageing run is already in progress' };
   const out = [], errs = [];
   try {
-    for (const org of XERO_REGIONS) { try { out.push(await accountsBankSyncOrg(org, opts)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
-    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'full' ? ' (full)' : ' (' + r.changed + ' changed, ' + r.dropped + ' cleared' + (r.mode === 'first' ? ', first ' + ACC_BANK_FIRST_DAYS + ' days' : '') + ')')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
+    for (const org of XERO_REGIONS) {
+      if (opts.deep && !opts.full) { const plan = await accDeepPlan(org);   // v28.703: deep pass only with spare capacity
+        if (typeof plan === 'string') { out.push({ org, mode: 'deep-skipped', why: plan, changed: 0, dropped: 0, items: (await pool.query('SELECT count(*)::int n FROM planner.accounts_bank_items WHERE org=$1', [org])).rows[0].n }); continue; }
+        _accReserve = { org, min: ACC_DEEP_RESERVE };
+        try { const r = await accountsBankSyncOrg(org, Object.assign({}, opts, { deepAll: plan.deepAll })); r.left_before = plan.left; out.push(r);
+          if (plan.deepAll) await accSettingSet('accounts_bank_deepall:' + org, { at: new Date().toISOString() }); }
+        catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } finally { _accReserve = null; }
+        continue; }
+      try { out.push(await accountsBankSyncOrg(org, opts)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
+    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'full' ? ' (full)' : r.mode === 'deep-skipped' ? ' (deep pass skipped: ' + r.why + ')' : ' (' + (r.mode === 'deep' || r.mode === 'deep-all' ? r.mode + ', ' : '') + r.changed + ' changed, ' + r.dropped + ' cleared' + (r.mode === 'first' ? ', first ' + ACC_BANK_FIRST_DAYS + ' days' : '') + ')')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_bank_ageing',$1,$2,$3)`, [errs.length ? 'error' : 'success', n, msg.slice(0, 500)]); } catch (_) {}
     return { ok: !errs.length, items: n, orgs: out, errors: errs };
   } finally { await accProgress('accounts_bank_ageing', ''); await accJobUnlock('accounts_bank_ageing'); }
@@ -3836,7 +3876,8 @@ app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {
 // 200 ok (or busy: another instance is running it) / 401 secret / 500 failed. Logs etl_runs 'accounts_bank_ageing'. Local server hourly only with HZ_ACCOUNTS_CRON=1 (the sandbox shares live's Xero allowance).
 app.post('/api/cron/accounts-bank-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await accountsBankSync('cron', { full: !!(req.body && (req.body.full === true || req.body.full === 'true')) }); res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const b = req.body || {}, deep = b.deep === true || b.deep === 'true', r = await accountsBankSync('cron', { full: b.full === true || b.full === 'true', deep });   /* v28.703: { "deep": true } = nightly spare-capacity pass */
+    if (deep && r && !r.busy) { try { r.bills_rescan = await xbWeeklyRescan(); } catch (e) { r.bills_rescan = { error: e.message }; } } res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
   const _ab = () => accountsBankSync('timer').then(r => console.log('[accounts-bank] ' + (r.busy ? 'busy' : r.items + ' item(s)' + (r.errors.length ? ' errors: ' + r.errors.join('; ') : ''))), e => console.warn('[accounts-bank] failed: ' + (e && e.message)));
@@ -8483,6 +8524,41 @@ function xeroQuotaNote(region, r) { try { const d = r.headers.get('x-daylimit-re
   } catch (_) {} }
 const XERO_DAY_ALERT = Number(process.env.XERO_DAY_ALERT) || 200;   // v28.272: our Xero plan allows 1,000 calls a day per org (measured 12-Oct-26), not 5,000: alert at 200 left
 function xeroQuota(region) { return _xeroQuota[xeroRegion(region)]; }
+// v28.703 (Ben 05-Nov-26, Xero calls plan item 1): SANDBOX Xero budget guard. The sandbox uses the same Xero apps as live and so eats live's
+// 1,000 calls / day per org (04-Nov: ~443 UK calls in 35 min of sandbox tests). On the sandbox only (IS_SANDBOX: not the production database),
+// every Xero call counts against XERO_SANDBOX_DAILY (default 50) per org per Xero day, and none is made once Xero reports fewer than
+// XERO_SANDBOX_MIN_LEFT (default 500) left. Xero's day resets at a fixed time, ~23:20-23:45 UTC (UK) and ~22:20-23:20 UTC (AU), measured from
+// the 'xero quota' health rows 12-Oct to 04-Nov-26, so the day key is the UTC date 30 minutes ahead. The count survives restarts (a file in the
+// temp folder). Live never reaches this code path.
+const XERO_SBX_DAILY = Number(process.env.XERO_SANDBOX_DAILY) || 50, XERO_SBX_MIN_LEFT = Number(process.env.XERO_SANDBOX_MIN_LEFT) || 500;
+const XERO_SBX_FILE = path.join(process.env.TMPDIR || '/tmp', 'horizon-xero-sandbox-budget.json');
+function xeroDayKey() { return new Date(Date.now() + 30 * 60000).toISOString().slice(0, 10); }
+let _xeroSbx = null;
+function xeroSandboxUse(region) {   // { day, uk, au } for the current Xero day
+  const day = xeroDayKey();
+  if (!_xeroSbx) { try { _xeroSbx = JSON.parse(readFileSync(XERO_SBX_FILE, 'utf8')); } catch (_) { _xeroSbx = null; } }
+  if (!_xeroSbx || _xeroSbx.day !== day) _xeroSbx = { day, uk: 0, au: 0 };
+  return region ? (_xeroSbx[region] || 0) : _xeroSbx;
+}
+async function xeroDayUse() {   // v28.703 (Xero calls plan item 5): calls used today per org = 1,000 minus Xero's own remaining count (live + sandbox together)
+  const out = { limit: 1000, sandbox: IS_SANDBOX ? { limit: XERO_SBX_DAILY, min_left: XERO_SBX_MIN_LEFT, used: Object.assign({}, xeroSandboxUse()) } : null };
+  for (const g of ['uk', 'au']) { let q = _xeroQuota[g], at = q && q.at, left = q && q.day;
+    if (left == null || Date.now() - Date.parse(at) > 3600000) {   // this instance has not called Xero lately: newest health row (written every 100 calls, so within 100)
+      try { const r = (await pool.query(`SELECT ms, ts FROM planner.app_health_events WHERE kind = 'metric' AND path = $1 ORDER BY ts DESC LIMIT 1`, ['xero quota ' + g])).rows[0];
+        if (r && (left == null || Date.parse(r.ts) > Date.parse(at))) { left = Number(r.ms); at = new Date(r.ts).toISOString(); } } catch (_) {} }
+    const fresh = at && xeroDayKey() === new Date(Date.parse(at) + 30 * 60000).toISOString().slice(0, 10);   // a reading from before the reset says nothing about today
+    out[g] = left == null || !fresh ? { left: null, used: null, at: at || null } : { left, used: Math.max(0, 1000 - left), at }; }
+  return out;
+}
+function xeroSandboxGuard(region) {   // throws before a sandbox call that would break the budget; counts the call otherwise
+  if (!IS_SANDBOX) return;
+  const used = xeroSandboxUse(region), q = _xeroQuota[region];
+  const why = used >= XERO_SBX_DAILY ? 'the sandbox has used its ' + XERO_SBX_DAILY + ' Xero ' + region.toUpperCase() + ' calls for today'
+    : (q && q.day != null && q.day < XERO_SBX_MIN_LEFT) ? 'Xero ' + region.toUpperCase() + ' has only ' + q.day + ' calls left today (sandbox stops below ' + XERO_SBX_MIN_LEFT + ', live keeps the rest)' : null;
+  if (why) { const e = new Error('Sandbox Xero budget: ' + why + '. Resets about 23:30 UTC.'); e.code = 429; e.xero_sandbox_budget = true; throw e; }
+  _xeroSbx[region] = used + 1;
+  try { writeFileSync(XERO_SBX_FILE, JSON.stringify(_xeroSbx)); } catch (_) {}
+}
 const _xeroAccMemo = new Map();   // v28.260: region|path -> { at, j } for GET /Accounts (chart of accounts, 66 rows, read on every bill push / payment plan); 10 min, opts.fresh bypasses
 async function xeroFetch(region, path, opts) {
   region = xeroRegion(region); opts = opts || {};
@@ -8496,6 +8572,8 @@ async function _xeroFetch0(region, path, opts) { const token = await xeroToken(r
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
+    xeroSandboxGuard(region);   // v28.703: sandbox only, see above
+    { const _rs = region + ' ' + (opts.method || 'GET') + ' ' + ((String(path).match(/^\/api\.xro\/2\.0\/([A-Za-z]+)/) || [, 'other'])[1]); const _bt = _xeroCallN.by || (_xeroCallN.by = {}); _bt[_rs] = (_bt[_rs] || 0) + 1; }   // v28.703: calls by org + method + resource (bills-sync status), to aim the caching (plan item 4)
     _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;   // v28.183 (Ben): per-instance call counter (bills-sync status)
     try { r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? ((typeof opts.body === 'string' || Buffer.isBuffer(opts.body)) ? opts.body : JSON.stringify(opts.body)) : undefined }, opts.timeoutMs || 20000); }   // v28.275: a Buffer body is sent raw (attachments)
     catch (e) { if ((opts.method || 'GET') === 'GET' && attempt < 1 && /abort|timeout/i.test(String(e && (e.name + ' ' + e.message)))) continue; throw e; }   // v28.253: a timed-out GET is retried once (opts.timeoutMs sets the per-call limit, default 20 s)
@@ -10856,7 +10934,7 @@ app.post('/api/supply/xero/bills-sync-visit', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/xero/bills-sync/status', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json({ ok: true, running: !!_xbSyncP, last: await xbLastSync(), xero_calls: _xeroCallN, last_result: _xbLast ? { at: _xbLast.at, changed: _xbLast.changed || 0, healed: _xbLast.healed || 0, flagged: _xbLast.flagged || 0 } : null }); }
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, running: !!_xbSyncP, last: await xbLastSync(), xero_calls: _xeroCallN, xero_day: await xeroDayUse(), last_result: _xbLast ? { at: _xbLast.at, changed: _xbLast.changed || 0, healed: _xbLast.healed || 0, flagged: _xbLast.flagged || 0 } : null }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

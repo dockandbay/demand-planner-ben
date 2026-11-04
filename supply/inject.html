@@ -12943,9 +12943,14 @@
   function xbsFmt(iso){ if(!iso)return ''; var d=new Date(iso); if(isNaN(d))return ''; var p=function(n){return (n<10?'0':'')+n;};
     return fd(d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()))+' '+p(d.getHours())+':'+p(d.getMinutes()); }   // dd-mmm-yy hh:mm, local time
   function xbsNote(){ return '<span class="xbs-note mut tiny" style="white-space:nowrap"></span>'; }
+  function xbsDayHtml(d){ /* v28.703 (Ben 05-Nov-26): Xero calls used today per org (1,000 a day each, shared by live and the sandbox) */
+    var p=['uk','au'].filter(function(g){return d[g]&&d[g].used!=null;}).map(function(g){ var u=d[g].used, c=u>=800?'var(--red)':(u>=500?'var(--amber)':'inherit'); return '<span style="color:'+c+'">'+g.toUpperCase()+' '+u.toLocaleString()+'</span>'; });
+    var sb=d.sandbox?' Sandbox used UK '+(d.sandbox.used.uk||0)+' / AU '+(d.sandbox.used.au||0)+' of its '+d.sandbox.limit+' a day.':'';
+    return p.length?' · <span title="Xero API calls used today per organisation, out of 1,000 a day each (live and the sandbox share it). Resets about 23:30 UTC.'+esc(sb)+'">Xero calls today: '+p.join(' · ')+' of 1,000</span>':''; }
   function xbsPaint(){ document.querySelectorAll('.xbs-note').forEach(function(el){ var at=XBS.last&&XBS.last.oldest;
     el.innerHTML=(XBS.running?'syncing Xero bills…':(at?'Xero bills synced '+esc(xbsFmt(at)):(XBS.last?'Xero bills not synced yet':'')))
       +(XBS.err?' <span style="color:var(--amber)" title="'+esc(XBS.err)+'">⚠ sync problem</span>':'')
+      +(XBS.day?xbsDayHtml(XBS.day):'')
       +((ME&&ME.is_admin)?' · <button class="lnk-btn xbs-now" style="color:var(--blue)"'+(XBS.running?' disabled':'')+' title="Sync the Xero bills changed since the last sync now">↻ Sync now</button>':'');
     var bt=el.querySelector('.xbs-now'); if(bt)bt.onclick=function(){ xbsSync(true); }; }); }
   function xbsSync(force){ if(XBS.running&&!force)return; XBS.running=true; XBS.err=''; xbsPaint();
@@ -12955,7 +12960,7 @@
         if((force||j.ran)&&(force||j.changed||j.healed||j.flagged)&&typeof XBS.onChanged==='function'){ try{ XBS.onChanged(); }catch(_){} } })
       .catch(function(e){ XBS.running=false; XBS.err=e.message||String(e); xbsPaint(); if(force)alert('Xero bill sync failed: '+XBS.err); }); }
   function xbsVisit(onChanged){ XBS.onChanged=onChanged; xbsPaint(); var now=Date.now(); if(now-XBS.visitAt<60000)return; XBS.visitAt=now;
-    fetch('/api/supply/xero/bills-sync/status').then(function(r){return r.json();}).then(function(s){ if(!s||s.error)return; XBS.last=s.last||XBS.last;
+    fetch('/api/supply/xero/bills-sync/status').then(function(r){return r.json();}).then(function(s){ if(!s||s.error)return; XBS.last=s.last||XBS.last; XBS.day=s.xero_day||null; xbsPaint();
       var o=XBS.last&&XBS.last.oldest, due=!o||(Date.now()-Date.parse(o)>XBS_MAX_AGE);
       if(due||s.running)xbsSync(false); else xbsPaint(); }).catch(function(){}); }
   var _xbRow=null;   // v28.170 (Ben): the Payments Report row whose Create in Xero popup is open, so a successful post can flip its button to "done" at once

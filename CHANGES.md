@@ -1,3 +1,11 @@
+## v28.703 (05-Nov-26) Xero calls: sandbox budget, changes-only bank sync, deep pass coded (not scheduled), calls used shown
+- Why: 04-Nov Xero UK fell to 133 calls left (red alert): ~443 sandbox test calls, ~200 the 05:15 bank sync re-checking every stored line, ~175 normal use.
+- Sandbox guard: on the sandbox only, 50 Xero calls per org per Xero day (env XERO_SANDBOX_DAILY) and none once Xero has under 500 left (env XERO_SANDBOX_MIN_LEFT). Live unaffected.
+- Bank sync (/api/cron/accounts-bank-sync, existing route): daily run is changes only, in every state, so reconciled / voided / deleted items clear without per-item re-checks.
+- Deep pass: same route with body { "deep": true }: runs per org only with 300+ calls left, stops at 150 left; 60-day re-check, full-history re-check every 7 days, weekly full bill re-scan. Env ACC_DEEP_MIN_LEFT / ACC_DEEP_RESERVE optional. NO n8n schedule yet (Ben: wait for the daily-limit check).
+- Bills sync status: xero_day (calls used today per org) and xero_calls.by (calls per org / method / resource); shown next to the Xero bills sync note.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no new cron routes, new env vars optional (defaults above).
+
 ## v28.702 (05-Nov-26) ACCOUNTS Money in: Stripe and Zalando ZPS payouts hidden with the other payouts
 - Ben 05-Nov-26: Stripe payouts hidden like PayPal / Shopify; ZPS (Zalando) handled by a Xero bank rule, hidden too.
 - Matched on the line text only. The Stripe USD bank accounts carry customer card payments (ch_ / pi_ ids, e.g. USWS-19079), so the account name is not used and charge lines stay visible.
