@@ -21905,12 +21905,17 @@
     var nBilled=rows.filter(function(r){ return acHasBill(r)&&(A==='all'||acAccTab(r)===A); }).length;
     var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&acHasBill(r)); }), n={found:0,none:0,money:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
     var vis=inTab.filter(function(r){ return acRcKind(r)===F&&(!q||(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)>=0); }).sort(acByDateAsc);   // v28.387: oldest first
+    // v28.697 (Ben: "money in needs a filter of things that are matched as well. and also filter OUT klarna, amazon, shopify, paypal, faire ... toggles, default hide")
+    var mnMatched=0, mnPayout=0; if(F==='money'){ vis=vis.filter(function(r){ var po=acMoneyPayout(r), mt=!po&&acMoneyMatched(r); if(po)mnPayout++; if(mt)mnMatched++;
+      return (po?AC_IN.showPayouts:true)&&(mt?AC_IN.showMatched:true); }); }
     var pill=function(k,l){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+' ('+n[k]+')</span>'; };
     var h='<div class="tiny mut" style="margin:0 0 8px;max-width:980px"><b>How it works:</b> 1. Upload the bank statement (Bank statement tab). 2. Lines whose receipt is in accounts@ show under <b>Receipt found</b>: press <b>Review</b>, check the bill and <b>Push bill to Xero</b>. 3. In Xero, reconcile the line with <b>Match</b>. Payees that never need a receipt: <b>Ignore</b>.</div>'
       +acAccTabsHtml(rows,A,'data-pa')
       +'<div class="bar">'+pill('found','Receipt found')+pill('none','No receipt')+pill('money','Money in')+pill('ignored','Ignored')
       +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'">'
       +'<label class="tiny" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Lines whose bill HORIZON already created in Xero: only the Match in Xero is left"><input type="checkbox" id="ac-hidebill"'+(AC_IN.hideBilled?' checked':'')+'> Hide lines with bill created'+(nBilled?' ('+nBilled+')':'')+'</label>'
+      +(F==='money'?'<label class="tiny" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Lines already matched in HORIZON (Receive Money created, or a key-account receipt posted)"><input type="checkbox" id="ac-showmatched"'+(AC_IN.showMatched?' checked':'')+'> Show matched ('+mnMatched+')</label>'
+        +'<label class="tiny" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Platform payouts (Klarna, Amazon, Shopify, PayPal, Faire) are cleared by their own flows, not here"><input type="checkbox" id="ac-showpayouts"'+(AC_IN.showPayouts?' checked':'')+'> Show Klarna / Amazon / Shopify / PayPal / Faire ('+mnPayout+')</label>':'')
       +'<span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
@@ -22105,6 +22110,7 @@
     b.querySelectorAll('[data-fwu]').forEach(function(x){ x.onclick=function(){ var r=AC_FW.d.rows[+x.dataset.fwu]; fwPost('/api/accounts/forwarding/action',{org:r.org,contact:r.contact,status:'open'},x); }; });
     var fh=document.getElementById('ac-fwh'); if(fh)fh.onclick=function(){ fh.style.pointerEvents='none'; fh.textContent='Starting…'; fetch('/api/accounts/forwarding/history',{method:'POST'}).then(function(){ AC_FW.d=null; acInRender(); setTimeout(function(){ AC_FW.d=null; acInRender(); },60000); }); };
     b.querySelectorAll('[data-pf]').forEach(function(x){ x.onclick=function(){ AC_IN.pF=x.dataset.pf; acInRender(); }; });
+    ['showMatched:ac-showmatched','showPayouts:ac-showpayouts'].forEach(function(p){ var kk=p.split(':'), el=document.getElementById(kk[1]); if(el)el.onchange=function(){ AC_IN[kk[0]]=el.checked; var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acInRender(); sc.scrollTop=y; }; });   // v28.697: default hidden each visit
     var hb=document.getElementById('ac-hidebill'); if(hb)hb.onchange=function(){ AC_IN.hideBilled=hb.checked; try{ localStorage.setItem('hz_ac_hide_billed',hb.checked?'1':'0'); }catch(_){} var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acInRender(); sc.scrollTop=y; };
     b.querySelectorAll('[data-pa]').forEach(function(x){ x.onclick=function(){ AC_IN.pA=x.dataset.pa; acInRender(); }; });
     var q=document.getElementById('ac-pq2'); if(q)q.oninput=function(){ AC_IN.pQ=q.value; clearTimeout(AC_IN._qt); AC_IN._qt=setTimeout(function(){ acInRender(); var n=document.getElementById('ac-pq2'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
@@ -22313,6 +22319,10 @@
       .catch(function(e){ AC_KA.busy=false; AC_KA.err=e.message||String(e); }); }
   function acKaOf(r){ if(!AC_KA.d||!(r.amount>0))return null; var t=(r.reference||'')+' '+(r.payee_key||'')+' '+(r.description||'');
     return (AC_KA.d.accounts||[]).filter(function(c){ return c._re&&c.org===r.org&&c._re.test(t); })[0]||null; }
+  // v28.697: Money in filters. Payouts = the platform settlements other flows clear; matched = Receive Money already created here.
+  var AC_PAYOUT_RE=/\b(klarna|amazon|amzn|shopify|paypal|faire)\b/i;
+  function acMoneyPayout(r){ return AC_PAYOUT_RE.test((r.payee_key||'')+' '+(r.reference||'')+' '+(r.description||'')); }
+  function acMoneyMatched(r){ try{ var c=acCrOf(r); if(c&&c.receipt&&c.receipt.status==='created')return true; var kc=acKaOf(r); if(kc){ var R=acKaRun(r,kc); if(R&&R.status==='created')return true; } }catch(e){} return false; }
   function acKaRun(r,c){ return ((AC_KA.d&&AC_KA.d.runs)||[]).filter(function(x){ return x.ka_key===c.ka_key&&x.line_date===r.line_date&&Math.abs(x.amount-r.amount)<0.005&&(x.reference||'')===(r.reference||'')&&x.status!=='error'&&x.status!=='dry_run'; })[0]||null; }
   function acKaInfo(c){ return '<span class="ac-ka-i" title="'+esc(c.help||'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:10.5px;font-weight:700;font-style:italic;cursor:help;margin-left:4px;vertical-align:middle">i</span>'; }
   function acKaCells(r,i){ var c=acKaOf(r), k=acCrKey(r), R=acKaRun(r,c), rc, act;

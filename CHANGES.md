@@ -1,3 +1,7 @@
+## v28.697 (04-Nov-26) ACCOUNTS Reconcile > Money in: hide matched lines and platform payouts (toggles)
+- Ben: "money in needs a filter of things that are matched as well. and also we need to filter OUT items like klarna, amazon, shopify, paypal, faire ... have toggles to hide/show these, default hide". Two toggles on Money in, both off each visit: "Show matched (N)" (Receive Money already created here, or a key-account receipt posted) and "Show Klarna / Amazon / Shopify / PayPal / Faire (N)" (payee / statement line names one of them; those payouts are cleared by their own flows). Sandbox: 10 payout lines hidden by default, shown when ticked.
+- No migration.
+
 ## v28.696 (04-Nov-26) COGS: weekly automatic "Email to Airtable"
 - Ben: "Airtable is the link on the COGS page to email to Airtable. It's an n8n to trigger that automatically". The send is one function used by the button and by a new cron route, POST /api/cron/cogs-airtable (x-webhook-secret, fails closed), for the n8n flow "Horizon | COGS to Airtable (weekly, Mon 07:00 London)". Same rules as the button: blocked only when a warehouse column is really missing (v28.694), stores the sent values, logs the upload.
 - Sandbox: no secret -> 401; with secret -> 2,410 SKUs built, not emailed (sandbox has no email key).
