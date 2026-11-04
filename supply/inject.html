@@ -21901,7 +21901,7 @@
   function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
     if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
     var rows=P.rows||[], F=(['found','none','money','ignored'].indexOf(AC_IN.pF)>=0?AC_IN.pF:'found'), A=AC_IN.pA||'all', q=AC_IN.pQ.toLowerCase();
-    acFlexEnsure(); acDhlEnsure(); acCrEnsure();   // v28.397; v28.418 customer receipts (money in): Flexport AU matches (Bank of America) and DHL invoices (ANZ)
+    acFlexEnsure(); acDhlEnsure(); acCrEnsure(); acKaEnsure();   // v28.397; v28.695 key-account bulk receipts (NEXT); v28.418 customer receipts (money in): Flexport AU matches (Bank of America) and DHL invoices (ANZ)
     var nBilled=rows.filter(function(r){ return acHasBill(r)&&(A==='all'||acAccTab(r)===A); }).length;
     var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&acHasBill(r)); }), n={found:0,none:0,money:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
     var vis=inTab.filter(function(r){ return acRcKind(r)===F&&(!q||(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)>=0); }).sort(acByDateAsc);   // v28.387: oldest first
@@ -21914,9 +21914,9 @@
       +'<span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
-    if(F==='money')h+=acCrOverdueHtml();   // v28.607
+    if(F==='money')h+=acKaClearingHtml()+acCrOverdueHtml();   // v28.607; v28.695 key-account clearing balance
     h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':F==='money'?'Order paid':'Why')+'</th><th></th></tr></thead><tbody>';
-    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):(r.amount>0?acCrCells(r,i):null));
+    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):(r.amount>0?(acKaOf(r)?acKaCells(r,i):acCrCells(r,i)):null));   // v28.695: a key account's bulk payment (NEXT) instead of the Shopify order card
       var rc=fx?fx.rc:k==='found'?('<div>'+esc(hzTrkDate(m.date))+' · '+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+(m.ambiguous?' <span class="pill" style="cursor:default" title="Another email has the same amount: check it in Review">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+'</div>')
         :k==='none'?'<span class="tiny" style="color:var(--neg)">none found in accounts@</span>':'<span class="tiny mut">'+(r.amount>=0?'money in':(r.treatment_source==='manual'?'ignored (your rule)':'ignored (built-in rule)'))+'</span>';
       var act=fx?fx.act:k==='found'?(r.bill?'<a href="'+esc(r.bill.url)+'" target="_blank" rel="noopener">Bill in Xero ↗</a><div class="tiny mut">match it in Xero</div>':'<span class="save-btn" data-rv="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">Review</span>'+(r.treatment==='autobill'?' <span class="pill" style="cursor:default" title="This payee is on Auto bill: HORIZON creates the bill automatically every 6 hours">Auto bill</span>':'')+' <span class="save-btn light" data-ig="'+i+'">Ignore</span>')
@@ -21935,7 +21935,7 @@
     b.querySelectorAll('[data-rv]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.rv]; if(r)acDrOpen(r); }; });
     b.querySelectorAll('[data-flex]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.flex]; if(r)acFlexGo(r,x); }; });   // v28.397
     b.querySelectorAll('[data-dhl]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.dhl], I=r&&acDhlOf(r); if(!I)return; AC_DHL.open[I.number]=!AC_DHL.open[I.number]; var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acLinesRerender(); sc.scrollTop=y; }; });
-    acDhlWire(b); acCrWire(b);   // v28.418
+    acDhlWire(b); acCrWire(b); acKaWire(b);   // v28.418; v28.695 key-account receipts
     b.querySelectorAll('[data-ig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.ig]; if(r)acIgnorePayee(r,true); }; });
     b.querySelectorAll('[data-unig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.unig]; if(r)acIgnorePayee(r,false); }; });
     var mb=document.getElementById('ac-mbx'); if(mb)mb.onclick=function(){ AC_IN.mbx=!AC_IN.mbx; var x=document.getElementById('ac-mbxbody'); if(x)x.style.display=AC_IN.mbx?'':'none'; mb.firstChild.textContent=AC_IN.mbx?'▾ ':'▸ '; }; }
@@ -22302,6 +22302,89 @@
     b.querySelectorAll('.ac-cr-go').forEach(function(x){ x.onclick=function(){ acCrSearch(x.dataset.k); }; });
     b.querySelectorAll('.ac-cr-pv').forEach(function(x){ x.onclick=function(){ acCrPreview(x.dataset.k); }; });
     b.querySelectorAll('.ac-cr-post').forEach(function(x){ x.onclick=function(){ acCrPost(x.dataset.k); }; }); }
+  // ═══ v28.695 (Ben 04-Nov-26: "ensure we have a repeatable process in accounts > reconcile") Key-account bulk receipts (NEXT first).
+  // A money-in line matching a key account's bank text (NEXT PLC ...) gets "Key account receipt": paste the remittance, Check (reads Xero),
+  // then Post: Receive Money in the bank to the clearing account + one batch payment from it for the remitted invoices. The (i) steps
+  // come from the key account's config (help). Data: /api/accounts/ka-receipts. On the sandbox Post is a dry run (no Xero writes).
+  var AC_KA={d:null,busy:false,err:'',open:{},txt:{},plan:{},msg:{},busyK:{},clrOpen:false};
+  function acKaEnsure(){ var rows=(AC_IN.p&&AC_IN.p.rows)||[]; if(AC_KA.d||AC_KA.busy||AC_KA.err||!rows.some(function(r){ return r.amount>0; }))return; acKaLoad(); }
+  function acKaLoad(){ AC_KA.busy=true;
+    fetch('/api/accounts/ka-receipts',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_KA.busy=false; if(j.error)AC_KA.err=j.error; else { AC_KA.d=j; (j.accounts||[]).forEach(function(c){ try{ c._re=new RegExp(c.match_re,'i'); }catch(e){ c._re=null; } }); } acCrRepaint(); })
+      .catch(function(e){ AC_KA.busy=false; AC_KA.err=e.message||String(e); }); }
+  function acKaOf(r){ if(!AC_KA.d||!(r.amount>0))return null; var t=(r.reference||'')+' '+(r.payee_key||'')+' '+(r.description||'');
+    return (AC_KA.d.accounts||[]).filter(function(c){ return c._re&&c.org===r.org&&c._re.test(t); })[0]||null; }
+  function acKaRun(r,c){ return ((AC_KA.d&&AC_KA.d.runs)||[]).filter(function(x){ return x.ka_key===c.ka_key&&x.line_date===r.line_date&&Math.abs(x.amount-r.amount)<0.005&&(x.reference||'')===(r.reference||'')&&x.status!=='error'&&x.status!=='dry_run'; })[0]||null; }
+  function acKaInfo(c){ return '<span class="ac-ka-i" title="'+esc(c.help||'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:10.5px;font-weight:700;font-style:italic;cursor:help;margin-left:4px;vertical-align:middle">i</span>'; }
+  function acKaCells(r,i){ var c=acKaOf(r), k=acCrKey(r), R=acKaRun(r,c), rc, act;
+    if(R&&R.status==='created'){
+      rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">Paid</span> '+esc(c.label)+': '+R.n_invoices+' invoices, '+acMoney(R.paid,r.currency)+acKaInfo(c)+'</div><div class="tiny mut">Receive Money to '+esc(c.clearing_code+' '+c.clearing_name)+' + batch payment · '+esc(String(R.created_by||'').split('@')[0]+'@')+' '+esc(R.at||'')+'</div>'
+        +(Math.abs(R.unexplained)>0.004?'<div class="tiny" style="color:var(--amber)">'+acMoney(R.unexplained,r.currency)+' unexplained in '+esc(c.clearing_code)+': enter the SL debit notes as credit notes</div>':'');
+      act='<a href="https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID='+esc(R.xero_receive_id)+'" target="_blank" rel="noopener">Receive Money in Xero ↗</a><div class="tiny mut">match the line to it in Xero</div>';
+      return {rc:rc,act:act,open:false,card:''}; }
+    rc='<div><span class="pill" style="cursor:default;background:#ede9fe;color:#6d28d9;border-color:#c4b5fd">Key account</span> <b>'+esc(c.label)+'</b> bulk payment'+acKaInfo(c)+'</div><div class="tiny mut">'+esc(c.label)+' bulk payment: paste the remittance (hover i for steps)</div>'
+      +(R&&R.status==='receive_done'?'<div class="tiny" style="color:var(--amber);white-space:normal;max-width:320px">Receive Money is in Xero; the batch payment is still to do'+(R.error?': '+esc(R.error):'')+'. Open and Post again to finish.</div>':'');
+    act='<span class="save-btn" data-ka="'+i+'" style="background:#6d28d9;border-color:#6d28d9;color:#fff;font-weight:700;white-space:nowrap">'+(AC_KA.open[k]?'Close':'Key account receipt')+'</span>'+acKaInfo(c);
+    return {rc:rc,act:act,open:!!AC_KA.open[k],card:AC_KA.open[k]?acKaCard(r,c):''}; }
+  function acKaCard(r,c){ var k=acCrKey(r), P=AC_KA.plan[k], m=AC_KA.msg[k], bz=AC_KA.busyK[k], ccy=r.currency||'GBP', sbx=AC_KA.d&&AC_KA.d.sandbox;
+    var chk={match:['✓ match','var(--pos)'],part:['part payment','var(--amber)'],over:['more than due','var(--neg)'],paid:['already paid','var(--neg)'],closed:['not open','var(--neg)'],not_found:['not found','var(--neg)']};
+    var h='<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden;text-align:left">'
+      +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--hover)"><b>'+esc(c.label)+' remittance'+acKaInfo(c)+'</b><span>'+esc(hzTrkDate(r.line_date))+' · '+esc(r.account_name)+' · +'+acMoney(r.amount,ccy)+'</span><span class="mut tiny">'+esc(String(r.reference||'').slice(0,100))+'</span>'
+      +'<span class="tiny mut" style="margin-left:auto">pays from '+esc(c.clearing_code+' '+c.clearing_name)+'</span></div>'
+      +'<div style="padding:10px 14px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap"><textarea class="fci ac-ka-txt" data-k="'+esc(k)+'" rows="7" placeholder="Paste '+esc(c.label)+'\'s remittance: one invoice per line, e.g.&#10;TS8849755 - 521.40&#10;TS8849894 - 2,562.00" style="width:340px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(AC_KA.txt[k]||'')+'</textarea>'
+      +'<div style="display:flex;flex-direction:column;gap:8px"><button class="save-btn light ac-ka-chk" data-k="'+esc(k)+'"'+(bz?' disabled':'')+'>'+(bz==='check'?'Checking Xero…':'Check against Xero')+'</button>'
+      +(P&&P.ok&&P._txt===(AC_KA.txt[k]||'')?'<button class="save-btn ac-ka-post" data-k="'+esc(k)+'" style="background:#6d28d9;border-color:#6d28d9;color:#fff"'+(bz?' disabled':'')+'>'+(bz==='post'?'Posting…':(sbx?'Dry run (sandbox: no Xero writes)':'Receive Money + batch payment in Xero'))+'</button>':'')
+      +'<span class="tiny mut" style="max-width:260px;white-space:normal">Leave it empty and Check to see which invoices could add up to the amount (a guide only).</span></div></div>';
+    if(P&&P.error)h+='<div style="padding:8px 14px;color:var(--neg);font-size:12.5px">'+esc(P.error)+'</div>';
+    else if(P){ var T=P.totals||{};
+      if(P._txt!==(AC_KA.txt[k]||''))h+='<div class="tiny mut" style="padding:0 14px 6px">The remittance changed: Check again.</div>';
+      if(P.problems&&P.problems.length)h+='<div style="padding:0 14px 6px;font-size:12.5px;color:var(--neg)"><b>Cannot post yet:</b><ul style="margin:2px 0 0 18px">'+P.problems.map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul></div>';
+      if(P.notes&&P.notes.length)h+='<div style="padding:0 14px 6px;font-size:12.5px;color:var(--amber)">'+P.notes.map(esc).join('<br>')+'</div>';
+      if(P.rows&&P.rows.length){
+        h+='<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Invoice</th><th class="l">PO (Xero reference)</th><th class="l">Invoiced</th><th class="l" style="text-align:right">Xero due</th><th class="l" style="text-align:right">Remittance</th><th class="l">Check</th></tr></thead><tbody>'
+          +P.rows.map(function(x){ var s=chk[x.check]||[x.check,'var(--muted)']; return '<tr style="border-top:1px solid var(--line)"><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+(x.invoice_id?'<a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID='+esc(x.invoice_id)+'" target="_blank" rel="noopener">'+esc(x.invoice)+'</a>':esc(x.invoice))+'</td><td class="l">'+esc(x.po||'')+'</td><td class="l">'+esc(hzTrkDate(x.date))+'</td>'
+            +'<td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+(x.due!=null?money(x.due):'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+money(x.amount)+'</td><td class="l" style="color:'+s[1]+';font-weight:700">'+esc(s[0])+(x.check==='part'?' <span class="tiny mut">('+money(x.due-x.amount)+' stays open)</span>':'')+'</td></tr>'; }).join('')
+          +'</tbody></table></div>'
+          +'<div style="padding:8px 14px;font-size:12.5px;display:flex;gap:18px;flex-wrap:wrap"><span>Remittance <b>'+acMoney(T.remittance,ccy)+'</b></span><span>Paid from '+esc(c.clearing_code)+' <b>'+acMoney(T.paid,ccy)+'</b></span><span>Bank line <b>'+acMoney(T.bank,ccy)+'</b></span>'
+          +(Math.abs(T.unexplained)<0.005?'<span style="color:var(--pos)">✓ matches the bank line</span>':'<span style="color:var(--amber)">Unexplained (stays in '+esc(c.clearing_code)+') <b>'+acMoney(T.unexplained,ccy)+'</b></span>')+'</div>';
+        if((P.still_open||[]).length)h+='<div style="padding:0 14px 10px;font-size:12.5px"><b>Still open on these POs after this payment</b><ul style="margin:2px 0 0 18px">'+P.still_open.map(function(s){ return '<li>'+esc(s.po)+': '+(s.invoices.length?s.invoices.length+' invoice'+(s.invoices.length>1?'s':'')+', '+acMoney(s.due_after,ccy)+' <span class="tiny mut">('+s.invoices.map(function(v){ return v.invoice+' '+money(v.due_after); }).join(', ')+')</span>':'<span style="color:var(--pos)">fully paid</span>')+'</li>'; }).join('')+'</ul></div>'; }
+      else if(P.proposal){ var Q=P.proposal, qt=Q.invoices.reduce(function(a,v){ return a+v.due; },0);
+        h+='<div style="padding:4px 14px 10px;font-size:12.5px"><b>Proposal (guide only)</b>: '+Q.invoices.length+' open invoices'+(Q.po?' on <b>'+esc(Q.po)+'</b>':'')+' add up to '+acMoney(qt,ccy)+'.'+(Q.several?' <span style="color:var(--amber)">Several sets of invoices fit this amount: get the remittance.</span>':'')
+          +'<div class="tiny mut" style="margin-top:4px;font-family:ui-monospace,Menlo,monospace;white-space:normal">'+Q.invoices.map(function(v){ return esc(v.invoice)+' '+money(v.due); }).join(' · ')+'</div></div>'; }
+      if(P.open_count!=null)h+='<div class="tiny mut" style="padding:0 14px 10px">'+esc(c.contact_name)+' has '+P.open_count+' open invoices in Xero, '+acMoney(P.open_due,ccy)+' due.</div>'; }
+    if(m)h+='<div style="padding:0 14px 10px;font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+'">'+m.html+'</div>';
+    return h+'</div>'; }
+  function acKaRow(k){ return ((AC_IN.p&&AC_IN.p.rows)||[]).filter(function(r){ return acCrKey(r)===k; })[0]||null; }
+  function acKaBody(r,c,k){ return {ka:c.ka_key,line:{account_name:r.account_name,date:r.line_date,amount:r.amount,reference:r.reference||''},remittance:AC_KA.txt[k]||''}; }
+  function acKaCheck(k){ var r=acKaRow(k), c=r&&acKaOf(r); if(!c)return; var txt=AC_KA.txt[k]||''; AC_KA.busyK[k]='check'; AC_KA.msg[k]=null; acCrRepaint();
+    fetch('/api/accounts/ka-receipts/check',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(acKaBody(r,c,k))}).then(function(x){ return x.json(); }).then(function(j){ AC_KA.busyK[k]=null; j._txt=txt; AC_KA.plan[k]=j; acCrRepaint(); })
+      .catch(function(e){ AC_KA.busyK[k]=null; AC_KA.plan[k]={error:e.message||String(e)}; acCrRepaint(); }); }
+  function acKaPost(k){ var r=acKaRow(k), c=r&&acKaOf(r), P=AC_KA.plan[k]; if(!c||!P||!P.ok)return; var T=P.totals, ccy=r.currency||'GBP', sbx=AC_KA.d&&AC_KA.d.sandbox;
+    var pay=P.rows.filter(function(x){ return x.check==='match'||x.check==='part'; });
+    if(!confirm((sbx?'SANDBOX DRY RUN (nothing is written to Xero)\n\n':'')+c.label+' bank line '+hzTrkDate(r.line_date)+', '+r.account_name+', '+ccy+' '+money(r.amount)+'\n\n(a) Xero: Receive Money in '+c.bank_account_name+' for '+ccy+' '+money(r.amount)+', dated '+hzTrkDate(r.line_date)+', to '+c.clearing_code+' '+c.clearing_name+'.\n(b) Xero: one batch payment from '+c.clearing_code+' paying '+pay.length+' invoices, '+ccy+' '+money(T.paid)+'.'
+      +(Math.abs(T.unexplained)>0.004?'\n\n'+ccy+' '+money(T.unexplained)+' stays in '+c.clearing_code+' as unexplained (SL deductions).':'')+'\n\nThen match the bank line to the Receive Money in Xero.'+(sbx?'':'\n\nThis writes to live Xero.')))return;
+    AC_KA.busyK[k]='post'; AC_KA.msg[k]=null; acCrRepaint(); var b=acKaBody(r,c,k); b.confirm=true;
+    fetch('/api/accounts/ka-receipts/post',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(x){ return x.json(); }).then(function(j){ AC_KA.busyK[k]=null;
+      if(j.error)AC_KA.msg[k]={ok:false,html:esc(j.error)};
+      else if(j.dry_run)AC_KA.msg[k]={ok:true,html:'✓ Dry run #'+esc(j.run_id)+' stored: Receive Money '+acMoney(j.would.receive.LineItems[0].UnitAmount,ccy)+' to '+esc(c.clearing_code)+' and a batch payment of '+j.would.batch.Payments.length+' invoices would be written on live. Nothing was sent to Xero.'};
+      else { var rb=Array.isArray(j.readback)?j.readback:[], bad=rb.filter(function(x){ return !x.ok; });
+        AC_KA.msg[k]={ok:!bad.length,html:'✓ <a href="'+esc(j.receive.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">Receive Money ↗</a> and batch payment of '+j.batch.n+' invoices ('+acMoney(j.batch.total,ccy)+') created. '+(bad.length?'Read-back: '+bad.length+' invoice(s) not at the expected amount due, check in Xero.':'Read-back: every invoice shows the expected amount due.')+' Now match the bank line in Xero.'};
+        AC_KA.plan[k]=null; }
+      AC_KA.d=null; acKaLoad(); })
+      .catch(function(e){ AC_KA.busyK[k]=null; AC_KA.msg[k]={ok:false,html:esc(e.message||String(e))}; AC_KA.d=null; acKaLoad(); }); }
+  // clearing accounts: what HORIZON left unexplained in each key account's clearing account (above the Money in lines)
+  function acKaClearingHtml(){ var d=AC_KA.d; if(!d||!(d.clearing||[]).length)return ''; return (d.clearing||[]).map(function(c){ var A=(d.accounts||[]).filter(function(x){ return x.ka_key===c.ka_key; })[0]||{};
+      var h='<div style="border:1px solid var(--line);border-radius:10px;margin:8px 0 10px;background:var(--card)"><div class="ac-ka-clr" style="padding:8px 12px;cursor:pointer;display:flex;gap:10px;align-items:center"><b>'+(AC_KA.clrOpen?'▾':'▸')+' '+esc(c.code+' '+c.name)+'</b>'
+        +(Math.abs(c.unexplained)<0.005?'<span class="tiny" style="color:var(--pos)">✓ nothing unexplained</span>':'<span class="tiny" style="color:var(--amber)">unexplained '+acMoney(c.unexplained,'GBP')+' ('+c.items.length+' payment'+(c.items.length>1?'s':'')+'): enter the SL debit notes as credit notes</span>')+(A.help?acKaInfo(A):'')
+        +'<span class="tiny mut" style="margin-left:auto">from payments posted by HORIZON</span></div>';
+      if(AC_KA.clrOpen&&c.items.length)h+='<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Bank date</th><th class="l">Bank line</th><th class="l" style="text-align:right">Received</th><th class="l" style="text-align:right">Paid invoices</th><th class="l" style="text-align:right">Unexplained</th><th class="l">Posted</th></tr></thead><tbody>'
+        +c.items.map(function(x){ return '<tr style="border-top:1px solid var(--line)"><td class="l">'+esc(hzTrkDate(x.line_date))+'</td><td class="l tiny">'+esc(String(x.reference||'').slice(0,60))+'</td><td class="l" style="text-align:right">'+money(x.amount)+'</td><td class="l" style="text-align:right">'+money(x.paid)+' ('+x.n_invoices+')</td><td class="l" style="text-align:right;color:var(--amber);font-weight:700">'+money(x.unexplained)+'</td><td class="l tiny">'+esc(x.at||'')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+      return h+'</div>'; }).join(''); }
+  function acKaWire(b){
+    b.querySelectorAll('[data-ka]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.ka]; if(!r)return; var k=acCrKey(r); AC_KA.open[k]=!AC_KA.open[k]; acCrRepaint(); }; });
+    b.querySelectorAll('.ac-ka-txt').forEach(function(x){ x.oninput=function(){ AC_KA.txt[x.dataset.k]=x.value; }; x.onchange=function(){ AC_KA.txt[x.dataset.k]=x.value; acCrRepaint(); }; });
+    b.querySelectorAll('.ac-ka-chk').forEach(function(x){ x.onclick=function(){ var t=b.querySelector('.ac-ka-txt[data-k="'+x.dataset.k.replace(/"/g,'\\"')+'"]'); if(t)AC_KA.txt[x.dataset.k]=t.value; acKaCheck(x.dataset.k); }; });
+    b.querySelectorAll('.ac-ka-post').forEach(function(x){ x.onclick=function(){ acKaPost(x.dataset.k); }; });
+    b.querySelectorAll('.ac-ka-clr').forEach(function(x){ x.onclick=function(e){ if(e.target.closest('.ac-ka-i'))return; AC_KA.clrOpen=!AC_KA.clrOpen; acCrRepaint(); }; }); }
   // ═══ v28.396 (Ben 16-Oct-26) Flexport AU; v28.397 (Ben: "can simply live in the main reconcile item ... a custom element"): Bank of
   // America (Xero UK, USD) pays every Flexport invoice. A Bank of America Flexport line that matches an open Xero AU Flexport bill shows in
   // Bank lines under Receipt found with its AU bill and one button that (a) pays the AU bill in Xero AU from 901 Loan - D&B Ltd (UK) and
@@ -22316,7 +22399,7 @@
   function acFlexOf(r){ if(!AC_FLEX.d||!acIsFlexBofa(r))return null; var a=-Number(r.amount);
     var l=(AC_FLEX.d.lines||[]).filter(function(x){ return x.date===r.line_date&&Math.abs(x.amount-a)<0.005&&x.reference===r.reference; })[0];
     return l&&['todo','partial','creating','done'].indexOf(l.status)>=0?l:null; }
-  function acHasBill(r){ var f=acFlexOf(r), d=acDhlOf(r), c=r.amount>0&&acCrOf(r); return !!(r.bill||(f&&f.status==='done')||(d&&d.status==='done')||(c&&c.receipt&&c.receipt.status==='created')); }
+  function acHasBill(r){ var f=acFlexOf(r), d=acDhlOf(r), c=r.amount>0&&acCrOf(r), ka=acKaOf(r), kr=ka&&acKaRun(r,ka); return !!(r.bill||(f&&f.status==='done')||(d&&d.status==='done')||(c&&c.receipt&&c.receipt.status==='created')||(kr&&kr.status==='created')); }
   function acFlexCells(r,i){ var f=acFlexOf(r), s=f.settlement||{}, m=AC_FLEX.msg[r.line_date+'|'+r.reference];
     var rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">AU bill</span> '+(f.bills||[]).map(function(x){ return '<a href="'+esc(x.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+x.invoice_id))+'" target="_blank" rel="noopener" style="font-family:ui-monospace,Menlo,monospace">'+esc(x.number||'bill')+' ↗</a> <span class="mut">USD '+money(x.amount)+'</span>'; }).join(', ')+'</div>'
       +'<div class="tiny mut">Xero AU Flexport bill: pay from '+esc(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+' + Spend Money here to '+esc(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'</div>'

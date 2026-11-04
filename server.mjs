@@ -3484,7 +3484,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note|ka-receipts\/check|ka-receipts\/post)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -4935,6 +4935,189 @@ app.post('/api/accounts/receipts/post', async (req, res) => {
       await pool.query(`UPDATE planner.accounts_customer_receipts SET status=$2, error=$3, updated_at=now() WHERE id=$1`, [row.id, any ? 'shopify_done' : 'error', String(e.message).slice(0, 400)]).catch(() => {}); }
     _crMemo.at = 0; log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message });
   }
+});
+// ═══ v28.695 (Ben 04-Nov-26: "ensure we have a repeatable process in accounts > reconcile") Key-account bulk receipts, NEXT first.
+// NEXT pays many TS invoices in one BGC payment into #7060 Lloyds. On a NEXT money-in line the user pastes NEXT's remittance; HORIZON
+// checks each line against the open Xero invoices (or, with no remittance, proposes the PO / invoices that fit the amount), then on
+// confirm writes (a) a Receive Money in the bank for the full amount to the key account's clearing account (9069) and (b) one Xero
+// batch payment from 9069 paying each remitted invoice. A short payment (SL deductions) leaves the difference in 9069 until credit
+// notes clear it. Config and the (i) help steps per key account: planner.accounts_ka_config; runs: planner.accounts_ka_receipts (mig 417).
+// The sandbox shares the LIVE Xero orgs (one daily allowance), so on the sandbox Post is a dry run: it reads, plans and stores, never writes.
+const ka2 = v => Math.round(Number(v) * 100) / 100;
+let _kaCfg = { at: 0, v: null };
+async function kaConfig(fresh) {
+  if (!fresh && _kaCfg.v && Date.now() - _kaCfg.at < 60e3) return _kaCfg.v;
+  const rows = (await pool.query(`SELECT * FROM planner.accounts_ka_config WHERE enabled ORDER BY ka_key`)).rows;
+  rows.forEach(r => { try { r._re = new RegExp(r.match_re, 'i'); } catch (_) { r._re = null; } try { r._inv = new RegExp(r.invoice_re, 'i'); } catch (_) { r._inv = /^TS\d{5,}$/i; } });
+  _kaCfg = { at: Date.now(), v: rows }; return rows;
+}
+const kaPublic = c => ({ ka_key: c.ka_key, org: c.org, label: c.label, match_re: c.match_re, bank_account_name: c.bank_account_name, clearing_code: c.clearing_code, clearing_name: c.clearing_name, contact_name: c.contact_name, help: c.help });
+// Remittance text: one invoice per line, e.g. "TS8849755 - 521.40", "TS8849551	1,800.00", "Inv TS8849535 £2,001.00 paid". Lines with no
+// invoice number are skipped (headers, totals); a line with an invoice but no amount is reported.
+function kaParseRemittance(text, cfg) {
+  const out = [], bad = [], seen = new Map();
+  String(text || '').split(/\r?\n/).forEach(raw => { const line = raw.trim(); if (!line) return;
+    const tok = (line.match(/\b[A-Z]{1,5}\d{5,}(?:_\d+)?\b/gi) || []).find(t => cfg._inv.test(t)); if (!tok) return;
+    const rest = line.replace(tok, ' '), nums = rest.match(/-?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|-?\d+(?:\.\d{1,2})?/g) || [];
+    const amt = nums.length ? Number(nums[nums.length - 1].replace(/,/g, '')) : NaN;
+    if (!isFinite(amt) || amt <= 0) { bad.push(line.slice(0, 80)); return; }
+    const inv = tok.toUpperCase(); if (seen.has(inv)) { out[seen.get(inv)].amount = ka2(out[seen.get(inv)].amount + amt); out[seen.get(inv)].dup = true; return; }
+    seen.set(inv, out.length); out.push({ invoice: inv, amount: ka2(amt) }); });
+  return { lines: out, bad };
+}
+async function kaXeroList(org, query) {   // paged summary read (100 a page)
+  const out = []; for (let page = 1; page <= 20; page++) {
+    const j = await xeroFetch(org, '/api.xro/2.0/Invoices?' + query + '&summaryOnly=true&page=' + page); const inv = (j && j.Invoices) || [];
+    out.push(...inv); if (inv.length < 100) break; }
+  return out;
+}
+const kaXDate = v => { const m = /\/Date\((\d+)/.exec(String(v || '')); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : (String(v || '').slice(0, 10) || null); };
+const kaInvRow = i => ({ invoice_id: i.InvoiceID, invoice: String(i.InvoiceNumber || '').toUpperCase(), po: i.Reference || '', status: i.Status, date: kaXDate(i.Date), due_date: kaXDate(i.DueDate),
+  total: ka2(i.Total || 0), due: ka2(i.AmountDue || 0), currency: i.CurrencyCode || 'GBP' });
+// Subset of open invoices adding up to the amount (cents), largest first; null when none. Map-based reach, capped for speed.
+function kaSubset(items, cents, skip) {   // reach: sum -> [previous sum, item index] (parent pointers, no path copies)
+  const reach = new Map([[0, null]]), back = s => { const p = []; while (reach.get(s)) { const [ps, i] = reach.get(s); p.push(i); s = ps; } return p; };
+  for (let i = 0; i < items.length; i++) { if (skip && skip.has(i)) continue; const v = Math.round(items[i].due * 100); if (v <= 0) continue;
+    const add = []; for (const s of reach.keys()) { const n = s + v; if (n <= cents && !reach.has(n)) add.push(n); }
+    for (const n of add) { reach.set(n, [n - v, i]); if (n === cents) return back(cents); }
+    if (reach.size > 3000000) break; }
+  return reach.has(cents) ? back(cents) : null;
+}
+// The plan: read the open invoices, check every remittance line, totals and what stays open on the POs touched.
+async function kaPlan(body) {
+  const cfgs = await kaConfig(), cfg = cfgs.find(c => c.ka_key === String(body.ka || '').toUpperCase());
+  if (!cfg) { const e = new Error('Unknown key account ' + (body.ka || '')); e.status = 400; throw e; }
+  const L0 = body.line || {}, line = { org: cfg.org, account_name: String(L0.account_name || ''), date: String(L0.date || '').slice(0, 10), amount: ka2(L0.amount), reference: String(L0.reference || '') };
+  const problems = [], notes = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(line.date) || !(line.amount > 0)) problems.push('Bank line date / amount missing');
+  if (line.account_name && line.account_name.toLowerCase() !== cfg.bank_account_name.toLowerCase()) problems.push('This line is in ' + line.account_name + '; ' + cfg.label + ' pays into ' + cfg.bank_account_name);
+  const open = (await kaXeroList(cfg.org, 'ContactIDs=' + encodeURIComponent(cfg.contact_id) + '&Statuses=AUTHORISED')).filter(i => i.Type === 'ACCREC').map(kaInvRow).filter(i => i.due > 0.004);
+  const byNo = new Map(open.map(i => [i.invoice, i]));
+  const R = kaParseRemittance(body.remittance || '', cfg);
+  if (R.bad.length) problems.push('Line(s) with an invoice but no amount: ' + R.bad.slice(0, 5).join(' | '));
+  let rows = [], proposal = null;
+  if (R.lines.length) {
+    const missing = R.lines.filter(l => !byNo.has(l.invoice)).map(l => l.invoice), other = new Map();
+    for (let i = 0; i < missing.length; i += 40) (await kaXeroList(cfg.org, 'InvoiceNumbers=' + encodeURIComponent(missing.slice(i, i + 40).join(','))))
+      .map(kaInvRow).forEach(x => { if (!other.has(x.invoice) || x.status !== 'DELETED') other.set(x.invoice, x); });
+    rows = R.lines.map(l => { const x = byNo.get(l.invoice), o = other.get(l.invoice);
+      if (x) { const d = ka2(l.amount - x.due);
+        return Object.assign({}, x, { amount: l.amount, dup: !!l.dup, check: Math.abs(d) < 0.005 ? 'match' : d < 0 ? 'part' : 'over', diff: d }); }
+      if (o) return Object.assign({}, o, { amount: l.amount, check: o.status === 'PAID' ? 'paid' : 'closed', diff: null });
+      return { invoice: l.invoice, amount: l.amount, check: 'not_found', diff: null }; });
+    const n = k => rows.filter(r => r.check === k);
+    if (n('not_found').length) problems.push('Not in Xero for ' + cfg.contact_name + ': ' + n('not_found').map(r => r.invoice).join(', '));
+    if (n('paid').length) problems.push('Already paid in Xero: ' + n('paid').map(r => r.invoice).join(', '));
+    if (n('closed').length) problems.push('Not open in Xero (voided / draft): ' + n('closed').map(r => r.invoice + ' ' + r.status).join(', '));
+    if (n('over').length) problems.push('Remittance more than Xero amount due: ' + n('over').map(r => r.invoice + ' (' + r.amount.toFixed(2) + ' vs ' + r.due.toFixed(2) + ')').join(', '));
+    if (rows.some(r => r.dup)) notes.push('An invoice appears twice in the remittance: the amounts were added together');
+    if (n('part').length) notes.push(n('part').length + ' part payment(s): the rest stays open on the invoice');
+  } else {
+    // no remittance: propose. A PO whose open invoices add up to the amount wins; else any subset of open invoices (flag several fits).
+    const cents = Math.round(line.amount * 100), byPo = new Map(); open.forEach(i => { const k = i.po || '(no reference)'; (byPo.get(k) || byPo.set(k, []).get(k)).push(i); });
+    const po = [...byPo.entries()].find(([, a]) => Math.round(a.reduce((s, i) => s + i.due, 0) * 100) === cents);
+    if (po) proposal = { kind: 'po', po: po[0], invoices: po[1], several: false };
+    else {   // invoices within one PO first (oldest PO first), then any open invoices dated before the bank line
+      const tryPool = (pool0, kind, poName) => { const items = pool0.slice().sort((a, b) => b.due - a.due), hit = kaSubset(items, cents); if (!hit) return null;
+        let several = false; for (const i of hit.slice(0, 12)) { if (kaSubset(items, cents, new Set([i]))) { several = true; break; } }
+        return { kind, po: poName || null, invoices: hit.map(i => items[i]), several }; };
+      const groups = [...byPo.entries()].filter(([, a]) => a.reduce((s, i) => s + i.due, 0) * 100 >= cents).sort((a, b) => String(a[1][0].date).localeCompare(String(b[1][0].date)));
+      const hits = groups.map(([k, a]) => tryPool(a, 'po_subset', k)).filter(Boolean);
+      if (hits.length) proposal = Object.assign(hits[0], { several: hits[0].several || hits.length > 1 });
+      else proposal = tryPool(open.filter(i => !i.date || i.date <= line.date), 'subset'); }
+    problems.push('Paste ' + cfg.label + '\'s remittance to post' + (proposal ? ' (the proposal below is a guide only' + (proposal && proposal.several ? ': several sets of invoices add up to this amount' : '') + ')' : ': no set of open invoices adds up to this amount'));
+  }
+  const pay = rows.filter(r => r.check === 'match' || r.check === 'part'), paid = ka2(pay.reduce((s, r) => s + r.amount, 0)), unexplained = ka2(line.amount - paid);
+  if (R.lines.length && unexplained < -0.004) problems.push('The remittance (' + paid.toFixed(2) + ') is more than the bank line (' + line.amount.toFixed(2) + ')');
+  if (R.lines.length && unexplained > 0.004) notes.push(unexplained.toFixed(2) + ' more received than the remittance pays: it stays in ' + cfg.clearing_code + ' ' + cfg.clearing_name + ' as unexplained until it is explained');
+  const pos = [...new Set(pay.map(r => r.po).filter(Boolean))], paidIds = new Set(pay.filter(r => r.check === 'match').map(r => r.invoice_id));
+  const stillOpen = pos.map(p => { const inv = open.filter(i => i.po === p && !paidIds.has(i.invoice_id)).map(i => { const pr = pay.find(x => x.invoice_id === i.invoice_id); return Object.assign({}, i, { due_after: ka2(i.due - (pr ? pr.amount : 0)) }); }).filter(i => i.due_after > 0.004);
+    return { po: p, invoices: inv, due_after: ka2(inv.reduce((s, i) => s + i.due_after, 0)) }; });
+  return { ok: !problems.length && pay.length > 0, problems, notes, cfg: kaPublic(cfg), line, rows, proposal, totals: { remittance: ka2(R.lines.reduce((s, l) => s + l.amount, 0)), paid, bank: line.amount, unexplained },
+    still_open: stillOpen, open_count: open.length, open_due: ka2(open.reduce((s, i) => s + i.due, 0)), sandbox: IS_SANDBOX, _cfg: cfg, _pay: pay };
+}
+const kaStrip = p => { const o = Object.assign({}, p); delete o._cfg; delete o._pay; return o; };
+app.get('/api/accounts/ka-receipts', async (req, res) => {
+  try { let cfgs, runs = [];
+    try { cfgs = await kaConfig(req.query.fresh === '1'); } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, migrated: false, accounts: [], runs: [] }); throw e; }
+    runs = (await pool.query(`SELECT id, ka_key, org, account_name, to_char(line_date,'YYYY-MM-DD') line_date, line_amount::float8 amount, line_ref reference, paid_total::float8 paid, unexplained::float8 unexplained,
+        jsonb_array_length(payments) n_invoices, xero_receive_id, xero_batch_id, status, error, created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at
+      FROM planner.accounts_ka_receipts WHERE status IN ('creating','receive_done','created') OR created_at > now() - interval '30 days' ORDER BY id DESC LIMIT 200`)).rows;
+    // clearing view: per key account, what HORIZON put into the clearing account and did not pay out (posted runs only, not dry runs)
+    const clearing = cfgs.map(c => { const rs = runs.filter(r => r.ka_key === c.ka_key && r.status === 'created');
+      return { ka_key: c.ka_key, code: c.clearing_code, name: c.clearing_name, unexplained: ka2(rs.reduce((s, r) => s + r.unexplained, 0)), items: rs.filter(r => Math.abs(r.unexplained) > 0.004) }; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, migrated: true, sandbox: IS_SANDBOX, accounts: cfgs.map(kaPublic), runs, clearing });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/ka-receipts/check', async (req, res) => {
+  try { res.json(kaStrip(await kaPlan(req.body || {}))); }
+  catch (e) { if (e.status !== 400) log500(e); res.status(e.status || (e.code === 429 ? 429 : 500)).json({ error: e.message }); }
+});
+// Body: { ka, line: { account_name, date, amount, reference }, remittance, confirm: true }. LIVE: (a) Receive Money, (b) batch payment.
+// The run row is written first (unique per bank line); a post that stopped after (a) resumes at (b). Sandbox: dry run (no Xero writes).
+app.post('/api/accounts/ka-receipts/post', async (req, res) => {
+  const b = req.body || {}; if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero' });
+  let row = null;
+  try {
+    const P = await kaPlan(b); if (!P.ok) return res.status(400).json({ error: P.problems.join(' · ') || 'Nothing to pay', problems: P.problems });
+    const C = P._cfg, L = P.line, by = authUser(req) || 'system';
+    const payJson = JSON.stringify(P._pay.map(r => ({ invoice: r.invoice, invoice_id: r.invoice_id, po: r.po, due_before: r.due, amount: r.amount, part: r.check === 'part' })));
+    const remJson = JSON.stringify(P.rows.map(r => ({ invoice: r.invoice, amount: r.amount })));
+    const cur = (await pool.query(`SELECT * FROM planner.accounts_ka_receipts WHERE ka_key=$1 AND org=$2 AND account_name=$3 AND line_date=$4::date AND line_amount=$5 AND line_ref=$6 AND status IN ('creating','receive_done','created')`,
+      [C.ka_key, L.org, L.account_name, L.date, L.amount, L.reference])).rows[0];
+    if (cur && cur.status === 'created') return res.status(409).json({ error: 'Already posted for this bank line (run #' + cur.id + ')' });
+    if (cur && cur.status === 'creating' && Date.now() - new Date(cur.updated_at).getTime() < 120e3) return res.status(409).json({ error: 'This bank line is already being posted' });
+    if (cur && cur.status === 'receive_done' && JSON.stringify(cur.payments) !== JSON.stringify(JSON.parse(payJson))) return res.status(409).json({ error: 'The Receive Money is already in Xero for a different remittance (run #' + cur.id + '): finish that one first' });
+    if (IS_SANDBOX) {   // dry run: store what would be written, never call Xero writes
+      const r = (await pool.query(`INSERT INTO planner.accounts_ka_receipts (ka_key, org, account_name, line_date, line_amount, line_ref, remittance, payments, paid_total, unexplained, status, created_by, error)
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,'dry_run',$11,'sandbox: no Xero writes') RETURNING id`, [C.ka_key, L.org, L.account_name, L.date, L.amount, L.reference, remJson, payJson, P.totals.paid, P.totals.unexplained, by])).rows[0];
+      return res.json({ ok: true, dry_run: true, run_id: r.id, would: kaWould(C, L, P) });
+    }
+    if (cur) { row = cur; await pool.query(`UPDATE planner.accounts_ka_receipts SET updated_at=now(), error=null WHERE id=$1`, [row.id]); }
+    else try { row = (await pool.query(`INSERT INTO planner.accounts_ka_receipts (ka_key, org, account_name, line_date, line_amount, line_ref, remittance, payments, paid_total, unexplained, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11) RETURNING *`, [C.ka_key, L.org, L.account_name, L.date, L.amount, L.reference, remJson, payJson, P.totals.paid, P.totals.unexplained, by])).rows[0]; }
+      catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'This bank line is already being posted or was posted' }); throw e; }
+    const W = kaWould(C, L, P);
+    // (a) Receive Money: the full bank amount into the clearing account, dated the bank line (Xero then suggests it for the statement line)
+    if (!row.xero_receive_id) {
+      const r = await xeroFetch(C.org, '/api.xro/2.0/BankTransactions', { method: 'PUT', body: { BankTransactions: [W.receive] } });
+      const t = r && r.BankTransactions && r.BankTransactions[0]; if (!t || !t.BankTransactionID) throw new Error('Xero did not return the Receive Money');
+      row.xero_receive_id = t.BankTransactionID;
+      await pool.query(`UPDATE planner.accounts_ka_receipts SET xero_receive_id=$2, status='receive_done', updated_at=now() WHERE id=$1`, [row.id, t.BankTransactionID]);
+    }
+    // (b) one batch payment from the clearing account for every remitted invoice
+    const r2 = await xeroFetch(C.org, '/api.xro/2.0/BatchPayments', { method: 'PUT', body: { BatchPayments: [W.batch] } });
+    const bp = r2 && r2.BatchPayments && r2.BatchPayments[0]; if (!bp || !bp.BatchPaymentID) throw new Error('Xero did not return the batch payment (the Receive Money is in: press Post again to finish)');
+    // read-back: each paid invoice's amount due now
+    let readback = null; try { const ids = P._pay.map(p => p.invoice_id), back = [];
+      for (let i = 0; i < ids.length; i += 40) back.push(...(await kaXeroList(C.org, 'IDs=' + ids.slice(i, i + 40).join(','))).map(kaInvRow));
+      readback = P._pay.map(p => { const x = back.find(y => y.invoice_id === p.invoice_id); const want = ka2(p.due - p.amount); return { invoice: p.invoice, due_now: x ? x.due : null, expected: want, ok: !!x && Math.abs(x.due - want) < 0.005 }; });
+    } catch (e) { readback = { error: e.message }; }
+    await pool.query(`UPDATE planner.accounts_ka_receipts SET xero_batch_id=$2, status='created', readback=$3::jsonb, error=null, updated_at=now() WHERE id=$1`, [row.id, bp.BatchPaymentID, JSON.stringify(readback)]);
+    res.json({ ok: true, run_id: row.id, receive: { id: row.xero_receive_id, url: 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + row.xero_receive_id }, batch: { id: bp.BatchPaymentID, n: P._pay.length, total: P.totals.paid },
+      unexplained: P.totals.unexplained, readback });
+  } catch (e) {
+    if (row) await pool.query(`UPDATE planner.accounts_ka_receipts SET status=CASE WHEN xero_receive_id IS NOT NULL THEN 'receive_done' ELSE 'error' END, error=$2, updated_at=now() WHERE id=$1`, [row.id, String(e.message).slice(0, 400)]).catch(() => {});
+    log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message });
+  }
+});
+function kaWould(C, L, P) {
+  const ref = (C.label + ' remittance ' + L.date).slice(0, 255);
+  return {
+    receive: { Type: 'RECEIVE', Contact: { ContactID: C.contact_id }, BankAccount: { AccountID: C.bank_account_id }, Date: L.date, Reference: ref, LineAmountTypes: 'NoTax', Status: 'AUTHORISED',
+      LineItems: [{ Description: (C.label + ' bulk payment ' + L.date + ': ' + P._pay.length + ' invoices per remittance' + (Math.abs(P.totals.unexplained) > 0.004 ? ', ' + P.totals.unexplained.toFixed(2) + ' unexplained' : '') + '. ' + String(L.reference || '')).slice(0, 3900),
+        Quantity: 1, UnitAmount: L.amount, AccountCode: C.clearing_code }] },
+    batch: { Account: { AccountID: C.clearing_account_id }, Date: L.date, Reference: ref, Payments: P._pay.map(p => ({ Invoice: { InvoiceID: p.invoice_id }, Amount: p.amount })) },
+  };
+}
+// Admins: edit a key account's help steps / bank-line match text (the (i) tooltip text).
+app.post('/api/accounts/ka-receipts/config', async (req, res) => {
+  const b = req.body || {}; try {
+    if (b.match_re != null) { try { new RegExp(String(b.match_re), 'i'); } catch (e) { return res.status(400).json({ error: 'Bank-line match is not a valid pattern: ' + e.message }); } }
+    const r = await pool.query(`UPDATE planner.accounts_ka_config SET help=coalesce($2,help), match_re=coalesce($3,match_re), updated_at=now(), updated_by=$4 WHERE ka_key=$1 RETURNING ka_key`,
+      [String(b.ka || '').toUpperCase(), b.help == null ? null : String(b.help).slice(0, 4000), b.match_re == null ? null : String(b.match_re).slice(0, 200), authUser(req) || 'admin']);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Unknown key account' }); _kaCfg.at = 0; res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function accEmailPdf(msgId) {
   const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
