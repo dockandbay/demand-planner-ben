@@ -20492,17 +20492,32 @@ async function invFbaCompare(mkt, rep) {
   const asin2sku = {}, dupAsins = [];
   for (const a in asinSkus) { if (asinSkus[a].length === 1) asin2sku[a] = asinSkus[a][0]; else dupAsins.push(a); }
   const skus = Object.keys(rep);
-  const rows = skus.map(sku => { const r = rep[sku], fba = (r.av || 0) + (r.fc || 0) + (r.rs || 0);   // FBA on-hand = available + fc-transfer + Reserved Staging (Ben)
-    // match by SKU first, else by unambiguous ASIN (Amazon SKU sometimes differs from ours but the ASIN maps)
-    let mSku = (sku in erp) ? sku : null, via = mSku ? 'sku' : null;
-    if (!mSku && r.asin && asin2sku[r.asin.toUpperCase()]) { mSku = asin2sku[r.asin.toUpperCase()]; via = 'asin'; }
-    const e = mSku ? erp[mSku] : null;
-    return { sku, asin: r.asin || '', available: r.av || 0, fc_transfer: r.fc || 0, reserved_staging: r.rs || 0, report_fba: fba, erp_sku: mSku, matched_via: via, erp_fba: e, matched: !!mSku, diff: (e == null ? null : fba - e) }; })
+  // v28.684 (Ben 04-Nov-26, US: "some duplicate rows"): Amazon repeats an ASIN's stock (available / fc-transfer / reserved staging) on
+  // EVERY seller SKU listed against that ASIN (1-ACTIVE-LAR-GREY, CA-ACTIVE-LAR-GREY, US-ACTIVE-LAR-GREY, TOWLF-ESS-LG-GREY-R all 93 in the
+  // US report: the CA-/US- prefixes are listing names, the stock is this marketplace's). So the compare is ONE row per ASIN: stock counted
+  // once (the largest of the repeated figures), our SKU resolved by the product's ASIN first, else a listing SKU that is one of ours; every
+  // Amazon SKU listed in amazon_skus. ERP FBA = all our SKUs found in the group. Report rows with no ASIN stay one row per SKU.
+  const groups = {}, order = [];
+  skus.forEach(sku => { const r = rep[sku], k = r.asin ? 'A:' + r.asin.toUpperCase() : 'S:' + sku;
+    let g = groups[k]; if (!g) { g = groups[k] = { asin: r.asin || '', list: [], av: 0, fc: 0, rs: 0 }; order.push(k); }
+    g.list.push(sku); if ((r.av || 0) + (r.fc || 0) + (r.rs || 0) > g.av + g.fc + g.rs) { g.av = r.av || 0; g.fc = r.fc || 0; g.rs = r.rs || 0; } });
+  const listingTo = {};   // each Amazon SKU -> its compare row (aged table)
+  const rows = order.map(k => { const g = groups[k], fba = g.av + g.fc + g.rs;   // FBA on-hand = available + fc-transfer + Reserved Staging (Ben)
+    const viaAsin = g.asin ? asin2sku[g.asin.toUpperCase()] || null : null;
+    const ours = g.list.filter(x => x in erp), ourInv = ours.filter(x => erp[x] > 0);
+    const mSku = viaAsin || ourInv[0] || ours[0] || null;
+    const via = !mSku ? null : (g.list.indexOf(mSku) >= 0 ? 'sku' : 'asin');
+    const erpSkus = [...new Set([mSku].concat(ours).filter(Boolean))];
+    const e = mSku ? erpSkus.reduce((a, x) => a + (erp[x] || 0), 0) : null;
+    const amazon = g.list.slice().sort((x, y) => (x === mSku ? -1 : y === mSku ? 1 : x.localeCompare(y)));
+    const row = { sku: mSku || amazon[0], amazon_skus: amazon, asin: g.asin, available: g.av, fc_transfer: g.fc, reserved_staging: g.rs, report_fba: fba,
+      erp_sku: mSku, erp_skus: erpSkus, matched_via: via, erp_fba: e, matched: !!mSku, diff: (e == null ? null : fba - e) };
+    g.list.forEach(x => { listingTo[x] = row; }); return row; })
     .sort((a, b) => Math.abs(b.diff || 0) - Math.abs(a.diff || 0));
-  const matchedSkus = new Set(rows.filter(r => r.erp_sku).map(r => r.erp_sku));
+  const matchedSkus = new Set(); rows.forEach(r => (r.erp_skus || []).forEach(x => matchedSkus.add(x)));
   const erp_missing = Object.keys(erp).filter(s => erp[s] > 0 && !matchedSkus.has(s)).map(s => ({ sku: s, erp_fba: erp[s] })).sort((a, b) => b.erp_fba - a.erp_fba);
-  const not_in_erp = rows.filter(r => !r.matched).map(r => ({ sku: r.sku, asin: r.asin, report_fba: r.report_fba }));
-  const bySku = {}; rows.forEach(r => { bySku[r.sku] = r; });   // reuse the SKU-then-ASIN match resolved above
+  const not_in_erp = rows.filter(r => !r.matched).map(r => ({ sku: r.sku, asin: r.asin, report_fba: r.report_fba, amazon_skus: r.amazon_skus }));
+  const bySku = listingTo;   // each Amazon SKU -> its ASIN row (aged keeps one line per listing, matched to our SKU)
   const aged = skus.map(sku => { const r = rep[sku], tot = (r.a1 || 0) + (r.a2 || 0) + (r.a3 || 0) + (r.a4 || 0) + (r.a5 || 0);
     const m = bySku[sku] || {};
     return { sku, asin: r.asin || '', erp_sku: m.erp_sku || null, matched: !!m.matched, matched_via: m.matched_via || null,

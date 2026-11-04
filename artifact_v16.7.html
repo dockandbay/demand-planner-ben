@@ -16079,7 +16079,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       if(INV_FBA_GAP==='items10')return Math.abs(r.diff)>10;
       if(INV_FBA_GAP==='pct20')return (r.erp_fba>0)?(Math.abs(r.diff)/r.erp_fba>0.20):(r.report_fba>0); return true; }
     var _qf=String(INV_FBA_Q||'').trim().toLowerCase();
-    var fr=(INV_FBA_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap)).filter(function(r){ return !_qf || (String(r.erp_sku||'')+' '+String(r.sku||'')+' '+String(r.asin||'')).toLowerCase().indexOf(_qf)>=0; });
+    var fr=(INV_FBA_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap)).filter(function(r){ return !_qf || (String(r.erp_sku||'')+' '+String(r.sku||'')+' '+String(r.asin||'')+' '+(r.amazon_skus||[]).join(' ')).toLowerCase().indexOf(_qf)>=0; });
     var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
       +'<span style="color:var(--pos)"><b>'+j.matched+'</b> matched</span>'
       +'<button class="fba-toggle" data-t="notinerp" style="background:none;border:none;cursor:pointer;color:var(--amber);font-size:12px;padding:0;font-family:inherit"><b>'+j.unmatched+'</b> not in ERP ▾</button>'
@@ -16093,13 +16093,17 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       +'<button id="fba-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding FBA stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete FBA stock" style="background:'+(INV_FBA_DEAD?'var(--neg)':'var(--neg-bg)')+';color:'+(INV_FBA_DEAD?'#fff':'var(--neg)')+';border:1px solid var(--neg);border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'</div>';   // v28.496 (Ben): Cin7 Stocktake button removed (Cin7 retired; Fulfil is the ERP)
-    var H=['SKU','ASIN','Available','FC-transfer','Reserved staging','FBA report (avail+fc+staging)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
+    var H=['SKU','Amazon SKUs','ASIN','Available','FC-transfer','Reserved staging','FBA report (avail+fc+staging)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--hover);white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
     var dc=function(d,note){ var c=(d==null?'var(--faint)':(d>0?'var(--pos)':(d===0?'var(--pos)':'var(--neg)'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600;white-space:normal">'+(d==null?'—':(d>0?'+':'')+d)+(note||'')+'</td>'; };   // positive diff (report > ERP) shown green — likely stock received but not yet registered in ERP; note sits under the number
-    var trs=fr.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span class="mut" style="font-size:10px;color:var(--blue)">→ '+tHesc(r.erp_sku)+' (via ASIN)</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
+    // v28.684 (Ben): one row per ASIN. SKU = ours (by the product's ASIN, else a listing that is one of our SKUs); every Amazon seller SKU
+    // on that ASIN in its own column (Amazon repeats the ASIN's stock on each listing, so they were duplicate rows)
+    var trs=fr.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span title="matched by ASIN: no Amazon listing uses this SKU" style="font-size:9px;background:var(--blue-soft);color:var(--blue-ink);padding:0 4px;border-radius:3px">via ASIN</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
+      var ex=(r.erp_skus||[]).filter(function(x){ return x!==r.erp_sku; }), az=(r.amazon_skus||[r.sku]).filter(function(x){ return x!==r.sku; });
       return '<tr'+(!r.matched?' style="background:var(--amber-bg)"':'')+'>'
-      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+'</td>'
+      +'<td style="padding:4px 10px;text-align:left;white-space:nowrap">'+tHesc(r.sku)+note+(ex.length?'<div class="mut" style="font-size:10px">+ ERP '+tHesc(ex.join(', '))+'</div>':'')+'</td>'
+      +'<td style="padding:4px 10px;text-align:left;font-size:11px;color:var(--muted)">'+(az.length?tHesc(az.join(', ')):'—')+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+tHesc(r.asin||'—')+'</td>'
       +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td><td style="padding:4px 10px;text-align:left">'+(r.reserved_staging||0)+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff,(r.diff>0)?_recentPoNote(r.recent_pos):'')+'</tr>'; }).join('');
