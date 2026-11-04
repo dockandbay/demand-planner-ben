@@ -2246,6 +2246,9 @@ const CUR_DAYS=(function(){
 const BUY_KEYS=AFTER20?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
 const BUY_LBL=AFTER20?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
+// v28.693 (Ben: "on urgent buy, would like to add a snooze feature 30 days or indefinite ... in top section a show snoozed toggle"): snoozed urgents per SKU|market
+let URG_SNZ={}, BU_SHOW_SNZ=false, _urgSnzReq=false;
+function urgSnzLoad(){ _urgSnzReq=true; fetch('/api/supply/urgent-snoozes',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(L){ URG_SNZ={}; (Array.isArray(L)?L:[]).forEach(function(x){ URG_SNZ[x.sku+'|'+x.market]={until:x.until||null,by:x.snoozed_by||''}; }); try{ buildBuPills(); render(); }catch(e){} }).catch(function(){}); }
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL',RW_SEL='ALL';   // RW_SEL = Release Window filter (BUY/FBA)
 let FBA_CARTON_MODE='FULL';  // FBA transfer sizing (default FULL = whole cartons, per the agreed rules): 'FULL' = whole cartons only | 'ANY' = full shortfall, no rounding | 'PARTIAL' = raw shortfall with floor
 var BP_CAT_COLLAPSED={};   // v27.673 Buy v2 slice 2: collapsed category sections (per-category, persists across re-renders). Display-only.
@@ -2303,7 +2306,28 @@ function urgentLeadText(p){
   return prod+'wk rush production + '+ship;
 }
 // Compute buy qtys for a SKU+market (sum over BUY_KEYS)
-function getBuyQtys(sku,mkt){
+function urgCellHtml(sku,v,snz,until,tip,col){   // v28.693: urgent cell; click = snooze menu
+  if(v>0)return `<td class="bq urg-c${tip?' tip120':''}"${tip?` data-tip="${tip} · click to snooze"`:''} data-sku="${sku}" data-q="${v}" style="cursor:pointer"><span class="bq-v" style="color:${col};font-weight:700">${fmt(v)}</span></td>`;
+  if(snz>0&&BU_SHOW_SNZ)return `<td class="bq urg-c" data-sku="${sku}" data-q="${snz}" data-snz="1" style="cursor:pointer" title="Snoozed ${until?'until '+fmtD(until):'indefinitely'} · click to change"><span style="color:var(--muted);text-decoration:line-through">${fmt(snz)}</span> <span style="font-size:10px">💤</span></td>`;
+  return `<td class="bq"><span class="bq-nil">—</span></td>`; }
+function fmtD(iso){ try{ var d=new Date(iso+'T12:00:00'); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-'); }catch(e){ return iso; } }
+if(!window.__urgSnzWired){ window.__urgSnzWired=1;
+  document.addEventListener('click',function(e){ var c=e.target&&e.target.closest&&e.target.closest('.urg-c'); var old=document.getElementById('urg-snz-menu');
+    if(old&&!(e.target.closest&&e.target.closest('#urg-snz-menu')))old.remove(); if(!c)return; e.stopPropagation();
+    var sku=c.dataset.sku, q=Number(c.dataset.q)||0, key=sku+'|'+CUR, z=URG_SNZ[key], r=c.getBoundingClientRect();
+    var m=document.createElement('div'); m.id='urg-snz-menu'; m.style.cssText='position:fixed;z-index:9000;left:'+Math.min(r.left,window.innerWidth-260)+'px;top:'+(r.bottom+4)+'px;width:240px;background:var(--card,#fff);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(15,23,42,.2);padding:8px;font-size:12px;text-align:left';
+    var b=function(k,t){ return '<button data-k="'+k+'" style="display:block;width:100%;text-align:left;padding:7px 9px;border:0;background:none;border-radius:6px;cursor:pointer;font:inherit;color:var(--ink)">'+t+'</button>'; };
+    m.innerHTML='<div style="font-weight:700;margin:2px 4px 6px">'+sku+' · '+CUR+' urgent '+fmt(q)+'</div>'+(z?'<div class="mut" style="margin:0 4px 6px">💤 Snoozed '+(z.until?'until '+fmtD(z.until):'indefinitely')+(z.by?' by '+String(z.by).split('@')[0]:'')+'</div>':'')
+      +b('30','💤 Snooze 30 days')+b('inf','💤 Snooze indefinitely')+(z?b('wake','⏰ Wake (show the urgent again)'):'');
+    document.body.appendChild(m);
+    m.querySelectorAll('button').forEach(function(x){ x.onmouseenter=function(){ x.style.background='var(--hover)'; }; x.onmouseleave=function(){ x.style.background='none'; };
+      x.onclick=function(ev){ ev.stopPropagation(); var k=x.dataset.k, body={sku:sku,market:CUR}; if(k==='wake')body.clear=true; else { body.days=k==='30'?30:null; body.urgent_qty=q; }
+        x.textContent='Saving…'; fetch('/api/supply/urgent-snooze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.json(); }).then(function(j){ m.remove();
+          if(j&&j.error){ alert(j.error); return; } if(k==='wake')delete URG_SNZ[key]; else URG_SNZ[key]={until:j.until||null,by:''}; buildBuPills(); render(); }).catch(function(){ m.remove(); }); }; }); }, true); }
+function getBuyQtys(sku,mkt){ var r=_getBuyQtysRaw(sku,mkt), z=URG_SNZ[sku+'|'+mkt];   // v28.693: a snoozed urgent is 0 everywhere (grid, filters, totals, POs, feed); snzU keeps it for "Show snoozed"
+  if(!z||!(r.b3u>0))return r;
+  return Object.assign({},r,{b3u:0,b3uSea:0,b3uAir:0,snzU:r.b3u,snzSea:r.b3uSea,snzAir:r.b3uAir,snzUntil:z.until,snzBy:z.by}); }
+function _getBuyQtysRaw(sku,mkt){
   const cacheKey=sku+'|'+mkt;
   if(BUY_CACHE[cacheKey])return BUY_CACHE[cacheKey];
   const pd=PD[sku];if(!pd){return BUY_CACHE[cacheKey]={b3:0,b3u:0,b3uSea:0,b3uAir:0,bf:0};}
@@ -2842,10 +2866,17 @@ function buildBuPills(){
   BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
     var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
     b.onclick=function(){ BU_SEL=val;
-      bup.querySelectorAll('button').forEach(function(btn){ var a=btn.textContent===lbl; btn.classList.toggle('active',a); btn.style.opacity=a?'1':'.55'; });
+      bup.querySelectorAll('button').forEach(function(btn){ if(btn.dataset.snz)return; var a=btn.textContent===lbl; btn.classList.toggle('active',a); btn.style.opacity=a?'1':'.55'; });
       render(); };
     if(val!==BU_SEL)b.style.opacity='.55';
     bup.appendChild(b); });
+  if(BP_VIEW!=='fba'&&BP_VIEW!=='transfer'){   // v28.693: snoozed urgents are hidden unless this is on
+    if(!_urgSnzReq)urgSnzLoad();
+    var _nz=Object.keys(URG_SNZ).filter(function(k){ return k.slice(-(CUR.length+1))==='|'+CUR; }).length;
+    var tb=mk('button','pill'+(BU_SHOW_SNZ?' active':''),'💤 Show snoozed'+(_nz?' ('+_nz+')':'')); tb.title='Urgent buys snoozed for 30 days or indefinitely (click an urgent cell to snooze or wake it)';
+    if(!BU_SHOW_SNZ)tb.style.opacity='.55'; tb.style.marginLeft='8px'; tb.dataset.snz='1';
+    tb.onclick=function(){ BU_SHOW_SNZ=!BU_SHOW_SNZ; buildBuPills(); render(); };
+    bup.appendChild(tb); }
 }
 function initUI(skipRender){
   const cp=document.getElementById('ctr');
@@ -3054,9 +3085,9 @@ function render(){
         var _md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[CUR]; var _wk=_md?fbaFwdDemand(_md,3)/13:0;   // avg weekly FBA demand (next 90 days)
         var _cov=_wk>0?((_md['if_']||0)+(_md.oof||0))/_wk:Infinity;   // FBA on-hand + inbound, in weeks
         if(!(_cov<3))return false; }
-      if(BU_SEL==='URGENT'&&!bq.b3u)return false;
-      if(BU_SEL==='URGENT_SEA'&&!bq.b3uSea)return false;
-      if(BU_SEL==='URGENT_AIR'&&!bq.b3uAir)return false;
+      if(BU_SEL==='URGENT'&&!(bq.b3u||(BU_SHOW_SNZ&&bq.snzU)))return false;
+      if(BU_SEL==='URGENT_SEA'&&!(bq.b3uSea||(BU_SHOW_SNZ&&bq.snzSea)))return false;
+      if(BU_SEL==='URGENT_AIR'&&!(bq.b3uAir||(BU_SHOW_SNZ&&bq.snzAir)))return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;
       // TRANSFER view: filter to rows that have a transfer of the selected class (dual-class rows appear in both).
@@ -3098,7 +3129,7 @@ function render(){
       const i3=md.i3,ifv=md['if_'],oo=md.oo||0;
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
-      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx,buyTip,urgTip}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx,buyTip,urgTip,snzSea,snzAir,snzUntil}=getBuyQtys(s.s,CUR);
           // Transfer cell: classified (Urgent red / Rebalance blue), filtered to the selected pill. donor→recip.
       function trfCellHtml(donor,recip,bd){
         const dash='<td class="bq" style="'+bd+'"><span class="bq-nil">—</span></td>';
@@ -3140,8 +3171,8 @@ function render(){
         ? OTH.map(function(m,i){return outCell(m,i===0);}).join('')+OTH.map(function(m,i){return getInbCell(m,i===0);}).join('')   // TRANSFER: OUTBOUND (CUR→all) then INBOUND (all→CUR)
         : `
         <td class="bq${b3>0&&buyTip?' tip120':''}"${b3>0&&buyTip?` data-tip="${buyTip}"`:''}>${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:var(--blue);margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
-        <td class="bq${b3uSea>0&&urgTip?' tip120':''}"${b3uSea>0&&urgTip?` data-tip="${urgTip}"`:''}>${b3uSea>0?`<span class="bq-v" style="color:var(--pos);font-weight:700">${fmt(b3uSea)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq${b3uAir>0&&urgTip?' tip120':''}"${b3uAir>0&&urgTip?` data-tip="${urgTip}"`:''}>${b3uAir>0?`<span class="bq-v" style="color:var(--neg);font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        ${urgCellHtml(s.s,b3uSea,snzSea,snzUntil,urgTip,'var(--pos)')}
+        ${urgCellHtml(s.s,b3uAir,snzAir,snzUntil,urgTip,'var(--neg)')}
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr" data-scat="${_catEsc}"${_catCol?' style="display:none"':''}>

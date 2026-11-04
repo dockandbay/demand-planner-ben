@@ -1,3 +1,8 @@
+## v28.693 (04-Nov-26) BUY: snooze an Urgent buy for 30 days or indefinitely
+- Ben: "on urgent buy, would like to add a snooze feature 30 days or indefinite. this can be set on click on the cell with a popup. then in top section a show snoozed which can be toggled". Click an Urgent Sea / Air cell: Snooze 30 days, Snooze indefinitely, or Wake. A snoozed urgent counts as 0 everywhere (grid, Urgent filters, category totals, Create Purchase Orders, CSV, the buy plan saved to the server) until it expires or is woken. "💤 Show snoozed (N)" next to the filters shows them struck through with 💤 and the date. Snoozes are per SKU x market and shared by everyone (who and when are stored).
+- Sandbox: with no snoozes the buy plan is identical (Buy 3PL 41,076, Urgent 10,418, Buy FBA 60).
+- MIGRATION 416_buy_urgent_snoozes.sql (new table planner.buy_urgent_snoozes). Apply before the code; without it the toggle shows nothing and snoozing says "needs migration 416".
+
 ## v28.692 (04-Nov-26) BUY plan popup: key-account / preorder figures only in the forecast column
 - Ben (GIFT-BOX-BEAUTY-SEASOIR UK): "key accounts forecast has 300 as actuals and 300 as forecast in the same month ... it should only be forecast". The NEXT key-account forecast (300, ship 01-Nov) showed in both "Actuals Nov 26" and "Remaining Nov 26". Key accounts, Preorder and Preorder & KA now show only in the forecast columns. Display only: the buy maths never read the Actuals column, so buy quantities do not change.
 - No migration.

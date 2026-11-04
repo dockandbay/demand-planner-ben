@@ -8104,6 +8104,24 @@ app.get('/api/supply/crossdock-report', async (req, res) => {
     res.json({ warehouses: XD_WH, rows, expected });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.693 (Ben 04-Nov-26: "on urgent buy, would like to add a snooze feature 30 days or indefinite"): BUY grid urgent snoozes per SKU x market.
+// GET lists the live ones (until NULL = indefinite, or today or later); POST {sku, market, days: 30|null} snoozes, {clear:true} wakes it.
+app.get('/api/supply/urgent-snoozes', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json((await pool.query(`SELECT sku, market, to_char(until,'YYYY-MM-DD') until, urgent_qty, snoozed_by, snoozed_at FROM planner.buy_urgent_snoozes WHERE until IS NULL OR until >= current_date`)).rows); }
+  catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.json([]); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/urgent-snooze', async (req, res) => {
+  const b = req.body || {}, sku = String(b.sku || '').trim(), mkt = String(b.market || '').trim().toUpperCase();
+  if (!sku || !/^(UK|US|EU|AU|CA)$/.test(mkt)) return res.status(400).json({ error: 'sku and market (UK/US/EU/AU/CA) required' });
+  try { const who = authUser(req);
+    if (b.clear) { await pool.query(`DELETE FROM planner.buy_urgent_snoozes WHERE sku=$1 AND market=$2`, [sku, mkt]); return res.json({ ok: true, cleared: true }); }
+    const days = b.days == null ? null : Number(b.days); if (days != null && !(days > 0 && days <= 365)) return res.status(400).json({ error: 'days must be 1 to 365, or empty for indefinite' });
+    const r = await pool.query(`INSERT INTO planner.buy_urgent_snoozes (sku, market, until, urgent_qty, snoozed_by, snoozed_at) VALUES ($1,$2, CASE WHEN $3::int IS NULL THEN NULL ELSE current_date + $3::int END, $4, $5, now())
+        ON CONFLICT (sku, market) DO UPDATE SET until=excluded.until, urgent_qty=excluded.urgent_qty, snoozed_by=excluded.snoozed_by, snoozed_at=now() RETURNING to_char(until,'YYYY-MM-DD') until`,
+      [sku, mkt, days, Number.isFinite(Number(b.urgent_qty)) ? Math.round(Number(b.urgent_qty)) : null, who || null]);
+    res.json({ ok: true, until: r.rows[0].until });
+  } catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.status(503).json({ error: 'Snoozing needs migration 416' }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/crossdock-note', async (req, res) => {
   const b = req.body || {}, wh = (b.warehouse || '').trim(), sku = (b.sku || '').trim();
   if (!wh || !sku) return res.status(400).json({ error: 'warehouse + sku required' });
