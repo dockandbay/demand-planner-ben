@@ -10694,7 +10694,7 @@ function openDemandPlanPopup(sku){
     if(typeof SKUM!=='undefined'&&SKUM[sku]&&SKUM[sku].vt==='SET'){ openSetPlanChooser(sku); return; }   // sets → component chooser (no buy plan of their own)
     // When opened from the DEMAND plan, pop the buy-plan detail as a modal only — don't leave the user on the
     // buy grid the scaffold builds behind it. Register a one-shot restore that re-renders the plan on close.
-    if(VIEW_MODE==='planning'){ window._onPlanPopupClose=function(){ try{ if(VIEW_MODE==='planning')render(); }catch(e){} }; }
+    if(VIEW_MODE==='planning'){ window._onPlanPopupClose=function(){ try{ var _tw=document.getElementById('tw'); if(VIEW_MODE==='planning'&&(!_tw||_tw.style.display==='none'))render(); }catch(e){} }; }   /* v28.726: the scaffold is invisible and leaves the plan table in place, so closing no longer re-renders the whole plan (49.7s hang, 04-Nov) unless the table was hidden */
     if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();
     if(window.BP){ try{ BP.CUR=CUR; }catch(e){} }
     if(!document.getElementById('ov')){ window._onPlanPopupClose=null; return; }

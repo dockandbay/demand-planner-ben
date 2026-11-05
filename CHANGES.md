@@ -1,3 +1,7 @@
+## v28.726 (05-Nov-26) DEMAND plan: closing the Plan popup no longer re-renders the whole plan
+- App health 04-Nov-26 09:25: closing the buy-plan popup (the X) on #/demand/plan blocked the page for 49.7 s (Kathryn, v28.688). The popup's hidden scaffold leaves the plan table in place, but the close re-rendered the entire plan. Now it only re-renders when the plan table was actually hidden.
+- Files: artifact_v16.7.html. No migration, no env vars, no new cron routes.
+
 ## v28.725 (05-Nov-26) Supplier portal: TIMELINE shows the PO grid's master data; invoice action follows Dock & Bay's process
 - Ben 05-Nov-26: (1) the PO drawer TIMELINE shows every grid column (same row, same calculations; production status and completion date stay the editable, synced fields). (2) No "submit your invoice" action when admin has the final invoice amount and final payment due date; a Shipped PO always has the action (unless submitted).
 - Portal PO SQL: + final_payment_due (balance_due_date_overide).
