@@ -1,3 +1,8 @@
+## v28.725 (05-Nov-26) Supplier portal: TIMELINE shows the PO grid's master data; invoice action follows Dock & Bay's process
+- Ben 05-Nov-26: (1) the PO drawer TIMELINE shows every grid column (same row, same calculations; production status and completion date stay the editable, synced fields). (2) No "submit your invoice" action when admin has the final invoice amount and final payment due date; a Shipped PO always has the action (unless submitted).
+- Portal PO SQL: + final_payment_due (balance_due_date_overide).
+- Files: supply/portal-view.js, server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.724 (05-Nov-26) Bank sync log: real before / removed counts (the "461 cleared" was every reconciled change Xero reported)
 - Ben 05-Nov-26: "the list shouldn't clear from 461 to 8". 461 was the number of reconciled / voided items Xero reported as changed since the last good run (14-Oct), most never on the list. The log now says: was N, X new / changed, Y reconciled in Xero (actually removed), Z older than the look-back.
 - Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.

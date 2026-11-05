@@ -30367,6 +30367,7 @@ const POS_SQL_PORTAL = `
     to_char(eff_ship,'YYYY-MM-DD') ship,
     flexport_reference, flex_id,
     round(supplier_invoice_total,2) final_invoice, round(val,2) value_used,
+    to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- v28.725: admin's final payment due date (with final_invoice = Dock & Bay's invoice process is complete)
     start_paid start_dep,
     CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
     CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,

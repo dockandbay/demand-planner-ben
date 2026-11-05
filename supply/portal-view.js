@@ -1355,6 +1355,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       var _pn=parseInt(p.prod_no,10); if(isFinite(_pn) && _pn<57) return false;   // invoices are only required from production 57 onward — 56 and earlier don't need one
       if(/future/i.test(p.status||'')) return false;
       if(subsArr.some(function(s){return s.kind==='invoice_value';})) return false;
+      // v28.725 (Ben 05-Nov-26): "no action for supplier to send invoice if the final invoice [amount] and final invoice date is in admin, this means our process
+      // is complete ... but if order is shipped they have an action to submit invoice for sure"
+      if(p.final_invoice!=null&&p.final_invoice!==''&&Number(p.final_invoice)>0&&p.final_payment_due) return false;
+      if(String(p.production_status||'').toLowerCase()==='shipped') return true;
       var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // latest supplier-submitted production end
       var effEnd = supEnd || p.prod_end || '';
       if(!effEnd) return false;   // no production end date (supplier or calculated) → nothing to invoice against yet
@@ -1539,7 +1543,23 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       // escalate is only offered on the supplier's OWN latest message (it emails Dock & Bay) — never on a D&B note
       var _supNotes=(notes||[]).filter(function(n){return n.author_kind!=='internal';});
       var _recentSupNoteId=_supNotes.length?_supNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var timeline=confirmBar+prodBlock
+      // v28.725 (Ben 05-Nov-26: "on TIMELINE add all missing master data which is from the PO grid, they should be bound"): the grid's other columns, from the
+      // same PO row and the same calculations as the grid (production status and completion date above stay the editable, synced fields)
+      var masterBlock=(function(){ var _sa=(p.start_assigned!=null?p.start_assigned:p.start_dep), _ca=(p.completion_assigned!=null?p.completion_assigned:p.completion);
+        var _paid=(p.start_date?Number(_sa)||0:0)+(p.completion_date?Number(_ca)||0:0)+(p.balance_1_date?Number(p.balance_1_amount)||0:0), _due=(p.value_used!=null?Number(p.value_used)-_paid:null);
+        var pay=function(a,d){ return (typeof ppPay==='function')?ppPay(a,d):(d?CUR+money(a||0)+' <span class="mut tiny">'+esc(fd(d))+'</span>':'<span class="mut">—</span>'); };
+        var dash='<span class="mut">—</span>', F=[
+          ['P#', p.prod_no?esc(p.prod_no):dash], ['Status', '<span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span class="tiny" style="color:var(--violet)">FOB</span>':'')],
+          ['Ship to country', p.country?esc(p.country):dash], ['Ship to branch', p.branch?esc(p.branch):dash],
+          ['Direct to client', p.client?esc(p.client)+(p.sales_order_ref?' <span class="mut">'+esc(p.sales_order_ref)+'</span>':''):dash],
+          ['Start', dcell(p.prod_start)], ['Est. completion', dcell(p.prod_end)],
+          ['Ship', dcell(p.ship)+(p.required_intake?' <span class="tiny" style="color:var(--amber,#b45309);font-weight:700">need by '+esc(fd(p.required_intake))+'</span>':'')],
+          ['Flexport', (p.flexport_reference||p.flex_id)?esc(p.flexport_reference||p.flex_id):dash], ['Ships with', p.ships_with?esc(p.ships_with):dash],
+          ['Start deposit', pay(_sa, p.start_date)], ['Completion', pay(_ca, p.completion_date)], ['Balance', pay(p.balance_1_amount, p.balance_1_date)],
+          ['Amount due', _due!=null?CUR+money(_due):dash], ['Due', dcell(p.balance_due)], ['Deposit ref', p.deposit_ref?esc(p.deposit_ref):dash]];
+        return '<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--hover);border:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 16px">'
+          +F.map(function(f){ return '<div><div class="mut tiny">'+f[0]+'</div><div>'+f[1]+'</div></div>'; }).join('')+'</div>'; })();
+      var timeline=confirmBar+prodBlock+masterBlock
         +(pend.length?'<div class="tiny" style="color:var(--amber);margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:var(--pos);margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +'<div style="margin:0 0 8px;display:flex;gap:5px"><textarea class="pp-note-body fci" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" data-po="'+po+'" rows="1" placeholder="Reply to Dock &amp; Bay…" style="flex:1;min-height:26px;max-width:420px;text-align:left"></textarea><button class="save-btn pp-note-post" data-po="'+po+'">Post</button></div>'
