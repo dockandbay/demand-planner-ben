@@ -1,3 +1,8 @@
+## v28.729 (05-Nov-26) COGS by channel: Build from Fulfil no longer times out
+- Live 05-Nov-26 10:49: "Fulfil read failed: Timed out after 30s calling dockandbay.fulfil.io". The first call (a search_count of the month's GL lines) took over 30 s while Fulfil was busy, so nothing else ran.
+- The build no longer counts first: 6 workers (was 8) page through the lines until a page comes back short. GL lines are filtered by clearing account id (looked up once) instead of a join on the account code. Each Fulfil call allows 60 s and retries once on a timeout. On a 429 (Fulfil request cap) all workers pause together and retry, up to 8 tries; after 250 s the build stops with "Fulfil is limiting requests (429) or slow; try again in a few minutes" instead of being cut off by the 300 s limit.
+- Files: server.mjs. No migration, no env vars, no new cron routes.
+
 ## v28.728 (05-Nov-26) COGS by channel: "Update Xero journals" per org, Replace (repost) option, current month
 - Ben 05-Nov-26: "a button to update journal and choose the month/year ... for a repost of an existing journal or add new if it doesn't exist yet".
 - Month picker now runs from this month back to Oct-26 (default last month).

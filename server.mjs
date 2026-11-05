@@ -7566,18 +7566,37 @@ function cchCogsAcct(ch, seg, cc, map) {
   }
   return [null, 'unmapped'];
 }
-async function cchFulfil(model, meth, body) { return fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/' + model + '/' + meth, body); }
+// v28.729 (live 05-Nov: the month's search_count took over 30 s while Fulfil was busy, then a re-run hit Fulfil's 429 request cap):
+// 60 s per call, one retry on a timeout; on a 429 EVERY worker waits (shared hold), up to 8 tries; the build stops with a clear
+// message once it has run 250 s, before the 300 s function limit
+let _cchHold = 0, _cchDeadline = 0;
+async function cchFulfil(model, meth, body) {
+  const cfg = fulfilConfigFor('live'); if (!cfg || !cfg.configured) { const e = new Error('Fulfil live API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  for (let i = 0, to = 0; ; i++) {
+    if (_cchDeadline && Date.now() > _cchDeadline) throw new Error('Fulfil is limiting requests (429) or slow; try again in a few minutes');
+    const w = _cchHold - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
+    let r; try { r = await _fetchT(cfg.base + '/model/' + model + '/' + meth, { method: 'PUT', headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 60000); }
+    catch (e) { if (e && e.code === 'FETCH_TIMEOUT' && !to++) continue; throw e; }
+    const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
+    if (r.ok) return j;
+    const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); if (r.status !== 429 || i >= 7) throw e;
+    const ra = Number(r.headers.get('retry-after')); _cchHold = Math.max(_cchHold, Date.now() + (ra > 0 ? ra * 1000 : Math.min(20000, 2000 * (i + 1))));
+  } }
 async function cchPool(jobs, C) { const out = new Array(jobs.length); let i = 0;
   await Promise.all(Array.from({ length: Math.min(C || 8, jobs.length) }, async () => { while (i < jobs.length) { const k = i++; out[k] = await jobs[k](); } }));
   return [].concat(...out); }
-async function cchPages(model, filters, fields) {   // Fulfil caps a page at 500 rows; 8 pages at a time (October: 90k GL lines in ~35 s)
-  const n = await cchFulfil(model, 'search_count', { filters }), jobs = [];
-  for (let o = 0; o < n; o += 500) jobs.push(() => cchFulfil(model, 'search_read', { filters, offset: o, limit: 500, order: [['id', 'ASC']], fields }));
-  return cchPool(jobs, 8); }
+// Fulfil caps a page at 500 rows; 6 pages at a time (v28.729, was 8). v28.729: no search_count first; each worker takes
+// the next offset until a page comes back short (ordered by id, so a short page is the end)
+async function cchPages(model, filters, fields) {
+  const out = []; let next = 0, done = false;
+  await Promise.all(Array.from({ length: 6 }, async () => { while (!done) { const o = next; next += 500;
+    const rows = await cchFulfil(model, 'search_read', { filters, offset: o, limit: 500, order: [['id', 'ASC']], fields });
+    out[o / 500] = rows || []; if (!rows || rows.length < 500) done = true; } }));
+  return [].concat(...out.filter(Boolean)); }
 async function cchByIds(model, ids, fields) {
   ids = [...new Set(ids.filter(x => x != null))]; const jobs = [];
   for (let i = 0; i < ids.length; i += 500) { const part = ids.slice(i, i + 500); jobs.push(() => cchFulfil(model, 'search_read', { filters: [['id', 'in', part]], fields })); }
-  const m = {}; (await cchPool(jobs, 8)).forEach(r => { m[r.id] = r; }); return m; }
+  const m = {}; (await cchPool(jobs, 6)).forEach(r => { m[r.id] = r; }); return m; }
 const cchDec = v => (v && typeof v === 'object') ? Number(v.decimal) || 0 : Number(v) || 0;
 const cchRef = (s, mdl) => { s = String(s || ''); return s.startsWith(mdl + ',') ? Number(s.slice(mdl.length + 1)) : null; };
 const cchR2 = x => Math.round(x * 100) / 100;
@@ -7587,9 +7606,11 @@ function cchFix(obj, target) { const r = {}; Object.keys(obj).forEach(k => { r[k
   const ks = Object.keys(r); if (!ks.length) return r; const diff = cchR2(target - ks.reduce((a, k) => a + r[k], 0));
   if (diff) { const big = ks.reduce((a, k) => Math.abs(r[k]) > Math.abs(r[a]) ? k : a, ks[0]); r[big] = cchR2(r[big] + diff); } return r; }
 async function cchBuild(month) {
-  const t0 = Date.now(), start = month + '-01', end = cchMonthEnd(month);
+  const t0 = Date.now(), start = month + '-01', end = cchMonthEnd(month); _cchDeadline = t0 + 250000;
   const map = cpJson(await cpSetting('cogs_channel_map', '{}'), {}) || {};
-  const lines = await cchPages('account.move.line', [['date', '>=', start], ['date', '<=', end], ['account.code', 'in', CCH_ACC], ['move.state', '=', 'posted']],
+  const accIds = (await cchFulfil('account.account', 'search_read', { filters: [['code', 'in', CCH_ACC]], fields: ['id'] }) || []).map(a => a.id);   // v28.729: ids, not a join on account.code
+  if (!accIds.length) throw new Error('clearing accounts ' + CCH_ACC.join(', ') + ' not found in Fulfil');
+  const lines = await cchPages('account.move.line', [['date', '>=', start], ['date', '<=', end], ['account', 'in', accIds], ['move.state', '=', 'posted']],
     ['origin', 'move.origin', 'debit', 'credit', 'account.code', 'account.company', 'product.code', 'party.rec_name']);
   const il = await cchByIds('account.invoice.line', lines.map(l => cchRef(l.origin, 'account.invoice.line')), ['origin', 'invoice', 'product.code']);
   const sl = await cchByIds('sale.line', Object.values(il).map(x => cchRef(x.origin, 'sale.line')),
@@ -7656,7 +7677,7 @@ async function cchStore(b, by) { b.built_by = by;
 async function cchLoad(month) { const v = await cpSetting('cogs_ch:' + month, ''); return v ? cpJson(v, null) : null; }
 const _cchBusy = {};   // per-instance: a build in flight per month (a second press waits for it)
 async function cchBuildStore(month, by) { if (_cchBusy[month]) return _cchBusy[month];
-  _cchBusy[month] = (async () => { try { return await cchStore(await cchBuild(month), by); } finally { delete _cchBusy[month]; } })(); return _cchBusy[month]; }
+  _cchBusy[month] = (async () => { try { return await cchStore(await cchBuild(month), by); } finally { delete _cchBusy[month]; _cchDeadline = 0; } })(); return _cchBusy[month]; }
 // ---- Xero: one COGS and one SALES manual journal per org and month. Narration "HORIZON <COGS|SALES> by channel YYYY-MM" (the same narration as
 // the October CSV import, so a later refresh finds a hand-imported journal too). Refresh rules (spec): a DRAFT is rebuilt in place; once
 // POSTED it is never edited, a "top-up" journal carries the difference (UK draft, AU posted).
