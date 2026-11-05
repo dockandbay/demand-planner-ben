@@ -1,3 +1,8 @@
+## v28.719 (05-Nov-26) Legacy commission runs: rows are paid ("approved (legacy)"), not pending
+- Ben 05-Nov-26 (run 333): legacy rows showed PENDING. The rebuild now writes them as paid; a legacy run's paid rows read "approved (legacy)".
+- LIVE DATA (Ben runs it, on his clipboard): UPDATE planner.commission_rows x SET status='paid' FROM planner.commission_runs r WHERE r.id=x.run_id AND r.legacy AND x.status='pending'; (about 8,130 rows).
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.718 (05-Nov-26) Commissions Exceptions: saved per month (opens instantly), Recalculate; agent setup in the list; manual scan folded away
 - Ben 05-Nov-26: the page recalculated (Fulfil + Xero + Faire, ~40 s) on every open. The full list is saved per month in app_settings cm_checks:<month>; opening reads it (sandbox: 1.3 s vs 37 s). Recalculated after Build / refresh (background), on Sundays (step 4, this and last month) and with Recalculate.
 - Agent currency not confirmed / no Xero group or Fulfil code are rows in the list (pill Agent setup). The manual missed-commission scan is a collapsed box.

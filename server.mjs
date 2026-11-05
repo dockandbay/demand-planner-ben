@@ -35115,7 +35115,7 @@ async function cmLegacyRebuild(through, by) {
     const R = []; G2.forEach(grp => grp.rows.forEach(h => R.push({ run: idOf[grp.g.id + '|' + grp.m], ccy: grp.ccy, h })));
     for (let i = 0; i < R.length; i += 2000) { const ch = R.slice(i, i + 2000);
       await c.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, invoice_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note, source, currency, history_id)
-        SELECT u.run, u.po, u.inv, u.cust, u.idate, u.idate, u.comm, u.rate, u.due, u.cn, 0, u.due, u.pc, 'pending', u.note, 'paid history (legacy)', u.ccy, u.hid
+        SELECT u.run, u.po, u.inv, u.cust, u.idate, u.idate, u.comm, u.rate, u.due, u.cn, 0, u.due, u.pc, 'paid', u.note, 'paid history (legacy)', u.ccy, u.hid
         FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::date[], $6::numeric[], $7::numeric[], $8::numeric[], $9::text[], $10::text[], $11::text[], $12::text[], $13::bigint[]) u(run, po, inv, cust, idate, comm, rate, due, cn, pc, note, ccy, hid)`,
         [ch.map(x => x.run), ch.map(x => x.h.po_no || null), ch.map(x => x.h.invoice_no || null), ch.map(x => x.h.customer || null), ch.map(x => x.h.invoice_date || null), ch.map(x => x.h.commissionable == null ? 0 : x.h.commissionable),
           ch.map(x => x.h.rate_pct == null ? 0 : x.h.rate_pct), ch.map(x => Number(x.h.commission_due) || 0), ch.map(x => x.h.credit_note || null), ch.map(x => x.h.payment_code || null), ch.map(x => x.h.notes || null), ch.map(x => x.ccy), ch.map(x => x.h.id)]);
