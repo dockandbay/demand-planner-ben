@@ -1,3 +1,10 @@
+## v28.710 (05-Nov-26) Commissions: adjustments from Paid history (agent / amount, with reason) + Adjustments log
+- Paid history ▸ Adjust (column 1): change the agent and / or the commissionable / commission amount, reason required, preview of each impact before saving.
+- Agent change = negative row on the old agent + positive row on the new agent; amount change = the difference. Into the agent's draft run (this month, else the next draft month; made if absent). Build / refresh keeps them.
+- Commissions ▸ Adjustments: log of every adjustment (who, when, reason, impact, run, state) with Cancel while the run is a draft.
+- MIGRATION 420_commission_adjustments.sql (planner.commission_adjustments). Paid history still loads before it.
+- Files: server.mjs, supply/inject.html, migrations/420_commission_adjustments.sql, lib/ai-logic/supply-finance.md. No env vars, no new cron routes.
+
 ## v28.709 (05-Nov-26) Commissions: legacy runs from paid history (to Sep-26), Open run from paid history, statement From mailbox
 - Legacy runs: POST /api/client/commission/runs/legacy-rebuild { confirm: true, through: '2026-09' } (admin; button on Paid history). One Approved read-only run per agent and month from paid history, badge "Created from paid history · legacy process". Replaces the 6 OPEN Sep-26 runs on live (built 22-Oct, never approved). Sandbox: 307 runs, 8,077 rows in 18 s; KEENA (72 rows, 2022) is on no agent and is left out.
 - Read-only guard on legacy runs: row edit, status, Xero bill, statement email, Fulfil push all refused (409).

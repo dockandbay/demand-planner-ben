@@ -23350,13 +23350,13 @@
       if(/^\d+$/.test(_pi)){ S.tab='run'; S.run=_pi; } else { S.tab=_pi; if(_pi==='run'&&/^\d+$/.test(_pt))S.run=_pt; } }
     var money=function(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     // v28.331 (Ben): Commissions is the WORK only. Agent settings, customers and customer rates moved to the client record (CLIENT ▸ Clients ▸ <agent>).
-    var TABS=[['orders','Orders'],['unassigned','Unassigned'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history']];   // v28.425 (Ben): Import data separate from Monthly run & bills
+    var TABS=[['orders','Orders'],['unassigned','Unassigned'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history'],['adjustments','Adjustments']];   // v28.710: + Adjustments log   // v28.425 (Ben): Import data separate from Monthly run & bills
     S.tab=({report:'run',overrides:'orders',agents:'orders',customers:'exceptions',rates:'orders'})[S.tab]||S.tab; if(!TABS.some(function(t){ return t[0]===S.tab; }))S.tab='orders';
     try{ if(CLIENT_SUB==='commission')writeHash(['client','commission',S.tab].concat(S.tab==='run'&&S.run?[String(S.run)]:[])); }catch(e){}
     b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===S.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="comm-body"><div class="count">Loading…</div></div>';
     b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ S.tab=x.dataset.t; if(S.tab!=='run')S.run=null; cpRenderCommission(b); }; });
     var box=document.getElementById('comm-body');
-    if(S.tab==='orders') commOrders(); else if(S.tab==='unassigned') commUnassigned(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else commReport();
+    if(S.tab==='orders') commOrders(); else if(S.tab==='unassigned') commUnassigned(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else if(S.tab==='adjustments') commAdjustments(); else commReport();
     var CUR3=['USD','EUR','GBP','CAD','AUD'];
     // ── Exceptions (v28.331): what needs a person before a run is right. Stage 2 adds the order-level ones (no agent, Fulfil code vs Xero group, Faire). ──
     // ── Unassigned (v28.442, Ben 22-Oct-26): paid wholesale orders with no agent, with the agent a rule says it could be (CLIENT ▸ Config ▸ Agent rules).
@@ -23595,6 +23595,60 @@
     // and period pills with live counts, instant search (highlighted; "/" focuses it), Year and Currency filters (dark when set), one flat grid
     // sorted by clicking a header (Month newest first by default), totals per currency, Summary drawer (by agent, by month).
     var CPH_D=null, CPH_AT=0;
+    // v28.710 (Ben 05-Nov-26): adjust a paid history line: another agent and / or another amount, with a reason. Preview shows each impact
+    // (a negative row on the old agent and a positive one on the new agent, or the difference) and the draft run it goes into.
+    function cmAdjDrawer(h, done){
+      var old=document.getElementById('cm-adj-dr'); if(old)old.remove();
+      var dr=document.createElement('div'); dr.id='cm-adj-dr';
+      dr.style.cssText='position:fixed;top:0;right:0;bottom:0;width:min(620px,100vw);background:var(--surface,#fff);box-shadow:-8px 0 24px rgba(0,0,0,.18);z-index:9000;display:flex;flex-direction:column';
+      var money=function(n,c){ return (c?c+' ':'')+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      dr.innerHTML='<div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:14px">Adjust commission · '+esc(h.invoice_no||h.po_no||'')+'</b><span style="flex:1"></span><button class="lnk-btn" id="cma-x" style="font-size:18px">✕</button></div>'
+        +'<div style="padding:12px 16px;overflow:auto;flex:1;font-size:12px">'
+        +'<div class="mut" style="margin-bottom:10px">'+esc(cphMl(h.period))+' · '+esc(h.customer||'')+' · paid to <b>'+esc(cmShort(h.rep_group||''))+'</b>: commissionable '+money(h.comm,h.ccy)+' · commission '+money(h.paid,h.ccy)+'</div>'
+        +'<div style="display:grid;grid-template-columns:130px 1fr;gap:8px 10px;align-items:center">'
+        +'<span class="mut">Agent</span><select id="cma-agent"><option value="">Loading…</option></select>'
+        +'<span class="mut">Commissionable</span><input id="cma-ca" type="number" step="0.01" value="'+esc(h.comm==null?'':h.comm)+'" style="width:140px">'
+        +'<span class="mut">Commission</span><input id="cma-co" type="number" step="0.01" value="'+esc(h.paid==null?'':h.paid)+'" style="width:140px">'
+        +'<span class="mut" style="align-self:start;padding-top:4px">Reason</span><textarea id="cma-why" rows="3" style="width:100%" placeholder="Required: why this is being corrected (shown on the statements)"></textarea>'
+        +'</div><div class="mut" style="font-size:11px;margin:14px 0 4px">What this does</div><div id="cma-imp" class="mut">…</div></div>'
+        +'<div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border)"><span id="cma-msg" style="font-size:12px;flex:1"></span><button class="save-btn light" id="cma-cancel">Cancel</button><button class="save-btn" id="cma-save" disabled>Save adjustment</button></div>';
+      document.body.appendChild(dr);
+      var $=function(x){ return dr.querySelector(x); }, t=null, seq=0, ok=false;
+      cpGet('/api/client/commission/groups').then(function(d){ var cur=(d.groups||[]).filter(function(g){ return String(g.name).trim().toLowerCase()===String(h.rep_group||'').trim().toLowerCase(); })[0];
+        $('#cma-agent').innerHTML=(d.groups||[]).filter(function(g){ return g.active||(cur&&g.id===cur.id); }).map(function(g){ return '<option value="'+g.id+'"'+(cur&&g.id===cur.id?' selected':'')+'>'+esc(cmShort(g.name))+(cur&&g.id===cur.id?' (as paid)':'')+'</option>'; }).join(''); load(); }).catch(function(e){ $('#cma-msg').textContent=e.message; });
+      function body(){ return {history_id:h.id, rep_group_id:$('#cma-agent').value||null, commissionable:$('#cma-ca').value, commission:$('#cma-co').value, reason:$('#cma-why').value}; }
+      function load(){ var my=++seq; ok=false; $('#cma-save').disabled=true;
+        cpPost('/api/client/commission/adjustments',Object.assign(body(),{preview:true})).then(function(j){ if(my!==seq)return; var im=j.impacts||[];
+          $('#cma-imp').innerHTML=(im.length?im.map(function(x){ return '<div style="padding:6px 0;border-bottom:1px solid var(--line2)"><b style="color:'+(x.commission<0?'var(--neg)':'var(--pos)')+'">'+(x.commission>=0?'+':'')+money(x.commission,j.currency)+'</b> on <b>'+esc(cmShort(x.agent))+'</b> in the <b>'+esc(cphMl(x.run_month))+'</b> run'+(x.run_id?'':' (made as a draft)')+' <span class="mut">· '+esc(x.text)+', commissionable '+money(x.commissionable)+'</span></div>'; }).join(''):'<span class="mut">Nothing changes yet: pick another agent or change an amount.</span>')
+            +(j.warning?'<div style="color:var(--amber);margin-top:6px">'+esc(j.warning)+'</div>':'');
+          ok=im.length>0; $('#cma-save').disabled=!(ok&&$('#cma-why').value.trim()); }).catch(function(e){ if(my!==seq)return; $('#cma-imp').innerHTML='<span style="color:var(--neg)">'+esc(e.message)+'</span>'; }); }
+      function later(){ clearTimeout(t); t=setTimeout(load,400); }
+      $('#cma-agent').onchange=load; $('#cma-ca').oninput=later; $('#cma-co').oninput=later; $('#cma-why').oninput=function(){ $('#cma-save').disabled=!(ok&&this.value.trim()); };
+      $('#cma-x').onclick=$('#cma-cancel').onclick=function(){ dr.remove(); };
+      $('#cma-save').onclick=function(){ var btn=this, m=$('#cma-msg'); btn.disabled=true; btn.textContent='Saving…';
+        cpPost('/api/client/commission/adjustments',body()).then(function(j){ m.style.color='var(--pos)'; m.textContent='✓ Saved: '+(j.impacts||[]).map(function(x){ return cmShort(x.agent)+' '+(x.commission>=0?'+':'')+x.commission.toFixed(2)+' in '+cphMl(x.run_month); }).join(', ');
+          setTimeout(function(){ dr.remove(); done&&done(); },1400); })
+        .catch(function(e){ btn.disabled=false; btn.textContent='Save adjustment'; m.style.color='var(--neg)'; m.textContent=e.message; }); };
+    }
+    // v28.710: Adjustments log (who, when, reason, the impact per agent, the run it went into, its state); Cancel while the run is a draft
+    function commAdjustments(){ box.innerHTML='<div class="count">Loading adjustments…</div>';
+      cpGet('/api/client/commission/adjustments').then(function(d){ if(d.missing){ box.innerHTML='<div class="annot">Adjustments need migration 420 (planner.commission_adjustments).</div>'; return; }
+        var R=d.rows||[], money=function(n,c){ return (c?c+' ':'')+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+        var stB=function(s){ var m={'in draft run':['bg-amber','In draft run'],'in review':['bg-blue','In review'],paid:['bg-green','Paid'],cancelled:['bg-neutral','Cancelled']}[s]||['bg-neutral',s]; return '<span class="tool-badge '+m[0]+'">'+m[1]+'</span>'; };
+        var kind=function(r){ return r.kind==='amount'?'Amount: commission '+money(r.old_commission)+' → '+money(r.new_commission):'Agent: '+esc(cmShort(r.from_agent||''))+' → '+esc(cmShort(r.to_agent||'')); };
+        var seen={};
+        box.innerHTML='<div class="tiny mut" style="margin-bottom:8px">Every correction made from Paid history ▸ Adjust: an agent change is a take-back on the old agent and a payment to the new one; an amount change is the difference. Each goes into that agent\'s draft run (this month\'s if still a draft, else next month\'s).</div>'
+          +(R.length?'<div class="tw"><table><thead><tr><th class="l">When</th><th class="l">By</th><th class="l">Order</th><th class="l">Customer</th><th class="l">Paid in</th><th class="l">Change</th><th class="l">Agent</th><th class="l" style="text-align:right">Commission</th><th class="l">Run</th><th class="l">State</th><th class="l">Reason</th><th></th></tr></thead><tbody>'
+          +R.map(function(r){ var first=!seen[r.batch_id]; seen[r.batch_id]=1;
+            return '<tr><td class="l">'+esc(fd(String(r.at||'').slice(0,10)))+' '+esc(String(r.at||'').slice(11,16))+'</td><td class="l">'+esc(String(r.created_by||'').split('@')[0])+'</td><td class="l">'+esc(r.invoice_ref||r.order_ref||'')+'</td><td class="l">'+esc(r.customer||'')+'</td><td class="l">'+esc(cphMl(r.hist_month||''))+'</td><td class="l">'+kind(r)+'</td><td class="l"><b>'+esc(cmShort(r.agent||''))+'</b></td>'
+              +'<td class="l" style="text-align:right;color:'+(Number(r.delta_commission)<0?'var(--neg)':'var(--pos)')+'"><b>'+(Number(r.delta_commission)>=0?'+':'')+money(r.delta_commission,r.currency)+'</b></td>'
+              +'<td class="l">'+(r.run_id?'<a class="cad-run" data-run="'+esc(r.run_id)+'" style="cursor:pointer;color:var(--blue)">'+esc(cphMl(r.run_month||''))+' ▸</a>':'')+'</td><td class="l">'+stB(r.state)+'</td><td class="l" style="max-width:260px">'+esc(r.reason||'')+'</td>'
+              +'<td class="l">'+(first&&r.state==='in draft run'?'<a class="cad-x" data-b="'+esc(r.batch_id)+'" style="cursor:pointer;color:var(--neg)" title="Remove this adjustment (both agents) from the draft runs">Cancel</a>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>'
+          :'<div class="count">No adjustments yet. Make one from Paid history ▸ Adjust.</div>')+'<div id="cad-msg" class="tiny" style="margin-top:6px"></div>';
+        box.querySelectorAll('.cad-run').forEach(function(a){ a.onclick=function(){ S.tab='run'; S.run=a.dataset.run; cpRenderCommission(b); }; });
+        box.querySelectorAll('.cad-x').forEach(function(a){ a.onclick=function(){ var m=document.getElementById('cad-msg'); if(a.dataset.sure!=='1'){ a.dataset.sure='1'; a.textContent='Cancel? click again'; return; }
+          a.textContent='Cancelling…'; cpPost('/api/client/commission/adjustments/'+encodeURIComponent(a.dataset.b)+'/cancel',{}).then(function(){ commAdjustments(); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=e.message; }); }; });
+      }).catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
     function commPaid(){ CPH=window.CPH||(window.CPH={}); var dflt={agent:'',status:'paid',period:'3m',year:'',ccy:'',q:'',sort:'period',dir:-1,month:'',all:false}; Object.keys(dflt).forEach(function(k){ if(CPH[k]==null)CPH[k]=dflt[k]; });
       if(CPH_D&&Date.now()-CPH_AT<120000)return cphDraw();
       box.innerHTML='<div class="count">Loading paid history…</div>';
@@ -23644,7 +23698,8 @@
       var CAP=400, show=CPH.all?SL:SL.slice(0,CAP);
       var stB=function(s){ var m={paid:['bg-green','Paid'],not_paid:['bg-amber','Not paid'],duplicate:['bg-purple','Duplicate'],cancelled:['bg-red','Cancelled']}[s]||['bg-neutral',s||'']; return '<span class="tool-badge '+m[0]+'">'+esc(m[1])+'</span>'; };
       var cell=function(r,c){ var k=c[0];
-        if(k==='run')return r.run_id?'<a class="cph-run" data-run="'+esc(r.run_id)+'" style="cursor:pointer;color:var(--blue);white-space:nowrap" title="Open the monthly run for '+esc(cphMl(r.period))+' · '+esc(cmShort(r.rep_group||''))+'">Open run ▸</a>':'<span class="mut tiny">no run</span>';   /* v28.709 */
+        if(k==='run')return '<span style="white-space:nowrap">'+(r.run_id?'<a class="cph-run" data-run="'+esc(r.run_id)+'" style="cursor:pointer;color:var(--blue)" title="Open the monthly run for '+esc(cphMl(r.period))+' · '+esc(cmShort(r.rep_group||''))+'">Open run ▸</a>':'<span class="mut tiny">no run</span>')
+          +' <a class="cph-adj" data-id="'+esc(r.id)+'" style="cursor:pointer;color:var(--blue);margin-left:6px" title="Correct the agent or the amount of this line (flows into the next draft run)">Adjust</a>'+(r.adj?' <span class="tool-badge bg-purple" title="'+r.adj+' adjustment(s): see Commissions ▸ Adjustments">adjusted</span>':'')+'</span>';   /* v28.709 Open run · v28.710 Adjust */
         if(k==='period')return esc(cphMl(r.period)); if(k==='rep_group')return esc(cmShort(r.rep_group||''));
         if(k==='customer'||k==='invoice_no'||k==='po_no'||k==='credit_note')return hl(r[k]);
         if(k==='invoice_date')return r.invoice_date?esc(hzTrkDate(r.invoice_date)):'';
@@ -23664,6 +23719,7 @@
       box.querySelectorAll('.cph-st').forEach(function(t){ t.onclick=function(){ CPH.status=t.dataset.st; CPH.all=false; go(); }; });
       box.querySelectorAll('.cph-pe').forEach(function(t){ t.onclick=function(){ CPH.period=t.dataset.pe; CPH.month=''; CPH.all=false; go(); }; });
       var mc=box.querySelector('.cph-mclr'); if(mc)mc.onclick=function(){ CPH.month=''; go(); };
+      box.querySelectorAll('.cph-adj').forEach(function(a){ a.onclick=function(){ var row=(CPH_D||[]).filter(function(x){ return String(x.id)===a.dataset.id; })[0]; if(row)cmAdjDrawer(row,function(){ CPH_D=null; cpRenderCommission(b); }); }; });   /* v28.710 */
       box.querySelectorAll('.cph-run').forEach(function(a){ a.onclick=function(){ _cpComm.tab='run'; _cpComm.run=a.dataset.run; cpRenderCommission(b); }; });   /* v28.709: straight to that agent and month's run */
       var lgb=document.getElementById('cph-legacy'); if(lgb)lgb.onclick=function(){ var old=document.getElementById('cph-lg-p'); if(old){ old.remove(); return; }
         var p=document.createElement('div'); p.id='cph-lg-p'; p.style.cssText='margin:8px 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,#f7f8fa);font-size:12px';

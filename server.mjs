@@ -34838,6 +34838,83 @@ app.get('/api/client/commission/import-status', async (req, res) => {
 // months were paid the old way, so no rebuild, row edit, review / approve change, statement email, Xero bill or Fulfil push. A rebuild replaces
 // the earlier legacy runs and any still-OPEN run up to the cut-off (Sep-26 had 6 test runs built 22-Oct); a run in review or approved is never
 // touched and its agent-month is reported instead. Each paid history line gets run_id = its legacy run (the Open run button on Paid history).
+// v28.710 (Ben 05-Nov-26): commission ADJUSTMENTS from a paid history line (Paid history ▸ Adjust): change the agent of that order and / or the
+// commissionable / commission amount, with a reason (required). Each impact is a row (source 'adjustment', note = reason) in the agent's run for
+// THIS month if it is still a draft, else the next month's (made if absent). Build / refresh keeps 'adjustment' rows (it rebuilds only the
+// calculated ones). An agent change = a NEGATIVE row on the old agent (takes back what was paid) and a POSITIVE row on the new agent (pays it);
+// an amount change = one row for the difference. Every impact is logged in planner.commission_adjustments (migration 420): who, when, reason,
+// old / new values, the run it went into (Commissions ▸ Adjustments). Cancel removes the row while its run is still a draft.
+const _cmMonth = (d, k) => { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + (k || 0), 1)); return x.toISOString().slice(0, 7); };
+async function cmAdjTarget(client, gid, dry) {   // the agent's first DRAFT run from this month on (this month if still a draft), made if absent
+  for (let k = 0; k < 4; k++) { const m = _cmMonth(new Date(), k);
+    const r = (await client.query(`SELECT id, month, status, coalesce((to_jsonb(r)->>'legacy')::boolean,false) legacy FROM planner.commission_runs r WHERE month=$1 AND rep_group_id=$2`, [m, gid])).rows[0];
+    if (r && (r.status !== 'open' || r.legacy)) continue;
+    if (r) return r; if (dry) return { id: null, month: m, status: 'open', new: true };
+    return (await client.query(`INSERT INTO planner.commission_runs (month, rep_group_id) VALUES ($1,$2) ON CONFLICT (month, rep_group_id) DO UPDATE SET month=excluded.month RETURNING id, month, status`, [m, gid])).rows[0]; }
+  throw new Error('no draft run in the next 4 months for this agent');
+}
+async function cmAdjPlan(client, b) {
+  const h = (await client.query(`SELECT h.*, to_char(h.period,'YYYY-MM') m FROM planner.commission_paid_history h WHERE h.id=$1`, [Number(b.history_id)])).rows[0];
+  if (!h) { const e = new Error('paid history line not found'); e.status = 404; throw e; }
+  const G = (await client.query(`SELECT id, name, coalesce(to_jsonb(g)->>'currency','USD') currency, default_rate FROM planner.rep_groups g`)).rows, byId = {}, byName = {};
+  const norm = x => String(x || '').trim().toLowerCase().replace(/^agent\s*-\s*/, '').replace(/s$/, ''); G.forEach(g => { byId[g.id] = g; byName[norm(g.name)] = g; });
+  const from = byName[norm(h.rep_group)]; if (!from) { const e = new Error('the agent on this line (' + h.rep_group + ') is not an agent in HORIZON'); e.status = 400; throw e; }
+  const to = b.rep_group_id ? byId[Number(b.rep_group_id)] : from; if (!to) { const e = new Error('new agent not found'); e.status = 400; throw e; }
+  const r2 = x => Math.round((Number(x) || 0) * 100) / 100, oldCa = r2(h.commissionable), oldCo = r2(h.commission_due);
+  const newCa = b.commissionable == null || b.commissionable === '' ? oldCa : r2(b.commissionable), newCo = b.commission == null || b.commission === '' ? oldCo : r2(b.commission);
+  const reason = String(b.reason || '').trim().slice(0, 500), ccy = String(h.currency || from.currency || 'USD').toUpperCase(), rate = oldCa ? r2(oldCo / oldCa * 100) : Number(h.rate_pct) || null;
+  const imp = [];
+  if (to.id !== from.id) { imp.push({ kind: 'agent_from', agent: from, ca: -oldCa, co: -oldCo, text: 'take back: paid to ' + from.name + ' in error' });
+    imp.push({ kind: 'agent_to', agent: to, ca: newCa, co: newCo, text: 'pay: moved from ' + from.name }); }
+  else if (r2(newCo - oldCo) !== 0 || r2(newCa - oldCa) !== 0) imp.push({ kind: 'amount', agent: from, ca: r2(newCa - oldCa), co: r2(newCo - oldCo), text: 'amount corrected' });
+  for (const x of imp) x.target = await cmAdjTarget(client, x.agent.id, true);
+  return { h, from, to, oldCa, oldCo, newCa, newCo, reason, ccy, rate, imp, ccy_warn: to.id !== from.id && String(to.currency || 'USD').toUpperCase() !== ccy ? to.name + ' is paid in ' + to.currency + ', this line is ' + ccy + ': the amounts are not converted' : null };
+}
+const _cmAdjOut = p => ({ history_id: p.h.id, order: p.h.invoice_no || p.h.po_no, customer: p.h.customer, month: p.h.m, from: p.from.name, to: p.to.name, old: { commissionable: p.oldCa, commission: p.oldCo }, new: { commissionable: p.newCa, commission: p.newCo }, currency: p.ccy, warning: p.ccy_warn,
+  impacts: p.imp.map(x => ({ kind: x.kind, agent: x.agent.name, commissionable: x.ca, commission: x.co, run_month: x.target.month, run_id: x.target.id, text: x.text })) });
+app.post('/api/client/commission/adjustments', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required' }); } catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
+  const b = req.body || {}, c = await pool.connect();
+  try { const p = await cmAdjPlan(c, b);
+    if (b.preview) return res.json(Object.assign({ ok: true, preview: true }, _cmAdjOut(p)));
+    if (!p.reason) return res.status(400).json({ error: 'a reason is required' });
+    if (!p.imp.length) return res.status(400).json({ error: 'nothing changes: pick another agent or change an amount' });
+    const batch = crypto.randomUUID(), by = (req.me && req.me.email) || null, done = [], M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = m => m ? M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4) : '';
+    await c.query('BEGIN');
+    for (const x of p.imp) { const run = await cmAdjTarget(c, x.agent.id, false);
+      const row = (await c.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source, currency, invoice_date)
+        VALUES ($1,$2,$3,$4,current_date,$5,$6,$7,$7,$8,'pending',$9,'adjustment',$10,$11) RETURNING id`,
+        [run.id, p.h.po_no || p.h.invoice_no, p.h.invoice_no, p.h.customer, x.ca, p.rate, x.co, run.month + ' ' + x.agent.name, ('adjustment (' + ml(p.h.m) + ' ' + (p.h.invoice_no || '') + '): ' + x.text + ' · ' + p.reason).slice(0, 500), p.ccy, p.h.invoice_date])).rows[0].id;
+      await c.query(`INSERT INTO planner.commission_adjustments (batch_id, created_by, history_id, order_ref, invoice_ref, customer, kind, rep_group_id, from_rep_group_id, to_rep_group_id, old_commissionable, new_commissionable, old_commission, new_commission, delta_commissionable, delta_commission, rate, currency, reason, run_id, row_id, run_month)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`, [batch, by, p.h.id, p.h.po_no, p.h.invoice_no, p.h.customer, x.kind, x.agent.id, p.from.id, p.to.id, p.oldCa, p.newCa, p.oldCo, p.newCo, x.ca, x.co, p.rate, p.ccy, p.reason, run.id, row, run.month]);
+      done.push({ agent: x.agent.name, run_id: run.id, run_month: run.month, commission: x.co }); }
+    await c.query('COMMIT');
+    for (const d of done) { try { await cpRunSummary(d.run_id); } catch (_) {} }
+    await cpAudit(null, 'Commission adjustment', (p.h.invoice_no || '') + ' ' + ml(p.h.m) + ': ' + done.map(d => d.agent + ' ' + (d.commission >= 0 ? '+' : '') + d.commission.toFixed(2) + ' in ' + ml(d.run_month)).join(', ') + ' · ' + p.reason, by);
+    try { _cphMemo.clear(); } catch (_) {} res.json({ ok: true, batch, impacts: done });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); if (/commission_adjustments/.test(e.message) && /does not exist/.test(e.message)) return res.status(409).json({ error: 'Run migration 420 first (planner.commission_adjustments).' }); if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+  finally { c.release(); }
+});
+app.get('/api/client/commission/adjustments', async (req, res) => {
+  try { const r = await pool.query(`SELECT a.*, to_char(a.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, g.name agent, gf.name from_agent, gt.name to_agent, r.status run_status, to_char(h.period,'YYYY-MM') hist_month
+      FROM planner.commission_adjustments a LEFT JOIN planner.rep_groups g ON g.id=a.rep_group_id LEFT JOIN planner.rep_groups gf ON gf.id=a.from_rep_group_id LEFT JOIN planner.rep_groups gt ON gt.id=a.to_rep_group_id
+      LEFT JOIN planner.commission_runs r ON r.id=a.run_id LEFT JOIN planner.commission_paid_history h ON h.id=a.history_id ORDER BY a.created_at DESC, a.id LIMIT 2000`);
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows: r.rows.map(x => Object.assign(x, { state: x.status === 'cancelled' ? 'cancelled' : x.run_status === 'paid' ? 'paid' : x.run_status === 'finalised' ? 'in review' : 'in draft run' })) });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/adjustments/:batch/cancel', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required' }); } catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
+  const c = await pool.connect();
+  try { const A = (await c.query(`SELECT a.*, r.status run_status FROM planner.commission_adjustments a LEFT JOIN planner.commission_runs r ON r.id=a.run_id WHERE a.batch_id=$1 AND a.status='applied'`, [req.params.batch])).rows;
+    if (!A.length) return res.status(404).json({ error: 'adjustment not found or already cancelled' });
+    if (A.some(a => a.run_status && a.run_status !== 'open')) return res.status(409).json({ error: 'Part of this adjustment is in a run that is in review or approved: move that run back to draft first.' });
+    await c.query('BEGIN');
+    await c.query(`DELETE FROM planner.commission_rows WHERE id = ANY($1) AND source='adjustment'`, [A.map(a => a.row_id).filter(Boolean)]);
+    await c.query(`UPDATE planner.commission_adjustments SET status='cancelled', cancelled_at=now(), cancelled_by=$2 WHERE batch_id=$1`, [req.params.batch, (req.me && req.me.email) || null]);
+    await c.query('COMMIT'); for (const id of [...new Set(A.map(a => a.run_id).filter(Boolean))]) { try { await cpRunSummary(id); } catch (_) {} }
+    await cpAudit(null, 'Commission adjustment cancelled', (A[0].invoice_ref || '') + ' · ' + A[0].reason, req.me && req.me.email); try { _cphMemo.clear(); } catch (_) {} res.json({ ok: true });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { c.release(); }
+});
 const CM_LEGACY_THROUGH = '2026-09';
 app.post(['/api/client/commission/rows/:id', '/api/client/commission/runs/:id/status', '/api/client/commission/runs/:id/xero-bill', '/api/client/commission/runs/:id/email-statement', '/api/client/commission/runs/:id/push-fulfil'], async (req, res, next) => {
   try { const isRow = /\/rows\//.test(req.path), id = Number(req.params.id); if (!id) return next();
@@ -35167,7 +35244,9 @@ app.get('/api/client/commission/history-all', async (req, res) => {
   try { const r = await pool.query(`SELECT h.id, to_char(h.period,'YYYY-MM') period, h.rep_group, h.customer, h.invoice_no, h.po_no, to_char(h.invoice_date,'YYYY-MM-DD') invoice_date,
         upper(coalesce(nullif(trim(h.currency),''), g.currency, 'USD')) ccy, h.commissionable::float8 comm, h.rate_pct::float8 rate, h.paid_amount::float8 paid, h.credit_note, coalesce(nullif(h.status,''),'paid') status, h.source, h.run_id, h.notes
       FROM planner.commission_paid_history h LEFT JOIN planner.rep_groups g ON lower(g.name)=lower(h.rep_group) ORDER BY h.period DESC NULLS LAST, h.id DESC`);
-    const cols = ['id', 'period', 'rep_group', 'customer', 'invoice_no', 'po_no', 'invoice_date', 'ccy', 'comm', 'rate', 'paid', 'credit_note', 'status', 'source', 'run_id', 'notes'];
+    const adj = {}; try { (await pool.query(`SELECT history_id, count(DISTINCT batch_id)::int n FROM planner.commission_adjustments WHERE status='applied' AND history_id IS NOT NULL GROUP BY 1`)).rows.forEach(a => { adj[a.history_id] = a.n; }); } catch (_) {}   // v28.710 (before migration 420: none)
+    r.rows.forEach(x => { x.adj = adj[x.id] || 0; });
+    const cols = ['id', 'period', 'rep_group', 'customer', 'invoice_no', 'po_no', 'invoice_date', 'ccy', 'comm', 'rate', 'paid', 'credit_note', 'status', 'source', 'run_id', 'notes', 'adj'];
     const v = { cols, rows: r.rows.map(x => cols.map(c => x[c] == null ? null : x[c])), at: new Date().toISOString() };
     _cphMemo.set('all', { at: Date.now(), v }); res.set('Cache-Control', 'no-store').json(v);
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ cols: [], rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
