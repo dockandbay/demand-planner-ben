@@ -14653,13 +14653,13 @@ function emailSender(channel) {
   return { from: (process.env['EMAIL_FROM_' + K] || EMAIL_CHANNELS[ch].from || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
     reply_to: (process.env['EMAIL_REPLY_TO_' + K] || EMAIL_CHANNELS[ch].reply).trim() };
 }
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel, reply }) {
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel, reply, from }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
   if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject + ((attachments && attachments.length) ? ' [+' + attachments.length + ' attachment]' : '')); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
-    const payload = { ...emailSender(channel), to: list, subject, html };   // v28.295: channel = admin (default) | supplier | client
+    const payload = { ...emailSender(channel), to: list, subject, html }; if (from) payload.from = from;   // v28.709: a caller-chosen From (commission statements)   // v28.295: channel = admin (default) | supplier | client
     if (emailOk(reply)) payload.reply_to = String(reply).trim();   // v28.508: explicit reply-to (client owner mailbox)
     if (cclist.length) payload.cc = cclist;
     // v28.137/v28.295: reply-to is the channel's ops@ alias (emailSender), set in the payload above. Was the person who triggered the email (replyTo
@@ -34180,7 +34180,7 @@ app.post('/api/client/commission/groups', async (req, res) => {
       if ('currency' in b) { add('currency', String(b.currency || 'USD').toUpperCase().slice(0, 3)); add('currency_checked', true); }
       if ('fulfil_codes' in b) add('fulfil_codes', (Array.isArray(b.fulfil_codes) ? b.fulfil_codes : String(b.fulfil_codes || '').split(/[,\s]+/)).map(x => String(x).trim()).filter(Boolean));
       if ('markettime_names' in b) add('markettime_names', (Array.isArray(b.markettime_names) ? b.markettime_names : String(b.markettime_names || '').split(/[,;\n]+/)).map(x => String(x).trim().replace(/\s+/g, ' ')).filter(Boolean));   // v28.649: names hold spaces, split on commas only
-      ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'statement_cc', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
+      ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'statement_cc', 'statement_from', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
       ['portal_on', 'no_commission'].forEach(k => { if (k in b) add(k, !!b[k]); });
       if (set.length) await pool.query(`UPDATE planner.rep_groups SET ${set.join(', ')} WHERE id=$1`, v); }
     if (b.id) { await pool.query(`UPDATE planner.rep_groups SET name=coalesce($2,name), default_rate=coalesce($3,default_rate), xero_contact=coalesce($4,xero_contact), xero_account_code=coalesce($5,xero_account_code), active=coalesce($6,active) WHERE id=$1`, [b.id, b.name || null, b.default_rate == null || b.default_rate === '' ? null : Number(b.default_rate), b.xero_contact ?? null, b.xero_account_code ?? null, typeof b.active === 'boolean' ? b.active : null]); await cpAudit(null, 'Rep group updated', String(b.name || b.id), req.me.email); return res.json({ ok: true, id: b.id }); }
@@ -34832,6 +34832,66 @@ app.get('/api/client/commission/import-status', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.421 (Ben 21-Oct-26): POST /api/client/commission/runs/:id/import-paid (paste a Xero export CSV) removed: the engine reads Xero and Fulfil itself.
+// v28.709 (Ben 05-Nov-26: "september 2026 is the cut off for the old process. can you rebuild the monthly runs from paid history, have a badge
+// saying 'created from paid history legacy process'"): every agent x month up to the cut-off gets an Approved run built from its paid history
+// lines (status paid, source sheet; the HORIZON-written lines are left out), flagged legacy (migration 419). Legacy runs are READ ONLY: those
+// months were paid the old way, so no rebuild, row edit, review / approve change, statement email, Xero bill or Fulfil push. A rebuild replaces
+// the earlier legacy runs and any still-OPEN run up to the cut-off (Sep-26 had 6 test runs built 22-Oct); a run in review or approved is never
+// touched and its agent-month is reported instead. Each paid history line gets run_id = its legacy run (the Open run button on Paid history).
+const CM_LEGACY_THROUGH = '2026-09';
+app.post(['/api/client/commission/rows/:id', '/api/client/commission/runs/:id/status', '/api/client/commission/runs/:id/xero-bill', '/api/client/commission/runs/:id/email-statement', '/api/client/commission/runs/:id/push-fulfil'], async (req, res, next) => {
+  try { const isRow = /\/rows\//.test(req.path), id = Number(req.params.id); if (!id) return next();
+    const r = (await pool.query(isRow ? `SELECT coalesce((to_jsonb(r)->>'legacy')::boolean,false) legacy FROM planner.commission_rows x JOIN planner.commission_runs r ON r.id=x.run_id WHERE x.id=$1`
+      : `SELECT coalesce((to_jsonb(r)->>'legacy')::boolean,false) legacy FROM planner.commission_runs r WHERE r.id=$1`, [id])).rows[0];
+    if (r && r.legacy) return res.status(409).json({ error: 'This run was created from paid history (legacy process, up to ' + CM_LEGACY_THROUGH.slice(5) + '/' + CM_LEGACY_THROUGH.slice(0, 4) + '): it is read only. That month was paid the old way, so nothing is sent, billed or pushed from it.' });
+    next(); } catch (e) { next(); } });
+async function cmLegacyRebuild(through, by) {
+  through = /^\d{4}-\d{2}$/.test(String(through || '')) ? through : CM_LEGACY_THROUGH;
+  const G = {}; (await pool.query(`SELECT id, name, coalesce(to_jsonb(g)->>'currency','USD') currency FROM planner.rep_groups g`)).rows.forEach(g => { G[String(g.name).trim().toLowerCase()] = g; });
+  const H = (await pool.query(`SELECT id, to_char(period,'YYYY-MM') m, rep_group, customer, invoice_no, po_no, invoice_date, upper(nullif(trim(currency),'')) ccy, commissionable, rate_pct, commission_due, credit_note, paid_amount, payment_code, notes
+    FROM planner.commission_paid_history WHERE period IS NOT NULL AND to_char(period,'YYYY-MM') <= $1 AND coalesce(nullif(status,''),'paid') = 'paid' AND coalesce(source,'sheet') <> 'horizon' ORDER BY period, id`, [through])).rows;
+  const groups = new Map(), unknown = new Set();
+  const norm = x => String(x || '').trim().toLowerCase().replace(/^agent\s*-\s*/, '').replace(/s$/, ''), G3 = {}; Object.values(G).forEach(g => { G3[norm(g.name)] = g; });   // "Roadrunners" = Agent - Roadrunner
+  for (const h of H) { const g = G[String(h.rep_group || '').trim().toLowerCase()] || G3[norm(h.rep_group)]; if (!g) { unknown.add(h.rep_group || '(blank)'); continue; }
+    const k = g.id + '|' + h.m; if (!groups.has(k)) groups.set(k, { g, m: h.m, rows: [] }); groups.get(k).rows.push(h); }
+  const c = await pool.connect(); const out = { through, runs: 0, rows: 0, replaced_open: 0, kept: [], unknown_agents: [...unknown] };
+  try { await c.query('BEGIN');
+    // earlier legacy runs and still-open runs up to the cut-off go (their rows first); review / approved runs stay and their agent-month is skipped
+    const old = (await c.query(`SELECT id, rep_group_id, month, status, coalesce((to_jsonb(r)->>'legacy')::boolean,false) legacy FROM planner.commission_runs r WHERE month <= $1`, [through])).rows;
+    const drop = old.filter(r => r.legacy || r.status === 'open'), keep = new Set(old.filter(r => !(r.legacy || r.status === 'open')).map(r => r.rep_group_id + '|' + r.month));
+    out.replaced_open = drop.filter(r => !r.legacy).length; out.kept = old.filter(r => !(r.legacy || r.status === 'open')).map(r => ({ run: r.id, month: r.month, status: r.status }));
+    if (drop.length) { const ids = drop.map(r => r.id);
+      await c.query(`UPDATE planner.commission_paid_history SET run_id = NULL WHERE run_id = ANY($1) AND coalesce(source,'sheet') <> 'horizon'`, [ids]);
+      await c.query(`DELETE FROM planner.commission_rows WHERE run_id = ANY($1)`, [ids]); await c.query(`DELETE FROM planner.commission_runs WHERE id = ANY($1)`, [ids]); }
+    const G2 = [...groups.entries()].filter(([k]) => !keep.has(k)).map(([, grp]) => { const y = +grp.m.slice(0, 4), mo = +grp.m.slice(5, 7);
+      return Object.assign(grp, { ccy: String((grp.rows.find(h => h.ccy) || {}).ccy || grp.g.currency || 'USD').toUpperCase(), end: new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10),
+        total: Math.round(grp.rows.reduce((t, h) => t + (Number(h.commission_due) || 0), 0) * 100) / 100 }); });
+    // one INSERT for every run, one for every row, one UPDATE for the history links (the sandbox database is slow; live has a 300 s limit)
+    const ids = G2.length ? (await c.query(`INSERT INTO planner.commission_runs (month, rep_group_id, status, total, currency, built_at, finalised_at, finalised_by, paid_at, paid_ref, legacy)
+      SELECT u.m, u.g, 'paid', u.t, u.c, now(), u.e, $6, u.e, 'legacy (paid history)', true FROM unnest($1::text[], $2::int[], $3::numeric[], $4::text[], $5::date[]) WITH ORDINALITY u(m, g, t, c, e, n) ORDER BY u.n RETURNING id, month, rep_group_id`,
+      [G2.map(x => x.m), G2.map(x => x.g.id), G2.map(x => x.total), G2.map(x => x.ccy), G2.map(x => x.end), 'legacy rebuild by ' + (by || 'HORIZON')])).rows : [];
+    const idOf = {}; ids.forEach(r => { idOf[r.rep_group_id + '|' + r.month] = r.id; });
+    const R = []; G2.forEach(grp => grp.rows.forEach(h => R.push({ run: idOf[grp.g.id + '|' + grp.m], ccy: grp.ccy, h })));
+    for (let i = 0; i < R.length; i += 2000) { const ch = R.slice(i, i + 2000);
+      await c.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, invoice_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note, source, currency, history_id)
+        SELECT u.run, u.po, u.inv, u.cust, u.idate, u.idate, u.comm, u.rate, u.due, u.cn, 0, u.due, u.pc, 'pending', u.note, 'paid history (legacy)', u.ccy, u.hid
+        FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::date[], $6::numeric[], $7::numeric[], $8::numeric[], $9::text[], $10::text[], $11::text[], $12::text[], $13::bigint[]) u(run, po, inv, cust, idate, comm, rate, due, cn, pc, note, ccy, hid)`,
+        [ch.map(x => x.run), ch.map(x => x.h.po_no || null), ch.map(x => x.h.invoice_no || null), ch.map(x => x.h.customer || null), ch.map(x => x.h.invoice_date || null), ch.map(x => x.h.commissionable == null ? 0 : x.h.commissionable),
+          ch.map(x => x.h.rate_pct == null ? 0 : x.h.rate_pct), ch.map(x => Number(x.h.commission_due) || 0), ch.map(x => x.h.credit_note || null), ch.map(x => x.h.payment_code || null), ch.map(x => x.h.notes || null), ch.map(x => x.ccy), ch.map(x => x.h.id)]);
+      await c.query(`UPDATE planner.commission_paid_history h SET run_id = u.run FROM unnest($1::bigint[], $2::bigint[]) u(hid, run) WHERE h.id = u.hid`, [ch.map(x => x.h.id), ch.map(x => x.run)]); }
+    out.runs = ids.length; out.rows = R.length;
+    await c.query('COMMIT');
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+  try { _cphMemo.clear(); } catch (_) {}
+  await cpAudit(null, 'Commission legacy runs rebuilt from paid history', 'to ' + through + ': ' + out.runs + ' runs, ' + out.rows + ' rows' + (out.replaced_open ? ', ' + out.replaced_open + ' open run(s) replaced' : '') + (out.kept.length ? ', ' + out.kept.length + ' kept (in review / approved)' : ''), by);
+  return out;
+}
+app.post('/api/client/commission/runs/legacy-rebuild', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'admin only' }); } catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
+  if ((req.body || {}).confirm !== true) return res.status(400).json({ error: 'confirm:true required: this replaces the legacy runs and any open run up to the cut-off' });
+  try { res.json(Object.assign({ ok: true }, await cmLegacyRebuild((req.body || {}).through, req.me && req.me.email))); }
+  catch (e) { if (/legacy|history_id/.test(e.message) && /does not exist/.test(e.message)) return res.status(409).json({ error: 'Run migration 419 first (planner.commission_runs.legacy).' }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/client/commission/rows/:id', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [];
   for (const k of ['status', 'note', 'paid_date', 'rate', 'commissionable', 'credit_adj', 'customer', 'invoice_ref']) if (k in b) { vals.push(b[k] === '' ? null : b[k]); sets.push(k + '=$' + vals.length); }
@@ -35198,7 +35258,7 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
     // agent to check (they reply by email); Approved sends the final one. A draft run sends nothing.
     if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the draft statement is sent from review, the final one once approved.' });
     const draft = p.run.status === 'finalised';
-    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email, to_jsonb(g)->>'statement_cc' cc_default, (SELECT c.owner_email FROM planner.clients c WHERE c.rep_group_id=g.id AND coalesce(c.owner_email,'')<>'' ORDER BY c.active DESC, c.id LIMIT 1) owner_email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
+    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email, to_jsonb(g)->>'statement_cc' cc_default, to_jsonb(g)->>'statement_from' from_box, (SELECT c.owner_email FROM planner.clients c WHERE c.rep_group_id=g.id AND coalesce(c.owner_email,'')<>'' ORDER BY c.active DESC, c.id LIMIT 1) owner_email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
     // v28.707 (Ben 05-Nov-26): CC per agent (Statement CC, migration 418), a note typed at send time, and a full preview before sending
     // (body { preview: true } returns exactly what would be sent and sends nothing). body.cc / body.note override for this send only.
     const b = req.body || {}, addrs = v => String(v || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
@@ -35213,8 +35273,13 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
       + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
       + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
     const subject = (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name;
-    if (b.preview) return res.json({ ok: true, preview: true, draft, to, cc, cc_default: g.cc_default || '', reply_to: g.owner_email || null, subject, html, note, attachments: [p.filename].concat(xl && xl.filename ? [xl.filename] : []) });
-    const r = await sendResendEmail({ to, cc, subject, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: g.owner_email, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
+    // v28.709 (Ben 05-Nov-26): from the agent's sales mailbox (Statement from: sales@ default, sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@). Resend only
+    // sends from a verified domain (today supplier.dockandbay.com), so until dockandbay.com is verified (EMAIL_ROOT_DOMAIN_OK=1) the From is
+    // "Dock & Bay Sales" on the verified domain and the chosen mailbox is the Reply-To (the agency's replies land there).
+    const box = CM_FROM_BOXES.includes(String(g.from_box || '').toLowerCase()) ? String(g.from_box).toLowerCase() : 'sales@dockandbay.com';
+    const fromHdr = process.env.EMAIL_ROOT_DOMAIN_OK === '1' ? 'Dock & Bay <' + box + '>' : 'Dock & Bay Sales <' + (process.env.EMAIL_SALES_RELAY || 'sales@supplier.dockandbay.com') + '>';
+    if (b.preview) return res.json({ ok: true, preview: true, draft, to, cc, cc_default: g.cc_default || '', from: fromHdr, reply_to: box, subject, html, note, attachments: [p.filename].concat(xl && xl.filename ? [xl.filename] : []) });
+    const r = await sendResendEmail({ to, cc, subject, html, from: fromHdr, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: box, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
     try { await pool.query(`UPDATE planner.commission_runs SET ${draft ? 'draft_sent_at=now(), draft_sent_to=$2, draft_sent_by=$3' : 'statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3'} WHERE id=$1`, [p.run.id, to.join(', ') + (cc.length ? ' (cc ' + cc.join(', ') + ')' : ''), req.me && req.me.email]); }
     catch (e) { if (!/does not exist/.test(e.message)) throw e; }   // before migration 384 the draft send is only in the audit log
@@ -35224,6 +35289,7 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
 });
 // v28.467 (Ben 23-Oct-26: "send statement to client can that be xlsx format as well"): the same statement as an xlsx (same rows as the PDF:
 // deferred rows left out), used by the download and attached to the statement email next to the PDF.
+const CM_FROM_BOXES = ['sales@dockandbay.com', 'sales-uk@dockandbay.com', 'sales-us@dockandbay.com', 'sales-eu@dockandbay.com', 'keyaccounts@dockandbay.com'];   // v28.709
 const cmStatusLbl = s => s === 'paid' ? 'Approved' : s === 'finalised' ? 'In review' : 'Draft';
 async function cmStatementXlsx(runId) {
   const run = (await pool.query(`SELECT r.*, g.name group_name, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [runId])).rows[0];

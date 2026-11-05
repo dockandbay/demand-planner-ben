@@ -1,3 +1,12 @@
+## v28.709 (05-Nov-26) Commissions: legacy runs from paid history (to Sep-26), Open run from paid history, statement From mailbox
+- Legacy runs: POST /api/client/commission/runs/legacy-rebuild { confirm: true, through: '2026-09' } (admin; button on Paid history). One Approved read-only run per agent and month from paid history, badge "Created from paid history · legacy process". Replaces the 6 OPEN Sep-26 runs on live (built 22-Oct, never approved). Sandbox: 307 runs, 8,077 rows in 18 s; KEENA (72 rows, 2022) is on no agent and is left out.
+- Read-only guard on legacy runs: row edit, status, Xero bill, statement email, Fulfil push all refused (409).
+- Paid history: column 1 "Open run" opens that agent and month's run.
+- Statement from: per agent (sales@ default / sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@). Until dockandbay.com is verified in Resend: From "Dock & Bay Sales <sales@supplier.dockandbay.com>", Reply-To the chosen mailbox. Optional env EMAIL_ROOT_DOMAIN_OK=1 (only after verifying dockandbay.com in Resend), EMAIL_SALES_RELAY.
+- MIGRATION 419_commission_legacy_runs.sql (commission_runs.legacy, commission_rows.history_id, rep_groups.statement_from). Run BEFORE the rebuild.
+- After deploy: Paid history ▸ Rebuild legacy runs (Ben confirms first: it replaces the open Sep-26 runs).
+- Files: server.mjs, supply/inject.html, migrations/419_commission_legacy_runs.sql, lib/ai-logic/supply-finance.md. No new cron routes.
+
 ## v28.708 (05-Nov-26) Commissions: shipping credit notes never deducted; Xero-paid orders open in Fulfil now commissioned
 - Ben 05-Nov-26 (USWS-19133 Schauben, People's Pharmacy): invoice 778.40 incl 83.40 shipping, CN-9681 41.70 (half the shipping), paid 736.70 in Xero (Stripe), Fulfil invoice 51415 still open.
 - Bug 1: the Xero payment was skipped as "already in Fulfil" because a Fulfil invoice existed, though Fulfil holds no cash on it. Now only a Fulfil invoice WITH cash blocks the Xero payment. Oct-26 live check: this was the only row missed (104.25 USD).
