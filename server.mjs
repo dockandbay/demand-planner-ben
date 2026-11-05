@@ -34931,7 +34931,7 @@ async function cmAgentChecks(month, opts) {
         done[x.faire_id] = new Date().toISOString(); n++; }
       if (n) { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_faire_todo',$1,'commission checks',now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify(done)]); notes.push(n + ' Faire claim to-do(s) for Madison'); } }
     catch (e) { notes.push('to-dos not written: ' + e.message); } }
-  return { ok: true, month, items: out, notes: (v.notes || []).concat(notes), faire_orders: (fr.orders || []).length };
+  return { ok: true, month, items: out, notes: (v.notes || []).concat(notes), faire_orders: (fr.orders || []).length, dismissed: dis };   // v28.715: + every dismissal, for rows the page merges in (customers on no agent's list)
 }
 const cmShortName = n => String(n || '').replace(/^\s*agent\s*-+\s*/i, '');
 // v28.712 (Ben 05-Nov-26: "double check the unpaid commissions from previous months definitely appear in current month. any draft monthly runs should
