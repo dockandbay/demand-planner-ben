@@ -23350,13 +23350,13 @@
       if(/^\d+$/.test(_pi)){ S.tab='run'; S.run=_pi; } else { S.tab=_pi; if(_pi==='run'&&/^\d+$/.test(_pt))S.run=_pt; } }
     var money=function(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     // v28.331 (Ben): Commissions is the WORK only. Agent settings, customers and customer rates moved to the client record (CLIENT ▸ Clients ▸ <agent>).
-    var TABS=[['orders','Orders'],['unassigned','Unassigned'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history'],['adjustments','Adjustments']];   // v28.710: + Adjustments log   // v28.425 (Ben): Import data separate from Monthly run & bills
-    S.tab=({report:'run',overrides:'orders',agents:'orders',customers:'exceptions',rates:'orders'})[S.tab]||S.tab; if(!TABS.some(function(t){ return t[0]===S.tab; }))S.tab='orders';
+    var TABS=[['summary','Summary'],['orders','Orders'],['unassigned','Unassigned'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history'],['adjustments','Adjustments']];   // v28.710: + Adjustments log   // v28.425 (Ben): Import data separate from Monthly run & bills
+    S.tab=({report:'run',overrides:'orders',agents:'orders',customers:'exceptions',rates:'orders'})[S.tab]||S.tab; if(!TABS.some(function(t){ return t[0]===S.tab; }))S.tab='summary';   // v28.712: Summary is the Commissions home
     try{ if(CLIENT_SUB==='commission')writeHash(['client','commission',S.tab].concat(S.tab==='run'&&S.run?[String(S.run)]:[])); }catch(e){}
     b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===S.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="comm-body"><div class="count">Loading…</div></div>';
     b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ S.tab=x.dataset.t; if(S.tab!=='run')S.run=null; cpRenderCommission(b); }; });
     var box=document.getElementById('comm-body');
-    if(S.tab==='orders') commOrders(); else if(S.tab==='unassigned') commUnassigned(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else if(S.tab==='adjustments') commAdjustments(); else commReport();
+    if(S.tab==='orders') commOrders(); else if(S.tab==='unassigned') commUnassigned(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else if(S.tab==='adjustments') commAdjustments(); else if(S.tab==='summary') commSummary(); else commReport();
     var CUR3=['USD','EUR','GBP','CAD','AUD'];
     // ── Exceptions (v28.331): what needs a person before a run is right. Stage 2 adds the order-level ones (no agent, Fulfil code vs Xero group, Faire). ──
     // ── Unassigned (v28.442, Ben 22-Oct-26): paid wholesale orders with no agent, with the agent a rule says it could be (CLIENT ▸ Config ▸ Agent rules).
@@ -23658,6 +23658,27 @@
         .catch(function(e){ btn.disabled=false; btn.textContent='Save adjustment'; m.style.color='var(--neg)'; m.textContent=e.message; }); };
     }
     // v28.710: Adjustments log (who, when, reason, the impact per agent, the run it went into, its state); Cancel while the run is a draft
+    // v28.712 (Ben 05-Nov-26): Commissions home: key indicators; draft runs are the action
+    function commSummary(){ box.innerHTML='<div class="count">Loading…</div>';
+      cpGet('/api/client/commission/summary').then(function(d){ var money=function(n,c){ return (c?c+' ':'')+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+        var card=function(title,val,sub,tone,body,go){ var col=tone==='act'?'var(--neg)':tone==='warn'?'var(--amber)':tone==='ok'?'var(--pos)':'var(--ink)';
+          return '<div class="csum-card" '+(go?'data-go="'+go+'" ':'')+'style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);min-width:220px;flex:1;'+(go?'cursor:pointer':'')+'"><div class="tiny mut" style="display:flex;align-items:center;gap:6px">'+(tone==='act'?'<span style="width:8px;height:8px;border-radius:50%;background:var(--neg);display:inline-block"></span>':'')+esc(title)+'</div><div style="font-size:22px;font-weight:700;color:'+col+';margin:4px 0">'+val+'</div><div class="tiny mut">'+sub+'</div>'+(body||'')+'</div>'; };
+        var dr=d.drafts||[], rv=d.review||[], cu=d.catchup||{}, ex=d.exceptions_open, exN=ex?Object.keys(ex).reduce(function(t,k){ return t+ex[k]; },0):null;
+        var runList=function(L){ return L.length?'<div style="margin-top:8px;max-height:160px;overflow:auto">'+L.map(function(r){ return '<a class="csum-run" data-run="'+r.id+'" style="display:flex;justify-content:space-between;gap:8px;cursor:pointer;color:var(--blue);font-size:12px;padding:2px 0"><span>'+esc(cmMonthLbl(r.month))+' · '+esc(cmShort(r.agent))+'</span><span>'+money(r.total,r.ccy)+'</span></a>'; }).join('')+'</div>':''; };
+        var cuTone=!cu.found?'ok':(cu.in_runs>=cu.found?'ok':'warn');
+        box.innerHTML='<div class="tiny mut" style="margin-bottom:10px">'+esc(cmMonthLbl(d.month))+' · runs since the cut-over (Oct-26 onwards; earlier months are legacy runs from paid history)</div>'
+          +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+          +card('Draft runs to finish',dr.length,dr.length?'Action: review and send for approval':'None open',(dr.length?'act':'ok'),runList(dr))
+          +card('Runs in review',rv.length,rv.length?'Waiting for the agency / approval':'None',rv.length?'warn':'ok',runList(rv))
+          +card('Unpaid earlier commission ('+cmMonthLbl(d.month)+')',(cu.found||0)+' found',(cu.found?money(cu.found_commission)+' · '+(cu.in_runs||0)+' in this month\'s runs ('+money(cu.in_runs_commission)+')'+(cu.in_runs<cu.found?' · run Build / refresh to add the rest':' ✓'):'Nothing missed from the 6 months before'),cuTone,'','import')
+          +'</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+          +card('Open exceptions',exN==null?'—':exN,ex?Object.keys(ex).map(function(k){ return esc(k.replace(/_/g,' '))+' '+ex[k]; }).join(' · ')+(d.exceptions_at?' · checked '+esc(fd(d.exceptions_at.slice(0,10))):''):'Checked every Sunday; open Exceptions to check now',exN?'warn':'ok','','exceptions')
+          +card('Faire 0% claims (Madison)',d.faire_claims_open||0,(d.faire_claims_open?'open to-dos':'none open'),d.faire_claims_open?'warn':'ok','','exceptions')
+          +card('Adjustments in draft runs',d.adjustments_in_drafts||0,'go out with the next approved run','', '','adjustments')
+          +'</div><div class="tiny mut">Sunday flow: '+((d.weekly||[]).length?(d.weekly||[]).map(function(w){ return esc(w.step)+' <b style="color:'+(w.status==='success'?'var(--pos)':'var(--neg)')+'">'+esc(w.status)+'</b> '+esc(fd(String(w.at||'').slice(0,10)))+' '+esc(String(w.at||'').slice(11,16)); }).join(' · '):'not run yet (n8n "Horizon | Commissions weekly", Sundays 06:00)')+'</div>';
+        box.querySelectorAll('.csum-run').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); S.tab='run'; S.run=a.dataset.run; cpRenderCommission(b); }; });
+        box.querySelectorAll('.csum-card[data-go]').forEach(function(c){ c.onclick=function(){ S.tab=c.dataset.go; cpRenderCommission(b); }; });
+      }).catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
     function commAdjustments(){ box.innerHTML='<div class="count">Loading adjustments…</div>';
       cpGet('/api/client/commission/adjustments').then(function(d){ if(d.missing){ box.innerHTML='<div class="annot">Adjustments need migration 420 (planner.commission_adjustments).</div>'; return; }
         var R=d.rows||[], money=function(n,c){ return (c?c+' ':'')+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };

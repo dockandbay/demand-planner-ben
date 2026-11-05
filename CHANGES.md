@@ -1,3 +1,8 @@
+## v28.712 (05-Nov-26) Commissions Summary (home): draft runs as the action, catch-up check, exceptions, Faire claims, adjustments, Sunday flow
+- GET /api/client/commission/summary (HORIZON tables only). Summary is the first Commissions tab and the default.
+- The weekly log message now starts with the step.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.711 (05-Nov-26) Commissions Exceptions: delivery / source / earlier orders, agent changed, Faire 0% claim (to-do for Madison), dismiss / reopen, search
 - GET /api/client/commission/checks?month= ; POST /api/client/commission/checks/dismiss { key, dismiss }. Dismissals in app_settings cm_exc_dismissed; Faire to-dos once per order (cm_faire_todo) into planner.user_todos for madison@.
 - Faire external API (read only): orders of the last 90 days, commission_bps / commission / source. NEW ENV VAR on prod: FAIRE_API_TOKEN (FAIRE_API_BASE_URL optional, default https://www.faire.com/external-api/v2). Without it the Faire check says "Faire not read" and the rest works.

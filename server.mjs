@@ -34818,7 +34818,7 @@ app.post('/api/cron/commission-weekly', async (req, res) => {
       out = { ok: true, month: cur, open: by, notes: r.notes }; }
     else return res.status(400).json({ error: 'step = customers | catchup | build | checks' });
     out.step = step; out.secs = Math.round((Date.now() - t0) / 1000);
-    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('commission_weekly',$1,$2,$3)`, [out.ok ? 'success' : 'error', out.customers || out.saved || 0, JSON.stringify(out).slice(0, 500)]); } catch (_) {}
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('commission_weekly',$1,$2,$3)`, [out.ok ? 'success' : 'error', out.customers || out.saved || 0, JSON.stringify(Object.assign({ step }, out)).slice(0, 500)]); } catch (_) {}
     res.status(out.ok ? 200 : 500).json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -34928,6 +34928,26 @@ async function cmAgentChecks(month, opts) {
   return { ok: true, month, items: out, notes: (v.notes || []).concat(notes), faire_orders: (fr.orders || []).length };
 }
 const cmShortName = n => String(n || '').replace(/^\s*agent\s*-+\s*/i, '');
+// v28.712 (Ben 05-Nov-26: "double check the unpaid commissions from previous months definitely appear in current month. any draft monthly runs should
+// be flagged as an action indicator on a commissions home page summary of key indicators"): Commissions ▸ Summary. Cheap reads only (no Fulfil /
+// Xero): runs by state since the cut-over (drafts = action), this month's catch-up items and whether a run holds them, adjustments waiting in
+// drafts, open exceptions from the last Sunday check, Madison's open Faire claims, and the last Sunday flow per step.
+app.get('/api/client/commission/summary', async (req, res) => {
+  try { const cur = new Date().toISOString().slice(0, 7), q = (sql, p) => pool.query(sql, p || []).then(r => r.rows).catch(() => []);
+    const runs = await q(`SELECT r.id, r.month, r.status, r.total, coalesce(r.currency, to_jsonb(g)->>'currency','USD') ccy, g.name agent, to_char(r.built_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') built
+      FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.month > $1 AND NOT coalesce((to_jsonb(r)->>'legacy')::boolean,false) ORDER BY r.month DESC, g.name`, [CM_LEGACY_THROUGH]);
+    const cu = (await q(`SELECT count(*)::int n, coalesce(sum(commission),0)::float8 c FROM planner.commission_catchup WHERE run_month=$1`, [cur]))[0] || { n: 0, c: 0 };
+    const cuIn = (await q(`SELECT count(*)::int n, coalesce(sum(x.commission),0)::float8 c FROM planner.commission_rows x JOIN planner.commission_runs r ON r.id=x.run_id WHERE r.month=$1 AND x.source='catch-up (auto)'`, [cur]))[0] || { n: 0, c: 0 };
+    const adj = (await q(`SELECT count(DISTINCT a.batch_id)::int n FROM planner.commission_adjustments a JOIN planner.commission_runs r ON r.id=a.run_id WHERE a.status='applied' AND r.status='open'`))[0] || { n: 0 };
+    const faire = (await q(`SELECT count(*)::int n FROM planner.user_todos WHERE email=$1 AND title LIKE 'Claim 0%% commission from Faire:%' AND done_at IS NULL`.replace('%%', '%'), [CM_FAIRE_CLAIM_TO]))[0] || { n: 0 };
+    const weekly = []; (await q(`SELECT status, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.etl_runs WHERE job='commission_weekly' ORDER BY ran_at DESC LIMIT 40`)).forEach(w => {
+      const st = (/"step":"(\w+)"/.exec(w.message || '') || [])[1]; if (st && !weekly.some(x => x.step === st)) weekly.push(Object.assign({ step: st }, w)); });   // the log message may be cut at 500 chars: read the step by pattern
+    const chk = weekly.find(w => w.step === 'checks'); let excOpen = null; try { excOpen = chk ? (JSON.parse(chk.message).open || {}) : null; } catch (_) { excOpen = null; }
+    res.set('Cache-Control', 'no-store').json({ ok: true, month: cur, runs, drafts: runs.filter(r => r.status === 'open'), review: runs.filter(r => r.status === 'finalised'),
+      catchup: { found: cu.n, found_commission: cu.c, in_runs: cuIn.n, in_runs_commission: cuIn.c }, adjustments_in_drafts: adj.n, faire_claims_open: faire.n, exceptions_open: excOpen, exceptions_at: chk ? chk.at : null,
+      weekly: weekly.map(w => ({ step: w.step, status: w.status, at: w.at })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/client/commission/checks', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json(await cmAgentChecks(String(req.query.month || ''), { env: req.query.env, fresh: req.query.fresh === '1' })); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
