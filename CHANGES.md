@@ -1,3 +1,8 @@
+## v28.718 (05-Nov-26) Commissions Exceptions: saved per month (opens instantly), Recalculate; agent setup in the list; manual scan folded away
+- Ben 05-Nov-26: the page recalculated (Fulfil + Xero + Faire, ~40 s) on every open. The full list is saved per month in app_settings cm_checks:<month>; opening reads it (sandbox: 1.3 s vs 37 s). Recalculated after Build / refresh (background), on Sundays (step 4, this and last month) and with Recalculate.
+- Agent currency not confirmed / no Xero group or Fulfil code are rows in the list (pill Agent setup). The manual missed-commission scan is a collapsed box.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.717 (05-Nov-26) Manage 3PL: pool tab counters = open discrepancies, refreshed quietly; ticking no longer jumps the page
 - Ben 05-Nov-26: the pool counters (UK ILG 495 / Non GRS 14 / Vendor 5) were the report's SKU counts, so they never changed after a rebaseline. They now show open discrepancies: the open pool recounts on every change, the others are read in the background after load (status API now returns disc_counts).
 - Ticking a box redrew the panel and reset the table's scroll: the table box is #ilg-scroll and its scroll is kept on every redraw (sandbox: 7,402 px before and after a tick).

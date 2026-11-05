@@ -34780,6 +34780,7 @@ app.post('/api/client/commission/runs/build-all', async (req, res) => {
     try { await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('commission_last_import',$1) ON CONFLICT (key) DO UPDATE SET value=$1`,   // v28.429: shown on Import data
       [JSON.stringify({ month, at: new Date().toISOString(), by: req.me.email || null, built: built.length, skipped: skipped.length, notes: v.notes })]); } catch (_) {}
     res.json({ ok: true, month, built, skipped, notes: v.notes });
+    try { hzWaitUntil(cmChecksStore(month, { env: b.env, by: 'Build / refresh' }).catch(e => console.warn('[cm-checks] ' + e.message))); } catch (_) {}   // v28.718: the Exceptions list is saved fresh after every build (engine cache is warm)
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
 // v28.707 (Ben 05-Nov-26: "each of these should run on a weekly schedule", "suggest running every Sunday"): the three Import data steps, run by
@@ -34819,7 +34820,7 @@ app.post('/api/cron/commission-weekly', async (req, res) => {
     else if (step === 'build') { out = { ok: true, months: {} };
       for (const m of [prev, cur]) { const r = await cmCronCall('POST', '/api/client/commission/runs/build-all', { month: m }, {}, 140000);
         out.months[m] = ok(r) ? { built: (r.body.built || []).length, left_alone: (r.body.skipped || []).length } : { error: (r.body && r.body.error) || ('HTTP ' + r.status) }; if (!ok(r)) out.ok = false; } }
-    else if (step === 'checks') { const r = await cmAgentChecks(cur, {}); const by = {}; r.items.filter(x => !x.dismissed).forEach(x => { by[x.kind] = (by[x.kind] || 0) + 1; });   // v28.711: customer / agent checks + Madison's Faire to-dos
+    else if (step === 'checks') { const r = await cmChecksStore(cur, { by: 'Sunday flow' }); try { await cmChecksStore(prev, { by: 'Sunday flow' }); } catch (_) {} const by = {};   // v28.718: saved for the page (this month and last) r.items.filter(x => !x.dismissed).forEach(x => { by[x.kind] = (by[x.kind] || 0) + 1; });   // v28.711: customer / agent checks + Madison's Faire to-dos
       out = { ok: true, month: cur, open: by, notes: r.notes }; }
     else return res.status(400).json({ error: 'step = customers | catchup | build | checks' });
     out.step = step; out.secs = Math.round((Date.now() - t0) / 1000);
@@ -34970,9 +34971,36 @@ app.get('/api/client/commission/summary', async (req, res) => {
       weekly: weekly.map(w => ({ step: w.step, status: w.status, at: w.at })) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.718 (Ben 05-Nov-26: "it calculates every time it opens, can this be cached and pre calculated from previous data imports"): the full list
+// (engine exceptions + checks + customers on no agent's list + agent setup) is saved per month (app_settings cm_checks:<month>) and the page
+// opens on it at once; it is recalculated after every Build / refresh, by the Sunday flow (step 4), or with Recalculate. Dismissals are applied
+// fresh on every read.
+async function cmChecksFull(month, opts) {
+  const r = await cmAgentChecks(month, opts);
+  try { const u = await cmCronCall('GET', '/api/client/commission/customers/fulfil-unmatched', null, {}, 120000), b = u.body || {};
+    (b.unmatched || []).forEach(c => r.items.push({ kind: 'unlisted_customer', customer: c.name, email: c.email, order_ref: '', invoice_ref: '', since: b.since, orders: c.orders, last: c.last, value: c.value,
+      text: c.orders + ' WS order' + (c.orders === 1 ? '' : 's') + ' since ' + (b.since || '') + ', last ' + String(c.last || '').slice(0, 10) + ', value ' + (Number(c.value) || 0).toFixed(2) }));
+    if (b.error) r.notes.push('customers on no agent\'s list not read: ' + b.error); } catch (e) { r.notes.push('customers on no agent\'s list not read: ' + e.message); }
+  const G = (await pool.query(`SELECT id, name, active, coalesce((to_jsonb(g)->>'no_commission')::boolean,false) no_commission, coalesce((to_jsonb(g)->>'currency_checked')::boolean,false) currency_checked, coalesce(to_jsonb(g)->>'currency','USD') currency,
+      to_jsonb(g)->>'xero_group_uk_id' xg, coalesce(jsonb_array_length(to_jsonb(g)->'fulfil_codes'),0) codes FROM planner.rep_groups g WHERE active`)).rows;
+  G.filter(g => !g.no_commission && !g.currency_checked).forEach(g => r.items.push({ kind: 'agent_currency', agent_id: g.id, agent: g.name, customer: g.name, order_ref: '', invoice_ref: '', text: 'paid in ' + g.currency + ' (set from the order history): confirm on the agent record' }));
+  G.filter(g => !g.no_commission && !g.xg && !g.codes).forEach(g => r.items.push({ kind: 'agent_no_group', agent_id: g.id, agent: g.name, customer: g.name, order_ref: '', invoice_ref: '', text: 'no Xero contact group and no Fulfil agent code: its customers cannot be found' }));
+  r.items.forEach(x => { x.key = x.key || _cmExcKey(x.kind === 'unlisted_customer' ? Object.assign({}, x, { order_ref: x.customer, invoice_ref: x.email }) : x); });
+  return r;
+}
+async function cmChecksStore(month, opts) {
+  const r = await cmChecksFull(month, opts), at = new Date().toISOString(), v = Object.assign({}, r, { calculated_at: at, calculated_by: (opts && opts.by) || 'HORIZON' });
+  await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, ['cm_checks:' + month, JSON.stringify(v), v.calculated_by]);
+  return v;
+}
 app.get('/api/client/commission/checks', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json(await cmAgentChecks(String(req.query.month || ''), { env: req.query.env, fresh: req.query.fresh === '1' })); }
-  catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+  try { const month = String(req.query.month || ''); if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+    let v = null; if (req.query.refresh !== '1') { const c = await cpSetting('cm_checks:' + month, ''); v = c ? cpJson(c, null) : null; }
+    if (!v) v = await cmChecksStore(month, { env: req.query.env, fresh: req.query.refresh === '1', by: (req.me && req.me.email) || null });
+    const dis = cpJson(await cpSetting('cm_exc_dismissed', ''), {}) || {};
+    (v.items || []).forEach(x => { const d = dis[x.key]; x.dismissed = d ? { by: d.by, at: d.at, note: d.note || '' } : null; });
+    res.set('Cache-Control', 'no-store').json(v);
+  } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/checks/dismiss', async (req, res) => {   // { key, dismiss: true|false, note }
   const b = req.body || {}, key = String(b.key || '').slice(0, 300); if (!key) return res.status(400).json({ error: 'key required' });
