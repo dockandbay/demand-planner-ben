@@ -15644,11 +15644,11 @@ function cogsHist(){ var ex=document.getElementById('cogs-hmodal'); if(ex)ex.rem
 // 9002 / 9003 / 9004 / 9005 revenue) traced line by line to the sale channel and journalled out to the channel accounts, so the clearing
 // accounts net to zero. Build reads LIVE Fulfil (about a minute, writes nothing); Xero: UK drafts, AU posted, preview first.
 var CCH={month:'',d:null,busy:'',msg:'',plan:{},open:{}};
-function cchMonths(){ var out=[], d=new Date(), y=d.getFullYear(), m=d.getMonth(); for(var i=0;i<14;i++){ m--; if(m<0){ m=11; y--; } var k=y+'-'+('0'+(m+1)).slice(-2); if(k<'2026-10')break; out.push(k); } return out; }
+function cchMonths(){ var out=[], d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; for(var i=0;i<15;i++){ m--; if(m<0){ m=11; y--; } var k=y+'-'+('0'+(m+1)).slice(-2); if(k<'2026-10')break; out.push(k); } return out; }
 function cchMoLbl(k){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+k.slice(5,7)-1]+'-'+k.slice(2,4); }
 function cchF(v){ v=Number(v)||0; var s=Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); return v<0?'('+s+')':s; }
 function cchJson(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }
-function cchLoad(){ var p=document.getElementById('cogs-panel'); if(!p)return; if(!CCH.month)CCH.month=cchMonths()[0]||'2026-10';
+function cchLoad(){ var p=document.getElementById('cogs-panel'); if(!p)return; if(!CCH.month){ var _ms=cchMonths(); CCH.month=_ms[1]||_ms[0]||'2026-10'; }   /* v28.728: the list starts at this month; default = last month */
   fetch('/api/supply/cogs-channel?month='+CCH.month,{cache:'no-store'}).then(cchJson).then(function(j){ CCH.d=j; renderCogsCh(); }).catch(function(e){ CCH.d={error:e.message||String(e)}; renderCogsCh(); }); }
 function cchBtn(id,txt,prim,dis,tip,extra){ return '<button id="'+id+'"'+(extra||'')+(dis?' disabled':'')+' title="'+esc(tip||'')+'" style="padding:6px 14px;border-radius:7px;border:1px solid '+(prim?'var(--nav)':'var(--line)')+';background:'+(prim?'var(--nav)':'var(--card)')+';color:'+(prim?'#fff':'var(--ink)')+';font-weight:700;font-size:12px;cursor:'+(dis?'default':'pointer')+';opacity:'+(dis?'.55':'1')+'">'+txt+'</button>'; }
 function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)return; var j=CCH.d||{}, b=j.build;
@@ -15663,7 +15663,8 @@ function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)retu
   if(!b){ p.innerHTML=h+'<div class="mut" style="font-size:12px">Not built yet for '+cchMoLbl(CCH.month)+'. Press Build to read Fulfil.</div>'+cchLogHtml(j.log||[]); cchBind(); return; }
   ['UK','AU'].forEach(function(org){ var o=b.orgs[org]; if(!o)return; var tc=0,tl=0,ts=0;
     h+='<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;background:var(--card)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-size:14px;font-weight:800;color:var(--nav)">'+org+' <span class="mut" style="font-weight:600">'+o.ccy+' · Xero '+org+(org==='AU'?' (posted)':' (draft)')+'</span></div><div style="margin-left:auto;display:flex;gap:6px">'
-      +cchBtn('cch-plan-'+org,CCH.busy==='plan'+org?'Checking Xero…':'Preview Xero',false,!!CCH.busy||!!o.blocked,'Read Xero: what would be created, rebuilt or topped up (writes nothing)',' data-org="'+org+'"')+'</div></div>';
+      +cchBtn('cch-plan-'+org,CCH.busy==='plan'+org?'Checking Xero…':'Preview Xero',false,!!CCH.busy||!!o.blocked,'Read Xero: what would be created, rebuilt or topped up (writes nothing)',' data-org="'+org+'"')
+      +cchBtn('cch-upd-'+org,CCH.busy==='upd'+org?'Reading Fulfil, then Xero…':'Update Xero journals',true,!!CCH.busy,'Rebuild '+cchMoLbl(b.month)+' from Fulfil, then show what changes in Xero '+org+' (create, update the draft, top-up or replace). Nothing is written until you confirm.',' data-org="'+org+'"')+'</div></div>';
     if(o.blocked)h+='<div class="tool-badge bg-amber" style="display:block;white-space:normal;margin-bottom:8px">'+esc(o.blocked)+'</div>';
     if(o.unmapped&&o.unmapped.length){ var codes=Object.keys(CCH_COGS_CODES[org]);
       h+='<table class="cch-t" style="margin-bottom:10px"><thead><tr><th>Unmapped channel</th><th>Segment</th><th>Countries</th><th class="n">COGS</th><th class="n">Net sales</th><th>Orders</th><th>Assign COGS account</th></tr></thead><tbody>'
@@ -15682,14 +15683,19 @@ function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)retu
     h+='</div>'; });
   p.innerHTML=h+cchLogHtml(j.log||[]); cchBind(); }
 function cchLinesHtml(L){ var dr=0,cr=0; return '<table class="cch-t"><thead><tr><th>Account</th><th>Name</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody>'+L.map(function(l){ if(l.amount>0)dr+=l.amount; else cr-=l.amount; return '<tr><td>'+esc(l.code)+'</td><td>'+esc(l.name)+'</td><td class="n">'+(l.amount>0?cchF(l.amount):'')+'</td><td class="n">'+(l.amount<0?cchF(-l.amount):'')+'</td></tr>'; }).join('')+'<tr class="tot"><td></td><td>Total</td><td class="n">'+cchF(dr)+'</td><td class="n">'+cchF(cr)+'</td></tr></tbody></table>'; }
-var CCH_ACT={created:'Create',rebuilt:'Rebuild the draft in place',top_up:'Top-up journal (difference only)',no_change:'No change'};
+var CCH_ACT={created:'Create',rebuilt:'Update the draft in place',top_up:'Top-up journal (difference only)',replaced:'Replace: void the journal(s) in Xero and post the full journal again',no_change:'No change'};
 function cchPlanHtml(org,pl){ if(pl.error)return '<div style="color:var(--neg);font-size:12px;margin-top:8px">'+esc(pl.error)+'</div>';
-  var act=pl.runs.some(function(r){ return r.action!=='no_change'; });
+  var act=pl.runs.some(function(r){ return r.action!=='no_change'; }), hasPosted=pl.runs.some(function(r){ return (r.existing||[]).some(function(x){ return /^POSTED$/i.test(x.status); }); });
+  var acts={}; pl.runs.forEach(function(r){ if(r.action!=='no_change')acts[r.action]=1; });
+  var verb=acts.replaced?'Replace in Xero '+org:acts.top_up?'Post top-up in Xero '+org:acts.rebuilt&&!acts.created?'Update draft in Xero '+org:(org==='AU'?'Create and POST in Xero AU':'Create DRAFTS in Xero UK');
   return '<div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px;font-size:12px">'+(pl.done?'<div style="color:var(--pos);font-weight:700;margin-bottom:6px">Done in Xero '+org+'</div>':'<div style="font-weight:700;margin-bottom:6px">Xero '+org+' preview</div>')
     +pl.runs.map(function(r){ return '<div style="margin-bottom:8px"><b>'+esc(r.narration)+'</b> · '+(pl.done?esc(r.action.replace('_',' ')):esc(CCH_ACT[r.action]||r.action))+' · '+esc(r.status)+' · dated '+invFmtEta(r.date)+(r.prev_total?' · in Xero now '+cchF(r.prev_total):'')+' → '+cchF(r.total)
         +(r.existing&&r.existing.length?' · '+r.existing.map(function(x){ return '<a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.status)+' ↗</a>'; }).join(' '):'')+(r.xero&&r.xero.url?' · <a href="'+esc(r.xero.url)+'" target="_blank" rel="noopener">open ↗</a>':'')
+        +(r.will_void&&r.will_void.length?'<div style="color:var(--neg)">The new full journal is posted first, then '+r.will_void.length+' old journal(s) are voided in Xero (unposted ones deleted).</div>':'')
+        +(r.void_error?'<div style="color:var(--neg);font-weight:700">'+esc(r.void_error)+'</div>':'')
         +(r.action!=='no_change'&&r.lines.length?'<details><summary style="cursor:pointer">'+r.lines.length+' lines'+(r.action==='top_up'?' (difference)':'')+'</summary>'+cchLinesHtml(r.lines)+'</details>':'')+'</div>'; }).join('')
-    +(!pl.done&&act?'<div id="cch-cf-'+org+'" style="display:flex;gap:8px;align-items:center;margin-top:6px">'+cchBtn('cch-push-'+org,CCH.busy==='push'+org?'Sending…':(org==='AU'?'Create and POST in Xero AU':'Create DRAFTS in Xero UK'),true,!!CCH.busy,'Writes to live Xero',' data-org="'+org+'"')+'<span class="mut">Writes to live Xero '+org+(org==='AU'?': posted journals (corrections later are top-ups).':': drafts for Ascendant to post.')+'</span></div>':'')+'</div>'; }
+    +(!pl.done&&hasPosted?'<label style="display:flex;gap:6px;align-items:center;margin:4px 0 2px;cursor:pointer"><input type="checkbox" class="cch-repl" data-org="'+org+'"'+(pl.replace?' checked':'')+'> Replace instead of a top-up: void the posted journal in Xero and post the full journal again</label>':'')
+    +(!pl.done&&act?'<div id="cch-cf-'+org+'" style="display:flex;gap:8px;align-items:center;margin-top:6px">'+cchBtn('cch-push-'+org,CCH.busy==='push'+org?'Sending…':verb,true,!!CCH.busy,'Writes to live Xero',' data-org="'+org+'"')+'<span class="mut">Writes to live Xero '+org+(org==='AU'?': posted journals.':': drafts for Ascendant to post.')+'</span></div>':'')+'</div>'; }
 function cchLogHtml(R){ var h='<div class="sect-h" style="margin-top:18px">Journal log <span class="mut tiny">every journal HORIZON created, rebuilt or topped up (kept for ever)</span></div>';
   if(!R.length)return h+'<div class="mut" style="font-size:12px">No journals yet.</div>';
   var grp={}, order=[]; R.forEach(function(r){ var k=r.month+' · '+r.org; if(!grp[k]){ grp[k]=[]; order.push(k); } grp[k].push(r); });
@@ -15708,13 +15714,19 @@ function cchBind(){ var g=function(id){ return document.getElementById(id); };
     fetch('/api/supply/cogs-channel/build',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month})}).then(cchJson)
       .then(function(){ CCH.busy=''; CCH.msg='<span style="color:var(--pos)">Built from Fulfil.</span>'; cchLoad(); })
       .catch(function(e){ CCH.busy=''; CCH.msg='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; renderCogsCh(); }); };
-  document.querySelectorAll('[id^="cch-plan-"]').forEach(function(bt){ bt.onclick=function(){ var org=bt.dataset.org; CCH.busy='plan'+org; renderCogsCh();
-    fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org})}).then(cchJson)
-      .then(function(j){ CCH.busy=''; CCH.plan[org]={runs:j.runs}; renderCogsCh(); }).catch(function(e){ CCH.busy=''; CCH.plan[org]={error:e.message||String(e)}; renderCogsCh(); }); }; });
+  var plan=function(org,repl){ CCH.busy=CCH.busy||('plan'+org); renderCogsCh();
+    return fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org,replace:!!repl})}).then(cchJson)
+      .then(function(j){ CCH.busy=''; CCH.plan[org]={runs:j.runs,replace:!!repl}; renderCogsCh(); }).catch(function(e){ CCH.busy=''; CCH.plan[org]={error:e.message||String(e)}; renderCogsCh(); }); };
+  document.querySelectorAll('[id^="cch-plan-"]').forEach(function(bt){ bt.onclick=function(){ plan(bt.dataset.org,false); }; });
+  document.querySelectorAll('[id^="cch-upd-"]').forEach(function(bt){ bt.onclick=function(){ var org=bt.dataset.org; CCH.busy='upd'+org; CCH.msg=''; CCH.plan={}; renderCogsCh();   /* v28.728: rebuild from Fulfil, then the Xero plan */
+    fetch('/api/supply/cogs-channel/build',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month})}).then(cchJson)
+      .then(function(j){ CCH.d=CCH.d||{}; CCH.d.build=j.build; CCH.busy='plan'+org; return plan(org,false); })
+      .catch(function(e){ CCH.busy=''; CCH.msg='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; renderCogsCh(); }); }; });
+  document.querySelectorAll('.cch-repl').forEach(function(cb){ cb.onchange=function(){ plan(cb.dataset.org,cb.checked); }; });
   document.querySelectorAll('[id^="cch-push-"]').forEach(function(bt){ bt.onclick=function(){ var org=bt.dataset.org, box=g('cch-cf-'+org); if(!box)return;
     if(!bt.dataset.armed){ bt.dataset.armed='1'; bt.textContent='Confirm: write to Xero '+org; bt.style.background='var(--neg)'; bt.style.borderColor='var(--neg)'; return; }
     CCH.busy='push'+org; renderCogsCh();
-    fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org,push:true,confirm:true})}).then(cchJson)
+    fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org,push:true,confirm:true,replace:!!(CCH.plan[org]&&CCH.plan[org].replace)})}).then(cchJson)
       .then(function(j){ CCH.busy=''; CCH.plan[org]={runs:j.runs,done:true}; cchLoad(); }).catch(function(e){ CCH.busy=''; CCH.plan[org]={error:e.message||String(e)}; renderCogsCh(); }); }; });
   document.querySelectorAll('.cch-map').forEach(function(s){ s.onchange=function(){ if(!s.value)return;
     fetch('/api/supply/cogs-channel/map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:s.dataset.ch,segment:s.dataset.seg,cogs:s.value})}).then(cchJson)

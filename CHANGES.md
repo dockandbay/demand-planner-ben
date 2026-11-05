@@ -1,3 +1,10 @@
+## v28.728 (05-Nov-26) COGS by channel: "Update Xero journals" per org, Replace (repost) option, current month
+- Ben 05-Nov-26: "a button to update journal and choose the month/year ... for a repost of an existing journal or add new if it doesn't exist yet".
+- Month picker now runs from this month back to Oct-26 (default last month).
+- Each org has **Update Xero journals**: rebuild the month from Fulfil, then the Xero plan. The confirm button names what happens: Create (none in Xero yet), Update draft (an unposted journal is rewritten in place), Post top-up (posted: difference only) or Replace.
+- **Replace** (shown when a journal is already posted): the full journal is posted again, then the old journal(s) are voided in Xero (unposted ones deleted). If the void fails, both stay and the page says so. POST /api/supply/cogs-channel/xero { replace: true }.
+- Files: server.mjs, artifact_v16.7.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.727 (05-Nov-26) COGS and SALES by channel: monthly Xero journals that net Fulfil's clearing accounts to zero
 - Ben 04/05-Nov-26 (spec docs/specs/cogs-channel-allocation.md): BUY & MOVE > Inventory > COGS > **By channel & journals**. Build reads LIVE Fulfil (read only): every posted October GL line on 9006 / 9002 / 9003 / 9004 / 9005 traced to invoice -> sale order -> channel, mapped to the channel COGS and SALES accounts. Each journal moves exactly the month's balance ("COGS and sales must net to zero in Xero clearing accounts"); landed costs and supplier-bill price variances with no sale order are spread pro rata to product COGS.
 - Xero: Preview (reads only), then Create with a second confirm. UK = drafts (Ascendant post), AU = posted. Re-runs: an unposted journal is rebuilt in place; a posted one gets a top-up for the difference only. Unmapped channels block the journals until mapped from the page.

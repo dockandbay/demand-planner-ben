@@ -7684,8 +7684,10 @@ async function cchXeroRun(month, orgK, opts) {
     const isDraft = x => /^DRAFT$/i.test(String(x.Status || '')), isTop = x => /top-up/i.test(String(x.Narration || ''));
     const draft = ex.find(x => isDraft(x) && !isTop(x)), posted = ex.filter(x => /^POSTED$/i.test(String(x.Status || ''))), draftTop = ex.find(x => isDraft(x) && isTop(x));
     const same = (a, h) => Object.keys(a).every(c => Math.abs((a[c] || 0) - (h[c] || 0)) < 0.005) && Object.keys(h).every(c => Math.abs(h[c] || 0) < 0.005 || a[c] != null);
-    let action, lines, xid = null, narration = cchNarr(j, month);
+    let action, lines, xid = null, narration = cchNarr(j, month), voids = [];
     if (!ex.length) { action = 'created'; lines = want; }
+    else if (opts.replace && posted.length) {   // v28.728 (Ben 05-Nov-26 "a repost of an existing journal"): void what is in Xero, post the full journal again
+      action = 'replaced'; lines = want; voids = ex.map(x => ({ id: x.ManualJournalID, status: /^POSTED$/i.test(String(x.Status || '')) ? 'VOIDED' : 'DELETED' })); }
     else if (!posted.length && draft && ex.length === 1) { action = same(want, have) ? 'no_change' : 'rebuilt'; lines = want; xid = draft.ManualJournalID; }
     else if (!posted.length) throw Object.assign(new Error(orgK + ' ' + j + ': ' + ex.length + ' unposted journals named "' + cchNarr(j, month) + '" in Xero. Delete the extra one(s) in Xero, then run again.'), { status: 409 });
     else {   // posted journals are never edited: only the difference against what is POSTED, as one top-up (an unposted top-up is rebuilt, not stacked)
@@ -7697,13 +7699,17 @@ async function cchXeroRun(month, orgK, opts) {
       if (draft) throw Object.assign(new Error(orgK + ' ' + j + ': a posted and an unposted "' + cchNarr(j, month) + '" are both in Xero. Delete the unposted one in Xero, then run again.'), { status: 409 });
     }
     const L = Object.keys(lines).filter(c => Math.abs(lines[c]) >= 0.005).sort().map(c => ({ code: c, name: cchName(orgK, c), amount: lines[c] }));
-    const r = { journal: j, action, narration, date, status, total, prev_total: prev, lines: L, existing: ex.map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, date: cchDOf(x.Date), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })) };
-    if (opts.push && (action === 'created' || action === 'rebuilt' || action === 'top_up')) {
+    const r = { journal: j, action, narration, date, status, total, prev_total: prev, lines: L, will_void: voids, existing: ex.map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, date: cchDOf(x.Date), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })) };
+    if (opts.push && (action === 'created' || action === 'rebuilt' || action === 'top_up' || action === 'replaced')) {
       const body = { Narration: narration, Date: date, Status: status, LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false,
         JournalLines: L.map(l => ({ LineAmount: l.amount, AccountCode: l.code, Description: l.name + ' (' + month + ', Fulfil ' + (j === 'COGS' ? '9006' : '9002-9005') + ' by channel)', TaxType: tax })) };
       if (xid) body.ManualJournalID = xid;
       const w = await xeroFetch(region, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: [body] } });
-      const m = ((w && w.ManualJournals) || [])[0] || {}; r.xero = { id: m.ManualJournalID, status: m.Status, url: m.ManualJournalID ? 'https://go.xero.com/Journal/View.aspx?invoiceID=' + m.ManualJournalID : null };
+      const m = ((w && w.ManualJournals) || [])[0] || {};
+      if (voids.length && m.ManualJournalID) {   // the new journal is in first; only then the old one(s) go (a failed void leaves both, and says so)
+        try { await xeroFetch(region, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: voids.map(v => ({ ManualJournalID: v.id, Status: v.status })) } }); r.voided = voids; }
+        catch (e) { r.void_error = 'New journal posted, but the old one(s) could not be voided (' + e.message + '): void them in Xero by hand.'; } }
+      r.xero = { id: m.ManualJournalID, status: m.Status, url: m.ManualJournalID ? 'https://go.xero.com/Journal/View.aspx?invoiceID=' + m.ManualJournalID : null };
     }
     if (opts.push) { try { await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, total, prev_total, xero_id, xero_status, lines, flags)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [month, orgK, j, opts.kind || 'manual', action, opts.by || 'HORIZON', total, prev, (r.xero && r.xero.id) || (draft && draft.ManualJournalID) || null, (r.xero && r.xero.status) || null, JSON.stringify(L), JSON.stringify({ spread: o.spread.cogs, unmapped: o.unmapped.length })]); }
@@ -7754,12 +7760,12 @@ app.post('/api/supply/cogs-channel/map', async (req, res) => {   // assign an ac
     res.json({ ok: true, map: m }); }
   catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
-app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, org: 'UK'|'AU', push, confirm }: no push = the plan (reads Xero only)
+app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, org: 'UK'|'AU', push, confirm, replace }: no push = the plan (reads Xero only)
   const me = await cchAccessOk(req, res); if (!me) return;
   const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK';
   if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
   if (b.push && b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
-  try { const runs = await cchXeroRun(month, orgK, { push: !!b.push, kind: 'manual', by: (me && me.email) || authUser(req) || 'admin' }); res.json({ ok: true, org: orgK, month, push: !!b.push, runs }); }
+  try { const runs = await cchXeroRun(month, orgK, { push: !!b.push, replace: b.replace === true, kind: 'manual', by: (me && me.email) || authUser(req) || 'admin' }); res.json({ ok: true, org: orgK, month, push: !!b.push, runs }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
 });
 // n8n "Horizon | COGS and SALES by channel": 1st 06:30 (month end: build last month, journals UK + AU, ONE email per org), 7th and 15th 06:30
