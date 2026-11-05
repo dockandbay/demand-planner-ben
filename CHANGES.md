@@ -1,3 +1,7 @@
+## v28.723 (05-Nov-26) Xero payments exceptions: column widths (Type readable, PO / Supplier narrower, Insight gets the room)
+- Ben 05-Nov-26: Type was nearly hidden. Type 140 px, PO 150 px (wraps), Supplier 150 px, actions 140 px, Insight the rest.
+- Files: supply/inject.html. No migration, no env vars, no new cron routes.
+
 ## v28.722 (05-Nov-26) CONFIG Xero: Production tracking options box shows what is already in Xero
 - Ben 05-Nov-26: "should be P58 ... P80 but it doesn't seem to save". The sync did write to Xero, but the box was refilled from HORIZON's productions only and the table cut at 24 options. Now: box = Xero's options + HORIZON's P58+, sorted; table lists all.
 - Files: supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
