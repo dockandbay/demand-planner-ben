@@ -1,3 +1,7 @@
+## v28.724 (05-Nov-26) Bank sync log: real before / removed counts (the "461 cleared" was every reconciled change Xero reported)
+- Ben 05-Nov-26: "the list shouldn't clear from 461 to 8". 461 was the number of reconciled / voided items Xero reported as changed since the last good run (14-Oct), most never on the list. The log now says: was N, X new / changed, Y reconciled in Xero (actually removed), Z older than the look-back.
+- Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.723 (05-Nov-26) Xero payments exceptions: column widths (Type readable, PO / Supplier narrower, Insight gets the room)
 - Ben 05-Nov-26: Type was nearly hidden. Type 140 px, PO 150 px (wraps), Supplier 150 px, actions 140 px, Insight the rest.
 - Files: supply/inject.html. No migration, no env vars, no new cron routes.

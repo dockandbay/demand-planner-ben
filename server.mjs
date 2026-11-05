@@ -3717,11 +3717,15 @@ async function accountsBankSyncOrg(org, opts) {
     if (check.pay.length) { const m = await accXeroByIds(org, 'Payments', 'PaymentID', check.pay); check.pay.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
     rows = modified; }
   }
-  const c = await pool.connect();
+  // v28.724 (Ben 05-Nov-26: "the list shouldn't clear from 461 to 8"): "cleared" counted every reconciled item Xero reported as changed, most of which
+  // were never on the list. The run now reports the list as it was and what actually left it: removed (reconciled / voided / deleted in Xero) and
+  // aged out (before the look-back floor).
+  const c = await pool.connect(); let before = 0, removed = 0, aged = 0;
   try { await c.query('BEGIN');
+    before = (await c.query("SELECT count(*)::int n FROM planner.accounts_bank_items WHERE org = $1 AND kind <> 'transfer'", [org])).rows[0].n;
     if (mode === 'full') await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1', [org]);
-    else { await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND kind = $2', [org, 'transfer']); if (dropIds.length) await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND xero_id = ANY($2)', [org, dropIds]); }
-    if (!opts.allHistory) await c.query("DELETE FROM planner.accounts_bank_items WHERE org = $1 AND txn_date < $2 AND kind <> 'transfer'", [org, floorD]);   // v28.706: items before the floor drop off
+    else { await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND kind = $2', [org, 'transfer']); if (dropIds.length) removed = (await c.query("DELETE FROM planner.accounts_bank_items WHERE org = $1 AND xero_id = ANY($2) AND kind <> 'transfer'", [org, dropIds])).rowCount; }
+    if (!opts.allHistory) aged = (await c.query("DELETE FROM planner.accounts_bank_items WHERE org = $1 AND txn_date < $2 AND kind <> 'transfer'", [org, floorD])).rowCount;   // v28.706: items before the floor drop off
     for (let i = 0; i < rows.length; i += 300) { const ch = rows.slice(i, i + 300);
       await c.query(`INSERT INTO planner.accounts_bank_items (org, kind, xero_id, bank_account_id, bank_account, currency, txn_date, amount, contact, reference, description, link_id, link_type, synced_at) VALUES `
         + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ',now())').join(',')
@@ -3734,7 +3738,7 @@ async function accountsBankSyncOrg(org, opts) {
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
   await accSettingSet('accounts_bank_wm:' + org, { at: t0.toISOString(), mode });
   const total = (await pool.query('SELECT count(*)::int n FROM planner.accounts_bank_items WHERE org=$1', [org])).rows[0].n;
-  return { org, mode: mode === 'incremental' && opts.deep ? (opts.deepAll ? 'deep-all' : 'deep') : mode, changed: rows.length, dropped: dropIds ? dropIds.length : 0, items: total, accounts: accs.length };
+  return { org, mode: mode === 'incremental' && opts.deep ? (opts.deepAll ? 'deep-all' : 'deep') : mode, changed: rows.length, dropped: removed, aged, before, xero_reconciled_changes: dropIds ? dropIds.length : 0, items: total, accounts: accs.length };
 }
 // v28.703 (Ben 05-Nov-26, Xero calls plan items 2-3 + "trigger the more expensive checks at the end of each day when there is capacity"):
 // Xero's day resets at a fixed time (UK ~23:20-23:45 UTC, AU ~22:20-23:20 UTC), so calls left late in the day are lost anyway. The deep pass
@@ -3773,7 +3777,7 @@ async function accountsBankSync(by, opts) {
         catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } finally { _accReserve = null; }
         continue; }
       try { out.push(await accountsBankSyncOrg(org, opts)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
-    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'full' ? ' (full)' : r.mode === 'deep-skipped' ? ' (deep pass skipped: ' + r.why + ')' : ' (' + (r.mode === 'deep' || r.mode === 'deep-all' ? r.mode + ', ' : '') + r.changed + ' changed, ' + r.dropped + ' cleared' + (r.mode === 'first' ? ', first ' + ACC_BANK_FIRST_DAYS + ' days' : '') + ')')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
+    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'full' ? ' (full)' : r.mode === 'deep-skipped' ? ' (deep pass skipped: ' + r.why + ')' : ' (' + (r.mode === 'deep' || r.mode === 'deep-all' ? r.mode + ', ' : '') + (r.before != null ? 'was ' + r.before + ', ' : '') + r.changed + ' new / changed, ' + r.dropped + ' reconciled in Xero' + (r.aged ? ', ' + r.aged + ' older than the look-back' : '') + (r.mode === 'first' ? ', first ' + ACC_BANK_FIRST_DAYS + ' days' : '') + ')')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_bank_ageing',$1,$2,$3)`, [errs.length ? 'error' : 'success', n, msg.slice(0, 500)]); } catch (_) {}
     return { ok: !errs.length, items: n, orgs: out, errors: errs };
   } finally { await accProgress('accounts_bank_ageing', ''); await accJobUnlock('accounts_bank_ageing'); }
