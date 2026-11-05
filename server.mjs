@@ -34922,6 +34922,17 @@ async function cmAgentChecks(month, opts) {
     out.push({ kind: 'faire_claim', order_ref: 'Faire #' + (o.display_id || o.id), invoice_ref: o.id, customer: retailer, amount: amt, currency: cm.currency || '', pay_date: String(o.created_at || '').slice(0, 10), source_label: 'Faire ' + (o._store ? o._store + ' ' : '') + (o.source === 'FAIRE_DIRECT' ? 'Direct' : 'Marketplace'),
       ship: { name: a.name || '', street: [a.address1, a.address2].filter(Boolean).join(', '), city: a.city || '', state: a.state_code || a.state || '', zip: a.postal_code || '', country: a.country_code || '', country_name: a.country || '' }, earlier: e.slice(0, 6),
       text: 'Faire charged ' + (bps / 100).toFixed(1) + '% (' + (cm.currency || '') + ' ' + amt.toFixed(2) + ') on a customer of a rep group (' + why + '): ask Faire for 0%', faire_id: o.id, owner: CM_FAIRE_CLAIM_TO }); }
+  // v28.716 (Ben 05-Nov-26: "links on orders to xero and or fulfil"): the Fulfil sales order (by reference, else number; one batched read) and a Xero invoice search
+  try { const env = opts.env === 'live' ? 'live' : await activeFulfilEnv(), cfg = fulfilConfigFor(env);
+    const refs = [...new Set(out.map(x => String(x.order_ref || '').trim()).filter(r => r && !/^CN-/i.test(r)))];
+    if (cfg.configured && refs.length) { const found = {}, F = ['id', 'number', 'reference', 'state'];
+      for (let i = 0; i < refs.length; i += 200) (await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read', [[['reference', 'in', refs.slice(i, i + 200)]], 0, 500, null, F]) || []).forEach(x => { if (x.reference && !found[x.reference]) found[x.reference] = x; });
+      const rest = refs.filter(r => !found[r]); for (let i = 0; i < rest.length; i += 200) (await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read', [[['number', 'in', rest.slice(i, i + 200)]], 0, 500, null, F]) || []).forEach(x => { if (x.number && !found[x.number]) found[x.number] = x; });
+      const base = 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/sale.sale/';
+      out.forEach(x => { const f = found[String(x.order_ref || '').trim()]; if (f) x.fulfil = { url: base + f.id, number: f.number, state: f.state }; }); } }
+  catch (e) { notes.push('Fulfil links not read: ' + e.message); }
+  const xs = r => 'https://go.xero.com/AccountsReceivable/Search.aspx?invoiceStatus=INVOICESTATUS%2fALL&graphSearch=False&searchTerm=' + encodeURIComponent(r);
+  out.forEach(x => { const r = /^[A-Z]{2}WS-\d+|^(INV|CN)-\d+/i.test(String(x.invoice_ref || '')) ? x.invoice_ref : /^[A-Z]{2}WS-\d+/i.test(String(x.order_ref || '')) ? x.order_ref : (/^xero/.test(String(x.source || '')) ? (x.invoice_ref || x.order_ref) : null); if (r) x.xero_url = xs(r); });
   // dismissals + Madison's to-dos (once per Faire order, never for a dismissed one)
   const dis = cpJson(await cpSetting('cm_exc_dismissed', ''), {}) || {};
   out.forEach(x => { x.key = _cmExcKey(x); const d = dis[x.key]; x.dismissed = d ? { by: d.by, at: d.at, note: d.note || '' } : null; });

@@ -1,3 +1,7 @@
+## v28.716 (05-Nov-26) Commissions Exceptions: Fulfil and Xero links on orders, group filter pills
+- Ben 05-Nov-26: links on each order (Fulfil sales order, Xero invoice search) and groups as filter pills (Organic Shopify, Agent changed, ...). Oct-26: all 18 order exceptions linked.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.715 (05-Nov-26) Commissions Exceptions: one list (customers on no agent's list merged in, with Dismiss / Reopen)
 - Ben 05-Nov-26: the separate "customers with WS orders since 01-Jan-25 on no agent's list" table had no Dismiss and duplicated the list above. It is now a type in the one list (search, Open / All, Dismiss / Reopen, assign agent).
 - GET /api/client/commission/checks also returns the dismissals.
