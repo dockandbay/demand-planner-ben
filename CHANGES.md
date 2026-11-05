@@ -1,3 +1,7 @@
+## v28.722 (05-Nov-26) CONFIG Xero: Production tracking options box shows what is already in Xero
+- Ben 05-Nov-26: "should be P58 ... P80 but it doesn't seem to save". The sync did write to Xero, but the box was refilled from HORIZON's productions only and the table cut at 24 options. Now: box = Xero's options + HORIZON's P58+, sorted; table lists all.
+- Files: supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.721 (05-Nov-26) Payments Report -> Xero: deposits never unmapped (production read from the reference; P58+ to Stock Deposits)
 - Ben 05-Nov-26: Ballast deposit P60-UK-BL1 (23,704.37, 27-Oct-26) showed "unmapped": its deposits.prod_no is blank, so it fell to the pre-P58 per-production account lookup. The production now also comes from the reference (P60), so it codes to Stock Deposits 602 tagged P60. A deposit with no production at all goes to 602 untagged, with a warning.
 - Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.

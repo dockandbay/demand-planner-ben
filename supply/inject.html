@@ -11113,7 +11113,13 @@
             fetch('/api/supply/xero/tracking/suggested?min=58').then(function(r){return r.json();}).catch(function(){return {options:[]};})
           ]):Promise.resolve([{accounts:[]},{accounts:[]},{categories:[]},{options:[]}]);
           accP.then(function(a){ BANKS=(a[0]&&a[0].accounts)||[]; ALLACC=(a[1]&&a[1].accounts)||[]; if(a[0]&&a[0].error)accErr=a[0].error;
-            TRACK=(a[2]&&a[2].categories)||[]; if(a[2]&&a[2].error)trackErr=a[2].error; SUGG=(a[3]&&a[3].options)||[]; draw(); });
+            TRACK=(a[2]&&a[2].categories)||[]; if(a[2]&&a[2].error)trackErr=a[2].error; SUGG=(a[3]&&a[3].options)||[];
+            // v28.722 (Ben 05-Nov-26: "should be P58 ... P80 but it doesn't seem to save"): the box is prefilled with the options ALREADY in Xero's
+            // Production category plus HORIZON's P58+ productions (it used to show only HORIZON's, so options added in Xero looked lost)
+            (function(){ var pc=TRACK.filter(function(c){ return String(c.name).toLowerCase()==='production'; })[0], seen={}, all=[];
+              ((pc&&pc.options)||[]).map(function(o){ return o.name; }).concat(SUGG).forEach(function(n){ n=String(n||'').trim(); if(n&&!seen[n.toUpperCase()]){ seen[n.toUpperCase()]=1; all.push(n); } });
+              SUGG=all.sort(function(x,y){ var a1=parseInt(String(x).replace(/\D/g,''),10), b1=parseInt(String(y).replace(/\D/g,''),10); return (isNaN(a1)?1e9:a1)-(isNaN(b1)?1e9:b1)||String(x).localeCompare(String(y)); }); })();
+            draw(); });
         }).catch(function(e){ b.innerHTML='<div style="color:var(--neg);padding:10px">Failed to load Xero config: '+esc(e&&e.message||e)+'</div>'; });
         function orgPills(){ return ['uk','au'].map(function(rg){ var on=(rg===REG); var nm=(STATUS&&STATUS.regions&&STATUS.regions[rg]&&(STATUS.regions[rg].org_name))||rg.toUpperCase();
           return '<span class="pill xcfg-org'+(on?' active':'')+'" data-rg="'+rg+'" style="cursor:pointer'+(on?';background:var(--blue);color:#fff;border-color:var(--blue)':'')+'">'+esc(rg.toUpperCase())+' — '+esc(nm)+'</span>'; }).join(' '); }
@@ -11188,7 +11194,7 @@
             +'<div class="mut tiny" style="max-width:760px;margin:0 0 8px">Xero allows 2 active tracking categories per org. Stock Deposits are tagged by production number via a <b>Production</b> category so each production’s deposit balance is reportable. Creating / adding options writes to live Xero.</div>'
             +(trackErr?'<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Xero tracking error: '+esc(trackErr)+'</div>':'')
             +(conn?('<div class="tw" style="max-width:900px;margin-bottom:8px"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Category</th><th class="l">Status</th><th class="l">Options</th></tr></thead><tbody>'
-              +(TRACK.length?TRACK.map(function(c){ return '<tr><td class="l"><b>'+esc(c.name)+'</b></td><td class="l">'+(c.status==='ACTIVE'?'<span class="tool-badge bg-green">active</span>':'<span class="tool-badge bg-neutral">'+esc((c.status||'').toLowerCase())+'</span>')+'</td><td class="l"><span class="mut tiny">'+c.options.length+': '+esc(c.options.map(function(o){return o.name;}).slice(0,24).join(', '))+(c.options.length>24?'…':'')+'</span></td></tr>'; }).join(''):'<tr><td colspan="3" class="l mut" style="padding:6px">no tracking categories</td></tr>')
+              +(TRACK.length?TRACK.map(function(c){ return '<tr><td class="l"><b>'+esc(c.name)+'</b></td><td class="l">'+(c.status==='ACTIVE'?'<span class="tool-badge bg-green">active</span>':'<span class="tool-badge bg-neutral">'+esc((c.status||'').toLowerCase())+'</span>')+'</td><td class="l"><span class="mut tiny">'+c.options.length+': '+esc(c.options.map(function(o){return o.name;}).join(', '))+'</span></td></tr>'; }).join(''):'<tr><td colspan="3" class="l mut" style="padding:6px">no tracking categories</td></tr>')
               +'</tbody></table></div>'
               +(function(){ var activeCount=TRACK.filter(function(c){return c.status==='ACTIVE';}).length; var hasProd=TRACK.some(function(c){return String(c.name).toLowerCase()==='production'&&c.status==='ACTIVE';}); var full=activeCount>=2&&!hasProd;
                 return '<div style="max-width:900px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--hover);text-align:left">'
