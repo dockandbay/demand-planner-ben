@@ -1,3 +1,13 @@
+## v28.727 (05-Nov-26) COGS and SALES by channel: monthly Xero journals that net Fulfil's clearing accounts to zero
+- Ben 04/05-Nov-26 (spec docs/specs/cogs-channel-allocation.md): BUY & MOVE > Inventory > COGS > **By channel & journals**. Build reads LIVE Fulfil (read only): every posted October GL line on 9006 / 9002 / 9003 / 9004 / 9005 traced to invoice -> sale order -> channel, mapped to the channel COGS and SALES accounts. Each journal moves exactly the month's balance ("COGS and sales must net to zero in Xero clearing accounts"); landed costs and supplier-bill price variances with no sale order are spread pro rata to product COGS.
+- Xero: Preview (reads only), then Create with a second confirm. UK = drafts (Ascendant post), AU = posted. Re-runs: an unposted journal is rebuilt in place; a posted one gets a top-up for the difference only. Unmapped channels block the journals until mapped from the page.
+- Journal log on the same page (planner.cogs_channel_runs), grouped by month and org.
+- October 2026 checked: UK COGS 228,364.52 / net sales 658,447.75, AU COGS 55,688.09 / net sales 216,707.14, all clearing accounts to zero; same as the hand build. October itself goes into Xero from the CSV import files (same narrations), so the 7th / 15th refreshes pick it up.
+- **New migration:** 421_cogs_channel_journals.sql (planner.cogs_channel_runs).
+- **New cron route:** POST /api/cron/cogs-channel (x-webhook-secret; n8n "Horizon | COGS and SALES by channel", 1st / 7th / 15th 06:30 London; 1st = month end with ONE email per org). It sits inside the auth-gate secret bracket.
+- No new env vars (recipients default in code; app_settings cogs_channel_email_uk / cogs_channel_email_au override).
+- Files: server.mjs, artifact_v16.7.html, migrations/421_cogs_channel_journals.sql, lib/ai-logic/supply-finance.md, docs/specs/cogs-channel-allocation.md.
+
 ## v28.726 (05-Nov-26) DEMAND plan: closing the Plan popup no longer re-renders the whole plan
 - App health 04-Nov-26 09:25: closing the buy-plan popup (the X) on #/demand/plan blocked the page for 49.7 s (Kathryn, v28.688). The popup's hidden scaffold leaves the plan table in place, but the close re-rendered the entire plan. Now it only re-renders when the plan table was actually hidden.
 - Files: artifact_v16.7.html. No migration, no env vars, no new cron routes.

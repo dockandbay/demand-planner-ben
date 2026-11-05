@@ -1,6 +1,6 @@
 # COGS and SALES channel allocation (UK + AU): monthly Xero journals + weekly Airtable report
 
-Draft for Ben's review, 04-Nov-26. Nothing built yet.
+Draft for Ben's review, 04-Nov-26. **Built v28.727 (05-Nov-26)**: method changed to the GL lines themselves (below, "Built").
 
 ## Why
 Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - Cost of Goods Sold Account" (on invoicing; 9011 Inventory Shipped Not Invoiced in between). Since 01-Oct-26 that reaches Xero, so Xero shows all COGS in one line instead of by channel. We already split September by hand (`fulfil-accounting-transition/working files/cogs_sep_analysis.py`, 14-Oct-26); this makes it automatic every month for UK (company 1, GBP) and AU (company 3, AUD).
@@ -128,3 +128,11 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
    - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited). NO emails on refreshes (Ben 04-Nov-26); the result shows in HORIZON ACCOUNTS > COGS by channel.
 6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
 7. ~~AU Marketplace / Custom~~ answered 05-Nov-26: TikTok AU -> 212e, Custom / Co-Brand -> 200f (both exist in Xero AU). Still open: Custom Local D2C sales (200f, or a new "Sales - Custom Local - D2C - AU"?), AU "Other" sales (200z, or a new "Sales - AU - Other"?), and shipping revenue (9004) / discounts (9005): leave in their Fulfil accounts, or split by channel too?
+
+## Built (v28.727, 05-Nov-26)
+- Ben 05-Nov-26: "COGS and sales must net to zero in Xero clearing accounts". So the source is the month's posted GL lines on 9006 / 9002 / 9003 / 9004 / 9005 themselves (not shipments), each traced GL line -> invoice line -> sale order. Every journal moves exactly the account balance; nothing is left in the clearing accounts.
+- Landed costs and supplier-bill price variances posted to 9006 with no sale order: spread pro rata to each channel's product COGS (by SKU was tried and rejected, see lib/ai-logic/supply-finance.md).
+- 9005 discounts (and 9003 / 9004) are included, so channel sales are NET (Ben's review default 05-Nov-26).
+- Defaults taken (review 05-Nov-26): Key Accounts -> that region's Wholesale; International Distributors 311.5c / 210.7z (AU entity 401.5 / 210e); "UK - Custom/Co-Brand" by delivery country; Shopify segment 274629623809 = Shopify.
+- Zero-cost shipments are not in these journals (they were never in 9006).
+- October 2026: CSV import files (same narrations) in fulfil-accounting-transition/working files; HORIZON automatic from the 1-Dec-26 month end (and the 7th / 15th October refreshes once live).

@@ -15540,7 +15540,7 @@ function renderInventory(){
   if(INV_SUB==='manage3pl') body=pillbar([['US_GV','US (Geneva)'],['UK','UK (ILG)'],'AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='cogs') body='<div id="cogs-panel"></div>';
+  else if(INV_SUB==='cogs') body=pillbar([['unit','Per-unit cost (Airtable)'],['channel','By channel & journals']],COGS.view||'unit','cogs-view-pill')+'<div id="cogs-panel"></div>';   /* v28.727: + COGS and SALES by channel */
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -15548,18 +15548,19 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
+  wrap.querySelectorAll('.cogs-view-pill').forEach(function(b){ b.onclick=function(){ COGS.view=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl'){ if(INV_3PL==='UK'||INV_3PL==='US_GV'){ ilgSite(INV_3PL==='US_GV'?'GENEVA':'ILG'); ilgLoad(); } else inv3plLoad(); }   // v28.553: UK = the ILG daily report; v28.682: US (Geneva) = the Geneva CSV, same panel
   else if(INV_SUB==='managefba'){ if(INV_FBA==='AWD')invAwdLoad(); else invFbaLoad('manage'); }
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
-  else if(INV_SUB==='cogs')renderCogs();
+  else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else renderCogs(); }
 }
 // v28.235 (Ben): BUY & MOVE ▸ Inventory ▸ COGS. Per-unit cost per SKU per warehouse for the Airtable cogs-up table.
 // Analyse = server reads LIVE Fulfil's Inventory Valuation (UK + AU companies) and previews every value: Fulfil (stock on
 // hand, converted to the column currency at Fulfil's rates), Kept (sold out: the last stored value is kept) or Supplier
 // cost (never valued: products.cost USD, converted). Email = the server rebuilds, emails the CSV to the Airtable address
 // and stores the values. Nothing is written by Analyse.
-var COGS={d:null,busy:false,f:'all',q:'',cat:'',st:'',all:false,msg:'',lastTried:false};   // v28.236 + category / status filters
+var COGS={d:null,busy:false,f:'all',q:'',cat:'',st:'',all:false,msg:'',lastTried:false,view:'unit'};   // v28.236 + category / status filters
 function cogsFmt(v){ return v==null?'':Number(v).toFixed(2); }
 function cogsBig(x){ return x&&(x.src==='fulfil'||x.src==='set')&&x.prev>0&&Math.abs(x.v/x.prev-1)>0.25; }
 function renderCogs(){ var p=document.getElementById('cogs-panel'); if(!p)return; var d=COGS.d;
@@ -15639,6 +15640,86 @@ function cogsHist(){ var ex=document.getElementById('cogs-hmodal'); if(ex)ex.rem
     el.className=''; el.innerHTML='<style>.cogs-htab th,.cogs-htab td{text-align:left!important;padding:4px 8px}</style>'+'<table class="cogs-htab" style="width:100%;font-size:12px"><thead><tr><th class="l">When</th><th class="l">What</th><th class="l">By</th><th class="l">Rows</th><th class="l">Changed</th><th class="l">Result</th></tr></thead><tbody>'
       +R.map(function(r){ return '<tr><td class="l" style="white-space:nowrap">'+invFmtEta(r.at)+' '+esc(String(r.at||'').slice(11,16))+'</td><td class="l">'+(r.kind==='email'?'Email to Airtable':r.kind==='baseline'?'Baseline load':esc(r.kind))+'</td><td class="l">'+esc(String(r.created_by||'').split('@')[0]+'@')+'</td><td class="l">'+(r.rows!=null?Number(r.rows).toLocaleString():'')+'</td><td class="l">'+(r.changed!=null?Number(r.changed).toLocaleString():'')+'</td><td class="l">'+(r.kind==='email'?(r.sent?'<span class="tool-badge bg-green">sent</span>':'<span class="tool-badge bg-amber">not sent</span>'):'')+(r.note?' <span class="mut">'+esc(r.note)+'</span>':'')+'</td></tr>'; }).join('')+'</tbody></table>'; })
     .catch(function(e){ var el=document.getElementById('cogs-h-body'); if(el)el.textContent='Could not load: '+(e.message||e); }); }
+// v28.727 (Ben 04/05-Nov-26, docs/specs/cogs-channel-allocation.md): COGS ▸ By channel & journals. Fulfil's clearing accounts (9006 COGS;
+// 9002 / 9003 / 9004 / 9005 revenue) traced line by line to the sale channel and journalled out to the channel accounts, so the clearing
+// accounts net to zero. Build reads LIVE Fulfil (about a minute, writes nothing); Xero: UK drafts, AU posted, preview first.
+var CCH={month:'',d:null,busy:'',msg:'',plan:{},open:{}};
+function cchMonths(){ var out=[], d=new Date(), y=d.getFullYear(), m=d.getMonth(); for(var i=0;i<14;i++){ m--; if(m<0){ m=11; y--; } var k=y+'-'+('0'+(m+1)).slice(-2); if(k<'2026-10')break; out.push(k); } return out; }
+function cchMoLbl(k){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+k.slice(5,7)-1]+'-'+k.slice(2,4); }
+function cchF(v){ v=Number(v)||0; var s=Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); return v<0?'('+s+')':s; }
+function cchJson(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }
+function cchLoad(){ var p=document.getElementById('cogs-panel'); if(!p)return; if(!CCH.month)CCH.month=cchMonths()[0]||'2026-10';
+  fetch('/api/supply/cogs-channel?month='+CCH.month,{cache:'no-store'}).then(cchJson).then(function(j){ CCH.d=j; renderCogsCh(); }).catch(function(e){ CCH.d={error:e.message||String(e)}; renderCogsCh(); }); }
+function cchBtn(id,txt,prim,dis,tip,extra){ return '<button id="'+id+'"'+(extra||'')+(dis?' disabled':'')+' title="'+esc(tip||'')+'" style="padding:6px 14px;border-radius:7px;border:1px solid '+(prim?'var(--nav)':'var(--line)')+';background:'+(prim?'var(--nav)':'var(--card)')+';color:'+(prim?'#fff':'var(--ink)')+';font-weight:700;font-size:12px;cursor:'+(dis?'default':'pointer')+';opacity:'+(dis?'.55':'1')+'">'+txt+'</button>'; }
+function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)return; var j=CCH.d||{}, b=j.build;
+  var h='<style>.cch-t th,.cch-t td{text-align:left!important;padding:4px 7px;white-space:nowrap;font-size:12px}.cch-t td.n,.cch-t th.n{text-align:right!important}.cch-t tr.tot td{font-weight:800;background:var(--blue-soft,#eef4ff)}</style>'
+    +'<div style="font-size:12px;color:var(--muted);margin:0 0 10px;max-width:1000px">Fulfil books every sale to generic clearing accounts (<b>9006</b> COGS; <b>9002</b> revenue, 9003 returns, 9004 shipping, 9005 discounts). Every posted GL line of the month is traced to its invoice and sale order, mapped to the channel\'s COGS and sales accounts, and journalled out so the clearing accounts <b>net to zero</b>. Lines with no sale order (landed costs, supplier-bill price variances on stock already sold) are spread pro rata to each channel\'s product COGS. Xero UK: draft (Ascendant post). Xero AU: posted. Automatic on the 1st (month end, with the email), 7th and 15th (refresh: a draft is rebuilt, a posted journal gets a top-up).</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><select id="cch-mo" class="flt" style="font-size:12px">'+cchMonths().map(function(k){ return '<option value="'+k+'"'+(k===CCH.month?' selected':'')+'>'+cchMoLbl(k)+'</option>'; }).join('')+'</select>'
+    +cchBtn('cch-build',CCH.busy==='build'?'Reading Fulfil… (about a minute)':(b?'Rebuild from Fulfil':'Build from Fulfil'),true,!!CCH.busy,'Read LIVE Fulfil now (writes nothing to Fulfil or Xero)')
+    +(b?'<span class="mut" style="font-size:12px">Built '+invFmtEta(b.built_at)+' '+esc(String(new Date(b.built_at).toTimeString()).slice(0,5))+(b.built_by?' by '+esc(String(b.built_by).split('@')[0])+(String(b.built_by).indexOf('@')>0?'@':''):'')+' · '+Number(b.gl_lines||0).toLocaleString()+' GL lines · '+Math.round((b.ms||0)/1000)+' s</span>':'')
+    +'<span id="cch-msg" style="font-size:12px">'+(CCH.msg||'')+'</span></div>';
+  if(j.error){ p.innerHTML=h+'<div style="color:var(--neg);font-size:12px">'+esc(j.error)+'</div>'; cchBind(); return; }
+  if(!CCH.d){ p.innerHTML=h+'<div class="mut" style="font-size:12px">Loading…</div>'; cchBind(); return; }
+  if(!b){ p.innerHTML=h+'<div class="mut" style="font-size:12px">Not built yet for '+cchMoLbl(CCH.month)+'. Press Build to read Fulfil.</div>'+cchLogHtml(j.log||[]); cchBind(); return; }
+  ['UK','AU'].forEach(function(org){ var o=b.orgs[org]; if(!o)return; var tc=0,tl=0,ts=0;
+    h+='<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;background:var(--card)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-size:14px;font-weight:800;color:var(--nav)">'+org+' <span class="mut" style="font-weight:600">'+o.ccy+' · Xero '+org+(org==='AU'?' (posted)':' (draft)')+'</span></div><div style="margin-left:auto;display:flex;gap:6px">'
+      +cchBtn('cch-plan-'+org,CCH.busy==='plan'+org?'Checking Xero…':'Preview Xero',false,!!CCH.busy||!!o.blocked,'Read Xero: what would be created, rebuilt or topped up (writes nothing)',' data-org="'+org+'"')+'</div></div>';
+    if(o.blocked)h+='<div class="tool-badge bg-amber" style="display:block;white-space:normal;margin-bottom:8px">'+esc(o.blocked)+'</div>';
+    if(o.unmapped&&o.unmapped.length){ var codes=Object.keys(CCH_COGS_CODES[org]);
+      h+='<table class="cch-t" style="margin-bottom:10px"><thead><tr><th>Unmapped channel</th><th>Segment</th><th>Countries</th><th class="n">COGS</th><th class="n">Net sales</th><th>Orders</th><th>Assign COGS account</th></tr></thead><tbody>'
+        +o.unmapped.map(function(u,i){ return '<tr><td>'+esc(u.channel||'(none)')+'</td><td>'+esc(u.segment||'')+'</td><td>'+esc(u.countries.join(', '))+'</td><td class="n">'+cchF(u.cogs)+'</td><td class="n">'+cchF(u.sales)+'</td><td class="mut">'+esc(u.orders.slice(0,5).join(', '))+'</td><td><select class="flt cch-map" data-ch="'+esc(u.channel)+'" data-seg="'+esc(u.segment||'*')+'" style="font-size:12px"><option value="">Choose…</option>'+codes.map(function(c){ return '<option value="'+c+'">'+c+' '+esc(CCH_COGS_CODES[org][c])+'</option>'; }).join('')+'</select></td></tr>'; }).join('')+'</tbody></table>'; }
+    h+='<div class="tw" style="overflow:auto"><table class="cch-t" style="width:100%"><thead><tr><th>COGS account</th><th>Sales account</th><th>Fulfil channels</th><th class="n">Orders</th><th class="n">Product COGS</th><th class="n">Spread (no sale order)</th><th class="n">COGS</th><th class="n">Net sales</th><th class="n">Margin</th></tr></thead><tbody>'
+      +o.rows.map(function(r){ tc+=r.cogs_total; tl+=r.landed; ts+=r.net_sales; var mg=r.net_sales?(1-r.cogs_total/r.net_sales):null;
+        return '<tr'+(r.cogs==='UNMAPPED'?' style="background:var(--neg-bg)"':'')+'><td title="'+esc(r.cogs_name)+'"><b>'+esc(r.cogs)+'</b> '+esc(r.cogs_name)+'</td><td title="'+esc(r.sales_name)+'">'+(r.sales?'<b>'+esc(r.sales)+'</b> '+esc(r.sales_name):'')+'</td><td title="'+esc((r.notes||[]).join(' · '))+'">'+esc(r.channels.join(', '))+((r.notes||[]).length?' <span class="mut">ⓘ</span>':'')+'</td><td class="n">'+r.orders.toLocaleString()+'</td><td class="n">'+cchF(r.cogs_total-r.landed)+'</td><td class="n mut">'+cchF(r.landed)+'</td><td class="n"><b>'+cchF(r.cogs_total)+'</b></td><td class="n"><b>'+cchF(r.net_sales)+'</b></td><td class="n">'+(mg==null?'':(mg*100).toFixed(1)+'%')+'</td></tr>'; }).join('')
+      +'<tr class="tot"><td>Total</td><td></td><td></td><td></td><td class="n">'+cchF(tc-tl)+'</td><td class="n">'+cchF(tl)+'</td><td class="n">'+cchF(tc)+'</td><td class="n">'+cchF(ts)+'</td><td class="n">'+(ts?((1-tc/ts)*100).toFixed(1)+'%':'')+'</td></tr></tbody></table></div>';
+    var g=o.gl||{}, rev=-((g['9002']||0)+(g['9003']||0)+(g['9004']||0)+(g['9005']||0)), okC=Math.abs(o.balanced.COGS)<0.005&&Math.abs(tc-(g['9006']||0))<0.005, okS=Math.abs(o.balanced.SALES)<0.005&&Math.abs(ts-rev)<0.005;
+    h+='<div style="font-size:12px;margin:8px 0">'+(okC?'✅':'⚠️')+' 9006 balance <b>'+cchF(g['9006'])+'</b> → COGS journal moves '+cchF(tc)+': 9006 nets to zero · '
+      +(okS?'✅':'⚠️')+' 9002 '+cchF(g['9002'])+' + 9003 '+cchF(g['9003'])+' + 9004 '+cchF(g['9004'])+' + 9005 '+cchF(g['9005'])+' → SALES journal moves '+cchF(ts)+' net: all net to zero</div>';
+    if(o.spread&&o.spread.by_source&&o.spread.by_source.length)h+='<details style="font-size:12px;margin-bottom:6px"><summary style="cursor:pointer">No sale order, spread pro rata: COGS '+cchF(o.spread.cogs)+(o.spread.sales?' · revenue '+cchF(o.spread.sales):'')+' ('+o.spread.by_source.length+' sources)</summary><table class="cch-t" style="margin-top:6px"><thead><tr><th>Account</th><th>Source</th><th>Party</th><th class="n">Lines</th><th class="n">Amount</th><th>SKUs (first 5)</th></tr></thead><tbody>'
+      +o.spread.by_source.map(function(s){ return '<tr><td>'+esc(s.account)+'</td><td>'+esc(s.source==='account.landed_cost'?'Landed cost':s.source==='account.invoice'?'Supplier / other invoice':s.source||'Journal')+'</td><td>'+esc(s.party||'')+'</td><td class="n">'+s.lines+'</td><td class="n">'+cchF(s.amount)+'</td><td class="mut">'+esc((s.skus||[]).join(', '))+'</td></tr>'; }).join('')+'</tbody></table></details>';
+    h+='<details style="font-size:12px"><summary style="cursor:pointer">Journal lines (COGS '+o.journals.COGS.length+', SALES '+o.journals.SALES.length+')</summary>'+['COGS','SALES'].map(function(jn){ return '<div style="font-weight:700;margin:8px 0 4px">HORIZON '+jn+' by channel '+esc(b.month)+'</div>'+cchLinesHtml(o.journals[jn]); }).join('')+'</details>';
+    var pl=CCH.plan[org]; if(pl)h+=cchPlanHtml(org,pl);
+    h+='</div>'; });
+  p.innerHTML=h+cchLogHtml(j.log||[]); cchBind(); }
+function cchLinesHtml(L){ var dr=0,cr=0; return '<table class="cch-t"><thead><tr><th>Account</th><th>Name</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody>'+L.map(function(l){ if(l.amount>0)dr+=l.amount; else cr-=l.amount; return '<tr><td>'+esc(l.code)+'</td><td>'+esc(l.name)+'</td><td class="n">'+(l.amount>0?cchF(l.amount):'')+'</td><td class="n">'+(l.amount<0?cchF(-l.amount):'')+'</td></tr>'; }).join('')+'<tr class="tot"><td></td><td>Total</td><td class="n">'+cchF(dr)+'</td><td class="n">'+cchF(cr)+'</td></tr></tbody></table>'; }
+var CCH_ACT={created:'Create',rebuilt:'Rebuild the draft in place',top_up:'Top-up journal (difference only)',no_change:'No change'};
+function cchPlanHtml(org,pl){ if(pl.error)return '<div style="color:var(--neg);font-size:12px;margin-top:8px">'+esc(pl.error)+'</div>';
+  var act=pl.runs.some(function(r){ return r.action!=='no_change'; });
+  return '<div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px;font-size:12px">'+(pl.done?'<div style="color:var(--pos);font-weight:700;margin-bottom:6px">Done in Xero '+org+'</div>':'<div style="font-weight:700;margin-bottom:6px">Xero '+org+' preview</div>')
+    +pl.runs.map(function(r){ return '<div style="margin-bottom:8px"><b>'+esc(r.narration)+'</b> · '+(pl.done?esc(r.action.replace('_',' ')):esc(CCH_ACT[r.action]||r.action))+' · '+esc(r.status)+' · dated '+invFmtEta(r.date)+(r.prev_total?' · in Xero now '+cchF(r.prev_total):'')+' → '+cchF(r.total)
+        +(r.existing&&r.existing.length?' · '+r.existing.map(function(x){ return '<a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.status)+' ↗</a>'; }).join(' '):'')+(r.xero&&r.xero.url?' · <a href="'+esc(r.xero.url)+'" target="_blank" rel="noopener">open ↗</a>':'')
+        +(r.action!=='no_change'&&r.lines.length?'<details><summary style="cursor:pointer">'+r.lines.length+' lines'+(r.action==='top_up'?' (difference)':'')+'</summary>'+cchLinesHtml(r.lines)+'</details>':'')+'</div>'; }).join('')
+    +(!pl.done&&act?'<div id="cch-cf-'+org+'" style="display:flex;gap:8px;align-items:center;margin-top:6px">'+cchBtn('cch-push-'+org,CCH.busy==='push'+org?'Sending…':(org==='AU'?'Create and POST in Xero AU':'Create DRAFTS in Xero UK'),true,!!CCH.busy,'Writes to live Xero',' data-org="'+org+'"')+'<span class="mut">Writes to live Xero '+org+(org==='AU'?': posted journals (corrections later are top-ups).':': drafts for Ascendant to post.')+'</span></div>':'')+'</div>'; }
+function cchLogHtml(R){ var h='<div class="sect-h" style="margin-top:18px">Journal log <span class="mut tiny">every journal HORIZON created, rebuilt or topped up (kept for ever)</span></div>';
+  if(!R.length)return h+'<div class="mut" style="font-size:12px">No journals yet.</div>';
+  var grp={}, order=[]; R.forEach(function(r){ var k=r.month+' · '+r.org; if(!grp[k]){ grp[k]=[]; order.push(k); } grp[k].push(r); });
+  return h+order.map(function(k){ var rows=grp[k], last={}; rows.forEach(function(r){ if(!last[r.journal]&&r.action!=='error')last[r.journal]=r; });
+    return '<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:var(--card)"><div style="padding:7px 10px;font-weight:800;font-size:12px;background:var(--blue-soft,#eef4ff);border-radius:8px 8px 0 0">'+esc(cchMoLbl(rows[0].month))+' · '+esc(rows[0].org)
+      +['COGS','SALES'].map(function(jn){ var x=last[jn]; return x?' <span class="mut" style="font-weight:600">· '+jn+' '+cchF(x.total)+(x.xero_status?' '+esc(String(x.xero_status).toLowerCase()):'')+'</span>':''; }).join('')+'</div>'
+      +'<table class="cch-t" style="width:100%"><thead><tr><th>When</th><th>Run</th><th>By</th><th>Journal</th><th>Action</th><th class="n">Total</th><th class="n">Change</th><th>Xero</th></tr></thead><tbody>'
+      +rows.map(function(r){ var ch=r.total!=null&&r.prev_total!=null?Number(r.total)-Number(r.prev_total):null;
+        return '<tr><td>'+invFmtEta(r.at)+' '+esc(String(r.at||'').slice(11,16))+'</td><td>'+esc({month_end:'Month end',refresh_7:'Refresh 7th',refresh_15:'Refresh 15th',manual:'By hand'}[r.run_kind]||r.run_kind)+'</td><td>'+esc(String(r.run_by||'').split('@')[0])+'</td><td>'+esc(r.journal)+'</td><td>'+(r.action==='error'?'<span style="color:var(--neg)" title="'+esc(r.error||'')+'">error</span>':esc(String(r.action).replace('_',' ')))+(r.emailed?' <span class="tool-badge bg-green">emailed</span>':'')+'</td><td class="n">'+(r.total!=null?cchF(r.total):'')+'</td><td class="n">'+(ch!=null&&Math.abs(ch)>=0.005?cchF(ch):'')+'</td><td>'+(r.xero_id?'<a href="https://go.xero.com/Journal/View.aspx?invoiceID='+esc(r.xero_id)+'" target="_blank" rel="noopener">'+esc(String(r.xero_status||'open').toLowerCase())+' ↗</a>':'')+'</td></tr>'
+          +(r.lines&&r.lines.length?'<tr><td colspan="8" style="padding:0 7px 6px"><details><summary class="mut" style="cursor:pointer">'+r.lines.length+' lines</summary>'+cchLinesHtml(r.lines)+'</details></td></tr>':''); }).join('')+'</tbody></table></div>'; }).join(''); }
+var CCH_COGS_CODES={UK:{'311.1a':'UK Shopify','311.1b':'UK Amazon','311.1c':'UK Wholesale','311.1d':'UK Marketplace','311.1e':'UK Faire','311.2a':'US Shopify','311.2b':'US Amazon','311.2c':'US Wholesale','311.2d':'US Marketplace','311.2e':'US Faire','311.2f':'US Walmart','311.3a':'EU Shopify','311.3b':'FR Wholesale','311.3c':'EU Wholesale','311.3d':'DE Wholesale','311.3e':'DE Amazon','311.3f':'IT Amazon','311.3g':'FR Amazon','311.3h':'ES Amazon','311.4b':'CA Amazon','311.5c':'International Distributors','311.5d':'EU Zalando','311.5g':'Int. Distributors (Co Brand)','311.9a':'UK Co-Brand/Custom','311.9b':'US Co-Brand/Custom','311.9c':'CA Co-Brand/Custom','311.9d':'EU Co-Brand/Custom','311.9e':'ROTW Co-Brand/Custom'},
+  AU:{'311.8a':'AU Shopify','311.8b':'AU Amazon','401.5':'AU Wholesale & Distributor','401.6':'AU Marketplace','401.11e':'AU Custom / Co Brand'}};
+function cchBind(){ var g=function(id){ return document.getElementById(id); };
+  if(g('cch-mo'))g('cch-mo').onchange=function(){ CCH.month=this.value; CCH.d=null; CCH.plan={}; CCH.msg=''; renderCogsCh(); cchLoad(); };
+  if(g('cch-build'))g('cch-build').onclick=function(){ CCH.busy='build'; CCH.msg=''; CCH.plan={}; renderCogsCh();
+    fetch('/api/supply/cogs-channel/build',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month})}).then(cchJson)
+      .then(function(){ CCH.busy=''; CCH.msg='<span style="color:var(--pos)">Built from Fulfil.</span>'; cchLoad(); })
+      .catch(function(e){ CCH.busy=''; CCH.msg='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; renderCogsCh(); }); };
+  document.querySelectorAll('[id^="cch-plan-"]').forEach(function(bt){ bt.onclick=function(){ var org=bt.dataset.org; CCH.busy='plan'+org; renderCogsCh();
+    fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org})}).then(cchJson)
+      .then(function(j){ CCH.busy=''; CCH.plan[org]={runs:j.runs}; renderCogsCh(); }).catch(function(e){ CCH.busy=''; CCH.plan[org]={error:e.message||String(e)}; renderCogsCh(); }); }; });
+  document.querySelectorAll('[id^="cch-push-"]').forEach(function(bt){ bt.onclick=function(){ var org=bt.dataset.org, box=g('cch-cf-'+org); if(!box)return;
+    if(!bt.dataset.armed){ bt.dataset.armed='1'; bt.textContent='Confirm: write to Xero '+org; bt.style.background='var(--neg)'; bt.style.borderColor='var(--neg)'; return; }
+    CCH.busy='push'+org; renderCogsCh();
+    fetch('/api/supply/cogs-channel/xero',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org,push:true,confirm:true})}).then(cchJson)
+      .then(function(j){ CCH.busy=''; CCH.plan[org]={runs:j.runs,done:true}; cchLoad(); }).catch(function(e){ CCH.busy=''; CCH.plan[org]={error:e.message||String(e)}; renderCogsCh(); }); }; });
+  document.querySelectorAll('.cch-map').forEach(function(s){ s.onchange=function(){ if(!s.value)return;
+    fetch('/api/supply/cogs-channel/map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:s.dataset.ch,segment:s.dataset.seg,cogs:s.value})}).then(cchJson)
+      .then(function(){ CCH.msg='<span style="color:var(--pos)">Mapped '+esc(s.dataset.ch)+' to '+esc(s.value)+'. Rebuild to apply.</span>'; renderCogsCh(); })
+      .catch(function(e){ CCH.msg='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; renderCogsCh(); }); }; }); }
 // SUG-0024 Inventory Status Report. Reads BP.statusMetrics(mkt) (SOH split, on-order, weeks-cover per warehouse,
 // cover targets, inbound units + next ETA). Section 1 = OUT OF STOCK; Section 2 = LOW STOCK (below cover target).
 // Sections still TODO (data-dependent): backorders vs inbound (no backorder feed), delivery vs forecast, PO delays.

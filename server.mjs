@@ -1317,7 +1317,7 @@ app.use((req, res, next) => {
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/tpl-push-continue' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
       || req.path === '/api/cron/commission-weekly'   // v28.707 (Ben 05-Nov-26): n8n Sunday commission steps (x-webhook-secret checked in the handler with safeEq, fails closed)
-      || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
+      || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/cogs-channel' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
@@ -7512,6 +7512,278 @@ app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: 
 app.get('/api/supply/cogs/history', async (req, res) => {
   try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
   catch (e) { res.json({ ok: true, rows: [] }); }
+});
+// v28.727 (Ben 04/05-Nov-26, docs/specs/cogs-channel-allocation.md): COGS and SALES by channel. Fulfil books every sale to generic clearing
+// accounts (9006 COGS; 9002 Revenue, 9003 Contra Revenue, 9004 Shipping, 9005 Sales Discount) and Xero sees them as single lines. Each month
+// HORIZON traces every POSTED GL line on those accounts to its invoice line -> sale order -> channel / segment / delivery country, and journals
+// the balance out to the channel accounts. Ben 05-Nov-26: "COGS and sales must net to zero in Xero clearing accounts", so each journal moves
+// EXACTLY the month's balance: lines with no sale order (landed costs and supplier-bill price variances posted to 9006 for stock already sold)
+// are spread over the channels pro rata to each channel's product COGS (by SKU was tried on October and rejected: a few pounds of a SKU's
+// October sales took its whole landed cost). Read-only on Fulfil (LIVE). Xero: UK journals DRAFT (Ascendant post), AU POSTED (Ben 04-Nov-26).
+const CCH_FROM = '2026-10';   // Fulfil's GL reached Xero from 01-Oct-26; September stays the manual journal
+const CCH_ACC = ['9002', '9003', '9004', '9005', '9006'];
+const CCH_EU = new Set(['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE']);
+const CCH_AMZ = { 'Amazon.co.uk': '311.1b', 'Amazon.com': '311.2b', 'Amazon.ca': '311.4b', 'Amazon.de': '311.3e', 'Amazon.es': '311.3h', 'Amazon.fr': '311.3g', 'Amazon.it': '311.3f', 'Amazon.com.au': '311.8b' };
+// COGS account -> SALES account (Ben's "3PL INVOICE ACCOUNTING - MAPPING" file, validated 05-Nov-26; AU read from live Xero AU)
+const CCH_SALES = { '311.1a': '200a', '311.1b': '201a', '311.1c': '210.5a', '311.1d': '202a', '311.1e': '212a', '311.2a': '200b', '311.2b': '201b', '311.2c': '210.5b',
+  '311.2d': '202b', '311.2e': '212b', '311.2f': '202.3b', '311.3a': '200d', '311.5d': '202.3c', '311.3b': '210.5f', '311.3d': '210.5e', '311.3c': '210.5d', '311.3e': '201e',
+  '311.3g': '201f', '311.3f': '201g', '311.3h': '201h', '311.4b': '201c', '311.5c': '210.7z', '311.5g': '210.7y', '311.9a': '210.6a', '311.9b': '210.6b', '311.9c': '210.6c',
+  '311.9d': '210.6d', '311.9e': '210.6e', '311.8a': '200e', '311.8b': '201e', '401.5': '210e', '401.6': '212e', '401.11e': '200f' };
+const CCH_NAME = { '311.1a': 'COGS - UK - Shopify', '311.1b': 'COGS - UK - Amazon', '311.1c': 'COGS - UK - Wholesale', '311.1d': 'COGS - UK - Marketplace', '311.1e': 'COGS - UK - Faire',
+  '311.2a': 'COGS - US - Shopify', '311.2b': 'COGS - US - Amazon', '311.2c': 'COGS - US - Wholesale', '311.2d': 'COGS - US - Marketplace', '311.2e': 'COGS - US - Faire', '311.2f': 'COGS - US - Walmart',
+  '311.3a': 'COGS - EU - Shopify', '311.3b': 'COGS - FR - Wholesale', '311.3c': 'COGS - EU - Wholesale (excl. DE, FR, Dist)', '311.3d': 'COGS - DE - Wholesale', '311.3e': 'COGS - DE - Amazon',
+  '311.3f': 'COGS - IT - Amazon', '311.3g': 'COGS - FR - Amazon', '311.3h': 'COGS - ES - Amazon', '311.4b': 'COGS - CA - Amazon', '311.5c': 'COGS - International Distributors',
+  '311.5d': 'COGS - EU - Zalando', '311.5g': 'COGS - International Distributors (Co Brand)', '311.9a': 'COGS - UK - Co-Brand/Custom', '311.9b': 'COGS - US - Co-Brand/Custom',
+  '311.9c': 'COGS - CA - Co-Brand/Custom', '311.9d': 'COGS - EU - Co-Brand/Custom', '311.9e': 'COGS - ROTW - Co-Brand/Custom', '311.8a': 'COGS - AU - Shopify', '311.8b': 'COGS - AU - Amazon',
+  '401.5': 'COGS - AU - Wholesale & Distributor', '401.6': 'COGS - AU - Marketplace', '401.11e': 'COGS - Custom / Co Brand - AU',
+  '200a': 'Sales - UK - Shopify', '201a': 'Sales - UK - Amazon', '210.5a': 'Sales - UK - Wholesale', '202a': 'Sales - UK - Marketplace', '212a': 'Sales - UK - Faire', '200b': 'Sales - US - Shopify',
+  '201b': 'Sales - US - Amazon', '210.5b': 'Sales - US - Wholesale', '202b': 'Sales - US - Marketplace', '212b': 'Sales - US - Faire', '202.3b': 'Sales - US - Walmart', '200d': 'Sales - EU - Shopify',
+  '202.3c': 'Sales - EU - Zalando', '210.5f': 'Sales - FR - Wholesale', '210.5e': 'Sales - DE - Wholesale', '210.5d': 'Sales - EU - Wholesale', '201e': 'Sales - DE - Amazon', '201f': 'Sales - FR - Amazon',
+  '201g': 'Sales - IT - Amazon', '201h': 'Sales - ES - Amazon', '201c': 'Sales - CA - Amazon', '210.7z': 'Sales - International Distributors', '210.7y': 'Sales - International Distributors (Co Brand)',
+  '210.6a': 'Sales - UK - Co-Brand/Custom', '210.6b': 'Sales - US - Co-Brand/Custom', '210.6c': 'Sales - CA - Co-Brand/Custom', '210.6d': 'Sales - EU - Co-Brand/Custom', '210.6e': 'Sales - ROTW - Co-Brand/Custom',
+  '200e': 'Sales - Shopify - AU', '210e': 'Sales - Wholesale - AU', '212e': 'Sales - Marketplace - AU', '200f': 'Sales - Custom/Co Brand - AU',
+  '9002': 'Fulfil - Revenue Account', '9003': 'Fulfil - Contra Revenue', '9004': 'Fulfil - Shipping Revenue', '9005': 'Fulfil - Sales Discount', '9006': 'Fulfil - Cost of Goods Sold Account' };
+const cchName = (org, code) => (org === 'AU' && code === '201e') ? 'Sales - Amazon - AU' : (CCH_NAME[code] || code);
+// channel / segment / delivery country -> [COGS account, note]. A mapping saved in HORIZON (app_settings cogs_channel_map, "<channel>|<segment>"
+// or "<channel>|*") wins, so a new channel is added without code. Defaults for Key Accounts / distributors / custom: Ben 05-Nov-26 review.
+function cchCogsAcct(ch, seg, cc, map) {
+  ch = ch || ''; seg = seg || ''; cc = cc || '';
+  const o = map[ch + '|' + seg] || map[ch + '|*']; if (o) return [o, 'mapped in HORIZON'];
+  if (CCH_AMZ[ch]) return [CCH_AMZ[ch], ''];
+  if (ch === 'Faire US') return ['311.2e', '']; if (ch === 'Faire UK') return ['311.1e', ''];
+  if (ch === 'dockandbay-uk') return seg === 'tiktok' ? ['311.1d', 'TikTok = UK Marketplace'] : ['311.1a', ''];
+  if (ch === 'dockandbay-us') return ['311.2a', ''];
+  if (ch === 'dockandbay-eu') return /zalando/i.test(seg) ? ['311.5d', 'Zalando'] : ['311.3a', ''];
+  if (ch === 'dockandbay-au') return seg === 'tiktok' ? ['401.6', 'TikTok AU = Marketplace'] : ['311.8a', ''];
+  if (ch === 'dockandbay-uk-ws' || ch === 'UK - Key Accounts') return ['311.1c', /Key/.test(ch) ? 'Key Accounts = UK Wholesale' : ''];
+  if (ch === 'dockandbay-us-ws' || ch === 'US - Key Accounts') return (cc && cc !== 'US') ? ['311.5c', 'US wholesale shipped outside the US = International Distributors'] : ['311.2c', /Key/.test(ch) ? 'Key Accounts = US Wholesale' : ''];
+  if (ch === 'dockandbay-eu-ws' || ch === 'EU - Key Accounts') return [cc === 'FR' ? '311.3b' : cc === 'DE' ? '311.3d' : '311.3c', (/Key/.test(ch) ? 'Key Accounts = ' : '') + 'EU wholesale by delivery country'];
+  if (ch === 'EU - International Distributor' || ch === 'UK - International Distributor' || ch === 'US - International Distributor') return ['311.5c', ''];
+  if (ch === 'International Distributor (AU entity)' || ch === 'AU - Key Accounts' || ch === 'dockandbay-au-ws') return ['401.5', 'AU wholesale / distributor'];
+  if (/custom|co-?brand/i.test(ch)) {
+    if (/\bAU\b/.test(ch)) return ['401.11e', 'Custom / Co-Brand AU'];
+    return [cc === 'GB' ? '311.9a' : cc === 'US' ? '311.9b' : cc === 'CA' ? '311.9c' : CCH_EU.has(cc) ? '311.9d' : '311.9e', 'Custom / Co-Brand by delivery country'];
+  }
+  return [null, 'unmapped'];
+}
+async function cchFulfil(model, meth, body) { return fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/' + model + '/' + meth, body); }
+async function cchPool(jobs, C) { const out = new Array(jobs.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(C || 8, jobs.length) }, async () => { while (i < jobs.length) { const k = i++; out[k] = await jobs[k](); } }));
+  return [].concat(...out); }
+async function cchPages(model, filters, fields) {   // Fulfil caps a page at 500 rows; 8 pages at a time (October: 90k GL lines in ~35 s)
+  const n = await cchFulfil(model, 'search_count', { filters }), jobs = [];
+  for (let o = 0; o < n; o += 500) jobs.push(() => cchFulfil(model, 'search_read', { filters, offset: o, limit: 500, order: [['id', 'ASC']], fields }));
+  return cchPool(jobs, 8); }
+async function cchByIds(model, ids, fields) {
+  ids = [...new Set(ids.filter(x => x != null))]; const jobs = [];
+  for (let i = 0; i < ids.length; i += 500) { const part = ids.slice(i, i + 500); jobs.push(() => cchFulfil(model, 'search_read', { filters: [['id', 'in', part]], fields })); }
+  const m = {}; (await cchPool(jobs, 8)).forEach(r => { m[r.id] = r; }); return m; }
+const cchDec = v => (v && typeof v === 'object') ? Number(v.decimal) || 0 : Number(v) || 0;
+const cchRef = (s, mdl) => { s = String(s || ''); return s.startsWith(mdl + ',') ? Number(s.slice(mdl.length + 1)) : null; };
+const cchR2 = x => Math.round(x * 100) / 100;
+function cchMonthEnd(month) { const [y, m] = month.split('-').map(Number); return month + '-' + String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0'); }
+// round each line to cents and put the rounding residual on the largest line, so a journal moves the GL balance to the cent
+function cchFix(obj, target) { const r = {}; Object.keys(obj).forEach(k => { r[k] = cchR2(obj[k]); });
+  const ks = Object.keys(r); if (!ks.length) return r; const diff = cchR2(target - ks.reduce((a, k) => a + r[k], 0));
+  if (diff) { const big = ks.reduce((a, k) => Math.abs(r[k]) > Math.abs(r[a]) ? k : a, ks[0]); r[big] = cchR2(r[big] + diff); } return r; }
+async function cchBuild(month) {
+  const t0 = Date.now(), start = month + '-01', end = cchMonthEnd(month);
+  const map = cpJson(await cpSetting('cogs_channel_map', '{}'), {}) || {};
+  const lines = await cchPages('account.move.line', [['date', '>=', start], ['date', '<=', end], ['account.code', 'in', CCH_ACC], ['move.state', '=', 'posted']],
+    ['origin', 'move.origin', 'debit', 'credit', 'account.code', 'account.company', 'product.code', 'party.rec_name']);
+  const il = await cchByIds('account.invoice.line', lines.map(l => cchRef(l.origin, 'account.invoice.line')), ['origin', 'invoice', 'product.code']);
+  const sl = await cchByIds('sale.line', Object.values(il).map(x => cchRef(x.origin, 'sale.line')),
+    ['sale', 'sale.channel.name', 'sale.channel_segment', 'sale.shipment_address.country.code', 'sale.number', 'sale.reference']);
+  const saleOfLine = x => x ? { ch: x['sale.channel.name'], seg: x['sale.channel_segment'], cc: x['sale.shipment_address.country.code'], no: x['sale.number'], ref: x['sale.reference'] } : null;
+  // fallback: an invoice line with no sale-line origin takes its invoice's first sale order
+  const invNeed = []; lines.forEach(l => { const x = il[cchRef(l.origin, 'account.invoice.line')]; if (x && sl[cchRef(x.origin, 'sale.line')]) return; invNeed.push(x ? x.invoice : cchRef(l['move.origin'], 'account.invoice')); });
+  const inv = await cchByIds('account.invoice', invNeed, ['sales', 'number', 'type']);
+  const so = await cchByIds('sale.sale', Object.values(inv).map(v => (v.sales || [])[0]), ['channel.name', 'channel_segment', 'shipment_address.country.code', 'number', 'reference']);
+  const orgOf = co => Number(co) === FULFIL_COMPANY_AU ? 'AU' : 'UK';
+  const O = {}; const org = k => O[k] || (O[k] = { org: k, ccy: k === 'AU' ? 'AUD' : 'GBP', gl: {}, acc: {}, landed: {}, ch: {}, notes: {}, orders: {}, unmapped: {}, spread: [], spreadTot: { '9006': 0, sales: 0 } });
+  for (const l of lines) {
+    const a = cchDec(l.debit) - cchDec(l.credit), o = org(orgOf(l['account.company'])), acc = l['account.code'];
+    o.gl[acc] = (o.gl[acc] || 0) + a;
+    const x = il[cchRef(l.origin, 'account.invoice.line')];
+    let s = x ? saleOfLine(sl[cchRef(x.origin, 'sale.line')]) : null;
+    if (!s) { const v = inv[x ? x.invoice : cchRef(l['move.origin'], 'account.invoice')]; const z = v && so[(v.sales || [])[0]]; if (z) s = { ch: z['channel.name'], seg: z.channel_segment, cc: z['shipment_address.country.code'], no: z.number, ref: z.reference }; }
+    if (!s) { o.spread.push({ acc, a, origin: String(l['move.origin'] || l.origin || '').split(',')[0], party: l['party.rec_name'] || '', sku: l['product.code'] || (x && x['product.code']) || '' }); continue; }
+    const [ca0, note] = cchCogsAcct(s.ch, s.seg, s.cc, map), ca = ca0 || 'UNMAPPED';
+    if (!ca0) { const k = (s.ch || '(none)') + '|' + (s.seg || ''); const u = o.unmapped[k] || (o.unmapped[k] = { channel: s.ch || '', segment: s.seg || '', countries: {}, cogs: 0, sales: 0, orders: {} }); u.countries[s.cc || '?'] = 1; if (acc === '9006') u.cogs += a; else u.sales -= a; if (Object.keys(u.orders).length < 20) u.orders[s.no] = 1; }
+    const b = o.acc[ca] || (o.acc[ca] = {}); b[acc] = (b[acc] || 0) + a;
+    if (note) (o.notes[ca] || (o.notes[ca] = {}))[note] = 1;
+    (o.ch[ca] || (o.ch[ca] = {}))[(s.ch || '(none)') + (s.seg === 'tiktok' || /zalando/i.test(s.seg || '') ? ' / ' + s.seg : '')] = 1;
+    (o.orders[ca] || (o.orders[ca] = {}))[s.no] = 1;
+  }
+  const out = { month, built_at: new Date().toISOString(), ms: 0, gl_lines: lines.length, orgs: {} };
+  for (const k of ['UK', 'AU']) {
+    const o = org(k), share = {}, sshare = {};
+    Object.keys(o.acc).forEach(ca => { if (ca === 'UNMAPPED') return; const b = o.acc[ca]; share[ca] = b['9006'] || 0; sshare[ca] = -(['9002', '9003', '9004', '9005'].reduce((t, x) => t + (b[x] || 0), 0)); });
+    const tot = Object.values(share).reduce((a, v) => a + v, 0), stot = Object.values(sshare).reduce((a, v) => a + v, 0);
+    for (const sp of o.spread) {   // no sale order: COGS lines spread pro rata to product COGS, revenue lines to net sales
+      const isC = sp.acc === '9006', sh = isC ? share : sshare, t = isC ? tot : stot; if (!t) continue;
+      Object.keys(sh).forEach(ca => { const v = sp.a * sh[ca] / t; const b = o.acc[ca]; b[sp.acc] = (b[sp.acc] || 0) + v; if (isC) o.landed[ca] = (o.landed[ca] || 0) + v; });
+      o.spreadTot[isC ? '9006' : 'sales'] += sp.a;
+    }
+    const gl = a => cchR2(o.gl[a] || 0);
+    const cogsBy = {}, salesBy = {}, rows = [];
+    Object.keys(o.acc).forEach(ca => { const b = o.acc[ca]; cogsBy[ca] = b['9006'] || 0; const sa = ca === 'UNMAPPED' ? 'UNMAPPED' : (CCH_SALES[ca] || 'UNMAPPED:' + ca);
+      salesBy[sa] = (salesBy[sa] || 0) - ['9002', '9003', '9004', '9005'].reduce((t, x) => t + (b[x] || 0), 0); });
+    const hasUnm = Object.keys(o.unmapped).length > 0 || Object.keys(salesBy).some(x => /^UNMAPPED/.test(x));
+    const cg = cchFix(cogsBy, gl('9006')), sg = cchFix(salesBy, -(gl('9002') + gl('9003') + gl('9004') + gl('9005')));
+    Object.keys(o.acc).sort().forEach(ca => { const sa = ca === 'UNMAPPED' ? '' : (CCH_SALES[ca] || '');
+      rows.push({ cogs: ca, cogs_name: ca === 'UNMAPPED' ? 'Unmapped channel' : cchName(k, ca), sales: sa, sales_name: sa ? cchName(k, sa) : '', channels: Object.keys(o.ch[ca] || {}).sort(),
+        orders: Object.keys(o.orders[ca] || {}).length, notes: Object.keys(o.notes[ca] || {}), landed: cchR2(o.landed[ca] || 0), cogs_total: cg[ca] || 0, net_sales: sa ? (sg[sa] || 0) : cchR2(salesBy.UNMAPPED || 0) }); });
+    const J = { COGS: [], SALES: [] };
+    Object.keys(cg).sort().forEach(ca => { if (cg[ca] && ca !== 'UNMAPPED') J.COGS.push({ code: ca, name: cchName(k, ca), amount: cg[ca] }); });
+    if (gl('9006')) J.COGS.push({ code: '9006', name: CCH_NAME['9006'], amount: -gl('9006') });
+    ['9002', '9003', '9004', '9005'].forEach(a => { if (gl(a)) J.SALES.push({ code: a, name: CCH_NAME[a], amount: -gl(a) }); });
+    Object.keys(sg).sort().forEach(sa => { if (sg[sa] && !/^UNMAPPED/.test(sa)) J.SALES.push({ code: sa, name: cchName(k, sa), amount: -sg[sa] }); });
+    const bal = L => cchR2(L.reduce((a, x) => a + x.amount, 0));
+    const byOrigin = {}; o.spread.forEach(sp => { const kk = sp.acc + '|' + sp.origin + '|' + sp.party; const e = byOrigin[kk] || (byOrigin[kk] = { account: sp.acc, source: sp.origin, party: sp.party, lines: 0, amount: 0, skus: {} }); e.lines++; e.amount += sp.a; if (sp.sku && Object.keys(e.skus).length < 5) e.skus[sp.sku] = 1; });
+    out.orgs[k] = { org: k, ccy: o.ccy, gl: CCH_ACC.reduce((m, a) => (m[a] = gl(a), m), {}), rows, journals: J,
+      balanced: { COGS: bal(J.COGS), SALES: bal(J.SALES) },
+      spread: { cogs: cchR2(o.spreadTot['9006']), sales: cchR2(o.spreadTot.sales), by_source: Object.values(byOrigin).map(e => Object.assign(e, { amount: cchR2(e.amount), skus: Object.keys(e.skus) })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).slice(0, 60) },
+      unmapped: Object.values(o.unmapped).map(u => ({ channel: u.channel, segment: u.segment, countries: Object.keys(u.countries), cogs: cchR2(u.cogs), sales: cchR2(u.sales), orders: Object.keys(u.orders) })),
+      blocked: hasUnm ? 'A channel has no account: map it below; the journals are held until every line has an account (the clearing accounts must net to zero).' : null };
+  }
+  out.ms = Date.now() - t0;
+  return out;
+}
+async function cchStore(b, by) { b.built_by = by;
+  await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, ['cogs_ch:' + b.month, JSON.stringify(b), by]);
+  return b; }
+async function cchLoad(month) { const v = await cpSetting('cogs_ch:' + month, ''); return v ? cpJson(v, null) : null; }
+const _cchBusy = {};   // per-instance: a build in flight per month (a second press waits for it)
+async function cchBuildStore(month, by) { if (_cchBusy[month]) return _cchBusy[month];
+  _cchBusy[month] = (async () => { try { return await cchStore(await cchBuild(month), by); } finally { delete _cchBusy[month]; } })(); return _cchBusy[month]; }
+// ---- Xero: one COGS and one SALES manual journal per org and month. Narration "HORIZON <COGS|SALES> by channel YYYY-MM" (the same narration as
+// the October CSV import, so a later refresh finds a hand-imported journal too). Refresh rules (spec): a DRAFT is rebuilt in place; once
+// POSTED it is never edited, a "top-up" journal carries the difference (UK draft, AU posted).
+const cchNarr = (j, month) => 'HORIZON ' + j + ' by channel ' + month;
+const cchDOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
+async function cchXeroExisting(region, j, month) {
+  const base = cchNarr(j, month).replace(/["\\]/g, '');
+  const r = await xeroFetch(region, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent('Narration.StartsWith("' + base + '")'));
+  const list = ((r && r.ManualJournals) || []).filter(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || '')));
+  for (let i = 0; i < list.length; i++) if (!Array.isArray(list[i].JournalLines) || !list[i].JournalLines.length) { const one = await xeroFetch(region, '/api.xro/2.0/ManualJournals/' + list[i].ManualJournalID); list[i] = ((one && one.ManualJournals) || [])[0] || list[i]; }
+  return list; }
+const cchSumLines = list => { const m = {}; list.forEach(x => (x.JournalLines || []).forEach(l => { const c = String(l.AccountCode || ''); m[c] = cchR2((m[c] || 0) + (Number(l.LineAmount) || 0)); })); return m; };
+// plan (dry) or do (push) one org: returns per journal { action, lines, total, prev_total, xero }
+async function cchXeroRun(month, orgK, opts) {
+  opts = opts || {}; const b = opts.build || await cchLoad(month); if (!b) throw Object.assign(new Error('Build the month first.'), { status: 409 });
+  const o = b.orgs[orgK]; if (!o) throw Object.assign(new Error('No ' + orgK + ' data in the build.'), { status: 409 });
+  if (month < CCH_FROM) throw Object.assign(new Error('Months before ' + CCH_FROM + ' stay the manual journals (Fulfil\'s GL did not reach Xero before 01-Oct-26).'), { status: 400 });
+  if (o.blocked) throw Object.assign(new Error(o.blocked), { status: 409 });
+  const region = orgK === 'AU' ? 'au' : 'uk', tax = orgK === 'AU' ? 'BASEXCLUDED' : 'NONE', status = orgK === 'AU' ? 'POSTED' : 'DRAFT', date = cchMonthEnd(month), res = [];
+  for (const j of ['COGS', 'SALES']) {
+    const want = {}; o.journals[j].forEach(l => { want[l.code] = cchR2((want[l.code] || 0) + l.amount); });
+    if (Math.abs(o.balanced[j]) > 0.004) throw Object.assign(new Error(orgK + ' ' + j + ' journal does not balance (' + o.balanced[j] + '). Nothing sent.'), { status: 500 });
+    const ex = await cchXeroExisting(region, j, month), have = cchSumLines(ex), prev = cchR2(Object.values(have).reduce((a, v) => a + Math.max(0, v), 0));
+    const total = cchR2(Object.values(want).reduce((a, v) => a + Math.max(0, v), 0));
+    const isDraft = x => /^DRAFT$/i.test(String(x.Status || '')), isTop = x => /top-up/i.test(String(x.Narration || ''));
+    const draft = ex.find(x => isDraft(x) && !isTop(x)), posted = ex.filter(x => /^POSTED$/i.test(String(x.Status || ''))), draftTop = ex.find(x => isDraft(x) && isTop(x));
+    const same = (a, h) => Object.keys(a).every(c => Math.abs((a[c] || 0) - (h[c] || 0)) < 0.005) && Object.keys(h).every(c => Math.abs(h[c] || 0) < 0.005 || a[c] != null);
+    let action, lines, xid = null, narration = cchNarr(j, month);
+    if (!ex.length) { action = 'created'; lines = want; }
+    else if (!posted.length && draft && ex.length === 1) { action = same(want, have) ? 'no_change' : 'rebuilt'; lines = want; xid = draft.ManualJournalID; }
+    else if (!posted.length) throw Object.assign(new Error(orgK + ' ' + j + ': ' + ex.length + ' unposted journals named "' + cchNarr(j, month) + '" in Xero. Delete the extra one(s) in Xero, then run again.'), { status: 409 });
+    else {   // posted journals are never edited: only the difference against what is POSTED, as one top-up (an unposted top-up is rebuilt, not stacked)
+      const hp = cchSumLines(posted), diff = {};
+      new Set(Object.keys(want).concat(Object.keys(hp))).forEach(c => { const d = cchR2((want[c] || 0) - (hp[c] || 0)); if (Math.abs(d) >= 0.005) diff[c] = d; });
+      lines = diff;
+      if (draftTop) { xid = draftTop.ManualJournalID; narration = draftTop.Narration; action = same(diff, cchSumLines([draftTop])) ? 'no_change' : 'rebuilt'; }
+      else { action = Object.keys(diff).length ? 'top_up' : 'no_change'; narration = cchNarr(j, month) + ' top-up ' + new Date().toISOString().slice(0, 10); }
+      if (draft) throw Object.assign(new Error(orgK + ' ' + j + ': a posted and an unposted "' + cchNarr(j, month) + '" are both in Xero. Delete the unposted one in Xero, then run again.'), { status: 409 });
+    }
+    const L = Object.keys(lines).filter(c => Math.abs(lines[c]) >= 0.005).sort().map(c => ({ code: c, name: cchName(orgK, c), amount: lines[c] }));
+    const r = { journal: j, action, narration, date, status, total, prev_total: prev, lines: L, existing: ex.map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, date: cchDOf(x.Date), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })) };
+    if (opts.push && (action === 'created' || action === 'rebuilt' || action === 'top_up')) {
+      const body = { Narration: narration, Date: date, Status: status, LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false,
+        JournalLines: L.map(l => ({ LineAmount: l.amount, AccountCode: l.code, Description: l.name + ' (' + month + ', Fulfil ' + (j === 'COGS' ? '9006' : '9002-9005') + ' by channel)', TaxType: tax })) };
+      if (xid) body.ManualJournalID = xid;
+      const w = await xeroFetch(region, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: [body] } });
+      const m = ((w && w.ManualJournals) || [])[0] || {}; r.xero = { id: m.ManualJournalID, status: m.Status, url: m.ManualJournalID ? 'https://go.xero.com/Journal/View.aspx?invoiceID=' + m.ManualJournalID : null };
+    }
+    if (opts.push) { try { await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, total, prev_total, xero_id, xero_status, lines, flags)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [month, orgK, j, opts.kind || 'manual', action, opts.by || 'HORIZON', total, prev, (r.xero && r.xero.id) || (draft && draft.ManualJournalID) || null, (r.xero && r.xero.status) || null, JSON.stringify(L), JSON.stringify({ spread: o.spread.cogs, unmapped: o.unmapped.length })]); }
+      catch (e) { console.warn('[cogs-ch] log not written: ' + (e && e.message)); } }
+    res.push(r);
+  }
+  return res;
+}
+async function cchEmail(month, orgK, b, runs, by) {   // month end only (spec: no emails on refreshes)
+  const def = orgK === 'AU' ? 'ben@dockandbay.com, alex@pillaraccountants.com.au' : 'ben@dockandbay.com, harry.maxwell@ascendantaccountants.com, Pooja.Gupta@ascendantaccountants.com';
+  const to = String(await cpSetting('cogs_channel_email_' + orgK.toLowerCase(), def) || def).split(/[,;\s]+/).filter(emailOk); if (!to.length) return { sent: 0 };
+  const o = b.orgs[orgK], f = v => Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tab = L => '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Account</th><th align="left">Name</th><th align="right">Debit</th><th align="right">Credit</th></tr>'
+    + L.map(l => '<tr><td>' + l.code + '</td><td>' + l.name + '</td><td align="right">' + (l.amount > 0 ? f(l.amount) : '') + '</td><td align="right">' + (l.amount < 0 ? f(-l.amount) : '') + '</td></tr>').join('') + '</table>';
+  const html = '<p>' + (orgK === 'AU' ? 'Hi Alex,' : 'Hi Pooja and Harry,') + '</p><p>The ' + ddMonYy(cchMonthEnd(month)) + ' journals that move Fulfil\'s generic clearing accounts to the sales channel accounts are '
+    + (orgK === 'AU' ? '<b>posted</b> in Xero AU.' : 'in Xero UK as <b>drafts</b>, ready for you to review and post.') + ' Each moves exactly the month\'s balance, so 9006, 9002, 9003 and 9005 end the month at zero.</p>'
+    + runs.map(r => '<p><b>' + r.narration + '</b> (' + o.ccy + ' ' + f(r.total) + (r.xero && r.xero.url ? ', <a href="' + r.xero.url + '">open in Xero</a>' : '') + ')</p>' + tab(r.lines)).join('')
+    + (o.spread.cogs ? '<p>Note: ' + o.ccy + ' ' + f(o.spread.cogs) + ' of 9006 has no sale order (landed costs and supplier-bill price variances on stock already sold); it is spread over the channels pro rata to their product COGS.</p>' : '')
+    + '<p>Sent by HORIZON (' + by + ').</p>';
+  return sendResendEmail({ to, subject: 'COGS and SALES by channel ' + month + ' (' + (orgK === 'AU' ? 'Xero AU, posted' : 'Xero UK, drafts') + ')', html, kind: 'cogs-channel', ref: month + ' ' + orgK, by });
+}
+async function cchAccessOk(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return null; }
+    if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access or admin required' }); return null; } return me; }
+  catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
+const cchMonthOk = m => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m || ''));
+app.get('/api/supply/cogs-channel', async (req, res) => {
+  if (!(await cchAccessOk(req, res))) return;
+  try { const month = String(req.query.month || ''); if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+    const b = await cchLoad(month); let log = [];
+    try { log = (await pool.query(`SELECT id, month, org, journal, run_kind, action, to_char(run_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, run_by, total, prev_total, xero_id, xero_status, lines, emailed, error
+      FROM planner.cogs_channel_runs ORDER BY month DESC, id DESC LIMIT 300`)).rows; } catch (e) { if (e.code !== '42P01') throw e; }
+    res.set('Cache-Control', 'no-store').json({ ok: true, month, build: b, building: !!_cchBusy[month], log, map: cpJson(await cpSetting('cogs_channel_map', '{}'), {}), from: CCH_FROM }); }
+  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/supply/cogs-channel/build', async (req, res) => {   // reads LIVE Fulfil (about a minute); writes only HORIZON's saved build
+  const me = await cchAccessOk(req, res); if (!me) return;
+  const month = String((req.body || {}).month || ''); if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  try { const b = await cchBuildStore(month, (me && me.email) || authUser(req) || 'admin'); res.json({ ok: true, build: b }); }
+  catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
+});
+app.post('/api/supply/cogs-channel/map', async (req, res) => {   // assign an account to a channel (/segment) that has none
+  const me = await cchAccessOk(req, res); if (!me) return;
+  try { const b = req.body || {}, ch = String(b.channel || '').trim(), seg = b.segment == null || b.segment === '*' ? '*' : String(b.segment), code = String(b.cogs || '').trim();
+    if (!ch) return res.status(400).json({ error: 'channel required' });
+    if (code && !CCH_NAME[code]) return res.status(400).json({ error: 'Unknown COGS account ' + code + '. Use one of the channel COGS accounts.' });
+    const m = cpJson(await cpSetting('cogs_channel_map', '{}'), {}) || {}; const k = ch + '|' + seg; if (code) m[k] = code; else delete m[k];
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cogs_channel_map',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(m), (me && me.email) || 'admin']);
+    res.json({ ok: true, map: m }); }
+  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, org: 'UK'|'AU', push, confirm }: no push = the plan (reads Xero only)
+  const me = await cchAccessOk(req, res); if (!me) return;
+  const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK';
+  if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  if (b.push && b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
+  try { const runs = await cchXeroRun(month, orgK, { push: !!b.push, kind: 'manual', by: (me && me.email) || authUser(req) || 'admin' }); res.json({ ok: true, org: orgK, month, push: !!b.push, runs }); }
+  catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
+});
+// n8n "Horizon | COGS and SALES by channel": 1st 06:30 (month end: build last month, journals UK + AU, ONE email per org), 7th and 15th 06:30
+// (refresh: rebuild, rebuilt draft or top-up, no email). Secret-gated. ?month= overrides (testing).
+app.post('/api/cron/cogs-channel', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' })), day = now.getDate();
+  const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1), month = cchMonthOk(req.query.month) ? String(req.query.month) : pm.getFullYear() + '-' + String(pm.getMonth() + 1).padStart(2, '0');
+  const kind = req.query.kind === 'month_end' || req.query.kind === 'refresh_7' || req.query.kind === 'refresh_15' ? req.query.kind : (day <= 3 ? 'month_end' : day <= 10 ? 'refresh_7' : 'refresh_15');
+  const by = 'cron (COGS by channel, ' + kind + ')', out = { ok: true, month, kind, orgs: {} };
+  try {
+    if (month < CCH_FROM) return res.json(Object.assign(out, { skipped: 'before ' + CCH_FROM }));
+    const b = await cchBuildStore(month, by);
+    for (const orgK of ['UK', 'AU']) {
+      try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b });
+        out.orgs[orgK] = runs.map(r => ({ journal: r.journal, action: r.action, total: r.total }));
+        if (kind === 'month_end' && runs.some(r => r.action !== 'no_change')) { const e = await cchEmail(month, orgK, b, runs, by); out.orgs[orgK].emailed = !!(e && e.sent);
+          if (e && e.sent) await pool.query(`UPDATE planner.cogs_channel_runs SET emailed=true WHERE month=$1 AND org=$2 AND run_kind='month_end' AND run_at > now() - interval '1 hour'`, [month, orgK]).catch(() => {}); } }
+      catch (e) { out.ok = false; out.orgs[orgK] = { error: String(e.message || e) };
+        await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, error) VALUES ($1,$2,'COGS',$3,'error',$4,$5)`, [month, orgK, kind, by, String(e.message || e).slice(0, 500)]).catch(() => {}); }
+    }
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('cogs_channel', $1, 0, $2)`, [out.ok ? 'success' : 'error', kind + ' ' + month + ': ' + JSON.stringify(out.orgs).slice(0, 400)]); } catch (e) {}
+    res.status(out.ok ? 200 : 207).json(out);
+  } catch (e) { log500(e); res.status(502).json({ error: String(e.message || e), month, kind }); }
 });
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
