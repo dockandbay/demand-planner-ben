@@ -1,3 +1,8 @@
+## v28.717 (05-Nov-26) Manage 3PL: pool tab counters = open discrepancies, refreshed quietly; ticking no longer jumps the page
+- Ben 05-Nov-26: the pool counters (UK ILG 495 / Non GRS 14 / Vendor 5) were the report's SKU counts, so they never changed after a rebaseline. They now show open discrepancies: the open pool recounts on every change, the others are read in the background after load (status API now returns disc_counts).
+- Ticking a box redrew the panel and reset the table's scroll: the table box is #ilg-scroll and its scroll is kept on every redraw (sandbox: 7,402 px before and after a tick).
+- Files: artifact_v16.7.html, server.mjs, lib/ai-logic/transfers.md. No migration, no env vars, no new cron routes.
+
 ## v28.716 (05-Nov-26) Commissions Exceptions: Fulfil and Xero links on orders, group filter pills
 - Ben 05-Nov-26: links on each order (Fulfil sales order, Xero invoice search) and groups as filter pills (Organic Shopify, Agent changed, ...). Oct-26: all 18 order exceptions linked.
 - Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.

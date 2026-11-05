@@ -20604,6 +20604,7 @@ async function ilgPoolCompare(rep, poolKey, fresh) {
   const pr = ilgPoolReport(rep.rows, poolKey), snap = await ilgFulfilSnapshot(fulfilFetch, poolKey, Object.keys(pr), new Date(rep.report_at).toISOString());
   const v = { warehouse_id: snap.warehouse_id, storage_id: snap.storage_id, rows: ilgCompare(pr, snap), fulfil_at: new Date().toISOString() }; _ilgCmp.set(k, { at: Date.now(), v }); return v;
 }
+const _ilgDisc = {};   // v28.717: pool -> { n open discrepancies, at, report } from the last compare on this instance
 app.get('/api/supply/ilg/status', async (req, res) => {
   const poolKey = String(req.query.pool || 'UK').toUpperCase(); if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool ' + poolKey });
   const site = ILG_POOLS[poolKey].site, sitePools = ilgPoolsOf(site), poolsOut = Object.fromEntries(sitePools.map(k => [k, ILG_POOLS[k]]));   // v28.682: one site per panel
@@ -20614,7 +20615,11 @@ app.get('/api/supply/ilg/status', async (req, res) => {
       (SELECT coalesce(sum((l->>'set_to')::numeric - (l->>'storage_now')::numeric),0) FROM jsonb_array_elements(lines) l) net FROM planner.ilg_rebaseline_batches WHERE pool = ANY($1) ORDER BY id DESC LIMIT 15`, [sitePools])).rows;
     if (!rep) return res.set('Cache-Control', 'no-store').json({ site, pools: poolsOut, pool: poolKey, report: null, batches });
     let cmp = null, fulfil_error = null; try { cmp = await ilgPoolCompare(rep, poolKey, req.query.fresh === '1'); } catch (e) { fulfil_error = e.message; }
-    res.set('Cache-Control', 'no-store').json({ site, pools: poolsOut, pool: poolKey, counts, ignored, batches, fulfil_error,
+    // v28.717 (Ben 05-Nov-26: "the counters ... didn't refresh after changes ... ideally they quietly refresh"): the pool tabs show OPEN DISCREPANCIES
+    // (SKUs where the report and Fulfil differ), not the report's SKU count. This pool's is fresh; the others are the last time each was compared.
+    if (cmp && Array.isArray(cmp.rows)) _ilgDisc[poolKey] = { n: cmp.rows.filter(r => r.diff && Math.abs(r.diff) >= 1).length, at: new Date().toISOString(), report: rep.id };
+    const disc_counts = {}; sitePools.forEach(k => { const m = _ilgDisc[k]; if (m && m.report === (rep && rep.id)) disc_counts[k] = m;   /* same report only: a newer report makes the old count stale */ });
+    res.set('Cache-Control', 'no-store').json({ site, pools: poolsOut, pool: poolKey, counts, disc_counts, ignored, batches, fulfil_error,
       report: { id: rep.id, filename: rep.filename, report_at: rep.report_at, received_at: rep.received_at, source: rep.source, imported_at: rep.imported_at, imported_by: rep.imported_by },
       ...(cmp || {}) });
   } catch (e) { if (/ilg_stock_reports" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 399' });
