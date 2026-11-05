@@ -85,6 +85,8 @@ Fulfil books every sale's revenue to generic accounts that reach Xero as single 
 | 311.9a UK / 311.9b US / 311.9c CA / 311.9d EU / 311.9e ROTW Co-Brand/Custom | 210.6a / 210.6b / 210.6c / 210.6d / 210.6e |
 | Dropship 311.10a-d | 203a / 203b / 203d / 202e (not used: nothing goes to dropship) |
 
+**AU org (read from live Xero AU 05-Nov-26):** Shopify AU 311.8a -> 200e Sales - Shopify - AU; Amazon AU 311.8b -> 201e Sales - Amazon - AU; Wholesale & Distributor 401.5 -> 210e Sales - Wholesale - AU; Marketplace / TikTok AU 401.6 -> **212e Sales - Marketplace - AU** (Ben: TikTok AU = marketplace); Custom / Co-Brand 401.11e -> **200f Sales - Custom/Co Brand - AU** (exists, nothing to create); Custom Local D2C 401.10e -> no sales account yet (open); anything else 311.8d -> no "Sales - AU - Other" (nearest 200z Sales - Shopify - ROW; open).
+
 Validation result: every UK-org pair in the file matches the COGS table. The file is marked NOT IN USE and its **AU** section is out of date: it uses COGS 401.3 / 401.4 / 401.9, which do not exist in Xero AU (Ben confirmed 311.8a / 311.8b / 311.8d on 04-Nov-26). Its AU sales accounts (200e Shopify, 201e Amazon, 210e Wholesale & Distributor, 200z Other/ROW) are to be read back from Xero AU at build time, and it has **no AU sales account** for Marketplace (TikTok AU, COGS 401.6) or Custom / Co-Brand (COGS 401.11e / 401.10e): see question 7.
 
 ## Schedule (n8n, Europe/London)
@@ -125,4 +127,4 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
    - AU: journal created POSTED (approved) in Xero AU by HORIZON; Alex (Pillar) is emailed that it is posted.
    - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited). NO emails on refreshes (Ben 04-Nov-26); the result shows in HORIZON ACCOUNTS > COGS by channel.
 6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
-7. **AU sales accounts** (Ben, open 05-Nov-26): which Xero AU sales accounts take AU Marketplace (TikTok AU) and AU Custom / Co-Brand (and Custom Local D2C)? Shipping revenue (9004) and discounts (9005): leave in their Fulfil accounts, or split by channel too?
+7. ~~AU Marketplace / Custom~~ answered 05-Nov-26: TikTok AU -> 212e, Custom / Co-Brand -> 200f (both exist in Xero AU). Still open: Custom Local D2C sales (200f, or a new "Sales - Custom Local - D2C - AU"?), AU "Other" sales (200z, or a new "Sales - AU - Other"?), and shipping revenue (9004) / discounts (9005): leave in their Fulfil accounts, or split by channel too?
