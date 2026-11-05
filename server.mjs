@@ -10742,7 +10742,7 @@ async function _computeXeroExceptions() {
       else if (r.due_h && !x.dueDate) ddMsg = 'Xero bill has no due date; Horizon expects ' + r.due_h;
       if (ddMsg) out.push({ type: 'due_date_mismatch', po: r.po, supplier: r.supplier, region: r._reg, bill_ref: x.number || r.bill_ref,
         bill_id: r.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id,
-        message: r.po + ' — bill due date looks wrong', insight: ddMsg, action: 'review_po' });
+        message: r.po + ' — bill due date looks wrong', insight: ddMsg, action: 'review_po', xero_due: x.dueDate || null, horizon_due: r.due_h || null, bill_date: x.date || null });   // v28.720: dates for the one-click fixes
     }
     // v28.094: HORIZON figures are USD. If the Xero bill is in another currency we can't compare raw amounts without an
     // FX rate, so skip the amount reconciliation (the due-date check above is currency-independent and still applies).
@@ -10785,17 +10785,67 @@ async function _computeXeroExceptions() {
   const byType = {}; out.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
   return { count: out.length, by_type: byType, exceptions: out, computed_at: new Date().toISOString() };
 }
+// v28.720 (Ben 05-Nov-26: "can we add a DISMISS section which remembers the dismissed items and can be hidden from view (and toggled to view
+// again)"): each exception has a key (type | PO | bill); dismissals live in app_settings xero_exc_dismissed { key: { by, at, note } }, applied on
+// every read (the cached reconciliation is never changed). count = OPEN exceptions (the nav badge); dismissed ones come back flagged.
+const _xeroExcKey = e => [e.type, String(e.po || '').toUpperCase(), e.bill_id || e.bill_ref || ''].join('|');
+async function xeroExcDismissed(data) {
+  const dis = cpJson(await cpSetting('xero_exc_dismissed', ''), {}) || {};
+  const ex = (data.exceptions || []).map(e => { const key = _xeroExcKey(e), d = dis[key]; return Object.assign({}, e, { key, dismissed: d ? { by: d.by, at: d.at, note: d.note || '' } : null }); });
+  const open = ex.filter(e => !e.dismissed); const byType = {}; open.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
+  return Object.assign({}, data, { exceptions: ex, count: open.length, by_type: byType, dismissed_count: ex.length - open.length });
+}
+// v28.720 (Ben 05-Nov-26: "for these 'Xero due ... vs Horizon ...' have a button to update all in one go, or one at a time"): fix due-date
+// mismatches either way. { items: [{ po, bill_id, region }], to: 'xero' | 'horizon', confirm: true }.
+//  · to 'xero': the Xero bill's DueDate is set to HORIZON's date (balance override, else balance 1, else completion). LIVE Xero write, one call per
+//    bill, read back; a bill whose date is before its bill date is refused (Xero would too).
+//  · to 'horizon': the PO's balance_due_date_overide is set to the Xero bill's due date (HORIZON only).
+app.post('/api/supply/xero/exceptions/due-fix', async (req, res) => {
+  const b = req.body || {}, to = b.to === 'xero' ? 'xero' : b.to === 'horizon' ? 'horizon' : null, items = Array.isArray(b.items) ? b.items.slice(0, 100) : [];
+  if (!to || !items.length) return res.status(400).json({ error: 'to (xero | horizon) and items required' });
+  if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required' + (to === 'xero' ? ': this writes to live Xero' : '') });
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    if (me.live && !(me.is_admin || me.accounts_access || (to === 'horizon' && me.supply_edit))) return res.status(403).json({ error: to === 'xero' ? 'ACCOUNTS access needed to change Xero bills' : 'SUPPLY edit access needed' }); }
+  catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
+  const out = [], by = (req.me && req.me.email) || null;
+  for (const it of items) { const po = String(it.po || ''); try {
+      const r = (await pool.query(`SELECT p.po, to_char(coalesce(p.balance_due_date_overide, p.pay_balance_1_date, p.pay_completion_date),'YYYY-MM-DD') due_h, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
+          b.invoice_id, to_char(b.due_date,'YYYY-MM-DD') due_x, to_char(b.invoice_date,'YYYY-MM-DD') bdate, b.status FROM planner.purchase_orders p
+          JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id=$2 LEFT JOIN planner.xero_bills b ON b.invoice_id=l.external_id WHERE p.po=$1`, [po, String(it.bill_id || '')])).rows[0];
+      if (!r) { out.push({ po, ok: false, error: 'PO / bill link not found' }); continue; }
+      if (to === 'horizon') { if (!r.due_x) { out.push({ po, ok: false, error: 'the Xero bill has no due date' }); continue; }
+        await pool.query(`UPDATE planner.purchase_orders SET balance_due_date_overide=$2::date WHERE po=$1`, [po, r.due_x]);
+        out.push({ po, ok: true, to, from: r.due_h, set: r.due_x }); continue; }
+      if (!r.due_h) { out.push({ po, ok: false, error: 'HORIZON has no balance or completion due date' }); continue; }
+      if (r.bdate && r.due_h < r.bdate) { out.push({ po, ok: false, error: 'HORIZON date ' + r.due_h + ' is before the bill date ' + r.bdate + ' (Xero refuses it)' }); continue; }
+      if (r.status === 'PAID' || r.status === 'VOIDED') { out.push({ po, ok: false, error: 'the bill is ' + r.status }); continue; }
+      const region = _poXeroRegion(r.cc, r.branch), jr = await xeroFetch(region, '/api.xro/2.0/Invoices/' + r.invoice_id, { method: 'POST', body: { Invoices: [{ InvoiceID: r.invoice_id, DueDate: r.due_h }] } });
+      const back = ((jr && jr.Invoices) || [])[0] || {}, gotDue = _cmXeroDate(back.DueDateString || back.DueDate) || null;
+      if (gotDue !== r.due_h) { out.push({ po, ok: false, error: 'Xero answered with due date ' + gotDue }); continue; }
+      await pool.query(`UPDATE planner.xero_bills SET due_date=$2::date WHERE invoice_id=$1`, [r.invoice_id, r.due_h]).catch(() => {});
+      out.push({ po, ok: true, to, from: r.due_x, set: r.due_h });
+    } catch (e) { out.push({ po, ok: false, error: e.message }); } }
+  try { await cpAudit(null, 'Xero due dates fixed (' + to + ')', out.filter(x => x.ok).map(x => x.po + ' ' + x.from + ' -> ' + x.set).join(', ').slice(0, 900), by); } catch (_) {}
+  try { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); invalidateSupplyCaches(); } catch (_) {}
+  res.json({ ok: out.every(x => x.ok), results: out, done: out.filter(x => x.ok).length, failed: out.filter(x => !x.ok).length });
+});
+app.post('/api/supply/xero/exceptions/dismiss', async (req, res) => {   // { key, dismiss: true|false, note }
+  const b = req.body || {}, key = String(b.key || '').slice(0, 300); if (!key) return res.status(400).json({ error: 'key required' });
+  try { const dis = cpJson(await cpSetting('xero_exc_dismissed', ''), {}) || {};
+    if (b.dismiss === false) delete dis[key]; else dis[key] = { by: (req.me && req.me.email) || null, at: new Date().toISOString(), note: String(b.note || '').slice(0, 300) };
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('xero_exc_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), (req.me && req.me.email) || null]);
+    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/supply/xero/exceptions', async (req, res) => {
   try {
     const fresh = String(req.query.refresh || '') === '1';
     // v28.081: was a 3-min cache that BLOCKED on expiry. Now SWR: within 15 min serve cached; past that serve the last
     // result at once and recompute behind. The reconciliation itself is now a fast local-DB read (v28.094 — bill amounts
     // come from planner.xero_bills), so ?refresh=1 first runs an incremental bill sync, then recomputes and waits.
-    if (fresh) { try { await syncXeroBills({}); } catch (e) { /* keep last synced bills */ } const data = await _computeXeroExceptions(); _xeroExcCache = { at: Date.now(), data }; swrDrop('xero:exc'); return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data)); }
+    if (fresh) { try { await syncXeroBills({}); } catch (e) { /* keep last synced bills */ } const data = await _computeXeroExceptions(); _xeroExcCache = { at: Date.now(), data }; swrDrop('xero:exc'); return res.set('Cache-Control', 'no-store').json(await xeroExcDismissed(Object.assign({ cached: false }, data))); }
     const _seed = _xeroExcCache.data ? _xeroExcCache : null; _xeroExcCache = { at: 0, data: null };   // migrate the old cache slot into swr once
     if (_seed) { const e = { v: _seed.data, at: _seed.at, inflight: null }; if (!_swr.has('xero:exc')) _swr.set('xero:exc', e); }
     const data = await swrGet('xero:exc', 15 * 60 * 1000, _computeXeroExceptions);
-    res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, data));
+    res.set('Cache-Control', 'no-store').json(await xeroExcDismissed(Object.assign({ cached: true }, data)));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── v28.094 (Ben): local Xero-bills cache + incremental sync ────────────────────────────────────────────────────────

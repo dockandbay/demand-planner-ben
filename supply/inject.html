@@ -13383,7 +13383,8 @@
     function drawExceptions(){
       if(_xpqExcPending&&!_xpqExc){ return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s.</div>'
         +'<div class="count" style="opacity:.7;padding:14px">⏳ Checking Xero… the live reconciliation reads every linked bill and can take ~20s on first load. The rest of the page is ready.</div>'; }
-      var ex=(_xpqExc&&_xpqExc.exceptions)||[];
+      var exAll=(_xpqExc&&_xpqExc.exceptions)||[], nDis=exAll.filter(function(e){ return e.dismissed; }).length;   /* v28.720: dismissed items hidden unless toggled */
+      var ex=window._xpqShowDis?exAll:exAll.filter(function(e){ return !e.dismissed; });
       var body=ex.length?ex.map(function(e){
         // v28.092 (Ben): every row gets Open PO (opens the PO drawer on the Payments tab) + Open in Xero (the bill),
         // plus the type-specific action (Credit note / Find links) where relevant.
@@ -13393,15 +13394,20 @@
         var openXero=e.bill_url?'<a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="'+_xl+'">open in Xero ↗</a>':'';
         var extra=e.action==='create_credit_note'?'<button class="save-btn xpq-mkcn" data-po="'+esc(e.po)+'" data-amt="'+(e.amount||0)+'" data-prod="'+esc(e.prod_no||'')+'" data-dep="'+esc(e.deposit_ref||'')+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Credit note</button>'
           :e.action==='find_links'?'<button class="lnk-btn xpq-find" data-po="'+esc(e.po)+'" style="color:var(--blue)">find links</button>':'';
-        var act='<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">'+openPo+openXero+extra+'</div>';
+        var dis='<button class="lnk-btn xpq-dis" data-key="'+esc(e.key||'')+'" data-on="'+(e.dismissed?'0':'1')+'" style="'+_xl+';color:var(--muted)" title="'+(e.dismissed?'Dismissed '+esc(String(e.dismissed.at||'').slice(0,10))+' by '+esc(String(e.dismissed.by||'').split('@')[0])+': put it back in the list':'Hide this exception (remembered for everyone; Show dismissed brings it back)')+'">'+(e.dismissed?'reopen':'dismiss')+'</button>';
+        var due=(e.type==='due_date_mismatch'&&!e.dismissed)?((e.horizon_due?'<button class="lnk-btn xpq-due" data-to="xero" data-po="'+esc(e.po)+'" data-bill="'+esc(e.bill_id||'')+'" style="'+_xl+'" title="Set the Xero bill due date to HORIZON\'s '+esc(fd(e.horizon_due))+' (live Xero)">HORIZON → Xero</button>':'')
+          +(e.xero_due?'<button class="lnk-btn xpq-due" data-to="horizon" data-po="'+esc(e.po)+'" data-bill="'+esc(e.bill_id||'')+'" style="'+_xl+'" title="Set HORIZON\'s balance due date to Xero\'s '+esc(fd(e.xero_due))+'">Xero → HORIZON</button>':'')):'';   /* v28.720 */
+        var act='<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">'+openPo+openXero+extra+due+dis+'</div>';
         var tlbl={amount_mismatch:'Amount mismatch',due_date_mismatch:'Due date',uncreated_credit_note:'Uncreated credit note',shipped_no_bill:'Not in Xero'}[e.type]||e.type;
         var tcol=e.type==='amount_mismatch'?'bg-red':'bg-amber';
-        return '<tr style="border-top:1px solid var(--line)"><td class="l" style="min-width:0;width:1%"><span class="tool-badge '+tcol+'">'+esc(tlbl)+'</span></td>'
+        return '<tr style="border-top:1px solid var(--line)'+(e.dismissed?';opacity:.5':'')+'"><td class="l" style="min-width:0;width:1%"><span class="tool-badge '+tcol+'">'+esc(tlbl)+'</span>'+(e.dismissed?'<div class="mut tiny">dismissed</div>':'')+'</td>'
           +'<td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(e.po||'')+(e.bill_ref?'<div class="mut tiny">'+esc(e.bill_ref)+'</div>':'')+'</td><td class="l">'+esc(e.supplier||'')+'</td>'
           +'<td class="l" style="white-space:normal;word-break:break-word;min-width:320px;width:100%"><span style="font-size:12px;line-height:1.45">'+esc(e.insight||e.message||'')+'</span></td>'
           +'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
-        :'<tr><td colspan="5" class="l mut" style="padding:10px">✓ No exceptions — Xero and Horizon reconcile.</td></tr>';
-      return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s. '+(_xpqExc&&_xpqExc.computed_at?'Checked '+esc(String(_xpqExc.computed_at).slice(11,16))+' UTC. ':'')+'<button class="lnk-btn" id="xpq-exc-refresh" style="color:var(--blue)">↻ re-check live</button> · <button class="lnk-btn" id="xpq-resolve-all" style="color:var(--blue)" title="Sweep every PO’s links from Xero / Fulfil / Flexport / DHL so exceptions cover the whole book">⟳ resolve all links</button></div>'
+        :'<tr><td colspan="5" class="l mut" style="padding:10px">'+(nDis&&!window._xpqShowDis?'✓ No open exceptions ('+nDis+' dismissed).':'✓ No exceptions — Xero and Horizon reconcile.')+'</td></tr>';
+      return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s. '+(_xpqExc&&_xpqExc.computed_at?'Checked '+esc(String(_xpqExc.computed_at).slice(11,16))+' UTC. ':'')
+        +(nDis?'<label style="margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="xpq-showdis"'+(window._xpqShowDis?' checked':'')+'> Show dismissed ('+nDis+')</label>':'')
+        +(function(){ var D=exAll.filter(function(e){ return e.type==='due_date_mismatch'&&!e.dismissed; }); return D.length?'<div style="margin:6px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="tiny"><b>'+D.length+'</b> due-date mismatches:</span><button class="save-btn light xpq-dueall" data-to="xero" style="padding:2px 10px;font-size:11px">All: HORIZON → Xero</button><button class="save-btn light xpq-dueall" data-to="horizon" style="padding:2px 10px;font-size:11px">All: Xero → HORIZON</button><span id="xpq-due-msg" class="tiny"></span></div><div id="xpq-due-cfm"></div>':''; })()+'<button class="lnk-btn" id="xpq-exc-refresh" style="color:var(--blue)">↻ re-check live</button> · <button class="lnk-btn" id="xpq-resolve-all" style="color:var(--blue)" title="Sweep every PO’s links from Xero / Fulfil / Flexport / DHL so exceptions cover the whole book">⟳ resolve all links</button></div>'
         +'<div class="tw" style="width:100%"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l" style="min-width:0;width:1%">Type</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">Insight</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
     function draw(j){ var items=(j&&j.items)||[], counts=(j&&j.counts)||{}; var excN=(_xpqExc&&_xpqExc.count)||0;
       function row(it){
@@ -13440,6 +13446,23 @@
           alert('✓ Resolved links across '+x.pos+' POs — Xero '+x.xero+', Fulfil '+x.fulfil+', Flexport '+x.flexport+', DHL '+x.dhl+' ('+x.bills_scanned+' bills scanned). Re-checking exceptions…');
           loadExceptions(true); })   // v28.088: progressive re-check
           .catch(function(e){ rall.textContent='⟳ resolve all links'; alert('Resolve failed: '+(e.message||e)); }); };
+      var sdc=b.querySelector('#xpq-showdis'); if(sdc)sdc.onchange=function(){ window._xpqShowDis=this.checked; draw(_xpqQueue); };   /* v28.720 */
+      // v28.720: due-date fixes, one or all, confirmed in the page (never a browser dialog)
+      function dueFix(items,to){ var c=b.querySelector('#xpq-due-cfm'), m=b.querySelector('#xpq-due-msg'); if(!c)return; var E=(_xpqExc.exceptions||[]);
+        var rows=items.map(function(it){ var e=E.filter(function(x){ return x.po===it.po&&x.type==='due_date_mismatch'; })[0]||{}; return esc(it.po)+': '+(to==='xero'?esc(fd(e.xero_due||''))+' → <b>'+esc(fd(e.horizon_due||''))+'</b> in Xero':esc(fd(e.horizon_due||''))+' → <b>'+esc(fd(e.xero_due||''))+'</b> in HORIZON'); });
+        c.innerHTML='<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0;background:var(--card);font-size:12px"><b>'+(to==='xero'?'Change '+items.length+' Xero bill due date'+(items.length===1?'':'s')+' (live Xero)':'Change '+items.length+' HORIZON balance due date'+(items.length===1?'':'s'))+'</b><div style="max-height:160px;overflow:auto;margin:6px 0">'+rows.join('<br>')+'</div><button class="save-btn" id="xpq-due-go">Confirm</button> <button class="save-btn light" id="xpq-due-x">Cancel</button></div>';
+        c.querySelector('#xpq-due-x').onclick=function(){ c.innerHTML=''; };
+        c.querySelector('#xpq-due-go').onclick=function(){ var bt=this; bt.disabled=true; bt.textContent='Updating…';
+          fetch('/api/supply/xero/exceptions/due-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items,to:to,confirm:true})}).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error);
+            c.innerHTML=''; if(m){ m.style.color=j.failed?'var(--amber)':'var(--pos)'; m.textContent='✓ '+j.done+' updated'+(j.failed?' · '+j.failed+' not: '+(j.results||[]).filter(function(x){ return !x.ok; }).map(function(x){ return x.po+' ('+x.error+')'; }).join('; '):''); }
+            loadExceptions(true); }).catch(function(e){ bt.disabled=false; bt.textContent='Confirm'; if(m){ m.style.color='var(--neg)'; m.textContent=e.message; } }); }; }
+      b.querySelectorAll('.xpq-due').forEach(function(btn){ btn.onclick=function(){ dueFix([{po:btn.dataset.po,bill_id:btn.dataset.bill}],btn.dataset.to); }; });
+      b.querySelectorAll('.xpq-dueall').forEach(function(btn){ btn.onclick=function(){ var to=btn.dataset.to; dueFix((_xpqExc.exceptions||[]).filter(function(e){ return e.type==='due_date_mismatch'&&!e.dismissed&&(to==='xero'?e.horizon_due:e.xero_due); }).map(function(e){ return {po:e.po,bill_id:e.bill_id}; }),to); }; });
+      b.querySelectorAll('.xpq-dis').forEach(function(btn){ btn.onclick=function(){ var on=btn.dataset.on==='1'; btn.disabled=true; btn.textContent='…';
+        fetch('/api/supply/xero/exceptions/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:btn.dataset.key,dismiss:on})}).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error);
+          (_xpqExc.exceptions||[]).forEach(function(e){ if(e.key===btn.dataset.key)e.dismissed=on?{by:(ME&&ME.email)||'',at:new Date().toISOString()}:null; });
+          _xpqExc.count=(_xpqExc.exceptions||[]).filter(function(e){ return !e.dismissed; }).length; try{ _navCounts.xeropayments=_xpqExc.count; updateNavBadges(); }catch(_){} draw(_xpqQueue); })
+          .catch(function(e){ btn.disabled=false; btn.textContent=e.message; }); }; });
       b.querySelectorAll('.xpq-openpo').forEach(function(btn){ btn.onclick=function(){ try{ openPODrawer(btn.dataset.po,'pay'); }catch(e){ try{ gotoPO(btn.dataset.po,'pay'); }catch(_){} } }; });   // v28.092: open the PO drawer (Payments tab) in place, not navigate to the grid
       b.querySelectorAll('.xpq-find').forEach(function(btn){ btn.onclick=function(){ btn.textContent='finding…'; fetch('/api/supply/po/'+encodeURIComponent(btn.dataset.po)+'/links?refresh=1').then(function(r){return r.json();}).then(function(){ exrf&&exrf.click&&exrf.click(); btn.textContent='done'; }).catch(function(){ btn.textContent='failed'; }); }; });
       b.querySelectorAll('.xpq-mkcn').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Create a Xero credit note for '+btn.dataset.po+' ('+money(btn.dataset.amt)+') — coded to Stock Deposits (602), allocated to the PO bill?\n\nThis writes to live Xero.'))return; btn.disabled=true; btn.textContent='Creating…';

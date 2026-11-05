@@ -1,3 +1,9 @@
+## v28.720 (05-Nov-26) Xero payments exceptions: dismiss / reopen (remembered, hidden, toggle), due-date fixes one or all
+- Ben 05-Nov-26 (59 issues on live): Dismiss on every exception, "Show dismissed (N)" toggle; the badge counts open ones. POST /api/supply/xero/exceptions/dismiss.
+- Due-date mismatches: "HORIZON → Xero" (live Xero bill DueDate, read back) or "Xero → HORIZON" (PO balance due date override), per row or all; in-page confirm. POST /api/supply/xero/exceptions/due-fix { items, to, confirm }.
+- Sandbox test: dismiss 66 -> 65 -> 66; Xero -> HORIZON fix cleared PO-55UKXR-AW26-1. The Xero direction was not run from the sandbox (it writes live Xero).
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.719 (05-Nov-26) Legacy commission runs: rows are paid ("approved (legacy)"), not pending
 - Ben 05-Nov-26 (run 333): legacy rows showed PENDING. The rebuild now writes them as paid; a legacy run's paid rows read "approved (legacy)".
 - LIVE DATA (Ben runs it, on his clipboard): UPDATE planner.commission_rows x SET status='paid' FROM planner.commission_runs r WHERE r.id=x.run_id AND r.legacy AND x.status='pending'; (about 8,130 rows).
