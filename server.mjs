@@ -1318,6 +1318,7 @@ app.use((req, res, next) => {
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
       || req.path === '/api/cron/commission-weekly'   // v28.707 (Ben 05-Nov-26): n8n Sunday commission steps (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/cogs-channel' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
+      || req.path.startsWith('/invoice/') || req.path === '/api/invoice-links/ensure'   // v28.730 (Ben): PUBLIC wholesale invoice pages (unguessable token, rate limited) + n8n ensure (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
@@ -1486,6 +1487,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && (p === '/api/supply/payment-fx' || p === '/api/supply/payments/pay' || p === '/api/supply/payments/xero-post')) return null;   // v28.305 (Ben): marking a payment run paid and submitting it to Xero = ACCOUNTS grant or admin, checked in the handler
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   // v28.255 (deep dive P0 #1, #2): the default is now FAIL CLOSED (admin only). Families with their own check are listed explicitly.
+  if (p === '/api/invoice-links/ensure') return null;         // v28.730: n8n, x-webhook-secret checked in the handler (the rest of /api/invoice-links/* stays admin)
   if (p.startsWith('/api/cron/')) return null;                // every cron handler checks x-webhook-secret (safeEq); action-metrics too from v28.255
   if (p.startsWith('/api/client/')) return null;              // cpAdminGate (app.use) checks the CLIENT grant / admin on every method
   if (p.startsWith('/api/assistant/')) return null;           // aiGate (app.use)
@@ -36573,6 +36575,228 @@ app.get('/api/cp/orders/:okey/invoice.pdf', cpAuth, async (req, res) => {
     const name = 'Dock-and-Bay-' + (inv.credit ? 'credit-note' : 'invoice') + '-' + String(inv.number || inv.id).replace(/[^A-Za-z0-9_-]+/g, '') + '.pdf';
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="' + name + '"', 'Cache-Control': 'no-store' }).send(buf);
   } catch (e) { log500(e); fail(502, 'The invoice is unavailable right now, please try again in a minute.'); } });
+// ---- v28.730 (Ben 05-Nov-26): PUBLIC wholesale invoice pages. A wholesale Shopify order (Fulfil channels dockandbay-uk-ws / -us-ws /
+// -eu-ws) gets a permanent link: /invoice/<token> = the PROFORMA (from the sale) or the TAX INVOICE (the latest posted Fulfil customer
+// invoice). HORIZON renders the page itself, live from Fulfil (10 min cache): Fulfil has no public document link, its Invoice print has
+// no VAT number or bank details, and its Sales Order Confirmation prints EUR bank details on every currency. n8n calls
+// POST /api/invoice-links/ensure (x-webhook-secret) and writes the link to Fulfil + Shopify; HORIZON writes nothing to either.
+// Seller / VAT / bank details per channel: app_settings invoice_link_entities (JSON, ACCOUNTS > Invoice links); EU from Fulfil's
+// current template, UK and US bank blocks empty until Ben supplies them. Pay by card: behind app_settings invoice_pay_enabled.
+const IL_GATEWAY = { 'dockandbay-uk-ws': 48, 'dockandbay-us-ws': 49, 'dockandbay-eu-ws': 50 };   // channel -> Fulfil Stripe gateway (pay by card)
+const IL_DEFAULT_ENTITIES = {
+  'dockandbay-uk-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
+    tax_label: 'VAT', tax_name: 'VAT', tax_numbers: ['GB 212 5071 56'], bank: [], terms_url: '' },
+  'dockandbay-eu-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
+    ship_from: ['Dock & Bay Ltd c/o I-Fulfilment', 'Harderhook 19', '46395 Bocholt', 'Germany'],
+    tax_label: 'VAT', tax_name: 'VAT', tax_numbers: ['DE309038882', 'GB 212 5071 56'],
+    bank: ['Bank of Ireland (IE)', 'Account name: Dock & Bay Ltd', 'Account: 36625168', 'Sort code: 90 25 14', 'BIC: BOFIIE2DXXX', 'IBAN: IE16BOFI90001736625168'],
+    terms_url: 'https://euwholesale.dockandbay.com/policies/terms-of-service' },
+  'dockandbay-us-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
+    tax_label: null, tax_name: 'Sales tax', tax_numbers: [], bank: [], terms_url: '' },
+};
+async function ilEntities() { const v = cpJson(await cpSetting('invoice_link_entities', ''), null); const out = {};
+  Object.keys(IL_DEFAULT_ENTITIES).forEach(k => { out[k] = Object.assign({}, IL_DEFAULT_ENTITIES[k], (v && v[k]) || {}); }); return out; }
+async function ilPayOn() { return String(await cpSetting('invoice_pay_enabled', 'false')).toLowerCase() === 'true'; }
+const ilRead = (model, filters, fields, extra) => fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/' + model + '/search_read', Object.assign({ filters, fields }, extra || {}));
+const ilN = v => _fulfilNum(v) || 0, ilDt = v => fulfilUnwrap(v) || null;
+function ilBase(req) { return process.env.INVOICE_LINK_BASE || (process.env.VERCEL ? 'https://horizon.dockandbay.com' : (req.protocol + '://' + req.get('host'))); }
+async function ilToken(kind, sale, inv, ch, invNos) {   // one live token per (kind, sale, invoice); an existing one is returned (invoice numbers refreshed)
+  const tok = crypto.randomBytes(24).toString('base64url');
+  return (await pool.query(`INSERT INTO planner.invoice_links (token, kind, fulfil_sale_id, fulfil_invoice_id, sale_number, invoice_number, channel)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    ON CONFLICT (kind, fulfil_sale_id, (coalesce(fulfil_invoice_id, 0))) WHERE revoked_at IS NULL DO UPDATE SET sale_number = EXCLUDED.sale_number, invoice_number = EXCLUDED.invoice_number
+    RETURNING token`, [tok, kind, sale.id, inv ? inv.id : null, sale.number || null, invNos || (inv ? (inv.number || null) : null), ch])).rows[0].token;
+}
+// the sale's posted customer invoices, newest first (invoice date, then id); credit notes (negative total) and cancelled ones never count
+async function ilPostedInvoices(invIds) {
+  if (!invIds.length) return [];
+  const r = await ilRead('account.invoice', [['id', 'in', invIds], ['type', '=', 'out'], ['state', 'in', ['posted', 'paid']]], ['id', 'number', 'invoice_date', 'total_amount', 'balance', 'sales']);
+  return (r || []).filter(i => ilN(i.total_amount) > 0).sort((a, b) => String(ilDt(b.invoice_date) || '').localeCompare(String(ilDt(a.invoice_date) || '')) || b.id - a.id);
+}
+app.post('/api/invoice-links/ensure', async (req, res) => {   // server to server (n8n): create or return links; writes only planner.invoice_links
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const ids = [...new Set(((req.body || {}).sale_ids || []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length || ids.length > 100) return res.status(400).json({ error: 'sale_ids: 1 to 100 Fulfil sale ids' });
+  try {
+    const sales = await ilRead('sale.sale', [['id', 'in', ids]], ['id', 'number', 'channel.name', 'invoices']);
+    const byId = new Map((sales || []).map(s => [s.id, s]));
+    const invs = await ilPostedInvoices([].concat(...(sales || []).map(s => s.invoices || [])));
+    const base = ilBase(req), out = {};
+    for (const id of ids) {
+      const s = byId.get(id); if (!s) { out[id] = { error: 'sale not found' }; continue; }
+      const ch = s['channel.name']; if (!IL_GATEWAY[ch]) { out[id] = { error: 'not a wholesale order (' + (ch || 'no channel') + ')' }; continue; }
+      const own = new Set(s.invoices || []), mine = invs.filter(i => own.has(i.id)).reverse();   // oldest first
+      const pro = base + '/invoice/' + await ilToken('proforma', s, null, ch);
+      // one tax link per ORDER (all its posted invoices in one file, Ben 05-Nov-26); it stays the same when a later invoice is posted
+      const tax = mine.length ? base + '/invoice/' + await ilToken('tax', s, null, ch, mine.map(i => i.number).join(', ')) : null;
+      out[id] = { sale_number: s.number, invoice_numbers: mine.map(i => i.number), proforma_url: pro, tax_url: tax, current_url: tax || pro };
+    }
+    res.json(out);
+  } catch (e) { log500(e); res.status(502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
+});
+// ---- the public page
+const _ilCache = new Map();   // token -> { at, doc }  (10 min)
+const ilEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const IL_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function ilDate(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? m[3] + '-' + IL_MON[Number(m[2]) - 1] + '-' + m[1].slice(2) : ''; }
+function ilMoney(v, ccy) { try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: ccy || 'GBP' }).format(v || 0); } catch (e) { return (ccy || '') + ' ' + Number(v || 0).toFixed(2); } }
+function ilPct(p) { return (Math.round(p * 100) / 100).toString().replace(/\.0+$/, '') + '%'; }
+const ilAddr = a => String(a || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+async function ilAddresses(ids) { ids = [...new Set(ids.filter(Boolean))]; if (!ids.length) return {};
+  const m = {}; ((await ilRead('party.address', [['id', 'in', ids]], ['id', 'full_address'])) || []).forEach(a => { m[a.id] = ilAddr(a.full_address); }); return m; }
+function ilLine(l) { return { sku: l['product.code'] || '', desc: l.description || '', qty: ilN(l.quantity), unit: ilN(l.unit_price), disc: ilN(l.discount), amount: ilN(l.amount) }; }
+async function ilLoadProforma(row) {
+  const s = (await ilRead('sale.sale', [['id', '=', Number(row.fulfil_sale_id)]], ['id', 'number', 'reference', 'sale_date', 'state', 'party.rec_name', 'party.tax_identifier.code',
+    'invoice_address', 'shipment_address', 'currency.code', 'untaxed_amount', 'tax_amount', 'total_amount', 'payment_term.name', 'lines', 'channel.name', 'payment_total', 'invoices']))[0];
+  if (!s || s.state === 'cancel') return null;
+  const lines = s.lines && s.lines.length ? await ilRead('sale.line', [['id', 'in', s.lines]], ['id', 'type', 'sequence', 'product.code', 'description', 'quantity', 'unit_price', 'discount', 'amount']) : [];
+  const ad = await ilAddresses([s.invoice_address, s.shipment_address]);
+  const net = ilN(s.untaxed_amount), tax = ilN(s.tax_amount), total = ilN(s.total_amount);
+  // owed: once invoiced, what the posted invoices still show as due; before that, the order total less payments on the order
+  const invs = await ilPostedInvoices(s.invoices || []);
+  const owed = invs.length ? invs.reduce((a, i) => a + ilN(i.balance), 0) : Math.max(0, total - ilN(s.payment_total));
+  return { kind: 'proforma', channel: s['channel.name'], ccy: s['currency.code'], number: s.number, ref: s.reference, date: ilDt(s.sale_date),
+    customer: s['party.rec_name'], customer_tax: s['party.tax_identifier.code'], bill: ad[s.invoice_address] || ad[s.shipment_address] || [s['party.rec_name']], ship: ad[s.shipment_address] || [],
+    lines: (lines || []).filter(l => l.type === 'line' && ilN(l.quantity) !== 0).sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.id - b.id).map(ilLine),
+    net, tax, total, taxes: tax ? [{ desc: null, rate: net ? tax / net * 100 : null, base: net, amount: tax }] : [], terms: s['payment_term.name'], owed: Math.round(owed * 100) / 100 };
+}
+// v28.730 (Ben 05-Nov-26 "if there are multiple invoices, combine them in 1 file"): the tax link is per ORDER (fulfil_invoice_id null) and shows
+// every posted customer invoice and credit note on it, oldest first, one A4 page each (each keeps its own number for VAT), with a summary of
+// the balance due when there are several. A token issued for one invoice id shows just that invoice.
+async function ilLoadInvoice(id, s) {
+  const i = (await ilRead('account.invoice', [['id', '=', Number(id)]], ['id', 'number', 'invoice_date', 'state', 'type', 'party.rec_name', 'party.tax_identifier.code',
+    'invoice_address', 'currency.code', 'untaxed_amount', 'tax_amount', 'total_amount', 'balance', 'payment_term.name', 'lines', 'taxes', 'reference', 'lines_to_pay']))[0];
+  if (!i || i.type !== 'out' || !['posted', 'paid'].includes(i.state)) return null;
+  const [lines, taxes, due, ad] = await Promise.all([
+    i.lines && i.lines.length ? ilRead('account.invoice.line', [['id', 'in', i.lines]], ['id', 'type', 'sequence', 'product.code', 'description', 'quantity', 'unit_price', 'discount', 'amount']) : [],
+    i.taxes && i.taxes.length ? ilRead('account.invoice.tax', [['id', 'in', i.taxes]], ['id', 'description', 'base', 'amount']) : [],
+    i.lines_to_pay && i.lines_to_pay.length ? ilRead('account.move.line', [['id', 'in', i.lines_to_pay]], ['id', 'maturity_date']) : [],
+    ilAddresses([i.invoice_address, s.shipment_address])]);
+  const tx = (taxes || []).map(t => ({ desc: t.description, base: ilN(t.base), amount: ilN(t.amount), rate: ilN(t.base) ? ilN(t.amount) / ilN(t.base) * 100 : null }));
+  const total = ilN(i.total_amount);
+  return { kind: 'tax', id: i.id, credit: total < 0, channel: s['channel.name'], ccy: i['currency.code'], number: i.number, ref: i.reference, sale_number: s.number, date: ilDt(i.invoice_date),
+    due: (due || []).map(m => ilDt(m.maturity_date)).filter(Boolean).sort()[0] || null,
+    customer: i['party.rec_name'], customer_tax: i['party.tax_identifier.code'], bill: ad[i.invoice_address] || [i['party.rec_name']], ship: ad[s.shipment_address] || [],
+    lines: (lines || []).filter(l => l.type === 'line').sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.id - b.id).map(ilLine),
+    net: ilN(i.untaxed_amount), tax: ilN(i.tax_amount), total, taxes: tx, terms: i['payment_term.name'], balance: ilN(i.balance), owed: Math.max(0, ilN(i.balance)) };
+}
+async function ilLoadTax(row) {
+  const s = (await ilRead('sale.sale', [['id', '=', Number(row.fulfil_sale_id)]], ['id', 'number', 'shipment_address', 'channel.name', 'invoices']))[0];
+  if (!s) return null;
+  let ids = row.fulfil_invoice_id ? [Number(row.fulfil_invoice_id)] : (s.invoices || []);
+  if (!row.fulfil_invoice_id && ids.length) ids = ((await ilRead('account.invoice', [['id', 'in', ids], ['type', '=', 'out'], ['state', 'in', ['posted', 'paid']]], ['id'])) || []).map(i => i.id);
+  const docs = (await Promise.all(ids.map(id => ilLoadInvoice(id, s)))).filter(Boolean)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || (a.credit - b.credit) || a.id - b.id);   // same day: invoice before credit note
+  if (!docs.some(d => !d.credit)) return null;
+  const owed = Math.max(0, Math.round(docs.reduce((a, d) => a + d.balance, 0) * 100) / 100);
+  return { kind: 'tax', multi: true, channel: s['channel.name'] || row.channel, ccy: docs[0].ccy, sale_number: s.number, docs, owed, number: docs.map(d => d.number).join(', ') };
+}
+// one A4 page per document; opts.bank = show the bank block (the last page of a set, only while money is owed)
+function ilPageHtml(d, ent, opts) {
+  const tax = d.taxes.length === 1 ? d.taxes[0] : null;   // one rate: per-line VAT shown; several: totals per rate only (Fulfil keeps tax on the invoice, not the line)
+  const tn = ent.tax_name || 'VAT', isTax = d.kind === 'tax', money = v => ilMoney(v, d.ccy);
+  const block = (h, arr) => arr && arr.length ? '<div class="blk"><h4>' + ilEsc(h) + '</h4>' + arr.map(x => '<div>' + ilEsc(x) + '</div>').join('') + '</div>' : '';
+  const anyDisc = d.lines.some(l => l.disc);
+  const rows = d.lines.map(l => '<tr><td>' + ilEsc(l.sku) + '</td><td>' + ilEsc(l.desc) + '</td><td class="n">' + ilEsc(l.qty) + '</td><td class="n">' + money(l.unit) + '</td>'
+    + (anyDisc ? '<td class="n">' + (l.disc ? ilPct(l.disc * 100) : '') + '</td>' : '')
+    + '<td class="n">' + (tax && tax.rate != null ? ilPct(tax.rate) : '') + '</td>'
+    + (isTax ? '<td class="n">' + (tax && tax.rate != null ? money(Math.round(l.amount * tax.rate) / 100) : '') + '</td>' : '')
+    + '<td class="n">' + money(l.amount) + '</td></tr>').join('');
+  const taxRows = d.taxes.map(t => '<tr><td>' + ilEsc(tn) + (t.rate != null ? ' ' + ilPct(t.rate) : '') + (t.desc ? ' (' + ilEsc(t.desc) + ')' : '') + (isTax ? ' on ' + money(t.base) : '') + '</td><td class="n">' + money(t.amount) + '</td></tr>').join('');
+  const title = !isTax ? 'PROFORMA INVOICE' : d.credit ? 'CREDIT NOTE' : ent.tax_label ? 'TAX INVOICE' : 'INVOICE';
+  const meta = [[!isTax ? 'Order number' : d.credit ? 'Credit note number' : 'Invoice number', d.number], ['Your reference', d.ref], isTax ? ['Order', d.sale_number] : null,
+    [isTax ? 'Date' : 'Order date', ilDate(d.date)], isTax && ent.tax_label ? ['Tax point', ilDate(d.date)] : null,
+    ['Payment terms', d.terms], isTax && d.due && !d.credit ? ['Due date', ilDate(d.due)] : null, ['Currency', d.ccy]].filter(x => x && x[1]);
+  return '<div class="page"><div class="hd"><img src="/api/cp/asset/logo" alt="Dock &amp; Bay"><h1>' + title + '</h1></div>'
+    + '<div class="grid">' + block('From', [ent.legal_name].concat(ent.address || []).concat((ent.tax_numbers || []).map(v => (ent.tax_label || tn) + ' ' + v)))
+    + block('Bill to', d.bill.concat(d.customer_tax ? [tn + ' ' + d.customer_tax] : [])) + block('Ship to', d.ship) + (ent.ship_from ? block('Ship from', ent.ship_from) : '')
+    + '<table class="meta">' + meta.map(m => '<tr><td>' + ilEsc(m[0]) + '</td><td>' + ilEsc(m[1]) + '</td></tr>').join('') + '</table></div>'
+    + '<table class="l"><thead><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Unit price</th>' + (anyDisc ? '<th class="n">Discount</th>' : '')
+    + '<th class="n">' + ilEsc(tn) + ' rate</th>' + (isTax ? '<th class="n">' + ilEsc(tn) + '</th>' : '') + '<th class="n">Net</th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<table class="t"><tr><td>Net</td><td class="n">' + money(d.net) + '</td></tr>' + (taxRows || '<tr><td>' + ilEsc(tn) + '</td><td class="n">' + money(0) + '</td></tr>')
+    + '<tr class="g"><td>Total ' + ilEsc(d.ccy) + '</td><td class="n">' + money(d.total) + '</td></tr>'
+    + (!d.credit && d.owed < d.total - 0.005 ? '<tr><td>Paid</td><td class="n">' + money(d.total - d.owed) + '</td></tr><tr><td><b>Balance due</b></td><td class="n"><b>' + money(d.owed) + '</b></td></tr>' : '') + '</table>'
+    + (isTax ? '' : '<div class="note"><b>This is not a tax invoice.</b> A tax invoice is issued when the order ships.</div>')
+    + '<div class="foot">' + (opts.bank && ent.bank && ent.bank.length ? block('Pay by bank transfer', ent.bank.concat(['Reference: ' + (opts.ref || d.number)])) : '')
+    + (ent.terms_url ? block('Terms and conditions', [ent.terms_url]) : '') + '</div>'
+    + (ent.company_no ? '<div class="small">' + ilEsc(ent.legal_name) + '. ' + ilEsc(ent.company_no) + '</div>' : '') + '</div>';
+}
+function ilRender(d, ent, token, payOn) {
+  const money = v => ilMoney(v, d.ccy), docs = d.multi ? d.docs : [d];
+  const pay = payOn && d.owed > 0.005 ? '<a class="btn pay" href="/invoice/' + ilEsc(token) + '/pay" rel="nofollow">Pay ' + money(d.owed) + ' by card</a>' : '';
+  const sum = docs.length > 1 ? '<div class="page sum"><b>Order ' + ilEsc(d.sale_number) + ': ' + docs.length + ' documents</b><table class="l"><thead><tr><th>Document</th><th>Number</th><th>Date</th><th class="n">Total</th><th class="n">Balance</th></tr></thead><tbody>'
+    + docs.map(x => '<tr><td>' + (x.credit ? 'Credit note' : 'Invoice') + '</td><td>' + ilEsc(x.number) + '</td><td>' + ilDate(x.date) + '</td><td class="n">' + money(x.total) + '</td><td class="n">' + money(x.balance) + '</td></tr>').join('')
+    + '</tbody></table><table class="t"><tr class="g"><td>Balance due</td><td class="n">' + money(d.owed) + '</td></tr></table></div>' : '';
+  const pages = docs.map((x, k) => ilPageHtml(x, ent, { bank: k === docs.length - 1 && d.owed > 0.005, ref: docs.length > 1 ? d.number : null })).join('');
+  const title = d.kind === 'tax' ? (docs.length > 1 ? 'Invoices ' : 'Invoice ') + d.number : 'Proforma ' + d.number;
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
+    + '<title>' + ilEsc(title) + ' | Dock &amp; Bay</title><style>'
+    + '*{box-sizing:border-box}body{margin:0;background:#f3f3f1;color:#1d1d1b;font:13px/1.45 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}'
+    + '.bar{max-width:210mm;margin:16px auto 0;display:flex;gap:8px;justify-content:flex-end;padding:0 16px}.btn{display:inline-block;border:1px solid #1d1d1b;background:#fff;color:#1d1d1b;padding:8px 14px;border-radius:4px;text-decoration:none;font-weight:600;cursor:pointer;font:inherit}.btn.pay{background:#1d1d1b;color:#fff}'
+    + '.page{max-width:210mm;margin:12px auto 24px;background:#fff;padding:14mm 14mm 12mm;box-shadow:0 1px 4px rgba(0,0,0,.08)}.page.sum{padding:8mm 14mm}'
+    + '.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.hd img{height:54px}.hd h1{margin:0;font-size:24px;letter-spacing:.04em}'
+    + '.grid{display:flex;flex-wrap:wrap;gap:12px 32px;margin-top:18px}.blk{min-width:150px}.blk h4{margin:0 0 3px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b6b66}'
+    + '.meta{margin-left:auto}.meta td{padding:1px 0 1px 12px}.meta td:first-child{color:#6b6b66;padding-left:0}'
+    + 'table.l{width:100%;border-collapse:collapse;margin-top:20px}table.l th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b66;border-bottom:1.5px solid #1d1d1b;padding:6px 6px}table.l td{border-bottom:1px solid #e6e6e2;padding:6px;vertical-align:top}'
+    + '.n{text-align:right;white-space:nowrap}table.t{margin:12px 0 0 auto;border-collapse:collapse;min-width:260px}table.t td{padding:4px 6px}table.t tr.g td{border-top:1.5px solid #1d1d1b;font-weight:700;font-size:15px}'
+    + '.note{margin-top:18px;padding:10px 12px;background:#f6f6f3;border-radius:4px}.foot{margin-top:22px;display:flex;flex-wrap:wrap;gap:16px 40px}.small{color:#6b6b66;font-size:11px;margin-top:20px}'
+    + '@media(max-width:640px){.page{padding:16px;margin:8px 0}.bar{padding:0 16px}table.l{font-size:12px}.hd h1{font-size:18px}.meta{margin-left:0}}'
+    + '@media print{body{background:#fff}.bar{display:none}.page{box-shadow:none;margin:0;max-width:none;padding:0;break-after:page}.page:last-child{break-after:auto}@page{size:A4;margin:12mm}}'
+    + '</style></head><body><div class="bar">' + pay + '<button class="btn" onclick="window.print()">Download PDF</button></div>' + sum + pages + '</body></html>';
+}
+function ilPlain(res, code, msg) { res.status(code).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' })
+  .send('<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Dock &amp; Bay</title><p style="font:14px system-ui;padding:24px">' + ilEsc(msg) + '</p>'); }
+const IL_TOKEN_RE = /^[A-Za-z0-9_-]{24,64}$/;
+function ilIp(req) { return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip'; }
+async function ilRow(token) { if (!IL_TOKEN_RE.test(String(token || ''))) return null;
+  return (await pool.query(`SELECT * FROM planner.invoice_links WHERE token=$1 AND revoked_at IS NULL`, [token])).rows[0] || null; }
+async function ilDoc(row) { const c = _ilCache.get(row.token); if (c && Date.now() - c.at < 10 * 60000) return c.doc;
+  const doc = row.kind === 'tax' ? await ilLoadTax(row) : await ilLoadProforma(row);
+  if (_ilCache.size > 2000) _ilCache.clear(); _ilCache.set(row.token, { at: Date.now(), doc }); return doc; }
+app.get('/invoice/:token', async (req, res) => {
+  if (_cpRateLimited('inv:' + ilIp(req), 120, 600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
+  let row; try { row = await ilRow(req.params.token); } catch (e) { log500(e); return ilPlain(res, 503, 'This document is temporarily unavailable, please try again in a few minutes.'); }
+  if (!row) return ilPlain(res, 404, 'Not found.');
+  try {
+    const doc = await ilDoc(row);
+    if (!doc) return ilPlain(res, 410, 'This document is no longer available. Please contact Dock & Bay.');
+    const [ents, payOn] = await Promise.all([ilEntities(), ilPayOn()]);
+    pool.query(`UPDATE planner.invoice_links SET views = views + 1, last_viewed_at = now() WHERE id=$1`, [row.id]).catch(() => {});
+    res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" })
+      .send(ilRender(doc, ents[doc.channel] || ents[row.channel] || IL_DEFAULT_ENTITIES['dockandbay-uk-ws'], row.token, payOn));
+  } catch (e) { log500(e); ilPlain(res, 503, 'This document is temporarily unavailable, please try again in a few minutes.'); }
+});
+// Pay by card: a FRESH Fulfil payment link on every click (never stored: they expire after 30 days), gateway by channel; a link from the sale
+// for a proforma, from the customer invoice for a tax invoice. Fulfil has not yet confirmed the API call (REST /model/payment_link is 404),
+// so this stays off (invoice_pay_enabled) and ilFulfilPayLink fails closed until it is wired.
+async function ilFulfilPayLink(row, doc) { const e = new Error('Fulfil payment link API not wired yet (gateway ' + IL_GATEWAY[doc.channel] + ')'); e.code = 'IL_PAY_PENDING'; throw e; }
+app.get('/invoice/:token/pay', async (req, res) => {
+  if (_cpRateLimited('invpay:' + ilIp(req), 20, 3600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
+  try { const row = await ilRow(req.params.token); if (!row || !(await ilPayOn())) return ilPlain(res, 404, 'Not found.');
+    _ilCache.delete(row.token); const doc = await ilDoc(row);   // fresh amount owed
+    if (!doc) return ilPlain(res, 410, 'This document is no longer available. Please contact Dock & Bay.');
+    if (!(doc.owed > 0.005)) return res.redirect(303, '/invoice/' + row.token);
+    const url = await ilFulfilPayLink(row, doc); res.set('Cache-Control', 'no-store').redirect(303, url);
+  } catch (e) { if (e.code !== 'IL_PAY_PENDING') log500(e); ilPlain(res, 503, 'Card payment is not available right now. Please pay by bank transfer, or try again later.'); }
+});
+// ---- admin (ACCOUNTS > Invoice links): list, revoke, settings. Admin only (requiredCap default for /api/invoice-links/*; hzAdminOnly here too)
+app.get('/api/invoice-links', async (req, res) => { const me = await hzAdminOnly(req, res); if (!me) return;
+  try { const q = String(req.query.q || '').trim(); const p = []; let w = '';
+    if (q) { p.push('%' + q + '%'); w = `WHERE sale_number ILIKE $1 OR invoice_number ILIKE $1 OR channel ILIKE $1`; }
+    const rows = (await pool.query(`SELECT id, token, kind, fulfil_sale_id, fulfil_invoice_id, sale_number, invoice_number, channel, created_at, revoked_at, revoked_by, views, last_viewed_at
+      FROM planner.invoice_links ${w} ORDER BY created_at DESC LIMIT 300`, p)).rows;
+    res.json({ links: rows, base: ilBase(req), entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/invoice-links/:id/revoke', async (req, res) => { const me = await hzAdminOnly(req, res); if (!me) return;
+  try { const r = await pool.query(`UPDATE planner.invoice_links SET revoked_at = now(), revoked_by = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING token`, [Number(req.params.id), (me && me.email) || authUser(req) || 'admin']);
+    if (r.rows[0]) _ilCache.delete(r.rows[0].token); res.json({ ok: true, revoked: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/invoice-links/settings', async (req, res) => { const me = await hzAdminOnly(req, res); if (!me) return;
+  try { const b = req.body || {};
+    if (b.entities !== undefined) { const v = b.entities; if (!v || typeof v !== 'object' || Array.isArray(v)) return res.status(400).json({ error: 'entities must be an object keyed by channel' });
+      const bad = Object.keys(v).filter(k => !IL_DEFAULT_ENTITIES[k]); if (bad.length) return res.status(400).json({ error: 'unknown channel: ' + bad.join(', ') });
+      await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('invoice_link_entities', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(v)]); }
+    if (b.pay_enabled !== undefined) await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('invoice_pay_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [b.pay_enabled ? 'true' : 'false']);
+    _ilCache.clear(); res.json({ ok: true, entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
 // v28.227 (Ben): the draft also carries what staff set in CLIENT ▸ Orders review: order.carrier_id / carrier_service_id
 // (Fulfil carrier + carrier.service ids) and per line mode 'ship' | 'backorder' | 'dropship' (= sale.line.delivery_mode) with

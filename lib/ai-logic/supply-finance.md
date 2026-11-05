@@ -31,6 +31,7 @@ sources:
   - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, cogsRecipient, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: cchBuild, cchCogsAcct, CCH_SALES, cchXeroRun, cchEmail, /api/cron/cogs-channel (COGS and SALES by channel journals, v28.727)
+  - server.mjs :: ilLoadProforma, ilLoadTax, ilRender, /api/invoice-links/ensure, /invoice/:token (public wholesale invoice pages, v28.730)
   - artifact_v16.7.html :: renderCogsCh
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
   - supply/inject.html :: hzUpload
@@ -848,3 +849,12 @@ verified_version: v28.616
 - One SSCC = one carton (v28.438, Ben 22-Oct-26 after Madison's Dillards packing list showed 8 SSCCs twice, earlier three times, for PO 3242991501): a label on more than one page (the same label in two PDFs, or a reissued label file) is used once. The first page wins; the repeats get no PDF and no packing-list row and are listed in the manifest as "duplicate page: same SSCC as <file>". Large sets are generated in batches and the browser applies the same rule across batches. (source: supply/inject.html :: _ediDupes)
 - Parse shows the repeats in an amber box (SSCC, PO, pages, files) and counts labels and labels per PO by unique SSCC. (source: server.mjs :: _ediPreview)
 - When a project holds more than one ASN CSV, the newest saved one is used (before v28.438 the oldest was used, so a re-downloaded ASN saved next to an old one was ignored). A CSV added in step 1 and not saved wins over saved ones.
+
+### Public wholesale invoice pages (v28.730, ACCOUNTS > Invoice links)
+- Wholesale orders only (Fulfil channels dockandbay-uk-ws, -us-ws, -eu-ws; all on company Dock & Bay Ltd). n8n calls POST /api/invoice-links/ensure with Fulfil sale ids and writes the returned current_url to the Fulfil metafield invoice_link and Shopify global.xero_invoice.
+- Each order has one PROFORMA link (the sale: "This is not a tax invoice") and, once a customer invoice is posted, one TAX INVOICE link. current_url = the tax link when it exists, else the proforma.
+- The tax page shows every posted customer invoice and credit note on the order, oldest first (same day: invoice before credit note), one A4 page each with its own number. With several documents a summary shows each balance and the total balance due. Credit notes alone never create a tax link; cancelled invoices never show.
+- Tax point = the Fulfil invoice date. VAT per line only when the invoice has one tax rate (Fulfil keeps tax on the invoice, not the line); otherwise totals per rate. US-WS: "Sales tax", title INVOICE (no VAT number).
+- Amount owed: tax page = sum of the invoices' Fulfil balance (floor 0); proforma = the posted invoices' balance once invoiced, else the order total less payment_total. Bank details show only while money is owed. Pay by card shows only when app_settings invoice_pay_enabled is true and money is owed; the Fulfil payment link API is not wired yet, so the pay route fails closed.
+- Seller, VAT and bank details per channel: app_settings invoice_link_entities over the built-in defaults (EU from Fulfil's Sales Order Confirmation template; UK and US bank lines empty).
+- Links never expire; Revoke (admin) kills a token and the next ensure issues a new one. Unknown / revoked token: plain 404. Pages are noindex, no-store, rate limited per IP.

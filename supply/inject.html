@@ -21231,8 +21231,8 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Reconcile and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var AC_SLUG={bank:'bank-statement',inbox:'reconcile',config:'rules',payreport:'payments-report'}, AC_SLUG_IN={'bank-statement':'bank',reconcile:'inbox',rules:'config',backdate:'bank','payments-report':'payreport'};   // v28.282 (Ben): deep links match the menu names; old links (bank, inbox, config, backdate) still work
-  var ACCOUNTS_TABS=[['bank','Bank statement'],['ageing','Ageing'],['inbox','Reconcile'],['payables','Payables'],['payreport','Payments report'],['3pl-invoicing','3PL invoicing'],['config','Rules']], ACCOUNTS_SUB='bank';   // v28.344 (Ben 14-Oct-26): Payments report mirrored here (same report as SUPPLY > Payments)   // v28.280 (Ben): statement, ageing, reconcile first; Back-date removed
+  var AC_SLUG={bank:'bank-statement',inbox:'reconcile',config:'rules',payreport:'payments-report',invlinks:'invoice-links'}, AC_SLUG_IN={'bank-statement':'bank',reconcile:'inbox',rules:'config',backdate:'bank','payments-report':'payreport','invoice-links':'invlinks'};   // v28.282 (Ben): deep links match the menu names; old links (bank, inbox, config, backdate) still work
+  var ACCOUNTS_TABS=[['bank','Bank statement'],['ageing','Ageing'],['inbox','Reconcile'],['payables','Payables'],['payreport','Payments report'],['3pl-invoicing','3PL invoicing'],['invlinks','Invoice links'],['config','Rules']], ACCOUNTS_SUB='bank';   // v28.344 (Ben 14-Oct-26): Payments report mirrored here (same report as SUPPLY > Payments)   // v28.280 (Ben): statement, ageing, reconcile first; Back-date removed
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -21265,7 +21265,36 @@
     if(k==='ageing'){ acRenderAgeing(b); return; }
     if(k==='backdate'){ acRenderBackdate(b); return; }
     if(k==='config'){ acRenderConfig(b); return; }   // v28.271
+    if(k==='invlinks'){ AC_IL.d=null; AC_IL.msg=''; acRenderInvLinks(); return; }   // v28.730
     acRenderPayables(b); }
+  // ── v28.730 (Ben 05-Nov-26): ACCOUNTS ▸ Invoice links. The public proforma / tax invoice pages (/invoice/<token>) n8n puts on wholesale
+  // orders (Fulfil metafield invoice_link, Shopify global.xero_invoice). Admin only (the API): issued links with Revoke, the seller / VAT /
+  // bank details shown per channel, and the Pay by card switch (off until Fulfil confirms the payment link API).
+  var AC_IL={q:'',d:null,busy:false,msg:'',ent:null};
+  function acIlDate(iso){ if(!iso)return ''; var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p=String(iso).slice(0,10).split('-'); return p.length<3?String(iso):(p[2]+'-'+M[+p[1]-1]+'-'+p[0].slice(2)); }
+  function acIlLoad(){ AC_IL.busy=true; fetch('/api/invoice-links'+(AC_IL.q?'?q='+encodeURIComponent(AC_IL.q):'')).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ AC_IL.d=j; AC_IL.busy=false; if(AC_IL.ent==null)AC_IL.ent=JSON.stringify(j.entities,null,2); acRenderInvLinks(); }).catch(function(e){ AC_IL.d={error:e.message}; AC_IL.busy=false; acRenderInvLinks(); }); }
+  function acIlPost(url,body,done){ fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ done(null,j); }).catch(function(e){ done(e); }); }
+  function acRenderInvLinks(){ var b=document.getElementById('accounts-body'); if(!b||ACCOUNTS_SUB!=='invlinks')return;
+    if(!AC_IL.d){ b.innerHTML='<div class="count">Loading invoice links…</div>'; if(!AC_IL.busy)acIlLoad(); return; }
+    if(AC_IL.d.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(AC_IL.d.error)+'</div>'; return; }
+    var d=AC_IL.d, rows=d.links||[];
+    var tr=rows.map(function(r){ var url=d.base+'/invoice/'+r.token;
+      return '<tr'+(r.revoked_at?' style="opacity:.55"':'')+'><td>'+esc(r.sale_number||r.fulfil_sale_id)+'</td><td>'+esc(r.kind==='tax'?'Tax invoice':'Proforma')+'</td><td>'+esc(r.invoice_number||'')+'</td><td>'+esc((r.channel||'').replace('dockandbay-',''))+'</td>'
+        +'<td>'+acIlDate(r.created_at)+'</td><td>'+(r.views||0)+(r.last_viewed_at?' <span class="tiny mut">'+acIlDate(r.last_viewed_at)+'</span>':'')+'</td>'
+        +'<td>'+(r.revoked_at?'<span class="tiny mut">revoked '+acIlDate(r.revoked_at)+'</span>':'<a href="'+esc(url)+'" target="_blank" rel="noopener">open ↗</a> <button class="save-btn light ac-il-rev" data-id="'+r.id+'">Revoke</button>')+'</td></tr>'; }).join('');
+    b.innerHTML='<div style="padding:8px 0"><div class="tiny mut" style="margin-bottom:8px">Public links to a wholesale order\'s proforma (before it ships) and tax invoice (all its posted invoices in one file). n8n issues them every 15 minutes; a revoked link stops working and the next run issues a new one.</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><input id="ac-il-q" placeholder="Search order, invoice, channel" value="'+esc(AC_IL.q)+'" style="min-width:220px">'
+      +'<label class="tiny"><input type="checkbox" id="ac-il-pay"'+(d.pay_enabled?' checked':'')+'> Show "Pay by card" (needs the Fulfil payment link API)</label>'+(AC_IL.msg?'<span class="tiny">'+esc(AC_IL.msg)+'</span>':'')+'</div>'
+      +'<table class="pay-tbl" style="width:100%"><thead><tr><th>Order</th><th>Document</th><th>Invoice no.</th><th>Channel</th><th>Issued</th><th>Views</th><th></th></tr></thead><tbody>'+(tr||'<tr><td colspan="7" class="mut">No links issued yet.</td></tr>')+'</tbody></table>'
+      +'<details style="margin-top:14px"><summary><b>Seller, VAT and bank details per channel</b></summary><div class="tiny mut" style="margin:6px 0">JSON keyed by channel: legal_name, address [lines], tax_label (null = no VAT, e.g. US), tax_name, tax_numbers [..], ship_from [lines], bank [lines], terms_url, company_no. UK and US bank lines are empty until supplied.</div>'
+      +'<textarea id="ac-il-ent" style="width:100%;min-height:260px;font:12px ui-monospace,monospace">'+esc(AC_IL.ent||'')+'</textarea><div><button class="save-btn" id="ac-il-save">Save details</button></div></details></div>';
+    var q=document.getElementById('ac-il-q'); if(q)q.onkeydown=function(e){ if(e.key==='Enter'){ AC_IL.q=q.value.trim(); AC_IL.d=null; acRenderInvLinks(); } };
+    var pay=document.getElementById('ac-il-pay'); if(pay)pay.onchange=function(){ acIlPost('/api/invoice-links/settings',{pay_enabled:pay.checked},function(e){ AC_IL.msg=e?e.message:(pay.checked?'Pay by card shown':'Pay by card hidden'); AC_IL.d=null; acRenderInvLinks(); }); };
+    var sv=document.getElementById('ac-il-save'); if(sv)sv.onclick=function(){ var t=document.getElementById('ac-il-ent').value, v; try{ v=JSON.parse(t); }catch(e){ AC_IL.msg='Not valid JSON: '+e.message; acRenderInvLinks(); return; }
+      AC_IL.ent=t; acIlPost('/api/invoice-links/settings',{entities:v},function(e,j){ AC_IL.msg=e?e.message:'Details saved'; if(!e)AC_IL.ent=JSON.stringify(j.entities,null,2); AC_IL.d=null; acRenderInvLinks(); }); };
+    b.querySelectorAll('.ac-il-rev').forEach(function(x){ x.onclick=function(){ x.disabled=true; acIlPost('/api/invoice-links/'+x.dataset.id+'/revoke',{},function(e){ AC_IL.msg=e?e.message:'Link revoked'; AC_IL.d=null; acRenderInvLinks(); }); }; }); }
   function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
     var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
