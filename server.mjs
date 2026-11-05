@@ -34871,14 +34871,20 @@ async function cmCustomerHistory() {   // customer key -> earlier orders with ag
   return H;
 }
 let _faireMemo = null;
-async function faireRecentOrders(days) {   // Faire external API v2, read only: orders created in the last `days` days (30 min memo)
+async function faireRecentOrders(days) {   // Faire external API v2, read only: orders created in the last `days` days, every brand with a token (30 min memo)
+  // v28.713 (Ben 05-Nov-26: "we have faire in uk and us so you need both tokens"): one token per Faire brand. FAIRE_API_TOKEN = Dock & Bay UK
+  // (b_8m259bzyrj, GBP), FAIRE_API_TOKEN_US = the US brand. Each order is tagged with its store.
   if (_faireMemo && Date.now() - _faireMemo.at < 30 * 60000) return _faireMemo.v;
-  const tok = process.env.FAIRE_API_TOKEN; if (!tok) return { ok: false, error: 'FAIRE_API_TOKEN not set', orders: [] };
+  const brands = [['UK', process.env.FAIRE_API_TOKEN], ['US', process.env.FAIRE_API_TOKEN_US]].filter(b => b[1]);
+  if (!brands.length) return { ok: false, error: 'FAIRE_API_TOKEN not set', orders: [] };
   const base = (process.env.FAIRE_API_BASE_URL || 'https://www.faire.com/external-api/v2').replace(/\/$/, ''), since = new Date(Date.now() - days * 864e5).toISOString();
-  const out = []; let cursor = '';
-  for (let p = 0; p < 40; p++) { const r = await _fetchT(base + '/orders?limit=50&' + (cursor ? 'cursor=' + encodeURIComponent(cursor) : 'created_at_min=' + encodeURIComponent(since)),   /* Faire: a cursor carries the filter (both = 400) */ { headers: { 'X-FAIRE-ACCESS-TOKEN': tok, Accept: 'application/json' } }, 30000);
-    if (!r.ok) return { ok: false, error: 'Faire API ' + r.status, orders: out }; const j = await r.json(); (j.orders || []).forEach(o => out.push(o)); cursor = j.cursor || ''; if (!cursor || !(j.orders || []).length) break; }
-  const v = { ok: true, orders: out }; _faireMemo = { at: Date.now(), v }; return v;
+  const out = [], errs = [], read = [];
+  for (const [store, tok] of brands) { let cursor = '', n = 0;
+    for (let p = 0; p < 40; p++) { const r = await _fetchT(base + '/orders?limit=50&' + (cursor ? 'cursor=' + encodeURIComponent(cursor) : 'created_at_min=' + encodeURIComponent(since)), { headers: { 'X-FAIRE-ACCESS-TOKEN': tok, Accept: 'application/json' } }, 30000);   /* Faire: a cursor carries the filter (both = 400) */
+      if (!r.ok) { errs.push('Faire ' + store + ' API ' + r.status); break; } const j = await r.json(); (j.orders || []).forEach(o => { o._store = store; out.push(o); n++; }); cursor = j.cursor || ''; if (!cursor || !(j.orders || []).length) break; }
+    read.push(store + ' ' + n); }
+  if (!process.env.FAIRE_API_TOKEN_US) errs.push('Faire US not read: set FAIRE_API_TOKEN_US');
+  const v = { ok: out.length > 0 || !errs.some(e => /API/.test(e)), error: errs.join('; '), orders: out, read }; _faireMemo = { at: Date.now(), v }; return v;
 }
 async function cmAgentChecks(month, opts) {
   opts = opts || {}; const v = await cmEngine(month, { env: opts.env, fresh: !!opts.fresh }), H = await cmCustomerHistory(), notes = [];
@@ -34906,14 +34912,14 @@ async function cmAgentChecks(month, opts) {
       text: 'was ' + cmShortName(wasA) + ' (last order ' + (last.order || '') + ' on ' + (last.date || '') + '), now ' + cmShortName(nowA) }); }
   // 3. Faire: commission charged on a retailer earlier linked to a rep group: ask Faire for 0%
   let fr = { ok: false, orders: [] }; try { fr = await faireRecentOrders(90); } catch (e) { fr = { ok: false, error: e.message, orders: [] }; }
-  if (!fr.ok) notes.push('Faire not read: ' + fr.error);
+  if (!fr.ok) notes.push('Faire not read: ' + fr.error); else if (fr.error) notes.push(fr.error);   // v28.713: e.g. the US token missing
   const custList = new Map(); (await pool.query(`SELECT customer_name, rep_group_id FROM planner.commission_customers WHERE rep_group_id IS NOT NULL`).catch(() => ({ rows: [] }))).rows.forEach(c => { custList.set(_cmCustKey(c.customer_name), c.rep_group_id); });
   for (const o of fr.orders || []) { if (/CANCEL/i.test(o.state || '')) continue; const pc = o.payout_costs || {}, bps = Number(pc.commission_bps) || 0, cm = pc.commission || {};
     const amt = (Number(cm.amount_minor) || 0) / 100; if (bps <= 0 && amt <= 0) continue;
     const a = o.address || {}, retailer = a.company_name || a.name || '', e = earlier(retailer, String(o.created_at || '').slice(0, 10), 'Faire #' + (o.display_id || '')).filter(z => isAgent(z.agent));
     const listed = custList.get(_cmCustKey(retailer)), why = e[0] ? 'earlier order ' + (e[0].order || '') + ' on ' + (e[0].date || '') + ' with ' + e[0].agent : listed && isAgent(gName[listed]) ? 'on ' + gName[listed] + '\'s customer list (Xero group / Fulfil)' : '';
     if (!why) continue;
-    out.push({ kind: 'faire_claim', order_ref: 'Faire #' + (o.display_id || o.id), invoice_ref: o.id, customer: retailer, amount: amt, currency: cm.currency || '', pay_date: String(o.created_at || '').slice(0, 10), source_label: 'Faire ' + (o.source === 'FAIRE_DIRECT' ? 'Direct' : 'Marketplace'),
+    out.push({ kind: 'faire_claim', order_ref: 'Faire #' + (o.display_id || o.id), invoice_ref: o.id, customer: retailer, amount: amt, currency: cm.currency || '', pay_date: String(o.created_at || '').slice(0, 10), source_label: 'Faire ' + (o._store ? o._store + ' ' : '') + (o.source === 'FAIRE_DIRECT' ? 'Direct' : 'Marketplace'),
       ship: { name: a.name || '', street: [a.address1, a.address2].filter(Boolean).join(', '), city: a.city || '', state: a.state_code || a.state || '', zip: a.postal_code || '', country: a.country_code || '', country_name: a.country || '' }, earlier: e.slice(0, 6),
       text: 'Faire charged ' + (bps / 100).toFixed(1) + '% (' + (cm.currency || '') + ' ' + amt.toFixed(2) + ') on a customer of a rep group (' + why + '): ask Faire for 0%', faire_id: o.id, owner: CM_FAIRE_CLAIM_TO }); }
   // dismissals + Madison's to-dos (once per Faire order, never for a dismissed one)

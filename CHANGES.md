@@ -1,3 +1,7 @@
+## v28.713 (05-Nov-26) Faire checks read both brands (UK + US)
+- Ben 05-Nov-26: Faire has a UK and a US brand. FAIRE_API_TOKEN is "Dock & Bay UK" (b_8m259bzyrj, GBP); NEW ENV VAR FAIRE_API_TOKEN_US for the US brand. Each Faire flag shows its store. Without the US token the checks say "Faire US not read".
+- Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no new cron routes.
+
 ## v28.712 (05-Nov-26) Commissions Summary (home): draft runs as the action, catch-up check, exceptions, Faire claims, adjustments, Sunday flow
 - GET /api/client/commission/summary (HORIZON tables only). Summary is the first Commissions tab and the default.
 - The weekly log message now starts with the step.
