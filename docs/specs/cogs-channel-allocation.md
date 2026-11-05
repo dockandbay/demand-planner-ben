@@ -1,4 +1,4 @@
-# COGS channel allocation (UK + AU): monthly Xero journal + weekly Airtable report
+# COGS and SALES channel allocation (UK + AU): monthly Xero journals + weekly Airtable report
 
 Draft for Ben's review, 04-Nov-26. Nothing built yet.
 
@@ -53,11 +53,45 @@ Fulfil books every sale's cost of goods to ONE generic account, 9006 "Fulfil - C
 
 The mapping lives in one HORIZON table so a new channel is added without code.
 
+## SALES journal (Ben 05-Nov-26: "the exact same split but to the mapped SALES channels ... created and sent at the same time as the cogs journal, in the same email")
+Fulfil books every sale's revenue to generic accounts that reach Xero as single lines (both companies): **9002 Fulfil - Revenue Account**, 9003 Contra Revenue (returns / credit notes), 9004 Shipping Revenue, 9005 Sales Discount.
+- Same source and split as COGS: the month's posted Fulfil customer invoices and credit notes by sale channel / segment / delivery country, the same custom / co-brand rule and the same "unmapped = held out and flagged" rule.
+- Journal per org, same date, reference `HORIZON SALES by channel YYYY-MM`: Dr 9002 (and Dr 9003 for credit notes) / Cr each channel's sales account (net product revenue, ex tax).
+- Same status rules as COGS (UK draft for Pooja and Harry; AU posted as approved), same 7th / 15th refreshes and top-ups, same journal log on the COGS page (each run shows both journals).
+- Reconciliation: the report total must match the month's movement on 9002 (+ 9003) within 0.5%, else flagged.
+- **One email** at month end per org carrying both journals (COGS and SALES), their totals, Xero links and any flags.
+
+### Channel to SALES account (Ben's mapping file "3PL INVOICE ACCOUNTING - MAPPING", validated against the COGS table above, 05-Nov-26)
+| COGS account | SALES account |
+|---|---|
+| 311.1a UK Shopify | 200a Sales - UK - Shopify |
+| 311.1b UK Amazon | 201a Sales - UK - Amazon |
+| 311.1c UK Wholesale | 210.5a Sales - UK - Wholesale |
+| 311.1d UK Marketplace (TikTok) | 202a Sales - UK - Marketplace |
+| 311.1e UK Faire | 212a Sales - UK - Faire |
+| 311.2a US Shopify | 200b Sales - US - Shopify |
+| 311.2b US Amazon | 201b Sales - US - Amazon |
+| 311.2c US Wholesale | 210.5b Sales - US - Wholesale |
+| 311.2d US Marketplace | 202b Sales - US - Marketplace |
+| 311.2e US Faire | 212b Sales - US - Faire |
+| 311.2f US Walmart | 202.3b Sales - US - Walmart (Walmart was missing from the COGS table: added) |
+| 311.3a EU Shopify | 200d Sales - EU - Shopify |
+| 311.5d EU Zalando | 202.3c Sales - EU - Zalando |
+| 311.3b FR / 311.3d DE / 311.3c other EU Wholesale | 210.5f / 210.5e / 210.5d |
+| 311.3e DE / 311.3g FR / 311.3f IT / 311.3h ES Amazon | 201e / 201f / 201g / 201h |
+| 311.4b CA Amazon | 201c Sales - CA - Amazon |
+| 311.5c International Distributors | 210.7z Sales - International Distributors |
+| 311.5g International Distributors (Co Brand) | 210.7y Sales - International Distributors (Co Brand) |
+| 311.9a UK / 311.9b US / 311.9c CA / 311.9d EU / 311.9e ROTW Co-Brand/Custom | 210.6a / 210.6b / 210.6c / 210.6d / 210.6e |
+| Dropship 311.10a-d | 203a / 203b / 203d / 202e (not used: nothing goes to dropship) |
+
+Validation result: every UK-org pair in the file matches the COGS table. The file is marked NOT IN USE and its **AU** section is out of date: it uses COGS 401.3 / 401.4 / 401.9, which do not exist in Xero AU (Ben confirmed 311.8a / 311.8b / 311.8d on 04-Nov-26). Its AU sales accounts (200e Shopify, 201e Amazon, 210e Wholesale & Distributor, 200z Other/ROW) are to be read back from Xero AU at build time, and it has **no AU sales account** for Marketplace (TikTok AU, COGS 401.6) or Custom / Co-Brand (COGS 401.11e / 401.10e): see question 7.
+
 ## Schedule (n8n, Europe/London)
 | When | What |
 |---|---|
 | Every Monday 07:00 | COGS per-SKU unit cost emailed to Airtable (same as the COGS page button) |
-| 1st of the month 06:30 | Build last month, create the DRAFT journal UK + AU, email the Xero links |
+| 1st of the month 06:30 | Build last month, create the COGS and SALES journals UK + AU, ONE email per org with both |
 | 7th 06:30 | Refresh last month (rebuild draft, or top-up draft if posted) |
 | 15th 06:30 | Final refresh, same rules; after this the month is closed in HORIZON |
 
@@ -91,3 +125,4 @@ ACCOUNTS > COGS by channel: month picker, UK / AU, table by channel and account 
    - AU: journal created POSTED (approved) in Xero AU by HORIZON; Alex (Pillar) is emailed that it is posted.
    - 7th / 15th refreshes: UK draft rebuilt (or a top-up draft if already posted); AU gets a posted top-up journal for the difference only (a posted journal is never edited). NO emails on refreshes (Ben 04-Nov-26); the result shows in HORIZON ACCOUNTS > COGS by channel.
 6. ~~CA~~ answered by Ben 04-Nov-26: Canadian sales are Amazon Canada only (311.4b). 311.4a / 311.4c are not used; a UK order shipped to Canada stays on its channel's account. International distributors: 311.5c (311.5g if co-brand).
+7. **AU sales accounts** (Ben, open 05-Nov-26): which Xero AU sales accounts take AU Marketplace (TikTok AU) and AU Custom / Co-Brand (and Custom Local D2C)? Shipping revenue (9004) and discounts (9005): leave in their Fulfil accounts, or split by channel too?
