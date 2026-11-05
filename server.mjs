@@ -5852,7 +5852,7 @@ app.get(['/vendor/jsqr.js', '/api/portal/jsqr.js'], (_req, res) => {   // v28.66
 // Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
 // embedded into the rasterised label PNG without tainting the canvas).
 app.get('/api/supply/asset/:name', (req, res) => {
-  const files = { grs: ['grs-logo.png', 'image/png'], db: ['db-logo.png', 'image/png'],
+  const files = { grs: ['grs-logo.png', 'image/png'], db: ['db-logo.png', 'image/png'], 'avask-howto': ['avask-howto.png', 'image/png'],
     'gotham-book': ['gotham-book.ttf', 'font/ttf'], 'gotham-bold': ['gotham-bold.ttf', 'font/ttf'] };
   const a = files[req.params.name]; if (!a) return res.status(404).end();
   try { res.setHeader('content-type', a[1]); res.setHeader('cache-control', 'public, max-age=86400');
@@ -7515,6 +7515,66 @@ app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: 
 app.get('/api/supply/cogs/history', async (req, res) => {
   try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
   catch (e) { res.json({ ok: true, rows: [] }); }
+});
+// v28.735 (Ben 06-Nov-26): COGS ▸ AVASK. AVASK (VAT services ▸ Cost of goods) flags Amazon SKUs whose cost it assumed. The user pastes AVASK's
+// "Need attention" export (ASIN, SKU, Description, Cost, Currency, Month, Year) and gets the same rows back with OUR cost, ready to paste into
+// the AVASK template and import. Replaces the retired Cin7-COGS "cogs_avask" sheet. Cost = the stored COGS per unit (planner.cogs_values) for the
+// Amazon pool in the row's currency (GBP = UK FBA, EUR = EU FBA, USD = US FBA, AUD = AU FBA), else that market's 3PL value. Reads only.
+const AVASK_COL = { GBP: ['UK FBA', 'UK ILG'], EUR: ['EU FBA', 'EU iFulfillment'], USD: ['US FBA', 'US Geneva'], AUD: ['AU FBA', 'AU Coghlans'] };
+function avaskRows(grid) {   // grid = array of string arrays; finds the header (SKU + Cost), else assumes AVASK's column order
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  let hi = -1, col = null;
+  for (let r = 0; r < Math.min(grid.length, 20) && hi < 0; r++) {
+    const row = grid[r].map(norm), f = (...names) => row.findIndex(c => names.indexOf(c) >= 0);
+    const sku = f('sku'), cost = f('cost');
+    if (sku >= 0 && cost >= 0) { hi = r; col = { asin: f('external provider id', 'asin/product id', 'asin', 'product id'), sku, desc: f('description'), cost, ccy: f('currency'), month: f('month'), year: f('year') }; }
+  }
+  if (!col) col = { asin: 0, sku: 1, desc: 2, cost: 3, ccy: 4, month: 5, year: 6 };
+  const g = (row, i) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '');
+  return grid.slice(hi + 1).map(row => ({ asin: g(row, col.asin), sku: g(row, col.sku), desc: g(row, col.desc), avask_cost: g(row, col.cost),
+    ccy: (g(row, col.ccy) || 'GBP').toUpperCase(), month: g(row, col.month), year: g(row, col.year) })).filter(r => r.sku || r.asin);
+}
+function avaskSplit(txt) {   // pasted cells (tab separated, from Excel / Sheets) or CSV text
+  const lines = String(txt || '').replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+  const tab = lines.some(l => l.indexOf('\t') >= 0);
+  return lines.map(l => tab ? l.split('\t').map(c => c.replace(/^"(.*)"$/, '$1').replace(/""/g, '"')) : parseCsvLine(l));
+}
+app.post('/api/supply/cogs/avask', async (req, res) => {
+  if (!(await cogsAdminOk(req, res))) return;
+  try {
+    const b = req.body || {}; let grid;
+    if (b.file_b64) {
+      const buf = Buffer.from(String(b.file_b64), 'base64'); if (buf.length > 5 * 1024 * 1024) return res.status(413).json({ error: 'File too large (5 MB max)' });
+      if (/\.xlsx$/i.test(b.filename || '')) {
+        const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook();
+        try { await wb.xlsx.load(buf); } catch (e) { return res.status(400).json({ error: 'Could not read that .xlsx file' }); }
+        const ws = wb.worksheets[0]; if (!ws) return res.status(400).json({ error: 'The file has no sheet' }); grid = [];
+        const cv = v => (v == null ? '' : typeof v === 'object' && !(v instanceof Date) ? (v.result != null ? v.result : v.richText ? v.richText.map(x => x.text).join('') : v.text != null ? v.text : '') : v);
+        ws.eachRow({ includeEmpty: false }, r => { const a = []; for (let i = 1; i <= r.cellCount; i++) a.push(String(cv(r.getCell(i).value))); grid.push(a); });
+      } else grid = avaskSplit(buf.toString('utf8'));
+    } else grid = avaskSplit(b.text);
+    const rows = avaskRows(grid); if (!rows.length) return res.status(400).json({ error: 'No rows found. Paste the AVASK export (with or without its header row).' });
+    if (rows.length > 5000) return res.status(413).json({ error: 'Too many rows (5,000 max)' });
+    const vals = {}; let asOf = null;
+    (await pool.query(`SELECT upper(sku) sku, col, value::float8 v, source, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD') at FROM planner.cogs_values WHERE value > 0`)).rows
+      .forEach(x => { (vals[x.sku] = vals[x.sku] || {})[x.col] = x; if (!asOf || x.at > asOf) asOf = x.at; });
+    const asinSkus = {};
+    (await pool.query(`SELECT sku, upper(asin) asin FROM planner.products WHERE coalesce(asin,'') <> ''`)).rows.forEach(x => (asinSkus[x.asin] = asinSkus[x.asin] || []).push(x.sku));
+    const out = rows.map(r => {
+      const cols = AVASK_COL[r.ccy], up = r.sku.toUpperCase();
+      const strip = up.replace(/^(UK|EU|US|CA|AU|DE|FR|IT|ES|NL|\d+)-/, '');
+      const viaAsin = r.asin && asinSkus[r.asin.toUpperCase()] && asinSkus[r.asin.toUpperCase()].length === 1 ? asinSkus[r.asin.toUpperCase()][0].toUpperCase() : null;
+      const tries = [[up, 'sku'], [viaAsin, 'asin'], [strip !== up ? strip : null, 'sku without prefix']];
+      let hit = null;
+      for (const [k, via] of tries) { if (!k || !vals[k]) continue; hit = { ours: k, via }; break; }
+      if (!cols) return Object.assign(r, { cost: null, why: 'Currency ' + (r.ccy || '(blank)') + ' not handled' });
+      if (!hit) return Object.assign(r, { cost: null, why: 'SKU not found in HORIZON COGS' });
+      const c = cols.map(k => vals[hit.ours][k]).find(Boolean);
+      if (!c) return Object.assign(r, { our_sku: hit.ours, via: hit.via, cost: null, why: 'No ' + cols[0] + ' cost' });
+      return Object.assign(r, { our_sku: hit.ours, via: hit.via, cost: Math.round(c.v * 100) / 100, from: c.col, src: c.source });
+    });
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows: out, as_of: asOf });
+  } catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
 // v28.727 (Ben 04/05-Nov-26, docs/specs/cogs-channel-allocation.md): COGS and SALES by channel. Fulfil books every sale to generic clearing
 // accounts (9006 COGS; 9002 Revenue, 9003 Contra Revenue, 9004 Shipping, 9005 Sales Discount) and Xero sees them as single lines. Each month

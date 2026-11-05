@@ -771,6 +771,15 @@ verified_version: v28.616
 - October 2026 was imported by hand from the CSVs built 05-Nov-26 with the same narrations, so the 7th / 15th refreshes find those journals. Zero-cost shipments (Fulfil cost 0) are not in 9006, so they are not in these journals.
 - Persistence (v28.238): every Analyse saves its full result (planner.cogs_analysis, newest row only, migration 345). Opening the tab shows that saved result with "Analysed <date time> by <user>" until the next Analyse. Times are London time. (source: /api/supply/cogs/last, /api/supply/cogs/analyse)
 
+## COGS for AVASK (v28.735)
+Where: BUY & MOVE > Inventory > COGS > AVASK. Ben 06-Nov-26, replaces the retired Cin7-COGS "cogs_avask" Google Sheet.
+- AVASK (Amazon VAT services > Cost of goods) lists Amazon SKUs whose cost it had to assume ("Need attention"). The user exports that list, pastes it (or chooses the .csv / .xlsx file) and HORIZON returns the same rows (ASIN/Product Id, SKU, Description, Cost, Currency, Month, Year) with our cost, to paste into the AVASK template and import.
+- Cost = the stored COGS per unit (planner.cogs_values, the Per-unit cost tab) for the Amazon pool in the row's currency: GBP = UK FBA, EUR = EU FBA, USD = US FBA, AUD = AU FBA; if that is missing, the same market's 3PL value (UK ILG, EU iFulfillment, US Geneva, AU Coghlans). Rounded to 2 decimals. Costs are as at the last COGS store (shown on the page).
+- SKU match: AVASK's SKU as given; else the product with that ASIN (only if exactly one product has it); else the SKU without a market prefix (UK-, EU-, US-, CA-, AU-, DE-, FR-, IT-, ES-, NL- or a number). The output keeps AVASK's own SKU so the import matches.
+- Rows with no cost (SKU not found, no cost, other currency) are listed in red and left out of the copy.
+- The header row is found by its SKU and Cost columns (AVASK export or the old sheet both work); without a header the columns are read in AVASK's order. Reads only; admins only (same as the rest of COGS).
+(source: server.mjs :: /api/supply/cogs/avask, avaskRows; artifact_v16.7.html :: renderCogsAvask)
+
 ## DHL import (ACCOUNTS > Reconcile > Bank lines, from v28.352; own tab until v28.397)
 - v28.397 (Ben 16-Oct-26: "not a separate tab"): no tab. An ANZ DHL line on the uploaded AU statement that matches a DHL invoice shows in Bank lines under Receipt found (DHL invoice, total, shipments); Review opens the invoice card under the line (AU accounts per shipment, Create in Xero AU, UK side, Ignore). Once the AU bill exists the line shows the bill link (match it in Xero) and counts as bill created for the Hide tick box. The match is by statement date, amount and reference (until v28.397 the statement query asked for a line id the table does not have, failed quietly, and no invoice ever matched its ANZ line).
 - Ben 14-Oct-26: DHL AU (account 51214671) invoices arrive in accounts@ as "Your latest DHL invoice" with a CSV and are paid by direct debit from ANZ (Xero AU), so they belong in Reconcile, not Payables. AU "DHL" debits are set to ignore in Bank lines (built-in rule) because this view handles them.

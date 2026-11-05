@@ -1,3 +1,8 @@
+## v28.735 (06-Nov-26) COGS > AVASK: our cost for AVASK's "Need attention" SKUs
+- Ben 06-Nov-26: an AVASK sub tab under BUY & MOVE > Inventory > COGS to replace the old Cin7-COGS cogs_avask sheet. Paste AVASK's Cost of goods export (or choose the .csv / .xlsx), click Get our costs, then Copy for AVASK (rows with a cost, no header), Copy with header or CSV, paste into the AVASK template and Import. How-to steps and a screenshot of the AVASK page are on the tab.
+- Cost = COGS per unit stored in planner.cogs_values, Amazon pool in the row's currency (GBP UK FBA, EUR EU FBA, USD US FBA, AUD AU FBA; else the market's 3PL). SKU matched as given, else by unique ASIN, else without a market prefix. Rows with no cost are shown in red and left out of the copy.
+- New route POST /api/supply/cogs/avask (admin, reads only). New asset supply/assets/avask-howto.png served at /api/supply/asset/avask-howto. No migration, no env vars, no cron.
+
 ## v28.734 (06-Nov-26) Invoice pages: bank account lines kept out of git
 - The bank lines (UK Lloyds, US Bank of America, EU Bank of Ireland incl. French) are no longer in server.mjs defaults; they live only in app_settings invoice_link_entities, entered once in ACCOUNTS > Invoice links (bank / bank_fr per channel). Until set, a page shows no bank block. Files: server.mjs.
 

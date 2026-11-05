@@ -15542,7 +15542,7 @@ function renderInventory(){
   if(INV_SUB==='manage3pl') body=pillbar([['US_GV','US (Geneva)'],['UK','UK (ILG)'],'AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='cogs') body=pillbar([['unit','Per-unit cost (Airtable)'],['channel','By channel & journals']],COGS.view||'unit','cogs-view-pill')+'<div id="cogs-panel"></div>';   /* v28.727: + COGS and SALES by channel */
+  else if(INV_SUB==='cogs') body=pillbar([['unit','Per-unit cost (Airtable)'],['channel','By channel & journals'],['avask','AVASK']],COGS.view||'unit','cogs-view-pill')+'<div id="cogs-panel"></div>';   /* v28.727: + COGS and SALES by channel */
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -15555,7 +15555,7 @@ function renderInventory(){
   else if(INV_SUB==='managefba'){ if(INV_FBA==='AWD')invAwdLoad(); else invFbaLoad('manage'); }
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
-  else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else renderCogs(); }
+  else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else if(COGS.view==='avask')renderCogsAvask(); else renderCogs(); }   /* v28.735: + AVASK */
 }
 // ── v28.732 (Kathryn 05-Nov-26 build briefs): BUY & MOVE ▸ Inventory ▸ Stock Availability (per SKU: on hand, on order, commitment and
 // next landing, Global + UK / US / EU / AU, AWD in US and Global only) and Stock On Order (per SKU per PO, intake, retail ex VAT, FOB
@@ -15812,6 +15812,53 @@ function cchJson(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw n
 function cchLoad(){ var p=document.getElementById('cogs-panel'); if(!p)return; if(!CCH.month){ var _ms=cchMonths(); CCH.month=_ms[1]||_ms[0]||'2026-10'; }   /* v28.728: the list starts at this month; default = last month */
   fetch('/api/supply/cogs-channel?month='+CCH.month,{cache:'no-store'}).then(cchJson).then(function(j){ CCH.d=j; renderCogsCh(); }).catch(function(e){ CCH.d={error:e.message||String(e)}; renderCogsCh(); }); }
 function cchBtn(id,txt,prim,dis,tip,extra){ return '<button id="'+id+'"'+(extra||'')+(dis?' disabled':'')+' title="'+esc(tip||'')+'" style="padding:6px 14px;border-radius:7px;border:1px solid '+(prim?'var(--nav)':'var(--line)')+';background:'+(prim?'var(--nav)':'var(--card)')+';color:'+(prim?'#fff':'var(--ink)')+';font-weight:700;font-size:12px;cursor:'+(dis?'default':'pointer')+';opacity:'+(dis?'.55':'1')+'">'+txt+'</button>'; }
+// v28.735 (Ben 06-Nov-26): COGS ▸ AVASK. Paste AVASK's "Need attention" cost-of-goods export, get the same rows back with our cost per unit,
+// copy them into the AVASK template and import. Server: POST /api/supply/cogs/avask (reads planner.cogs_values only).
+var AVK={text:'',d:null,busy:false,msg:'',err:false};
+function avkTsv(rows,head){ var c=function(v){ return String(v==null?'':v).replace(/[\t\r\n]+/g,' '); };
+  var out=rows.map(function(r){ return [r.asin,r.sku,r.desc,r.cost.toFixed(2),r.ccy,r.month,r.year].map(c).join('\t'); });
+  if(head)out.unshift(['ASIN/Product Id','SKU','Description','Cost','Currency','Month','Year'].join('\t')); return out.join('\n'); }
+function avkRun(body){ AVK.busy=true; AVK.msg=''; renderCogsAvask();
+  fetch('/api/supply/cogs/avask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ AVK.d=j; AVK.err=false; }).catch(function(e){ AVK.d=null; AVK.msg=(e&&e.message)||String(e); AVK.err=true; })
+    .finally(function(){ AVK.busy=false; renderCogsAvask(); }); }
+function renderCogsAvask(){ var p=document.getElementById('cogs-panel'); if(!p)return; var d=AVK.d;
+  var btn=function(id,txt,prim,dis,tip){ return '<button id="'+id+'"'+(dis?' disabled':'')+' title="'+esc(tip||'')+'" style="padding:6px 14px;border-radius:7px;border:1px solid '+(prim?'var(--nav)':'var(--line)')+';background:'+(prim?'var(--nav)':'var(--card)')+';color:'+(prim?'#fff':'var(--ink)')+';font-weight:700;font-size:12px;cursor:'+(dis?'default':'pointer')+';opacity:'+(dis?'.5':'1')+'">'+txt+'</button>'; };
+  var ok=d?d.rows.filter(function(r){ return r.cost!=null; }):[], bad=d?d.rows.filter(function(r){ return r.cost==null; }):[];
+  var h='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin:0 0 14px">'
+    +'<div style="flex:1 1 360px;max-width:520px;font-size:13px;line-height:1.6"><div style="font-weight:700;margin-bottom:4px">How to</div><ol style="margin:0;padding-left:20px">'
+    +'<li>Log in to <b>AVASK</b>.</li><li>Go to <b>VAT services ▸ Cost of goods</b>.</li><li>Click <b>Need attention</b>, then <b>Export</b>.</li>'
+    +'<li>Open the exported file, copy all its rows (header row included is fine) and paste them in the box below, or choose the file. Click <b>Get our costs</b>.</li>'
+    +'<li>Click <b>Copy for AVASK</b>, paste into the AVASK template (<b>Download AVASK template</b> in AVASK) and <b>Import</b>.</li></ol>'
+    +'<div class="mut" style="font-size:12px;margin-top:6px">Cost = our landed cost per unit from the COGS page (Per-unit cost), Amazon pool in the row\'s currency: GBP = UK FBA, EUR = EU FBA, USD = US FBA (else the market\'s 3PL value). SKUs are matched as given, else by ASIN, else without a market prefix (UK-, EU- …).</div></div>'
+    +'<a href="/api/supply/asset/avask-howto" target="_blank" rel="noopener" title="Open full size" style="flex:1 1 420px;max-width:700px"><img src="/api/supply/asset/avask-howto" alt="AVASK Cost of goods page: VAT services, Cost of goods, Need attention, Export" style="width:100%;border:1px solid var(--line);border-radius:8px"></a></div>'
+    +'<textarea id="avk-txt" placeholder="Paste the AVASK export here (External Provider Id, SKU, Description, Cost, Currency, Month, Year)" style="width:100%;max-width:1220px;height:120px;font:12px ui-monospace,Menlo,monospace;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)">'+esc(AVK.text)+'</textarea>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px">'+btn('avk-go',AVK.busy?'Working…':'Get our costs',true,AVK.busy,'Look up our cost for every row (reads only)')
+    +'<label style="font-size:12px;cursor:pointer;color:var(--nav);font-weight:700">or choose the file<input id="avk-file" type="file" accept=".csv,.xlsx,.txt" style="display:none"></label>'
+    +(d?btn('avk-copy','Copy for AVASK ('+ok.length+')',true,!ok.length,'Copies the rows with a cost (no header), ready to paste into the AVASK template')+btn('avk-copyh','Copy with header',false,!ok.length,'Same, with the header row')+btn('avk-csv','⤓ CSV',false,!ok.length,'Download the rows as a CSV'):'')
+    +(d?btn('avk-clear','Clear',false,false,''):'')+'<span id="avk-msg" style="font-size:12px;color:'+(AVK.err?'var(--neg)':'var(--muted)')+'">'+esc(AVK.msg)+'</span></div>';
+  if(d){
+    h+='<div style="font-size:12px;margin:0 0 8px">'+d.rows.length+' rows: <b>'+ok.length+'</b> with our cost'+(bad.length?', <b style="color:var(--neg)">'+bad.length+' without</b> (left out of the copy: fix them in AVASK by hand or add the cost on the COGS page)':'')+'. Costs as at '+(d.as_of?invFmtEta(d.as_of):'?')+'.</div>';
+    h+='<style>#avk-tbl th,#avk-tbl td{text-align:left;padding:5px 10px;white-space:nowrap}</style><div class="tw" style="max-width:1220px;max-height:60vh;overflow:auto"><table id="avk-tbl"><thead><tr><th class="l">ASIN/Product Id</th><th class="l">SKU</th><th class="l">Description</th><th>Cost</th><th class="l">Currency</th><th>Month</th><th>Year</th><th>AVASK cost</th><th class="l">Matched</th></tr></thead><tbody>'
+      +bad.concat(ok).map(function(r){ var miss=r.cost==null;
+        return '<tr'+(miss?' style="background:color-mix(in srgb,var(--neg) 10%,transparent)"':'')+'><td class="l">'+esc(r.asin)+'</td><td class="l">'+esc(r.sku)+'</td><td class="l" title="'+esc(r.desc)+'" style="max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(r.desc)+'</td>'
+          +'<td style="font-weight:700">'+(miss?'':r.cost.toFixed(2))+'</td><td class="l">'+esc(r.ccy)+'</td><td>'+esc(r.month)+'</td><td>'+esc(r.year)+'</td><td class="mut">'+esc(r.avask_cost)+'</td>'
+          +'<td class="l mut tiny">'+(miss?'<span style="color:var(--neg)">'+esc(r.why)+'</span>':esc(r.our_sku!==String(r.sku).toUpperCase()?r.our_sku+' ('+r.via+')':'SKU')+' · '+esc(r.from))+'</td></tr>'; }).join('')+'</tbody></table></div>';
+  }
+  p.innerHTML=h;
+  var g=function(id){ return document.getElementById(id); };
+  g('avk-txt').oninput=function(){ AVK.text=this.value; };
+  g('avk-go').onclick=function(){ if(!AVK.text.trim()){ AVK.msg='Paste the export first, or choose the file.'; AVK.err=true; renderCogsAvask(); return; } avkRun({text:AVK.text}); };
+  g('avk-file').onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; AVK.text=''; avkRun({file_b64:b64,filename:f.name}); }; rd.readAsDataURL(f); };
+  var copy=function(head){ var t=avkTsv(ok,head); (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(function(){ AVK.msg='Copied '+ok.length+' rows. Paste into the AVASK template, then Import.'; AVK.err=false; renderCogsAvask(); },function(){ AVK.msg='Copy failed: use ⤓ CSV instead.'; AVK.err=true; renderCogsAvask(); }); };
+  if(g('avk-copy'))g('avk-copy').onclick=function(){ copy(false); };
+  if(g('avk-copyh'))g('avk-copyh').onclick=function(){ copy(true); };
+  if(g('avk-csv'))g('avk-csv').onclick=function(){ var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+    var csv=['ASIN/Product Id,SKU,Description,Cost,Currency,Month,Year'].concat(ok.map(function(r){ return [r.asin,r.sku,r.desc,r.cost.toFixed(2),r.ccy,r.month,r.year].map(q).join(','); })).join('\r\n');
+    var u=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv'})),a=document.createElement('a'); a.href=u; a.download='avask-cogs-import.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800); };
+  if(g('avk-clear'))g('avk-clear').onclick=function(){ AVK.d=null; AVK.text=''; AVK.msg=''; renderCogsAvask(); };
+}
 function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)return; var j=CCH.d||{}, b=j.build;
   var h='<style>.cch-t th,.cch-t td{text-align:left!important;padding:4px 7px;white-space:nowrap;font-size:12px}.cch-t td.n,.cch-t th.n{text-align:right!important}.cch-t tr.tot td{font-weight:800;background:var(--blue-soft,#eef4ff)}</style>'
     +'<div style="font-size:12px;color:var(--muted);margin:0 0 10px;max-width:1000px">Fulfil books every sale to generic clearing accounts (<b>9006</b> COGS; <b>9002</b> revenue, 9003 returns, 9004 shipping, 9005 discounts). Every posted GL line of the month is traced to its invoice and sale order, mapped to the channel\'s COGS and sales accounts, and journalled out so the clearing accounts <b>net to zero</b>. Lines with no sale order (landed costs, supplier-bill price variances on stock already sold) are spread pro rata to each channel\'s product COGS. Xero UK: draft (Ascendant post). Xero AU: posted. Automatic on the 1st (month end, with the email), 7th and 15th (refresh: a draft is rebuilt, a posted journal gets a top-up).</div>'
