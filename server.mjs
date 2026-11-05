@@ -3589,6 +3589,15 @@ app.post('/api/accounts/payables/credit-note', async (req, res) => {
 // (yearly ones were refused on the UK org) with a 45 s call timeout and one retry. Progress is written to app_settings so any instance can show it.
 const ACC_BANK_FROM_YEAR = 2018, ACC_BANK_LOCK_MS = 15 * 60000, ACC_BANK_FIRST_DAYS = Number(process.env.ACC_BANK_FIRST_DAYS) || 90;
 const _xDate = s => { if (!s) return null; const m = /\/Date\((-?\d+)/.exec(String(s)); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s).slice(0, 10); };
+// v28.706 (Ben 05-Nov-26: "rare that transactions are unreconciled more than the last 2 months and certainly not further than the most recent
+// March 1st (beginning of financial year). In March look back at least 12 months"): the bank sync reads and keeps only items dated on or after
+// this floor (was 2018 to now). Items before it drop off the bank ageing list. ?full / { full: true, allHistory: true } still reads from 2018.
+function accBankFloor(now) {
+  const d = now ? new Date(now) : new Date(), y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (m === 2) return new Date(Date.UTC(y - 1, 2, d.getUTCDate()));   // March: 12 months back
+  const two = new Date(Date.UTC(y, m - 2, d.getUTCDate())), mar1 = new Date(Date.UTC(m > 2 ? y : y - 1, 2, 1));
+  return two > mar1 ? two : mar1;
+}
 const _xDT = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
 // ── small job helpers shared by the ACCOUNTS jobs (lock, watermark, progress) ──
 async function accSettingGet(key) { try { const r = (await pool.query('SELECT value FROM planner.app_settings WHERE key=$1', [key])).rows[0]; return r ? JSON.parse(r.value) : null; } catch (_) { return null; } }
@@ -3660,6 +3669,8 @@ async function accXeroHeadroom(org) { try { await xeroFetch(org, '/api.xro/2.0/O
   const q = xeroQuota(org); if (q && q.day != null && q.day < ACC_XERO_DAY_MIN) throw new Error('Xero ' + org.toUpperCase() + ' daily allowance low (' + q.day + ' calls left): the full scan waits for tomorrow'); }
 async function accountsBankSyncOrg(org, opts) {
   opts = opts || {}; const t0 = new Date(); const wm = opts.full ? null : await accSettingGet('accounts_bank_wm:' + org);
+  const floor = opts.allHistory ? new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)) : accBankFloor(t0), floorD = floor.toISOString().slice(0, 10);   // v28.706
+  const trFloor = opts.allHistory ? floor : new Date(Date.UTC(t0.getUTCFullYear(), t0.getUTCMonth() - 2, t0.getUTCDate()));   // Ben 05-Nov-26: transfers are reconciled every month, so always 2 months, March too
   if (opts.full) await accXeroHeadroom(org);
   const accs = ((await xeroFetch(org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'), { timeoutMs: 45000 })) || {}).Accounts || [];
   const bank = new Map(accs.map(a => [a.AccountID, a]));
@@ -3669,9 +3680,9 @@ async function accountsBankSyncOrg(org, opts) {
   let rows, mode, dropIds = null;
   if (!since) {
     mode = 'full'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (full scan, 2018 to now)');
-    const bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false');
-    const pays = await accXeroList(org, 'Payments', 'IsReconciled==false AND Status=="AUTHORISED"');
-    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
+    const bt = await accXeroBtRange(org, floor, new Date(Date.now() + 864e5), 'IsReconciled==false');
+    const pays = await accXeroList(org, 'Payments', `IsReconciled==false AND Status=="AUTHORISED" AND Date>=${_xDT(floor)}`);
+    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(trFloor)}`);
     rows = accBankRowsFrom(org, bank, bt, pays, tr);
   } else {
     mode = wm && wm.at ? 'incremental' : 'first'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + (mode === 'first' ? ' (first run: items updated in the last ' + ACC_BANK_FIRST_DAYS + ' days)' : ' (changes since ' + since.toISOString().slice(0, 16).replace('T', ' ') + ')'));
@@ -3679,10 +3690,10 @@ async function accountsBankSyncOrg(org, opts) {
     // v28.703 (Ben 05-Nov-26, Xero calls plan item 2): the daily read is CHANGES ONLY and no longer filters on IsReconciled / Status, so an item
     // reconciled, voided or deleted in Xero since the last run comes back as a change and is cleared here. That replaces the per-item re-check
     // of every stored line on every run (~200 UK calls on 04-Nov-26); the re-check now runs only in the deep pass (opts.deep, see accountsBankDeep).
-    try { bt = await accXeroList(org, 'BankTransactions', '', { since }); }
-    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), '', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
-    pays = await accXeroList(org, 'Payments', '', { since });
-    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
+    try { bt = await accXeroList(org, 'BankTransactions', `Date>=${_xDT(floor)}`, { since }); }
+    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, floor, new Date(Date.now() + 864e5), '', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
+    pays = await accXeroList(org, 'Payments', `Date>=${_xDT(floor)}`, { since });
+    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(trFloor)}`);
     const modified = accBankRowsFrom(org, bank, bt, pays, tr);   // every transfer is re-read (cheap), so transfer rows are complete
     dropIds = bt.filter(t => t.IsReconciled || t.Status !== 'AUTHORISED').map(t => t.BankTransactionID)
       .concat(pays.filter(x => x.IsReconciled || x.Status !== 'AUTHORISED').map(x => x.PaymentID));   // v28.703: changed in Xero to reconciled / voided / deleted
@@ -3691,7 +3702,7 @@ async function accountsBankSyncOrg(org, opts) {
     // stored spend / receive / payment items not in the modified set: re-check by id and drop the ones now reconciled, voided or deleted
     const stored = (await pool.query(`SELECT kind, xero_id, to_char(txn_date,'YYYY-MM-DD') d FROM planner.accounts_bank_items WHERE org=$1 AND kind IN ('spend','receive','payment')`, [org])).rows;
     const seen = new Set(modified.map(r => r[1] + '|' + r[2])), check = { bt: [], pay: [] }, btDates = [];
-    const cut = opts.deepAll ? '' : new Date(Date.now() - ACC_DEEP_DAYS * 864e5).toISOString().slice(0, 10);   // v28.703: deep pass = items dated in the last 60 days; deepAll = every stored item
+    const cut = opts.allHistory ? '' : floorD;   /* v28.706: the deep re-check covers items from the floor (2 months, never before 1 March; 12 months in March) */   // v28.703: deep pass = items dated in the last 60 days; deepAll = every stored item
     stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id) || dropIds.includes(r.xero_id)) return; if (cut && (!r.d || r.d < cut)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); if (r.kind !== 'payment' && r.d) btDates.push(r.d); });
     if (check.bt.length) { let m;
       try { m = await accXeroByIds(org, 'BankTransactions', 'BankTransactionID', check.bt); }
@@ -3709,6 +3720,7 @@ async function accountsBankSyncOrg(org, opts) {
   try { await c.query('BEGIN');
     if (mode === 'full') await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1', [org]);
     else { await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND kind = $2', [org, 'transfer']); if (dropIds.length) await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND xero_id = ANY($2)', [org, dropIds]); }
+    if (!opts.allHistory) await c.query("DELETE FROM planner.accounts_bank_items WHERE org = $1 AND txn_date < $2 AND kind <> 'transfer'", [org, floorD]);   // v28.706: items before the floor drop off
     for (let i = 0; i < rows.length; i += 300) { const ch = rows.slice(i, i + 300);
       await c.query(`INSERT INTO planner.accounts_bank_items (org, kind, xero_id, bank_account_id, bank_account, currency, txn_date, amount, contact, reference, description, link_id, link_type, synced_at) VALUES `
         + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ',now())').join(',')

@@ -1,3 +1,8 @@
+## v28.706 (05-Nov-26) ACCOUNTS bank sync: look back 2 months (never before 1 March; 12 months in March), transfers always 2 months
+- Ben 05-Nov-26: unreconciled items older than 2 months are rare and never before the start of the financial year (1 March); in March look back 12 months; bank transfers are reconciled monthly, so 2 months always.
+- Every bank sync read (bank transactions, payments, transfers, the deep re-check) is limited to that floor; it was 2018 to now. Items before the floor drop off the bank ageing list (7 on live on 05-Nov-26: 5 transfers and 1 payment from Jul / Aug-26, 1 transfer from 2018).
+- Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.705 (05-Nov-26) Xero UK bank transfers read: stop re-reading the same unpaged list (~190 calls a day saved)
 - Found in the v28.703 sandbox test after the reset: 47 of the 50 UK calls were GET BankTransfers. Xero does not page that list (each page returns all 1,000+ UK transfers), and accXeroList treated a full page as "more to come", up to page 199. AU (under 1,000 transfers) was 1 call.
 - This is the bulk of the ~200 UK calls of the daily 05:15 bank sync.
