@@ -23737,7 +23737,7 @@
         +'<select class="flt" id="cph-y" aria-label="Year"><option value="">All years</option>'+years.map(function(y){ return '<option'+(String(CPH.year)===y?' selected':'')+'>'+y+'</option>'; }).join('')+'</select>'
         +'<select class="flt" id="cph-c" aria-label="Currency"><option value="">All currencies</option>'+ccys.map(function(c){ return '<option'+(CPH.ccy===c?' selected':'')+'>'+c+'</option>'; }).join('')+'</select>'
         +'<button class="cph-btn" id="cph-sum" title="Paid by month and by agent">Month summary ›</button>'
-        +((typeof ME!=='undefined'&&ME&&ME.is_admin)?'<button class="cph-btn" id="cph-legacy" title="Rebuild the monthly runs up to Sep-26 (the old process) from this paid history: one Approved, read-only run per agent and month">Rebuild legacy runs ›</button>':'')
+        /* v28.714 (Ben 05-Nov-26): the Rebuild legacy runs button is removed now the legacy runs are built on live (311 runs, 05-Nov-26); the admin route stays for a rerun */
         +'<span class="cph-sum"><span>'+L.length.toLocaleString()+' row'+(L.length===1?'':'s')+'</span>'+Object.keys(byC).sort().map(function(c){ return '<b>'+cphMoney(byC[c],c)+'</b>'; }).join(' · ')+'</span></div>';
       // grid
       var one=!!CPH.agent, COLS=[['run','Run'],['period','Month'],['rep_group','Agent'],['customer','Customer'],['invoice_no','Invoice'],['po_no','PO'],['invoice_date','Invoice date'],['comm','Commissionable',1],['rate','Rate',1],['paid','Paid',1],['credit_note','Credit note'],['status','Status'],['source','Source']].filter(function(c){ return !(one&&c[0]==='rep_group'); });

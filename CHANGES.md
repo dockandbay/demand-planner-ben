@@ -1,3 +1,7 @@
+## v28.714 (05-Nov-26) Paid history: Rebuild legacy runs button removed
+- Ben 05-Nov-26: legacy runs rebuilt on live (311 runs, 8,130 rows, Jan-22 to Sep-26; the 6 open Sep-26 runs replaced; KEENA 72 rows left out). The button is removed; the admin route stays.
+- Files: supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.713 (05-Nov-26) Faire checks read both brands (UK + US)
 - Ben 05-Nov-26: Faire has a UK and a US brand. FAIRE_API_TOKEN is "Dock & Bay UK" (b_8m259bzyrj, GBP); NEW ENV VAR FAIRE_API_TOKEN_US for the US brand. Each Faire flag shows its store. Without the US token the checks say "Faire US not read".
 - Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no new cron routes.
