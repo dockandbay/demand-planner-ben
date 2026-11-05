@@ -1316,6 +1316,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/tpl-push-continue' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
+      || req.path === '/api/cron/commission-weekly'   // v28.707 (Ben 05-Nov-26): n8n Sunday commission steps (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
@@ -34179,7 +34180,7 @@ app.post('/api/client/commission/groups', async (req, res) => {
       if ('currency' in b) { add('currency', String(b.currency || 'USD').toUpperCase().slice(0, 3)); add('currency_checked', true); }
       if ('fulfil_codes' in b) add('fulfil_codes', (Array.isArray(b.fulfil_codes) ? b.fulfil_codes : String(b.fulfil_codes || '').split(/[,\s]+/)).map(x => String(x).trim()).filter(Boolean));
       if ('markettime_names' in b) add('markettime_names', (Array.isArray(b.markettime_names) ? b.markettime_names : String(b.markettime_names || '').split(/[,;\n]+/)).map(x => String(x).trim().replace(/\s+/g, ' ')).filter(Boolean));   // v28.649: names hold spaces, split on commas only
-      ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
+      ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'statement_cc', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
       ['portal_on', 'no_commission'].forEach(k => { if (k in b) add(k, !!b[k]); });
       if (set.length) await pool.query(`UPDATE planner.rep_groups SET ${set.join(', ')} WHERE id=$1`, v); }
     if (b.id) { await pool.query(`UPDATE planner.rep_groups SET name=coalesce($2,name), default_rate=coalesce($3,default_rate), xero_contact=coalesce($4,xero_contact), xero_account_code=coalesce($5,xero_account_code), active=coalesce($6,active) WHERE id=$1`, [b.id, b.name || null, b.default_rate == null || b.default_rate === '' ? null : Number(b.default_rate), b.xero_contact ?? null, b.xero_account_code ?? null, typeof b.active === 'boolean' ? b.active : null]); await cpAudit(null, 'Rep group updated', String(b.name || b.id), req.me.email); return res.json({ ok: true, id: b.id }); }
@@ -34736,6 +34737,49 @@ app.post('/api/client/commission/runs/build-all', async (req, res) => {
     res.json({ ok: true, month, built, skipped, notes: v.notes });
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
+// v28.707 (Ben 05-Nov-26: "each of these should run on a weekly schedule", "suggest running every Sunday"): the three Import data steps, run by
+// n8n "Horizon | Commissions weekly" every Sunday, one step per call so each fits the 300 s function limit: ?step=customers (1. sync agent customers
+// from Xero), ?step=catchup (3. unpaid commission from the 6 months before the current month, saved as catch-up), ?step=build (2. build / refresh
+// all agents for last month and this month; runs that are no longer open are left alone, as with the button). Same code as the buttons, run
+// in-process as "cron (commissions weekly)". Xero UK cost: about 110 calls for the customer sync (5,400 customers, 50 per call) plus the month reads.
+async function cmCronCall(method, path, body, query, timeoutMs) {
+  const stack = (app.router && app.router.stack) || [];
+  const layer = stack.find(l => l && l.route && l.route.methods && l.route.methods[method.toLowerCase()] && l.match(path));
+  if (!layer) return { status: 404, body: { error: 'no route ' + path } };
+  const req = { method, url: path, originalUrl: path, path, baseUrl: '', params: Object.assign({}, layer.params), query: query || {}, body: body || {}, headers: { 'content-type': 'application/json' },
+    ip: '127.0.0.1', protocol: 'https', secure: true, app, me: { email: 'cron (commissions weekly)', is_admin: true, live: !IS_SANDBOX }, get(h) { return this.headers[String(h).toLowerCase()]; }, header(h) { return this.get(h); } };
+  return await new Promise(resolve => {
+    let done = false; const fin = b => { if (done) return; done = true; clearTimeout(t); resolve({ status: res.statusCode, body: b }); };
+    const t = setTimeout(() => fin({ error: 'no answer within ' + Math.round(timeoutMs / 1000) + ' s' }), timeoutMs);
+    const res = { statusCode: 200, headersSent: false, locals: {}, _h: {}, req, status(c) { this.statusCode = c; return this; }, set() { return this; }, setHeader() {}, getHeader() {}, header() { return this; }, append() { return this; }, type() { return this; },
+      on() { return this; }, once() { return this; }, emit() { return true; }, json(b) { fin(b); return this; }, send(b) { fin(b); return this; }, end(b) { fin(b == null ? null : { text: String(b) }); return this; }, sendStatus(c) { this.statusCode = c; fin(null); return this; } };
+    req.res = res;
+    try { const r = layer.route.dispatch(req, res, err => fin({ error: err ? (err.message || String(err)) : 'not handled' })); if (r && typeof r.catch === 'function') r.catch(e => fin({ error: e.message })); } catch (e) { fin({ error: e.message }); }
+  });
+}
+app.post('/api/cron/commission-weekly', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const step = String(req.query.step || (req.body && req.body.step) || ''), t0 = Date.now();
+  const ym = d => d.toISOString().slice(0, 7), now = new Date(), cur = ym(now), prev = ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)));
+  const ok = r => r && r.status < 400 && !(r.body && r.body.error);
+  try { let out;
+    if (step === 'customers') { const r = await cmCronCall('POST', '/api/client/commission/customers/sync', {}, {}, 280000); out = { ok: ok(r), agents: r.body && r.body.agents, customers: r.body && r.body.customers, errors: (r.body && (r.body.errors || (r.body.error ? [r.body.error] : []))) || [] }; }
+    else if (step === 'catchup') {
+      const ms = []; for (let k = 6; k >= 1; k--) ms.push(ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1))));
+      const found = [], errs = [];
+      for (const m of ms) { if (Date.now() - t0 > 250000) { errs.push('stopped at ' + m + ' (time limit)'); break; }
+        const r = await cmCronCall('GET', '/api/client/commission/missed', null, { from: m, to: m }, 120000); if (ok(r)) (r.body.rows || []).forEach(x => found.push(x)); else errs.push(m + ': ' + ((r.body && r.body.error) || r.status)); }
+      const sv = errs.length ? null : await cmCronCall('POST', '/api/client/commission/catchup/save', { month: cur, rows: found, from: ms[0], to: ms[ms.length - 1] }, {}, 60000);
+      out = { ok: !errs.length && ok(sv), month: cur, from: ms[0], to: ms[ms.length - 1], found: found.length, saved: sv && sv.body ? sv.body.saved : 0, errors: errs.concat(sv && !ok(sv) ? [(sv.body && sv.body.error) || 'save failed'] : []) }; }
+    else if (step === 'build') { out = { ok: true, months: {} };
+      for (const m of [prev, cur]) { const r = await cmCronCall('POST', '/api/client/commission/runs/build-all', { month: m }, {}, 140000);
+        out.months[m] = ok(r) ? { built: (r.body.built || []).length, left_alone: (r.body.skipped || []).length } : { error: (r.body && r.body.error) || ('HTTP ' + r.status) }; if (!ok(r)) out.ok = false; } }
+    else return res.status(400).json({ error: 'step = customers | catchup | build' });
+    out.step = step; out.secs = Math.round((Date.now() - t0) / 1000);
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('commission_weekly',$1,$2,$3)`, [out.ok ? 'success' : 'error', out.customers || out.saved || 0, JSON.stringify(out).slice(0, 500)]); } catch (_) {}
+    res.status(out.ok ? 200 : 500).json(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.429 (Ben 21-Oct-26: "can it show last imported data on IMPORT DATA"): when the agent customers were last synced, the last payments
 // import (month, when, who, runs built) and when each month's runs were last built.
 app.get('/api/client/commission/import-status', async (req, res) => {
@@ -35115,21 +35159,28 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
     // agent to check (they reply by email); Approved sends the final one. A draft run sends nothing.
     if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the draft statement is sent from review, the final one once approved.' });
     const draft = p.run.status === 'finalised';
-    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email, (SELECT c.owner_email FROM planner.clients c WHERE c.rep_group_id=g.id AND coalesce(c.owner_email,'')<>'' ORDER BY c.active DESC, c.id LIMIT 1) owner_email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
-    const to = String((req.body && req.body.to) || g.email || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
+    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email, to_jsonb(g)->>'statement_cc' cc_default, (SELECT c.owner_email FROM planner.clients c WHERE c.rep_group_id=g.id AND coalesce(c.owner_email,'')<>'' ORDER BY c.active DESC, c.id LIMIT 1) owner_email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
+    // v28.707 (Ben 05-Nov-26): CC per agent (Statement CC, migration 418), a note typed at send time, and a full preview before sending
+    // (body { preview: true } returns exactly what would be sent and sends nothing). body.cc / body.note override for this send only.
+    const b = req.body || {}, addrs = v => String(v || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
+    const to = addrs(b.to || g.email), cc = addrs(b.cc != null ? b.cc : g.cc_default).filter(x => !to.includes(x));
+    const note = String(b.note || '').trim().slice(0, 4000);
+    const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     if (!to.length) return res.status(400).json({ error: 'No statement email for ' + (g.name || 'this agent') + ': set "Statement to" on the agent (CLIENT ▸ Clients ▸ ' + (g.name || 'agent') + ' ▸ Commission).' });
     const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = M[+p.run.month.slice(5, 7) - 1] + '-' + p.run.month.slice(2, 4);
     const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); const xl = await cmStatementXlsx(p.run.id);
-    const html = '<p>Hello,</p>' + (draft ? '<p>Please find attached your <b>DRAFT</b> Dock &amp; Bay commission statement for <b>' + ml + '</b> for your review: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p><p>Please check it and reply to this email with any missing or incorrect orders. Once agreed we will approve it and send the final statement.</p>'
+    const html = '<p>Hello,</p>' + (note ? '<p>' + esc(note).replace(/\r?\n/g, '<br>') + '</p>' : '') + (draft ? '<p>Please find attached your <b>DRAFT</b> Dock &amp; Bay commission statement for <b>' + ml + '</b> for your review: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p><p>Please check it and reply to this email with any missing or incorrect orders. Once agreed we will approve it and send the final statement.</p>'
         : '<p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>')
       + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
       + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
-    const r = await sendResendEmail({ to, subject: (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: g.owner_email, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
+    const subject = (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name;
+    if (b.preview) return res.json({ ok: true, preview: true, draft, to, cc, cc_default: g.cc_default || '', reply_to: g.owner_email || null, subject, html, note, attachments: [p.filename].concat(xl && xl.filename ? [xl.filename] : []) });
+    const r = await sendResendEmail({ to, cc, subject, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: g.owner_email, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
-    try { await pool.query(`UPDATE planner.commission_runs SET ${draft ? 'draft_sent_at=now(), draft_sent_to=$2, draft_sent_by=$3' : 'statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3'} WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]); }
+    try { await pool.query(`UPDATE planner.commission_runs SET ${draft ? 'draft_sent_at=now(), draft_sent_to=$2, draft_sent_by=$3' : 'statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3'} WHERE id=$1`, [p.run.id, to.join(', ') + (cc.length ? ' (cc ' + cc.join(', ') + ')' : ''), req.me && req.me.email]); }
     catch (e) { if (!/does not exist/.test(e.message)) throw e; }   // before migration 384 the draft send is only in the audit log
-    await cpAudit(null, draft ? 'Commission DRAFT statement emailed for review' : 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', '), req.me && req.me.email);
-    res.json({ ok: true, to });
+    await cpAudit(null, draft ? 'Commission DRAFT statement emailed for review' : 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', ') + (cc.length ? ' (cc ' + cc.join(', ') + ')' : '') + (note ? ' · note: ' + note.slice(0, 200) : ''), req.me && req.me.email);
+    res.json({ ok: true, to, cc });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.467 (Ben 23-Oct-26: "send statement to client can that be xlsx format as well"): the same statement as an xlsx (same rows as the PDF:

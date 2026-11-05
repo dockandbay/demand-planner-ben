@@ -22806,7 +22806,7 @@
               ['Xero group UK',xs('xero_group_uk_id',XU,g.xero_group_uk_id,g.xero_group_uk_name)],['Xero group AU',xs('xero_group_au_id',XA,g.xero_group_au_id,g.xero_group_au_name)],
               ['Customers',(CC[g.id]||0)+' <a class="ce-tocust" style="cursor:pointer;color:var(--blue);margin-left:6px">see the list ▸</a>'],
               ['Xero bill to',inp('xero_contact',g.xero_contact,'100%','Xero contact for the commission bill')],['Xero account',inp('xero_account_code',g.xero_account_code,'90px')],
-              ['Statement to',inp('statement_email',g.statement_email,'100%','email')],['Portal view',chk('portal_on',g.portal_on,'commission statements in the client portal')],
+              ['Statement to',inp('statement_email',g.statement_email,'100%','email')],['Statement CC',inp('statement_cc',g.statement_cc,'100%','copied on every statement email, comma between addresses')],['Portal view',chk('portal_on',g.portal_on,'commission statements in the client portal')],
               ['Notes',inp('notes',g.notes)],['Active',chk('active',g.active,'')]]));
             box.querySelectorAll('.ag1').forEach(function(el){ el.onchange=function(){ var f=el.dataset.f, body={id:g.id}; body[f]=el.type==='checkbox'?el.checked:el.value;
               if(f==='xero_group_uk_id'||f==='xero_group_au_id')body[f.replace('_id','_name')]=el.value?el.selectedOptions[0].text:'';
@@ -23733,10 +23733,50 @@
           cpRunDetail(box,id,b); })
           .catch(function(e){ cxb.disabled=false; cxb.textContent=_t; msg.style.color='var(--neg)'; msg.textContent='Create failed: '+(e.message||e); }); };
       var cml=document.getElementById('crd-mail'); if(cml)cml.onclick=function(){ if(!r.statement_email){ msg.style.color='var(--neg)'; msg.textContent='No statement email: set "Statement to" on the agent (CLIENT ▸ Clients ▸ '+r.group_name+' ▸ Commission).'; return; }
-        if(!confirm((appr?'Email the '+r.group_name+' statement':'Email the DRAFT '+r.group_name+' statement for their review')+' to '+r.statement_email+'?'+(!appr&&r.draft_sent_at?'\n\nA draft was already sent on '+fd(String(r.draft_sent_at).slice(0,10))+'.':'')))return; var _ml=cml.textContent; cml.disabled=true; cml.textContent='Sending…';
-        cpPost('/api/client/commission/runs/'+id+'/email-statement',{}).then(function(){ cpRunDetail(box,id,b); }).catch(function(e){ cml.disabled=false; cml.textContent=_ml; msg.style.color='var(--neg)'; msg.textContent=e.message; }); };
+        cpStmtPreview(id, r, appr, function(){ cpRunDetail(box,id,b); }); };
     }).catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
 
+  // v28.707 (Ben 05-Nov-26: "add a CC ... and also a manually entered note option for the email", "include a full preview of email before send"):
+  // the statement email opens a side drawer with To, CC (from the agent's Statement CC, editable for this send), a note, the attachments and the
+  // email exactly as it will go (server preview, nothing sent), then Send. Replaces the browser confirm.
+  function cpStmtPreview(id, r, appr, done){
+    var old=document.getElementById('cp-stmt-dr'); if(old)old.remove();
+    var dr=document.createElement('div'); dr.id='cp-stmt-dr';
+    dr.style.cssText='position:fixed;top:0;right:0;bottom:0;width:min(720px,100vw);background:var(--surface,#fff);box-shadow:-8px 0 24px rgba(0,0,0,.18);z-index:9000;display:flex;flex-direction:column';
+    dr.innerHTML='<div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:14px">'+(appr?'Email statement':'Email DRAFT statement for review')+' · '+esc(r.group_name)+'</b><span style="flex:1"></span><button class="lnk-btn" id="cps-x" style="font-size:18px">✕</button></div>'
+      +'<div style="padding:12px 16px;overflow:auto;flex:1">'
+      +'<div style="display:grid;grid-template-columns:80px 1fr;gap:6px 10px;align-items:center;font-size:12px">'
+      +'<span class="mut">To</span><span id="cps-to">…</span>'
+      +'<span class="mut">CC</span><input id="cps-cc" style="width:100%" placeholder="none (set a default on the agent: Commission ▸ Statement CC)">'
+      +'<span class="mut">Subject</span><span id="cps-sub">…</span>'
+      +'<span class="mut">Attached</span><span id="cps-att">…</span>'
+      +'<span class="mut" style="align-self:start;padding-top:4px">Note</span><textarea id="cps-note" rows="3" style="width:100%" placeholder="Optional: a message added to the top of the email"></textarea>'
+      +'</div>'
+      +(!appr&&r.draft_sent_at?'<div style="margin-top:8px;color:var(--amber);font-size:12px">A draft was already sent on '+fd(String(r.draft_sent_at).slice(0,10))+'.</div>':'')
+      +'<div class="mut" style="font-size:11px;margin:12px 0 4px">Preview: exactly what will be sent</div>'
+      +'<iframe id="cps-fr" sandbox="" style="width:100%;height:340px;border:1px solid var(--border);border-radius:6px;background:#fff"></iframe>'
+      +'</div>'
+      +'<div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border)"><span id="cps-msg" style="font-size:12px;flex:1"></span><button class="save-btn light" id="cps-cancel">Cancel</button><button class="save-btn" id="cps-send" disabled>Send</button></div>';
+    document.body.appendChild(dr);
+    var $=function(x){return dr.querySelector(x);}, msg=$('#cps-msg'), first=true, t=null, seq=0;
+    function body(extra){ var o={cc:$('#cps-cc').value, note:$('#cps-note').value}; for(var k in extra)o[k]=extra[k]; if(first&&!extra.send)delete o.cc; return o; }
+    function load(){ var my=++seq; $('#cps-send').disabled=true; msg.style.color=''; msg.textContent='Updating preview…';
+      cpPost('/api/client/commission/runs/'+id+'/email-statement',body({preview:true})).then(function(j){ if(my!==seq)return;
+        $('#cps-to').textContent=(j.to||[]).join(', ')+(j.reply_to?'   (replies go to '+j.reply_to+')':'');
+        if(first){ $('#cps-cc').value=(j.cc||[]).join(', '); first=false; }
+        $('#cps-sub').textContent=j.subject||''; $('#cps-att').textContent=(j.attachments||[]).join(' · ');
+        $('#cps-fr').srcdoc='<div style="font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;color:#111;padding:8px 12px">'+(j.html||'')+'</div>';
+        msg.textContent=''; $('#cps-send').disabled=false; })
+      .catch(function(e){ if(my!==seq)return; msg.style.color='var(--neg)'; msg.textContent=e.message; }); }
+    function later(){ clearTimeout(t); t=setTimeout(load,500); }
+    $('#cps-cc').oninput=later; $('#cps-note').oninput=later;
+    $('#cps-x').onclick=$('#cps-cancel').onclick=function(){ dr.remove(); };
+    $('#cps-send').onclick=function(){ var btn=this; btn.disabled=true; btn.textContent='Sending…'; msg.style.color=''; msg.textContent='';
+      cpPost('/api/client/commission/runs/'+id+'/email-statement',body({send:true})).then(function(j){ msg.style.color='var(--pos)'; msg.textContent='✓ Sent to '+(j.to||[]).join(', ')+((j.cc||[]).length?' (cc '+j.cc.join(', ')+')':'');
+        btn.textContent='Sent'; setTimeout(function(){ dr.remove(); done&&done(); },1400); })
+      .catch(function(e){ btn.disabled=false; btn.textContent='Send'; msg.style.color='var(--neg)'; msg.textContent=e.message; }); };
+    load();
+  }
   function cpRenderMessages(b){ var S=_cpMsg; if(_cpPending&&_cpPending.sub==='messages'){ S.thread=_cpPending.id; _cpPending=null; }
     var _tq=[]; if(S.client)_tq.push('client_id='+encodeURIComponent(S.client)); if(S.kind)_tq.push('kind='+S.kind);   // v28.200 (Ben): + order / general filter
     Promise.all([cpGet('/api/client/threads'+(_tq.length?'?'+_tq.join('&'):'')),cpGet('/api/client/clients')]).then(function(r){ var ts=r[0].threads||[], clients=r[1].clients||[]; if(!S.thread&&ts[0])S.thread=ts[0].id;

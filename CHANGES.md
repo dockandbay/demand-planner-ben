@@ -1,3 +1,9 @@
+## v28.707 (05-Nov-26) Commissions: statement email CC + note + full preview; the three Import data steps run every Sunday
+- Statement email (Ben 05-Nov-26): per-agent Statement CC (CLIENT > Clients > agent > Commission), a note typed at send time, and a preview drawer showing To / CC / subject / attachments / the email itself before Send (replaces the browser confirm). body { preview: true } returns the email and sends nothing.
+- Weekly: NEW cron route POST /api/cron/commission-weekly?step=customers|catchup|build (x-webhook-secret, safeEq, fails closed); added inside the auth-gate secret bracket. n8n "Horizon | Commissions weekly (Sun 06:00 London)" hCXbKUb5BnvmQQgA created INACTIVE: activate once live. Xero UK cost about 110+ calls on Sundays (customer sync).
+- MIGRATION 418_commission_statement_cc.sql (rep_groups.statement_cc). Run before or with the deploy; the preview works before it (CC empty), saving a Statement CC needs it.
+- Files: server.mjs, supply/inject.html, migrations/418_commission_statement_cc.sql, lib/ai-logic/supply-finance.md. No env vars.
+
 ## v28.706 (05-Nov-26) ACCOUNTS bank sync: look back 2 months (never before 1 March; 12 months in March), transfers always 2 months
 - Ben 05-Nov-26: unreconciled items older than 2 months are rare and never before the start of the financial year (1 March); in March look back 12 months; bank transfers are reconciled monthly, so 2 months always.
 - Every bank sync read (bank transactions, payments, transfers, the deep re-check) is limited to that floor; it was 2018 to now. Items before the floor drop off the bank ageing list (7 on live on 05-Nov-26: 5 transfers and 1 payment from Jul / Aug-26, 1 transfer from 2018).
