@@ -1,3 +1,10 @@
+## v28.708 (05-Nov-26) Commissions: shipping credit notes never deducted; Xero-paid orders open in Fulfil now commissioned
+- Ben 05-Nov-26 (USWS-19133 Schauben, People's Pharmacy): invoice 778.40 incl 83.40 shipping, CN-9681 41.70 (half the shipping), paid 736.70 in Xero (Stripe), Fulfil invoice 51415 still open.
+- Bug 1: the Xero payment was skipped as "already in Fulfil" because a Fulfil invoice existed, though Fulfil holds no cash on it. Now only a Fulfil invoice WITH cash blocks the Xero payment. Oct-26 live check: this was the only row missed (104.25 USD).
+- Bug 2: a shipping credit lowered the cash ratio, cutting commission on fully paid products (657.76 instead of 695.00). Shipping credits applied to an invoice now come off its total in the ratio.
+- Credit notes: shipping-only ones (no-SKU lines with shipping words, or no bigger than the credited invoice's shipping) are never commission credits; listed under exceptions. No-SKU product credits (e.g. damaged goods) now count (the invoice rule had treated them as shipping). Zero "applied before payment" rows no longer listed (counted in the notes). The row shows the credited invoice.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.707 (05-Nov-26) Commissions: statement email CC + note + full preview; the three Import data steps run every Sunday
 - Statement email (Ben 05-Nov-26): per-agent Statement CC (CLIENT > Clients > agent > Commission), a note typed at send time, and a preview drawer showing To / CC / subject / attachments / the email itself before Send (replaces the browser confirm). body { preview: true } returns the email and sends nothing.
 - Weekly: NEW cron route POST /api/cron/commission-weekly?step=customers|catchup|build (x-webhook-secret, safeEq, fails closed); added inside the auth-gate secret bracket. n8n "Horizon | Commissions weekly (Sun 06:00 London)" hCXbKUb5BnvmQQgA created INACTIVE: activate once live. Xero UK cost about 110+ calls on Sundays (customer sync).

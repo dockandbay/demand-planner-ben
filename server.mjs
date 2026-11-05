@@ -34349,6 +34349,19 @@ const _CM_SHIP_RE = /\b(ship|shipping|freight|postage|delivery|carriage|courier)
 const _cmIsProductLine = l => { const ic = String(l.ItemCode || '').trim().toUpperCase(); return (!!ic && ic !== 'CUSTOM' && !_CM_SHIP_RE.test(ic)) || /\(([A-Z0-9]+-)+[A-Z0-9]+\)\s*$/.test(String(l.Description || '').trim()); };
 const _cmIsFaireX = v => ((v && v.LineItems) || []).some(l => /\bfaire\b/i.test(String(l.Description || '')));   // Faire commission / fee lines = a Faire order
 function _cmShipX(v) { return ((v && v.LineItems) || []).reduce((a, l) => a + (_cmIsProductLine(l) ? 0 : (Number(l.LineAmount) || 0)), 0); }
+// v28.708 (Ben 05-Nov-26: "if we credit note shipping then we should never include that as a credit note ... if the shipping matches the credit note
+// assume it's the same ... xero shipping is flaky because there is no clear sku for shipping, look at description and lack of sku"). For a CREDIT
+// NOTE, a line without a SKU is shipping only when its description says so (ship / freight / postage / delivery / carriage / courier) or its amount
+// equals the shipping on the invoice it credits; any other line without a SKU is a product credit (e.g. "damaged goods"), which the invoice rule
+// (_cmShipX: every non-SKU line = shipping) used to drop. A credit note whose ex-tax total equals the credited invoice's shipping is all shipping.
+// lines: [{ sku: bool, desc, amt }] ex tax; invShip: shipping on the credited invoice(s), ex tax. Returns the shipping part, ex tax.
+function _cmCnShip(lines, invShip) {
+  const near = (a, b) => b > 0.005 && Math.abs(Math.abs(a) - b) < 0.015;
+  const tot = lines.reduce((a, l) => a + (Number(l.amt) || 0), 0), upTo = (a, b) => b > 0.005 && Math.abs(a) <= b + 0.015;
+  // Ben 05-Nov-26 (USWS-19133: CN-9681 41.70 = half of the 83.40 shipping): a credit with no SKU lines that is no bigger than the shipping is a shipping credit
+  if (near(tot, invShip) || (lines.length && lines.every(l => !l.sku) && upTo(tot, invShip))) return tot;
+  return lines.reduce((a, l) => a + (!l.sku && (_CM_SHIP_RE.test(String(l.desc || '')) || upTo(l.amt, invShip)) ? (Number(l.amt) || 0) : 0), 0);
+}
 // v28.430 (Ben 21-Oct-26: "show the client PO number as well which is an important field they like to show"): the customer's own PO number.
 // Fulfil: the Shopify order metafield global.po_number (else the PO inside global.xero_reference); Xero: the PO inside the invoice reference,
 // e.g. "Markettime WRAP-0201 [ID: 32766988]" -> WRAP-0201.
@@ -34412,6 +34425,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     .forEach(r => { const e = { n: prevE.length, c: Number(r.c) || 0, where: r.month + ' run' }; prevE.push(e); new Set([_cmDocKey(r.order_ref), _cmDocKey(r.invoice_ref)]).forEach(k => prevAdd('g|' + r.g + '|' + k, e)); });
   const rows = [], exceptions = [], seen = new Set(), seenCn = new Set(), notes = [];
   const exc = (kind, o) => exceptions.push(Object.assign({ kind }, o));
+  const cmShipCn = []; let cmCnBefore = 0;   // v28.708: credit notes that only credit shipping: never a commission credit, listed for review
   // FX: Fulfil daily rates, units per GBP; rate on/before the date
   let fx = {}; try { const rr = await fAll('currency.currency.rate', [['date', '>=', new Date(Date.parse(ms) - 200 * 864e5).toISOString().slice(0, 10)], ['date', '<=', me]], ['date', 'rate', 'currency.code']);
     rr.forEach(r => { const c = r['currency.code']; (fx[c] = fx[c] || []).push([_cmDate(r.date), _cmNum(r.rate)]); }); Object.values(fx).forEach(a => a.sort((x, y) => x[0] < y[0] ? -1 : 1)); } catch (e) { notes.push('FX rates not read: ' + e.message); }
@@ -34449,9 +34463,10 @@ async function cmEngine(month, opts) { opts = opts || {};
       o.allocAmts.forEach(a => { const p = _cmR2(Math.max(0, a.amt - Math.max(0, a.unpaid))); if (p <= 0) return; if (a.keys.some(isDone)) take += p; else unc.push(a.keys[0] + ' (' + p.toFixed(2) + ' of it paid)'); });
       if (unc.length) exc('credit_note_uncommissioned', { order_ref: o.order_ref, customer: o.customer, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source, text: 'credits ' + unc.join(', ') + ', never commissioned to ' + g.name + ': that part not deducted' });
       if (unc.length && take <= 0) return;
+      if (take <= 0) { cmCnBefore++; return; }   // v28.708 (Ben 05-Nov-26: "this is a $0 ... so shouldn't be in the list"): applied before payment, nothing to take back
       const share = o.cn_total > 0 ? Math.min(1, take / o.cn_total) : 0;
-      o = Object.assign({}, o, { amount_src: o.amount_src * share, cn_note: take <= 0 ? 'credit note applied while the invoice was unpaid: the lower cash already covers it, nothing taken back'
-        : share < 0.999 ? 'credit note: ' + Math.round(share * 100) + '% taken back (the rest was applied while the invoice was unpaid)' : 'credit note' });
+      o = Object.assign({}, o, { amount_src: o.amount_src * share, cn_note: (take <= 0 ? 'credit note applied while the invoice was unpaid: the lower cash already covers it, nothing taken back'
+        : share < 0.999 ? 'credit note: ' + Math.round(share * 100) + '% taken back (the rest was applied while the invoice was unpaid)' : 'credit note') + (o.cn_ship > 0.005 ? ' · shipping ' + o.cn_ship.toFixed(2) + ' left out' : '') });   /* v28.708 */
     }
     const cv = conv(o.amount_src, o.currency_src, ccy, o.pay_date);
     let rate = Number(g.default_rate) || 0, rateSrc = 'agent';
@@ -34498,8 +34513,9 @@ async function cmEngine(month, opts) { opts = opts || {};
     const cnLine = new Set(), cnOfLine = {}; if (mlRef.size) { const ml = []; const L = [...mlRef]; for (let i = 0; i < L.length; i += 300) ml.push(...await fAll('account.move.line', [['id', 'in', L.slice(i, i + 300)]], ['id', 'invoices']));
       const invOf = {}; ml.forEach(x => (x.invoices || []).forEach(v => { (invOf[v] = invOf[v] || []).push(x.id); }));
       const vIds = Object.keys(invOf).map(Number); for (let i = 0; i < vIds.length; i += 300) (await fAll('account.invoice', [['id', 'in', vIds.slice(i, i + 300)], ['total_amount', '<', 0]], ['id'])).forEach(v => (invOf[v.id] || []).forEach(id => { cnLine.add(id); cnOfLine[id] = v.id; })); }
-    const shipF = {}; for (let i = 0; i < invs.length; i += 200) (await fAll('account.invoice.line', [['invoice', 'in', invs.slice(i, i + 200).map(x => x.id)], ['type', '=', 'line']], ['invoice', 'amount', 'description', 'product.code']))
-      .forEach(l => { if (!String(l['product.code'] || '').trim() || _CM_SHIP_RE.test(String(l['product.code'] || ''))) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
+    const shipF = {}, linesF = {}; for (let i = 0; i < invs.length; i += 200) (await fAll('account.invoice.line', [['invoice', 'in', invs.slice(i, i + 200).map(x => x.id)], ['type', '=', 'line']], ['invoice', 'amount', 'description', 'product.code']))
+      .forEach(l => { const pc = String(l['product.code'] || '').trim(), sku = !!pc && !_CM_SHIP_RE.test(pc); (linesF[l.invoice] = linesF[l.invoice] || []).push({ sku, desc: l.description, amt: _cmNum(l.amount) });   // v28.708
+        if (!sku) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
     const saleIds = [...new Set(invs.flatMap(i => i.sales || []))]; const sales = {};
     for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata', 'shipment_address.country.code', 'shipment_address.subdivision.code', 'shipment_address.subdivision.name', 'shipment_address.zip'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number); v28.442: + ship-to (agent rules)
     const codes = {}; try { const def = (await ff('PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']]) || [])[0];
@@ -34513,17 +34529,29 @@ async function cmEngine(month, opts) { opts = opts || {};
       const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} })).map(a => ({ d: _cmDate(a.date), cn: a._ref.model === 'account.move.line' ? cnOfLine[a._ref.id] : null,
         amt: ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null) }))
         .filter(a => a.d && a.amt).sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : (a.cn ? 1 : 0) - (b.cn ? 1 : 0));
-      for (const a of apps) { if (a.cn) (cnApps[a.cn] = cnApps[a.cn] || []).push({ keys: [String(inv.number || '').toUpperCase(), String(s.reference || '').toUpperCase()].filter(Boolean), amt: Math.abs(a.amt), unpaid: total - paid }); paid += a.amt; } }
+      for (const a of apps) { if (a.cn) (cnApps[a.cn] = cnApps[a.cn] || []).push({ inv_id: inv.id, inv_no: inv.number, amt_raw: Math.abs(a.amt), keys: [String(inv.number || '').toUpperCase(), String(s.reference || '').toUpperCase()].filter(Boolean), amt: Math.abs(a.amt), unpaid: total - paid }); paid += a.amt; } }
+    // v28.708: shipping-only credit notes (see _cmCnShip) and the shipping credit each invoice received from them (taken off the cash-ratio total)
+    const shipCrOf = {}; for (const cnv of invs) { if (_cmNum(cnv.total_amount) >= 0) continue; const ap = cnApps[cnv.id] || [];
+      const invShip = [...new Set(ap.map(a => a.inv_id))].reduce((t, id) => t + Math.abs(shipF[id] || 0), 0), sub = _cmNum(cnv.untaxed_amount), sh = _cmCnShip(linesF[cnv.id] || [], invShip);
+      if (Math.abs(sub) > 0.005 && Math.abs(sh) >= Math.abs(sub) - 0.015) ap.forEach(a => { shipCrOf[a.inv_id] = (shipCrOf[a.inv_id] || 0) + (a.amt_raw || 0); }); }
     for (const inv of invs) {
       const s = sales[(inv.sales || [])[0]] || {}, invDate = _cmDate(inv.invoice_date), ccy = String(inv['currency.code'] || 'USD').toUpperCase(), compCcy = Number(inv.company) === FULFIL_COMPANY_AU ? 'AUD' : 'GBP';
-      const total = _cmNum(inv.total_amount), ratio = total ? (_cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0)) / total : 1;
-      const ref = s.reference || s.number || inv.number; seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase());
+      const total = _cmNum(inv.total_amount), _tEff = total - Math.min(shipCrOf[inv.id] || 0, Math.abs(shipF[inv.id] || 0) * (total / (_cmNum(inv.untaxed_amount) || total || 1))), ratio = _tEff > 0.005 ? (_cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0)) / _tEff : 1;
+      const ref = s.reference || s.number || inv.number;
+      // v28.708 (Ben 05-Nov-26, USWS-19133): a Fulfil invoice blocks the Xero payment of the same order ("already in Fulfil") only when Fulfil holds
+      // cash on it. Since 01-Oct-26 wholesale invoices reach Xero and many are paid there only (Stripe), leaving the Fulfil invoice open: that Xero
+      // payment was skipped as a duplicate and never commissioned.
+      const _seen = () => { seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase()); };
       if (total < 0) {   // a credit note: one negative row in its own month, at the order's agent and rate (product lines, ex tax)
         [inv.number, inv.reference].forEach(x => { if (x) seenCn.add(String(x).toUpperCase()); });
+        const _ap = cnApps[inv.id] || [], _invShip = [...new Set(_ap.map(a => a.inv_id))].reduce((t, id) => t + Math.abs(shipF[id] || 0), 0), _onInv = [...new Set(_ap.map(a => a.inv_no).filter(Boolean))].join(', ');
+        const _cnShip = _cmCnShip(linesF[inv.id] || [], _invShip), _sub = _cmNum(inv.untaxed_amount);   // v28.708: signed (a credit note's lines are negative)
+        if (invDate >= ms && invDate <= me && Math.abs(_sub) > 0.005 && Math.abs(_cnShip) >= Math.abs(_sub) - 0.015) { cmShipCn.push({ order_ref: _onInv || ref, invoice_ref: inv.number, customer: inv['party.name'], amount: _cmR2(Math.abs(_sub)), currency: ccy, source: 'fulfil', date: invDate }); continue; }
         if (invDate >= ms && invDate <= me) cnLater.push({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, mt_group: mtg[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
-          invoice_date: invDate, pay_date: invDate, amount_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0), currency_src: ccy, credit_note: true, quiet: true, allocAmts: cnApps[inv.id] || [], cn_total: -total });
+          invoice_date: invDate, pay_date: invDate, amount_src: _sub - _cnShip, currency_src: ccy, credit_note: true, quiet: true, allocAmts: cnApps[inv.id] || [], cn_total: -total, cn_ship: _cmR2(Math.abs(_cnShip)) });
         continue; }
       const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} }));
+      if (apps.some(a => !(a._ref.model === 'account.move.line' && cnLine.has(a._ref.id)) && _cmNum(a.applied_amount))) _seen();
       for (const a of apps) { const d = _cmDate(a.date); if (!d) continue;
         if (a._ref.model === 'account.move.line' && cnLine.has(a._ref.id)) continue;   // applied from a credit note, not cash
         const amt = ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null);
@@ -34547,7 +34575,11 @@ async function cmEngine(month, opts) { opts = opts || {};
     let dup = 0;
     for (const p of mine) { const v = xi[(p.Invoice || {}).InvoiceID] || p.Invoice || {}; const no = String(v.InvoiceNumber || '').toUpperCase(), rf = String(v.Reference || '').toUpperCase();
       if ((no && seen.has(no)) || (rf && seen.has(rf))) { dup++; continue; }
-      const tot = Number(v.Total) || 0, shipX = _cmShipX(v), ratio = tot ? ((Number(v.SubTotal) || 0) - shipX) / tot : 1, c = v.Contact || (p.Invoice || {}).Contact || {};   // shipping is not commissionable (as the paid sheet)
+      const shipX = _cmShipX(v), shipInc = (Number(v.SubTotal) || 0) ? shipX * (Number(v.Total) || 0) / (Number(v.SubTotal) || 1) : shipX;
+      // v28.708 (Ben 05-Nov-26, USWS-19133): a credit note applied to the invoice that is no bigger than its shipping credited shipping, not products:
+      // the cash ratio uses the total less those credits (paid 736.70 of 778.40 after a 41.70 shipping credit = the 695.00 of products, all of it)
+      const shipCr = Math.min(shipInc, (v.CreditNotes || []).reduce((t, o) => { const a = Number(o.AppliedAmount) || 0; return t + (a > 0 && a <= shipInc + 0.015 ? a : 0); }, 0));
+      const tot = (Number(v.Total) || 0) - shipCr, ratio = tot > 0.005 ? ((Number(v.SubTotal) || 0) - shipX) / tot : 1, c = v.Contact || (p.Invoice || {}).Contact || {};   // shipping is not commissionable (as the paid sheet)
       add({ source: 'xero ' + org, order_ref: v.Reference || v.InvoiceNumber, invoice_ref: v.InvoiceNumber, client_po: _cmClientPo(null, v.Reference), customer: c.Name, xid: c.ContactID, org, channel: _cmIsFaireX(v) ? 'Faire' : '', invoice_date: _cmXeroDate(v.DateString || v.Date),
         pay_date: _cmXeroDate(p.DateString || p.Date), amount_src: (Number(p.Amount) || 0) * ratio, inv_value_src: (Number(v.SubTotal) || 0) - shipX, currency_src: String(v.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() });
       if (opts.debug && rows.length) rows[rows.length - 1].debug_lines = (v.LineItems || []).map(l => [l.ItemCode, l.Description, l.AccountCode, l.LineAmount]).slice(0, 40); }
@@ -34559,7 +34591,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       if (no && cnPaid.has(no)) { cnDone++; continue; } cnMine++; cnKeep.push(cn); }
     // v28.471: the credited invoices, for their unpaid balance at each allocation (payments up to that day, other credits / prepayments before it)
     const cxIds = [...new Set(cnKeep.flatMap(cn => (cn.Allocations || []).map(a => (a.Invoice || {}).InvoiceID)).filter(Boolean))], cx = {};
-    for (let i = 0; i < cxIds.length; i += 40) { const j = await xeroFetch(org, '/api.xro/2.0/Invoices?IDs=' + cxIds.slice(i, i + 40).join(',')); ((j && j.Invoices) || []).forEach(v => { cx[v.InvoiceID] = v; }); }
+    for (let i = 0; i < cxIds.length; i += 40) { const j = await xeroFetch(org, '/api.xro/2.0/Invoices?page=1&IDs=' + cxIds.slice(i, i + 40).join(','));   /* v28.708: page=1 = with line items (their shipping) */ ((j && j.Invoices) || []).forEach(v => { cx[v.InvoiceID] = v; }); }
     const xd = x => _cmXeroDate(x && (x.DateString || x.Date)) || '';
     for (const cn of cnKeep) { const c = cn.Contact || {};
       const allocAmts = (cn.Allocations || []).map(a => { const iv = cx[(a.Invoice || {}).InvoiceID] || a.Invoice || {}, d = xd(a);
@@ -34567,11 +34599,18 @@ async function cmEngine(month, opts) { opts = opts || {};
           + (iv.CreditNotes || []).filter(o => o.CreditNoteID !== cn.CreditNoteID && xd(o) && xd(o) < d).reduce((t, o) => t + (Number(o.AppliedAmount) || 0), 0)
           + [].concat(iv.Prepayments || [], iv.Overpayments || []).filter(o => xd(o) && xd(o) <= d).reduce((t, o) => t + (Number(o.AppliedAmount) || 0), 0);
         return { keys: [String(iv.InvoiceNumber || '').toUpperCase(), String(iv.Reference || '').toUpperCase()].filter(Boolean), amt: Number(a.Amount) || 0, unpaid: iv.Total != null ? (Number(iv.Total) || 0) - before : 0 }; });
-      add({ source: 'xero ' + org, order_ref: cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, client_po: _cmClientPo(null, cn.Reference), customer: c.Name, xid: c.ContactID, org, channel: '', credit_note: true,
-        allocAmts, cn_total: Number(cn.Total) || 0,
-        invoice_date: _cmXeroDate(cn.DateString || cn.Date), pay_date: _cmXeroDate(cn.DateString || cn.Date), amount_src: -((Number(cn.SubTotal) || 0) - _cmShipX(cn)), currency_src: String(cn.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() }); }
+      const credited = [...new Set((cn.Allocations || []).map(a => (a.Invoice || {}).InvoiceID).filter(Boolean))].map(id => cx[id]).filter(Boolean);
+      const invShip = credited.reduce((t, iv) => t + _cmShipX(iv), 0), sub = Number(cn.SubTotal) || 0;
+      const cnShip = _cmCnShip((cn.LineItems || []).map(l => ({ sku: _cmIsProductLine(l), desc: l.Description, amt: Number(l.LineAmount) || 0 })), invShip);
+      const ccyX = String(cn.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase(), onInv = credited.map(iv => iv.InvoiceNumber).filter(Boolean).join(', ');
+      if (sub > 0.005 && cnShip >= sub - 0.015) { cmShipCn.push({ order_ref: onInv || cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, customer: c.Name, amount: _cmR2(sub), currency: ccyX, source: 'xero ' + org, date: _cmXeroDate(cn.DateString || cn.Date) }); continue; }   // v28.708: a shipping credit is never a commission credit
+      add({ source: 'xero ' + org, order_ref: onInv || cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, client_po: _cmClientPo(null, cn.Reference), customer: c.Name, xid: c.ContactID, org, channel: '', credit_note: true,
+        allocAmts, cn_total: Number(cn.Total) || 0, cn_ship: _cmR2(cnShip),
+        invoice_date: _cmXeroDate(cn.DateString || cn.Date), pay_date: _cmXeroDate(cn.DateString || cn.Date), amount_src: -(sub - cnShip), currency_src: ccyX }); }
     notes.push('Xero ' + org.toUpperCase() + ': ' + pays.length + ' payments, ' + mine.length + ' for agents\' customers' + (dup ? ', ' + dup + ' already in Fulfil' : '') + (cnMine ? ', ' + cnMine + ' credit notes' : '') + (cnDone ? ' (' + cnDone + ' already deducted in paid history)' : ''));
   } catch (e) { notes.push('Xero ' + org.toUpperCase() + ' not read: ' + e.message); } }
+  if (cmCnBefore) notes.push(cmCnBefore + ' credit note' + (cmCnBefore === 1 ? '' : 's') + ' applied before the invoice was paid: nothing to take back (the lower cash covers it), not listed');
+  cmShipCn.forEach(x => exc('credit_note_shipping', Object.assign({}, x, { text: 'shipping only (' + x.currency + ' ' + Number(x.amount).toFixed(2) + ' ex tax, ' + (x.date || '') + '): not a commission credit' })));
   // order override commissionable amount: replaces the cash, spread over the order's rows in the month by cash
   const byOrder = {}; rows.forEach(r => { if (r.override && r.override.amount != null && r.override.amount !== '') (byOrder[r.order_ref] = byOrder[r.order_ref] || []).push(r); });
   Object.values(byOrder).forEach(list => { const amt = Number(list[0].override.amount), cash = list.reduce((a, r) => a + (r.commissionable || 0), 0);
