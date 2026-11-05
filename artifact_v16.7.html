@@ -10988,6 +10988,8 @@ function render(){
     else if(DEMAND_VIEW==='aspadj') renderAspAdjView(body);
     else if(DEMAND_VIEW==='campalerts') renderCampAlertsView(body);   // v28.608 DEMAND ▸ Config ▸ Campaign alerts (who gets the ETA-past-intake alert)   // v27.577 DEMAND ▸ Config ▸ More settings (ASP reduction / discontinued discount per country × channel)
     else if(DEMAND_VIEW==='shipbags') renderShipBagView(body);   // DEMAND ▸ Ship bags — packaging forecast from units→orders
+    else if(DEMAND_VIEW==='stockavail'){ body.innerHTML='<div id="ks-panel"></div>'; renderStockAvail(); }   /* v28.732 DEMAND > Analysis > Stock Availability (#/demand/analysis/stockavail) */
+    else if(DEMAND_VIEW==='onorder'){ body.innerHTML='<div id="ks-panel"></div>'; renderStockOnOrder(); }   /* v28.732 DEMAND > Analysis > Stock On Order (#/demand/analysis/onorder) */
     else if(DEMAND_VIEW==='stockcover') renderStockCoverView(body);   // DEMAND ▸ Stock cover — weeks-of-cover trend per warehouse vs target (cash flow)
     else renderDemandActionsView(body);
     return;
@@ -15291,7 +15293,7 @@ function renderWssiPlanView(body){
     }).catch(function(e){ box.innerHTML='<b style="color:var(--neg)">Could not upload: '+H(e&&e.message||e)+'</b>'; }); }; rd.readAsDataURL(f); };
   totals(); paint();
 }
-var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['wssiplan','WSSI plan'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['wssiplan','WSSI plan'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner'],['stockavail','Stock Availability'],['onorder','Stock On Order']];   /* v28.732: Kathryn's two sheets, DEMAND > Analysis (Ben 06-Nov-26) */   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -15308,7 +15310,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['campalerts']='Campaign alerts'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj','campalerts'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake','stockavail','onorder'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj','campalerts'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -15554,6 +15556,165 @@ function renderInventory(){
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
   else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else renderCogs(); }
+}
+// ── v28.732 (Kathryn 05-Nov-26 build briefs): BUY & MOVE ▸ Inventory ▸ Stock Availability (per SKU: on hand, on order, commitment and
+// next landing, Global + UK / US / EU / AU, AWD in US and Global only) and Stock On Order (per SKU per PO, intake, retail ex VAT, FOB
+// cost and FOB margin %, all in £ from the Settings panel). Data: /api/inventory/stock-availability and /stock-on-order (rules there).
+function ksE(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+var KS_CSS_DONE=false;
+function ksCss(){ if(KS_CSS_DONE)return; KS_CSS_DONE=true; var st=document.createElement('style'); st.textContent=
+  '.ks-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}.ks-bar input[type=text],.ks-bar input[type=search],.ks-bar input[type=date]{padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px}'
+ +'.ks-ms{position:relative}.ks-ms>summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:99px;background:var(--card);font-size:12px;font-weight:600;color:var(--ink-soft);white-space:nowrap}.ks-ms>summary::-webkit-details-marker{display:none}.ks-ms.on>summary{border-color:var(--nav);color:var(--nav)}'
+ +'.ks-ms>div{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:220px;max-height:320px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);padding:6px}.ks-ms label{display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 4px;cursor:pointer;white-space:nowrap}.ks-ms .ks-ms-q{width:100%;margin-bottom:4px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px;background:var(--card);color:var(--ink)}'
+ +'.ks-btn{padding:5px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-weight:700;font-size:12px;cursor:pointer}.ks-btn.pri{background:var(--nav);border-color:var(--nav);color:#fff}'
+ +'.ks-wrap{overflow:auto;max-height:calc(100vh - 250px);border:1px solid var(--line);border-radius:8px;background:var(--card)}'
+ +'table.ks-t{border-collapse:separate;border-spacing:0;font-size:12px;text-align:left}table.ks-t th,table.ks-t td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card)}'
+ +'table.ks-t thead th{position:sticky;top:0;z-index:3;background:var(--hover);font-weight:700;color:var(--ink-soft);cursor:pointer;user-select:none}table.ks-t thead tr.h2 th{top:27px}table.ks-t thead tr.h1 th{height:27px;box-sizing:border-box}'
+ +'table.ks-t .fz{position:sticky;z-index:2}table.ks-t thead .fz{z-index:5}table.ks-t td.neg{color:var(--neg);font-weight:700}table.ks-t .bl{border-left:2px solid var(--line)}table.ks-t th.blk{cursor:pointer;text-transform:uppercase;letter-spacing:.04em}'
+ +'table.ks-t tr.sub td{background:var(--hover);font-weight:700}table.ks-t tr.sub td.gtog{cursor:pointer}'
+ +'.ks-tot{display:flex;gap:18px;flex-wrap:wrap;align-items:center;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--hover);margin:0 0 10px;font-size:12px}.ks-tot b{font-size:15px}.ks-fob{color:var(--amber);font-weight:700}'
+ +'.ks-set{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 10px;background:var(--card);font-size:12px}.ks-set label{display:inline-flex;flex-direction:column;gap:2px;margin:0 12px 8px 0}.ks-set input{width:110px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}';
+  document.head.appendChild(st); }
+var KS_MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function ksDate(d){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m?m[3]+'-'+KS_MON[+m[2]-1]+'-'+m[1].slice(2):''; }
+function ksMonth(d){ var m=/^(\d{4})-(\d{2})/.exec(String(d||'')); return m?KS_MON[+m[2]-1]+'-'+m[1].slice(2):''; }
+function ksN(v){ if(v==null||v==='')return ''; var r=Math.round(Number(v)); return r.toLocaleString('en-GB'); }
+function ksGbp(v,dp){ if(v==null||!isFinite(v))return ''; return '£'+Number(v).toLocaleString('en-GB',{minimumFractionDigits:dp||0,maximumFractionDigits:dp||0}); }
+// multi-select chip: <details> with a search box and checkboxes; data-k = the filter key
+function ksMulti(k,label,vals,sel,open){ var on=sel&&sel.length; return '<details class="ks-ms'+(on?' on':'')+'" data-k="'+k+'"'+(open===k?' open':'')+'><summary>'+ksE(label)+(on?' ('+sel.length+')':'')+' ▾</summary><div><input class="ks-ms-q" placeholder="Search">'
+  +vals.map(function(v){ return '<label data-v="'+ksE(String(v).toLowerCase())+'"><input type="checkbox" value="'+ksE(v)+'"'+(sel.indexOf(v)>=0?' checked':'')+'>'+ksE(v===''?'(blank)':v)+'</label>'; }).join('')+'</div></details>'; }
+function ksBindMulti(root,state,rerender){ root.querySelectorAll('.ks-ms').forEach(function(d){ var k=d.dataset.k;
+  d.addEventListener('toggle',function(){ if(d.open){ state.open=k; root.querySelectorAll('.ks-ms').forEach(function(o){ if(o!==d)o.open=false; }); } else if(state.open===k)state.open=null; });
+  var q=d.querySelector('.ks-ms-q'); if(q)q.oninput=function(){ var t=q.value.toLowerCase(); d.querySelectorAll('label').forEach(function(l){ l.style.display=l.dataset.v.indexOf(t)>=0?'':'none'; }); };
+  d.querySelectorAll('input[type=checkbox]').forEach(function(c){ c.onchange=function(){ var a=state.f[k]||(state.f[k]=[]), i=a.indexOf(c.value); if(c.checked&&i<0)a.push(c.value); if(!c.checked&&i>=0)a.splice(i,1); rerender(); }; }); }); }
+function ksUniq(rows,fn){ var m={}; rows.forEach(function(r){ m[fn(r)==null?'':fn(r)]=1; }); return Object.keys(m).sort(); }
+function ksCsv(name,head,rows){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  var txt=[head.map(q).join(',')].concat(rows.map(function(r){ return r.map(q).join(','); })).join('\n');
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/csv'})); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },500); }
+function ksFetch(url,cb){ fetch(url,{cache:'no-store'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }).then(function(j){ cb(null,j); }).catch(function(e){ cb(e); }); }
+
+// ---------- Stock Availability ----------
+var KSA={d:null,busy:false,err:'',q:'',f:{c:[],s:[],st:[]},sort:'sku',dir:1,col:{uk:false,us:false,eu:false,au:false},open:null};
+var KSA_BLOCKS=[['g','Global (UK + US + EU + AU)',true],['uk','UK',false],['us','US',true],['eu','EU',false],['au','AU',false]];
+// next landing: sum units by date across POs in the block, the earliest date with more than 20 units
+function ksaNext(land){ var ds=Object.keys(land||{}).sort(); for(var i=0;i<ds.length;i++){ if(land[ds[i]]>20)return {d:ds[i],q:land[ds[i]]}; } return null; }
+function ksaCalc(r){ var o={}, G={oh3:0,ohF:0,ohA:0,oo3:0,ooF:0,ooA:0}, gl={};
+  ['uk','us','eu','au'].forEach(function(m){ var x={oh3:r.oh[m+'_3pl']||0,ohF:r.oh[m+'_fba']||0,ohA:m==='us'?(r.oh.us_awd||0):0,oo3:r.oo[m+'_3pl']||0,ooF:r.oo[m+'_fba']||0,ooA:m==='us'?(r.oo.us_awd||0):0};
+    x.ohT=x.oh3+x.ohF+x.ohA; x.ooT=x.oo3+x.ooF+x.ooA; x.c3=x.oh3+x.oo3; x.cF=x.ohF+x.ooF; x.cA=x.ohA+x.ooA; x.cT=x.ohT+x.ooT;
+    var L=r.land[m]||{}, nx=ksaNext(L); x.eta=nx?nx.d:''; x.etaQ=nx?nx.q:null; Object.keys(L).forEach(function(d){ gl[d]=(gl[d]||0)+L[d]; });
+    ['oh3','ohF','ohA','oo3','ooF','ooA'].forEach(function(k){ G[k]+=x[k]; }); o[m]=x; });
+  G.ohT=G.oh3+G.ohF+G.ohA; G.ooT=G.oo3+G.ooF+G.ooA; G.c3=G.oh3+G.oo3; G.cF=G.ohF+G.ooF; G.cA=G.ohA+G.ooA; G.cT=G.ohT+G.ooT;
+  var gn=ksaNext(gl); G.eta=gn?gn.d:''; G.etaQ=gn?gn.q:null; o.g=G; return o; }
+function ksaCols(b,awd){ var c=[]; [['oh','On hand'],['oo','On order'],['c','Commitment']].forEach(function(g){ var p=g[0];
+    c.push([p==='c'?'c3':p+'3',g[1]+' 3PL']); c.push([p==='c'?'cF':p+'F',g[1]+' FBA']); if(awd)c.push([p==='c'?'cA':p+'A',g[1]+' AWD']); c.push([p==='c'?'cT':p+'T',g[1]+' Total']); });
+  c.push(['eta','Next ETA (>20 units)']); c.push(['etaQ','Next qty (>20 units)']); return c; }
+function renderStockAvail(){ ksCss(); var p=document.getElementById('ks-panel'); if(!p)return;
+  if(!KSA.d){ p.innerHTML='<div class="mut" style="font-size:12px">'+(KSA.err?'<span style="color:var(--neg)">'+ksE(KSA.err)+'</span>':'Loading stock…')+'</div>';
+    if(!KSA.busy&&!KSA.err){ KSA.busy=true; ksFetch('/api/inventory/stock-availability',function(e,j){ KSA.busy=false; if(e)KSA.err=e.message; else { KSA.d=j; KSA.d.rows.forEach(function(r){ r.k=ksaCalc(r); }); } renderStockAvail(); }); } return; }
+  var rows=KSA.d.rows, f=KSA.f, q=KSA.q.toLowerCase();
+  var vis=rows.filter(function(r){ return (!f.c.length||f.c.indexOf(r.c||'')>=0)&&(!f.s.length||f.s.indexOf(r.s||'')>=0)&&(!f.st.length||f.st.indexOf(r.st||'')>=0)&&(!q||(r.sku+' '+r.n).toLowerCase().indexOf(q)>=0); });
+  var sk=KSA.sort, dir=KSA.dir, val=function(r){ if(sk.indexOf('.')>0){ var a=sk.split('.'), v=r.k[a[0]][a[1]]; return v===''||v==null?null:v; } return (r[sk]||'').toLowerCase(); };
+  vis.sort(function(a,b){ var x=val(a),y=val(b); if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; return (x<y?-1:x>y?1:0)*dir; });
+  var ATT=[['sku','SKU',170],['n','Product name',260],['c','Category',120],['s','Season',64],['st','Status',96]], left=0;
+  ATT.forEach(function(a){ a.push(left); left+=a[2]; });
+  var arrow=function(k){ return KSA.sort===k?(KSA.dir>0?' ▲':' ▼'):''; };
+  var h1='<tr class="h1">'+ATT.map(function(a){ return '<th class="fz" rowspan="2" data-s="'+a[0]+'" style="left:'+a[3]+'px;min-width:'+a[2]+'px;max-width:'+a[2]+'px">'+a[1]+arrow(a[0])+'</th>'; }).join('');
+  var h2='<tr class="h2">', body='';
+  var plan=KSA_BLOCKS.map(function(b){ var awd=b[2]&&(b[0]==='g'||b[0]==='us'), cols=ksaCols(b[0],b[0]==='g'||b[0]==='us'), shut=b[0]!=='g'&&KSA.col[b[0]];
+    if(shut)cols=[['cT','Commitment Total']]; return {k:b[0],lbl:b[1],cols:cols,shut:shut}; });
+  plan.forEach(function(b){ h1+='<th class="blk bl" colspan="'+b.cols.length+'" data-tog="'+b.k+'" title="'+(b.k==='g'?'Always expanded':'Click to '+(b.shut?'expand':'collapse'))+'">'+(b.k==='g'?'':(b.shut?'▸ ':'▾ '))+ksE(b.lbl)+'</th>';
+    b.cols.forEach(function(c,i){ h2+='<th data-s="'+b.k+'.'+c[0]+'"'+(i===0?' class="bl"':'')+'>'+ksE(c[1])+arrow(b.k+'.'+c[0])+'</th>'; }); });
+  h1+='</tr>'; h2+='</tr>';
+  vis.forEach(function(r){ body+='<tr>'+ATT.map(function(a){ return '<td class="fz" style="left:'+a[3]+'px;min-width:'+a[2]+'px;max-width:'+a[2]+'px;overflow:hidden;text-overflow:ellipsis" title="'+ksE(r[a[0]]||'')+'">'+ksE(r[a[0]]||'')+'</td>'; }).join('');
+    plan.forEach(function(b){ var x=r.k[b.k]; b.cols.forEach(function(c,i){ var v=x[c[0]], cl=(i===0?'bl':'')+(typeof v==='number'&&v<0?' neg':'');
+      body+='<td'+(cl?' class="'+cl+'"':'')+'>'+(c[0]==='eta'?ksDate(v):(v===0||v==null?(c[0]==='etaQ'?'':'<span class="mut">0</span>'):ksN(v)))+'</td>'; }); }); body+='</tr>'; });
+  var opts=function(fn){ return ksUniq(rows,fn); };
+  p.innerHTML='<div style="font-size:12px;color:var(--muted);margin:0 0 8px;max-width:1100px">Per SKU: stock on hand, stock on order (supplier-confirmed open POs: Production, Ready to ship, Shipping, Shipped to master, and Delivered not yet confirmed in the 3PL) and total commitment, by market and 3PL / FBA / US AWD. Global = UK + US + EU + AU (Canada and China excluded). Next ETA = the earliest delivery date with more than 20 units landing that day across the block\'s POs. Negative stock is shown as held. Non-GRS stock is not included.</div>'
+    +'<div class="ks-bar"><input type="search" id="ksa-q" placeholder="SKU or product name" value="'+ksE(KSA.q)+'" style="min-width:220px">'
+    +ksMulti('c','Category',opts(function(r){return r.c;}),f.c,KSA.open)+ksMulti('s','Season',opts(function(r){return r.s;}),f.s,KSA.open)+ksMulti('st','Status',opts(function(r){return r.st;}),f.st,KSA.open)
+    +((f.c.length||f.s.length||f.st.length||KSA.q)?'<button class="ks-btn" id="ksa-clr">Clear all</button>':'')
+    +'<button class="ks-btn" id="ksa-csv">⤓ CSV</button><button class="ks-btn" id="ksa-rl">↻ Refresh</button><span class="mut" style="font-size:12px">'+vis.length.toLocaleString()+' of '+rows.length.toLocaleString()+' SKUs</span></div>'
+    +'<div class="ks-wrap"><table class="ks-t"><thead>'+h1+h2+'</thead><tbody>'+body+'</tbody></table></div>';
+  var qi=document.getElementById('ksa-q'); qi.oninput=function(){ clearTimeout(KSA._t); KSA._t=setTimeout(function(){ KSA.q=qi.value; renderStockAvail(); var n=document.getElementById('ksa-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+  ksBindMulti(p,KSA,renderStockAvail);
+  var cl=document.getElementById('ksa-clr'); if(cl)cl.onclick=function(){ KSA.f={c:[],s:[],st:[]}; KSA.q=''; renderStockAvail(); };
+  document.getElementById('ksa-rl').onclick=function(){ KSA.d=null; KSA.err=''; renderStockAvail(); };
+  p.querySelectorAll('th[data-tog]').forEach(function(t){ if(t.dataset.tog==='g')return; t.onclick=function(){ KSA.col[t.dataset.tog]=!KSA.col[t.dataset.tog]; renderStockAvail(); }; });
+  p.querySelectorAll('th[data-s]').forEach(function(t){ t.onclick=function(){ var k=t.dataset.s; if(KSA.sort===k)KSA.dir=-KSA.dir; else { KSA.sort=k; KSA.dir=1; } renderStockAvail(); }; });
+  document.getElementById('ksa-csv').onclick=function(){ var head=['SKU','Product name','Category','Season','Status'], full=KSA_BLOCKS.map(function(b){ return {k:b[0],lbl:b[0]==='g'?'Global':b[1],cols:ksaCols(b[0],b[0]==='g'||b[0]==='us')}; });
+    full.forEach(function(b){ b.cols.forEach(function(c){ head.push(b.lbl+' '+c[1]); }); });
+    ksCsv('stock-availability.csv',head,vis.map(function(r){ var a=[r.sku,r.n,r.c,r.s,r.st]; full.forEach(function(b){ b.cols.forEach(function(c){ var v=r.k[b.k][c[0]]; a.push(c[0]==='eta'?ksDate(v):(v==null?'':Math.round(v))); }); }); return a; })); };
+}
+
+// ---------- Stock On Order ----------
+var KSO={d:null,busy:false,err:'',q:'',f:{},from:'',to:'',group:'none',sort:[['intake',1],['po',1]],shut:{},open:null,set:false,setMsg:'',fx:null};
+var KSO_COLS=[['sku','SKU','t'],['n','Product name','t'],['c','Category','t'],['s','Season','t'],['st','Status','t'],['supplier','Supplier','t'],['po','PO','t'],['mkt','Market','t'],['dest','Destination','t'],['status','PO status','t'],
+  ['intake','Intake date','d'],['month','Intake month','m'],['qty','Qty units','n'],['rrpG','RRP incl VAT (£)','p'],['costG','FOB cost price (£)','p'],['rv','Retail value ex VAT (£)','v'],['cv','FOB cost value (£)','v'],['mg','FOB margin %','%']];
+var KSO_CHIPS=[['supplier','Supplier'],['c','Category'],['po','PO'],['mkt','Market'],['month','Intake month'],['s','Season'],['st','Status'],['dest','Destination'],['status','PO status']];
+function ksoFx(S,ccy){ ccy=String(ccy||'').toUpperCase(); return ccy==='GBP'?1:ccy==='USD'?S.gbp_per_usd:ccy==='EUR'?S.gbp_per_eur:ccy==='AUD'?S.gbp_per_aud:null; }
+function ksoCalc(){ var S=KSO.d.settings, mk={UK:['GBP','uk_div'],US:['USD','us_div'],EU:['EUR','eu_div'],AU:['AUD','au_div']};
+  KSO.d.rows.forEach(function(r){ var m=mk[r.mkt], fr=ksoFx(S,m[0]), dv=S[m[1]], fc=ksoFx(S,r.ccy);
+    r.month=ksMonth(r.intake); r.monthKey=String(r.intake||'').slice(0,7);
+    r.rrpG=r.rrp!=null&&fr?r.rrp*fr:null; r.costG=r.cost!=null&&fc?r.cost*fc:null;
+    r.rv=r.rrpG!=null&&dv?r.qty*r.rrpG/dv:null; r.cv=r.costG!=null?r.qty*r.costG:null; r.mg=r.rv&&r.cv!=null?(r.rv-r.cv)/r.rv:null; }); }
+function ksoTot(rows){ var t={qty:0,rv:0,cv:0,cvM:0,n:rows.length,noRv:0,noCv:0}; rows.forEach(function(r){ t.qty+=r.qty; if(r.cv!=null)t.cv+=r.cv; else t.noCv++; if(r.rv!=null){ t.rv+=r.rv; if(r.cv!=null)t.cvM+=r.cv; } else t.noRv++; });
+  t.mg=t.rv?(t.rv-t.cvM)/t.rv:null; return t; }   // margin from the filtered totals (rows with a retail value), not an average of rows
+function ksoCell(r,c){ var v=r[c[0]]; if(c[2]==='d')return ksDate(v); if(c[2]==='n')return ksN(v); if(c[2]==='p')return ksGbp(v,2)+(c[0]==='costG'&&r.cost_src==='product'?' <span class="mut" title="No cost on the PO line: product FOB cost used">*</span>':'');
+  if(c[2]==='v')return ksGbp(v,0); if(c[2]==='%')return v==null?'':(Math.round(v*1000)/10).toFixed(1)+'%'; return ksE(v==null?'':v); }
+function renderStockOnOrder(){ ksCss(); var p=document.getElementById('ks-panel'); if(!p)return;
+  if(!KSO.d){ p.innerHTML='<div class="mut" style="font-size:12px">'+(KSO.err?'<span style="color:var(--neg)">'+ksE(KSO.err)+'</span>':'Loading open POs…')+'</div>';
+    if(!KSO.busy&&!KSO.err){ KSO.busy=true; ksFetch('/api/inventory/stock-on-order',function(e,j){ KSO.busy=false; if(e)KSO.err=e.message; else { KSO.d=j; ksoCalc(); } renderStockOnOrder(); }); } return; }
+  var rows=KSO.d.rows, S=KSO.d.settings, f=KSO.f, q=KSO.q.toLowerCase();
+  var vis=rows.filter(function(r){ for(var i=0;i<KSO_CHIPS.length;i++){ var k=KSO_CHIPS[i][0], a=f[k]; if(a&&a.length&&a.indexOf(r[k]==null?'':String(r[k]))<0)return false; }
+    if(KSO.from&&(!r.intake||r.intake<KSO.from))return false; if(KSO.to&&(!r.intake||r.intake>KSO.to))return false; return !q||(r.sku+' '+r.n).toLowerCase().indexOf(q)>=0; });
+  var cmp=function(a,b){ for(var i=0;i<KSO.sort.length;i++){ var k=KSO.sort[i][0], d=KSO.sort[i][1]; if(k==='month')k='monthKey'; var x=a[k],y=b[k]; if(x==null&&y==null)continue; if(x==null||x==='')return 1; if(y==null||y==='')return -1;
+      if(typeof x==='string'){ x=x.toLowerCase(); y=String(y).toLowerCase(); } if(x<y)return -d; if(x>y)return d; } return 0; };
+  vis.sort(cmp);
+  var T=ksoTot(vis), arrow=function(k){ return KSO.sort[0][0]===k?(KSO.sort[0][1]>0?' ▲':' ▼'):''; };
+  var tot='<div class="ks-tot"><span>Qty units <b>'+ksN(T.qty)+'</b></span><span>Retail value ex VAT <b>'+ksGbp(T.rv)+'</b></span><span>FOB cost value <b>'+ksGbp(T.cv)+'</b></span><span>FOB margin <b>'+(T.mg==null?'':(Math.round(T.mg*1000)/10).toFixed(1)+'%')+'</b></span>'
+    +'<span class="ks-fob">Costs and margin are FOB only. Freight and duty not included.</span>'
+    +(T.noRv?'<span class="mut" title="Retail value needs an RRP and a VAT divisor for the market">'+T.noRv+' row'+(T.noRv===1?'':'s')+' without retail value'+(S.eu_div?'':' (EU VAT divisor not set)')+'; margin uses rows with a retail value</span>':'')
+    +(T.noCv?'<span class="mut">'+T.noCv+' row'+(T.noCv===1?'':'s')+' without a cost</span>':'')+'</div>';
+  var setP=KSO.set?'<div class="ks-set"><b>Settings</b> <span class="mut">(one basis for every £ figure; FX locked monthly, not live)</span><div style="margin-top:8px">'
+    +[['gbp_per_usd','£ per US$'],['gbp_per_eur','£ per €'],['gbp_per_aud','£ per A$'],['uk_div','UK VAT divisor'],['au_div','AU GST divisor'],['us_div','US divisor'],['eu_div','EU VAT divisor (planning)']].map(function(x){ var v=KSO.fx&&KSO.fx[x[0]]!=null?KSO.fx[x[0]]:S[x[0]];
+      return '<label>'+x[1]+'<input data-k="'+x[0]+'" type="number" step="0.0001" value="'+(v==null?'':v)+'"'+(x[0]==='eu_div'&&v==null?' placeholder="not set" style="border-color:var(--amber)"':'')+'></label>'; }).join('')
+    +'<label>FX last updated<input data-k="fx_date" type="date" value="'+ksE((KSO.fx&&KSO.fx.fx_date)||S.fx_date||'')+'"></label></div>'
+    +'<div class="mut">Source: '+ksE((KSO.fx&&KSO.fx.fx_source)||S.fx_source||'')+(S.updated_by?' · saved by '+ksE(String(S.updated_by).split('@')[0])+' '+ksDate(S.updated_at):'')+'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><button class="ks-btn" id="kso-fxr" title="Read Fulfil\'s current currency rates (read only) into the boxes; nothing is saved until Save">Read rates from Fulfil</button><button class="ks-btn pri" id="kso-save">Save settings</button><span style="font-size:12px">'+ksE(KSO.setMsg||'')+'</span></div></div>':'';
+  var cols=KSO_COLS, head='<tr>'+cols.map(function(c,i){ return '<th data-s="'+c[0]+'"'+(i<2?' class="fz" style="left:'+(i?150:0)+'px;min-width:'+(i?240:150)+'px;max-width:'+(i?240:150)+'px"':'')+'>'+ksE(c[1])+arrow(c[0])+'</th>'; }).join('')+'</tr>';
+  var rowHtml=function(r){ return '<tr>'+cols.map(function(c,i){ return '<td'+(i<2?' class="fz" style="left:'+(i?150:0)+'px;min-width:'+(i?240:150)+'px;max-width:'+(i?240:150)+'px;overflow:hidden;text-overflow:ellipsis" title="'+ksE(r[c[0]]||'')+'"':'')+'>'+ksoCell(r,c)+'</td>'; }).join('')+'</tr>'; };
+  var body='';
+  if(KSO.group==='none') body=vis.map(rowHtml).join('');
+  else { var gk=KSO.group, groups=[], gm={}; vis.forEach(function(r){ var k=r[gk==='month'?'month':gk]||'(blank)'; if(!gm[k]){ gm[k]=[]; groups.push(k); } gm[k].push(r); });
+    groups.forEach(function(k){ var g=gm[k], t=ksoTot(g), shut=KSO.shut[gk+'|'+k];
+      body+='<tr class="sub"><td class="fz gtog" data-g="'+ksE(k)+'" style="left:0;min-width:150px;max-width:150px">'+(shut?'▸ ':'▾ ')+ksE(k)+'</td><td class="fz" style="left:150px;min-width:240px;max-width:240px">'+g.length+' line'+(g.length===1?'':'s')+'</td>'
+        +cols.slice(2).map(function(c){ return '<td>'+(c[0]==='qty'?ksN(t.qty):c[0]==='rv'?ksGbp(t.rv):c[0]==='cv'?ksGbp(t.cv):c[0]==='mg'?(t.mg==null?'':(Math.round(t.mg*1000)/10).toFixed(1)+'%'):'')+'</td>'; }).join('')+'</tr>';
+      if(!shut)body+=g.map(rowHtml).join(''); }); }
+  var anyF=KSO_CHIPS.some(function(c){ return f[c[0]]&&f[c[0]].length; })||KSO.from||KSO.to||KSO.q;
+  p.innerHTML='<div style="font-size:12px;color:var(--muted);margin:0 0 8px;max-width:1100px">Every SKU on supplier-confirmed open POs (Production, Ready to ship, Shipping, Shipped to master, and Delivered not yet confirmed in the 3PL), UK / US / EU / AU. Intake date = HORIZON\'s PO delivery date (the shipment\'s date when the PO is on one). All values in £ at the Settings rates. RRP incl VAT: the US price excludes sales tax. FOB cost = PO line cost in the supplier\'s currency (* = no cost on the line, product FOB cost used).</div>'
+    +tot+setP
+    +'<div class="ks-bar"><input type="search" id="kso-q" placeholder="SKU or product name" value="'+ksE(KSO.q)+'" style="min-width:200px">'
+    +KSO_CHIPS.map(function(c){ var vals=c[0]==='month'?ksUniq(rows,function(r){return r.monthKey;}).map(function(k){ return ksMonth(k+'-01'); }):ksUniq(rows,function(r){ return r[c[0]]==null?'':String(r[c[0]]); }); return ksMulti(c[0],c[1],vals,f[c[0]]||[],KSO.open); }).join('')
+    +'<span style="font-size:12px">Intake <input type="date" id="kso-from" value="'+ksE(KSO.from)+'"> to <input type="date" id="kso-to" value="'+ksE(KSO.to)+'"></span>'
+    +(anyF?'<button class="ks-btn" id="kso-clr">Clear all</button>':'')+'</div>'
+    +'<div class="ks-bar"><span style="font-size:12px;font-weight:700">Group by</span>'+[['none','None'],['po','PO'],['supplier','Supplier'],['month','Intake month'],['mkt','Market']].map(function(g){ return '<button class="ks-btn'+(KSO.group===g[0]?' pri':'')+' kso-g" data-g="'+g[0]+'">'+g[1]+'</button>'; }).join('')
+    +'<button class="ks-btn" id="kso-csv">⤓ CSV</button><button class="ks-btn" id="kso-set">⚙ Settings</button><button class="ks-btn" id="kso-rl">↻ Refresh</button><span class="mut" style="font-size:12px">'+vis.length.toLocaleString()+' of '+rows.length.toLocaleString()+' lines</span></div>'
+    +'<div class="ks-wrap"><table class="ks-t"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+  var qi=document.getElementById('kso-q'); qi.oninput=function(){ clearTimeout(KSO._t); KSO._t=setTimeout(function(){ KSO.q=qi.value; renderStockOnOrder(); var n=document.getElementById('kso-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+  ksBindMulti(p,KSO,renderStockOnOrder);
+  document.getElementById('kso-from').onchange=function(){ KSO.from=this.value; renderStockOnOrder(); }; document.getElementById('kso-to').onchange=function(){ KSO.to=this.value; renderStockOnOrder(); };
+  var cl=document.getElementById('kso-clr'); if(cl)cl.onclick=function(){ KSO.f={}; KSO.from=''; KSO.to=''; KSO.q=''; renderStockOnOrder(); };
+  p.querySelectorAll('.kso-g').forEach(function(b){ b.onclick=function(){ KSO.group=b.dataset.g; renderStockOnOrder(); }; });
+  p.querySelectorAll('td.gtog').forEach(function(t){ t.onclick=function(){ var k=KSO.group+'|'+t.dataset.g; KSO.shut[k]=!KSO.shut[k]; renderStockOnOrder(); }; });
+  p.querySelectorAll('th[data-s]').forEach(function(t){ t.onclick=function(){ var k=t.dataset.s; if(KSO.sort[0][0]===k)KSO.sort[0][1]=-KSO.sort[0][1]; else KSO.sort=[[k,1],['po',1]]; renderStockOnOrder(); }; });
+  document.getElementById('kso-rl').onclick=function(){ KSO.d=null; KSO.err=''; renderStockOnOrder(); };
+  document.getElementById('kso-set').onclick=function(){ KSO.set=!KSO.set; KSO.fx=null; KSO.setMsg=''; renderStockOnOrder(); };
+  document.getElementById('kso-csv').onclick=function(){ ksCsv('stock-on-order.csv',cols.map(function(c){ return c[1]; }),vis.map(function(r){ return cols.map(function(c){ var v=r[c[0]]; if(c[2]==='d')return ksDate(v); if(c[2]==='p')return v==null?'':Math.round(v*100)/100; if(c[2]==='v')return v==null?'':Math.round(v); if(c[2]==='%')return v==null?'':Math.round(v*1000)/10; return v==null?'':v; }); })); };
+  var fxr=document.getElementById('kso-fxr'); if(fxr)fxr.onclick=function(){ KSO.setMsg='Reading Fulfil…'; renderStockOnOrder(); ksFetch('/api/inventory/fx-fulfil',function(e,j){ if(e){ KSO.setMsg=e.message; } else { KSO.fx={gbp_per_usd:j.gbp_per_usd,gbp_per_eur:j.gbp_per_eur,gbp_per_aud:j.gbp_per_aud,fx_date:String(j.read_at).slice(0,10),fx_source:'Fulfil currency rates read '+ksDate(j.read_at)}; KSO.setMsg='Fulfil rates filled in. Press Save to use them.'; } renderStockOnOrder(); }); };
+  var sv=document.getElementById('kso-save'); if(sv)sv.onclick=function(){ var b={}; p.querySelectorAll('.ks-set input[data-k]').forEach(function(i){ b[i.dataset.k]=i.value===''?null:(i.type==='date'?i.value:Number(i.value)); }); if(KSO.fx&&KSO.fx.fx_source)b.fx_source=KSO.fx.fx_source;
+    KSO.setMsg='Saving…'; renderStockOnOrder();
+    fetch('/api/inventory/stock-on-order/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ KSO.d.settings=j.settings; KSO.fx=null; ksoCalc(); KSO.setMsg='Saved'; renderStockOnOrder(); }).catch(function(e){ KSO.setMsg=e.message; renderStockOnOrder(); }); };
 }
 // v28.235 (Ben): BUY & MOVE ▸ Inventory ▸ COGS. Per-unit cost per SKU per warehouse for the Airtable cogs-up table.
 // Analyse = server reads LIVE Fulfil's Inventory Valuation (UK + AU companies) and previews every value: Fulfil (stock on

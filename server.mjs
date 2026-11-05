@@ -1478,6 +1478,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/demand/cache/invalidate') return null;   // in-app "refresh" button — rebuild-only, harmless, no data write (ungated sibling of the secret-gated /api/data-cache/invalidate)
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;
+  if (method === 'POST' && p === '/api/inventory/stock-on-order/settings') return 'supply';   // v28.732 Stock On Order settings (FX / VAT divisors): SUPPLY edit
   if (method === 'POST' && p === '/api/inventory/backorder-orders') return null;   // v28.492 (SUG-0040): live Fulfil READ of the orders behind backorders (POST only to carry the SKU list), no DB write   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
@@ -26135,6 +26136,91 @@ app.post('/api/scenario/prime-day', async (req, res) => {
 // Buy-plan extra stock pools per SKU: AWD (US upstream, inventory_us_awd) + NonGRS on-hand (UK/US). The buy
 // plan pools AWD into FBA cover and shows it in its own column; NonGRS is shown as a sub-line under SOH 3PL
 // (display only). Defensive on the NonGRS columns so it works if those columns are absent (returns 0 until then).
+// ── v28.732 (Kathryn 05-Nov-26 build briefs, Ben 06-Nov-26 "build"): BUY & MOVE > Inventory > Stock Availability + Stock On Order.
+// One row per SKU (availability) / per SKU per PO (on order), UK + US + EU + AU only (Canada and China out of scope).
+// ON ORDER (Kathryn's rule, both sheets): supplier-confirmed open POs = status PRODUCTION, READY TO SHIP, SHIPPING, SHIPPED TO MASTER,
+// plus DELIVERED while confirmed_in_3pl is false; FUTURE and COMPLETE excluded. Read from the PO lines (not the inbound feed), so it
+// differs on purpose from the buy plan's on-order (which also counts FUTURE POs and the Fulfil inbound feed; see lib/ai-logic).
+// Market + destination come from the PO's branch through _INV_BRANCH_MAP (the same branch -> warehouse map the inventory snapshots
+// use): e.g. UK ILG = uk_3pl, UK FBA = uk_fba, US AWD = us_awd. Branches that map to no warehouse (Direct to Client, Manufacturing,
+// China Stock, B2B, CA FBA) and the non-GRS branches are left out. Intake date = v_po_finance.eff_delivery (HORIZON's canonical
+// delivery date: the linked shipment's arrival / delivery / landing first, else production end + 7 + branch transit).
+// ON HAND: v_product_inventory (the buy plan's on hand, negatives kept so data issues stay visible); US AWD = products.inventory_us_awd
+// (the buy plan's AWD figure). Non-GRS (inventory_uk_nongrs / us_nongrs) excluded until Kathryn / Ben confirm.
+const KS_MKTS = ['uk', 'us', 'eu', 'au'];
+const KS_OPEN_SQL = `(po.status IN ('PRODUCTION','READY TO SHIP','SHIPPING','SHIPPED TO MASTER')
+  OR (po.status = 'DELIVERED' AND coalesce((to_jsonb(po.*)->>'confirmed_in_3pl')::boolean, false) = false))`;
+function ksWh(branch) { const w = _INV_BRANCH_MAP[String(branch || '').trim()]; if (!w) return null; const [m, d] = w.split('_'); return KS_MKTS.includes(m) && ['3pl', 'fba', 'awd'].includes(d) ? w : null; }
+async function ksOpenLines() {
+  return (await pool.query(`SELECT l.sku, po.po, coalesce(po.supplier_name, su.name, '') supplier, po.status, po.branch, l.qty::float8 qty,
+      nullif(l.cost_price, 0)::float8 line_cost,
+      coalesce(nullif((to_jsonb(p.*)->>('cost_' || lower(coalesce(su.code, ''))))::numeric, 0), nullif(p.cost, 0))::float8 sku_cost,
+      upper(coalesce(nullif(su.default_currency, ''), 'USD')) ccy, to_char(v.eff_delivery, 'YYYY-MM-DD') intake
+    FROM planner.purchase_order_lines l
+    JOIN planner.purchase_orders po ON po.po = l.po
+    LEFT JOIN planner.suppliers su ON su.id = po.supplier_id
+    LEFT JOIN planner.products p ON p.sku = l.sku
+    LEFT JOIN planner.v_po_finance v ON v.po = po.po
+    WHERE coalesce(l.qty, 0) > 0 AND ${KS_OPEN_SQL}
+      AND (to_jsonb(po.*)->>'master_po') IS NULL
+      AND po.po NOT IN (${EXCL_REF_LIST})`)).rows
+    .map(r => Object.assign(r, { wh: ksWh(r.branch) })).filter(r => r.wh);
+}
+async function ksAttrs(skus) {
+  if (!skus.length) return {};
+  const m = {}; (await pool.query(`SELECT sku, product_name n, category c, release_window s, status st, uk_rt::float8 uk, us_rt::float8 us, eu_rt::float8 eu, au_rt::float8 au
+    FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { m[r.sku] = r; }); return m;
+}
+app.get('/api/inventory/stock-availability', async (req, res) => {
+  try {
+    const [inv, awd, lines] = await Promise.all([
+      pool.query(`SELECT sku, warehouse wh, available::float8 q FROM planner.v_product_inventory WHERE warehouse = ANY($1) AND coalesce(available, 0) <> 0`,
+        [['uk_3pl', 'uk_fba', 'us_3pl', 'us_fba', 'eu_3pl', 'eu_fba', 'au_3pl', 'au_fba']]),
+      pool.query(`SELECT sku, inventory_us_awd::float8 q FROM planner.products WHERE coalesce(inventory_us_awd, 0) <> 0`),
+      ksOpenLines()]);
+    const by = {}; const row = s => by[s] || (by[s] = { sku: s, oh: {}, oo: {}, land: {} });
+    inv.rows.forEach(r => { row(r.sku).oh[r.wh] = (row(r.sku).oh[r.wh] || 0) + r.q; });
+    awd.rows.forEach(r => { row(r.sku).oh.us_awd = r.q; });
+    lines.forEach(r => { const x = row(r.sku), mk = r.wh.split('_')[0]; x.oo[r.wh] = (x.oo[r.wh] || 0) + r.qty;
+      if (r.intake) { const L = x.land[mk] || (x.land[mk] = {}); L[r.intake] = (L[r.intake] || 0) + r.qty; } });
+    const at = await ksAttrs(Object.keys(by));
+    const rows = Object.values(by).map(x => { const a = at[x.sku] || {}; return Object.assign(x, { n: a.n || '', c: a.c || '', s: a.s || '', st: a.st || '' }); });
+    res.set('Cache-Control', 'no-store').json({ rows, at: new Date().toISOString() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Settings: GBP per unit of each currency (locked monthly, not live) + VAT divisors. EU divisor has no default: Retail / margin stay blank for
+// EU until it is set (a business decision, Kathryn's open item).
+const KS_SET_DEFAULT = { gbp_per_usd: 0.742, gbp_per_eur: 0.8336, gbp_per_aud: 0.5197, uk_div: 1.2, au_div: 1.1, us_div: 1.0, eu_div: null, fx_date: '2026-11-05', fx_source: 'Fulfil currency rates read 05-Nov-26 (Kathryn brief)' };
+async function ksSettings() { const v = cpJson(await cpSetting('stock_on_order_settings', ''), null); return Object.assign({}, KS_SET_DEFAULT, v || {}); }
+app.get('/api/inventory/stock-on-order', async (req, res) => {
+  try {
+    const lines = await ksOpenLines(); const at = await ksAttrs([...new Set(lines.map(r => r.sku))]);
+    const rows = lines.map(r => { const a = at[r.sku] || {}, mk = r.wh.split('_')[0];
+      return { sku: r.sku, n: a.n || '', c: a.c || '', s: a.s || '', st: a.st || '', supplier: r.supplier, po: r.po, mkt: mk.toUpperCase(), dest: r.wh.split('_')[1].toUpperCase(),
+        status: r.status, intake: r.intake, qty: r.qty, rrp: a[mk] != null ? a[mk] : null, cost: r.line_cost != null ? r.line_cost : r.sku_cost, cost_src: r.line_cost != null ? 'po' : (r.sku_cost != null ? 'product' : null), ccy: r.ccy }; });
+    res.set('Cache-Control', 'no-store').json({ rows, settings: await ksSettings() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/inventory/stock-on-order/settings', async (req, res) => {
+  try { const b = req.body || {}, cur = await ksSettings(), out = Object.assign({}, cur);
+    const num = (k, lo, hi) => { if (b[k] === undefined) return; if (b[k] === null || b[k] === '') { out[k] = null; return; } const n = Number(b[k]); if (!(n >= lo && n <= hi)) throw Object.assign(new Error(k + ' must be between ' + lo + ' and ' + hi), { status: 400 }); out[k] = n; };
+    num('gbp_per_usd', 0.1, 5); num('gbp_per_eur', 0.1, 5); num('gbp_per_aud', 0.1, 5); num('uk_div', 1, 2); num('au_div', 1, 2); num('us_div', 1, 2); num('eu_div', 1, 2);
+    if (b.fx_date !== undefined) { if (b.fx_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.fx_date))) return res.status(400).json({ error: 'fx_date: YYYY-MM-DD' }); out.fx_date = b.fx_date || null; }
+    if (b.fx_source !== undefined) out.fx_source = String(b.fx_source || '').slice(0, 200);
+    out.updated_by = authUser(req) || null; out.updated_at = new Date().toISOString();
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('stock_on_order_settings', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(out)]);
+    res.json({ ok: true, settings: out });
+  } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// Read LIVE Fulfil's currency rates (read only) to prefill the Settings panel; nothing is saved until the user saves. Fulfil's rate is
+// units of the currency per £1 (company currency GBP), so GBP per unit = 1 / rate.
+app.get('/api/inventory/fx-fulfil', async (req, res) => {
+  try { const r = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/currency.currency/search_read', { filters: [['code', 'in', ['USD', 'EUR', 'AUD', 'GBP']]], fields: ['code', 'rate'] });
+    const rate = {}; (r || []).forEach(x => { rate[x.code] = _fulfilNum(x.rate); });
+    const g = c => rate[c] && rate.GBP ? Math.round(rate.GBP / rate[c] * 10000) / 10000 : null;
+    res.json({ rates: rate, gbp_per_usd: g('USD'), gbp_per_eur: g('EUR'), gbp_per_aud: g('AUD'), read_at: new Date().toISOString() });
+  } catch (e) { log500(e); res.status(502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
+});
 app.get('/api/buy-extra-stock', async (req, res) => {
   try {
     const cols = (await pool.query(`SELECT column_name FROM information_schema.columns
@@ -36583,16 +36669,34 @@ app.get('/api/cp/orders/:okey/invoice.pdf', cpAuth, async (req, res) => {
 // Seller / VAT / bank details per channel: app_settings invoice_link_entities (JSON, ACCOUNTS > Invoice links); EU from Fulfil's
 // current template, UK and US bank blocks empty until Ben supplies them. Pay by card: behind app_settings invoice_pay_enabled.
 const IL_GATEWAY = { 'dockandbay-uk-ws': 48, 'dockandbay-us-ws': 49, 'dockandbay-eu-ws': 50 };   // channel -> Fulfil Stripe gateway (pay by card)
+// v28.734: bank account lines are NOT in code (kept out of git); they live only in app_settings invoice_link_entities (ACCOUNTS > Invoice links).
+// v28.730: from Dock & Bay's Xero wholesale invoices (Ben 06-Nov-26: UKWS-6986, USWS-19303, EUWS-3306, EUWS-3288 in French). All printed on
+// every customer invoice, so not secret. Editable in ACCOUNTS > Invoice links (app_settings invoice_link_entities overrides key by key).
+const IL_GRS = ['GRS Certified* 83% Pre Consumer Recycled Polyester (RM0189) 17% Pre Consumer Recycled Polyamide (RM1084)',
+  'GRS Certified** Upper: 83% Pre Consumer Recycled Polyester (RM0189) 17% Pre Consumer Recycled Polyamide (RM1084). Reverse: 100% Pre Consumer Recycled Polyester (RM0189)'];
+const IL_FOOTER = 'Company Registration No: 09444124. Registered Office: 90a High Street, Berkhamsted, Hertfordshire, HP4 2BL, GBR';
 const IL_DEFAULT_ENTITIES = {
-  'dockandbay-uk-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
-    tax_label: 'VAT', tax_name: 'VAT', tax_numbers: ['GB 212 5071 56'], bank: [], terms_url: '' },
-  'dockandbay-eu-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
-    ship_from: ['Dock & Bay Ltd c/o I-Fulfilment', 'Harderhook 19', '46395 Bocholt', 'Germany'],
-    tax_label: 'VAT', tax_name: 'VAT', tax_numbers: ['DE309038882', 'GB 212 5071 56'],
-    bank: ['Bank of Ireland (IE)', 'Account name: Dock & Bay Ltd', 'Account: 36625168', 'Sort code: 90 25 14', 'BIC: BOFIIE2DXXX', 'IBAN: IE16BOFI90001736625168'],
-    terms_url: 'https://euwholesale.dockandbay.com/policies/terms-of-service' },
-  'dockandbay-us-ws': { legal_name: 'Dock & Bay Ltd', address: ['22 Southwark Bridge Road, City Gate House', 'London SE1 9HF', 'United Kingdom'],
-    tax_label: null, tax_name: 'Sales tax', tax_numbers: [], bank: [], terms_url: '' },
+  'dockandbay-uk-ws': { legal_name: 'Dock & Bay LTD', tax_label: 'VAT', tax_name: 'VAT', footer: IL_FOOTER,
+    from: ['Dock & Bay LTD', '90a High St', 'Berkhamsted', 'HP4 2BL', 'United Kingdom', 'sales-uk@dockandbay.com', 'CRN: 09444124', 'VAT: 212 5071 56'],
+    bank: [],
+    notes: ['Payment terms: shipment on payment of invoice (unless agreed otherwise).', 'Cheques not accepted (please contact us if this is an issue).', 'Amazon and eBay re-sellers are not permitted.'],
+    card_note: 'Card payment: use the Pay by card button on this invoice.', extra: IL_GRS, terms_url: 'https://ukwholesale.dockandbay.com/policies/terms-of-service' },
+  'dockandbay-us-ws': { legal_name: 'Dock & Bay LTD Corp', tax_label: null, tax_name: 'Sales tax', footer: IL_FOOTER,
+    from: ['Dock & Bay LTD Corp', '8 Hutchins Way', 'Westford, MA', '01886-2942', 'EIN: 98-1262923', 'CRN: 09444124', 'sales@dockandbay.com'],
+    bank: [],
+    notes: ['New accounts: please email a copy of your state resale certificate to sales-us@dockandbay.com.', 'Payment terms: payment prior to shipment (unless agreed otherwise).', 'Checks: not currently accepted.',
+      'Re-sales on Amazon / eBay are not allowed.', 'MSRP = MAP (unless otherwise agreed; see www.dockandbay.com for MSRP).'],
+    card_note: 'Card payment: use the Pay by card button on this invoice.', extra: IL_GRS, terms_url: 'https://uswholesale.dockandbay.com/policies/terms-of-service' },
+  'dockandbay-eu-ws': { legal_name: 'Dock & Bay LTD', tax_label: 'VAT', tax_name: 'VAT', footer: IL_FOOTER,
+    from: ['Dock & Bay LTD c/o I-Fulfilment', 'Harderhook 19', '46395 Bocholt', 'Germany', 'VAT: DE309038882', 'CRN: 09444124', 'VAT: 212 5071 56', 'sales@dockandbay.com'],
+    bank: [],
+    bank_fr: [],
+    notes: ['EURO PAYMENTS ONLY.', 'Payment terms: shipment on payment of invoice (unless agreed otherwise).', 'Cheques not accepted (please contact us if this is an issue).', 'Amazon and eBay re-sellers are not permitted.'],
+    notes_fr: ['PAIEMENTS EN EURO UNIQUEMENT.', 'Conditions de paiement : livraison après paiement de la facture (sauf convention contraire).', 'Chèques non acceptés (veuillez nous contacter en cas de problème).', 'Les revendeurs Amazon et eBay ne sont pas autorisés.'],
+    card_note: 'Card payment: use the Pay by card button on this invoice. A 1.4% surcharge may apply depending on location.',
+    card_note_fr: "Paiement par carte : utilisez le bouton Payer par carte de cette facture. Un supplément de 1,4 % peut s'appliquer.",
+    extra: ['Commodity / HS codes: towels, hair wraps, ponchos 6302.93.10; swim shorts 6211.11.10; makeup wipes 6307.10.20'].concat(IL_GRS),
+    terms_url: 'https://euwholesale.dockandbay.com/policies/terms-of-service', terms_url_fr: 'https://docs.google.com/document/d/1ciFQ4WX9g3lry1eTMIVP7tIF7ES7K-ZuIPEoB89kZW0/edit?usp=sharing' },
 };
 async function ilEntities() { const v = cpJson(await cpSetting('invoice_link_entities', ''), null); const out = {};
   Object.keys(IL_DEFAULT_ENTITIES).forEach(k => { out[k] = Object.assign({}, IL_DEFAULT_ENTITIES[k], (v && v[k]) || {}); }); return out; }
@@ -36643,7 +36747,7 @@ function ilMoney(v, ccy) { try { return new Intl.NumberFormat('en-GB', { style: 
 function ilPct(p) { return (Math.round(p * 100) / 100).toString().replace(/\.0+$/, '') + '%'; }
 const ilAddr = a => String(a || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 async function ilAddresses(ids) { ids = [...new Set(ids.filter(Boolean))]; if (!ids.length) return {};
-  const m = {}; ((await ilRead('party.address', [['id', 'in', ids]], ['id', 'full_address'])) || []).forEach(a => { m[a.id] = ilAddr(a.full_address); }); return m; }
+  const m = { cc: {} }; ((await ilRead('party.address', [['id', 'in', ids]], ['id', 'full_address', 'country.code'])) || []).forEach(a => { m[a.id] = ilAddr(a.full_address); m.cc[a.id] = a['country.code'] || null; }); return m; }
 function ilLine(l) { return { sku: l['product.code'] || '', desc: l.description || '', qty: ilN(l.quantity), unit: ilN(l.unit_price), disc: ilN(l.discount), amount: ilN(l.amount) }; }
 async function ilLoadProforma(row) {
   const s = (await ilRead('sale.sale', [['id', '=', Number(row.fulfil_sale_id)]], ['id', 'number', 'reference', 'sale_date', 'state', 'party.rec_name', 'party.tax_identifier.code',
@@ -36656,6 +36760,7 @@ async function ilLoadProforma(row) {
   const invs = await ilPostedInvoices(s.invoices || []);
   const owed = invs.length ? invs.reduce((a, i) => a + ilN(i.balance), 0) : Math.max(0, total - ilN(s.payment_total));
   return { kind: 'proforma', channel: s['channel.name'], ccy: s['currency.code'], number: s.number, ref: s.reference, date: ilDt(s.sale_date),
+    cc: ad.cc[s.invoice_address] || ad.cc[s.shipment_address] || null,
     customer: s['party.rec_name'], customer_tax: s['party.tax_identifier.code'], bill: ad[s.invoice_address] || ad[s.shipment_address] || [s['party.rec_name']], ship: ad[s.shipment_address] || [],
     lines: (lines || []).filter(l => l.type === 'line' && ilN(l.quantity) !== 0).sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.id - b.id).map(ilLine),
     net, tax, total, taxes: tax ? [{ desc: null, rate: net ? tax / net * 100 : null, base: net, amount: tax }] : [], terms: s['payment_term.name'], owed: Math.round(owed * 100) / 100 };
@@ -36674,7 +36779,7 @@ async function ilLoadInvoice(id, s) {
     ilAddresses([i.invoice_address, s.shipment_address])]);
   const tx = (taxes || []).map(t => ({ desc: t.description, base: ilN(t.base), amount: ilN(t.amount), rate: ilN(t.base) ? ilN(t.amount) / ilN(t.base) * 100 : null }));
   const total = ilN(i.total_amount);
-  return { kind: 'tax', id: i.id, credit: total < 0, channel: s['channel.name'], ccy: i['currency.code'], number: i.number, ref: i.reference, sale_number: s.number, date: ilDt(i.invoice_date),
+  return { kind: 'tax', id: i.id, cc: ad.cc[i.invoice_address] || ad.cc[s.shipment_address] || null, credit: total < 0, channel: s['channel.name'], ccy: i['currency.code'], number: i.number, ref: i.reference, sale_number: s.number, date: ilDt(i.invoice_date),
     due: (due || []).map(m => ilDt(m.maturity_date)).filter(Boolean).sort()[0] || null,
     customer: i['party.rec_name'], customer_tax: i['party.tax_identifier.code'], bill: ad[i.invoice_address] || [i['party.rec_name']], ship: ad[s.shipment_address] || [],
     lines: (lines || []).filter(l => l.type === 'line').sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.id - b.id).map(ilLine),
@@ -36689,47 +36794,69 @@ async function ilLoadTax(row) {
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || (a.credit - b.credit) || a.id - b.id);   // same day: invoice before credit note
   if (!docs.some(d => !d.credit)) return null;
   const owed = Math.max(0, Math.round(docs.reduce((a, d) => a + d.balance, 0) * 100) / 100);
-  return { kind: 'tax', multi: true, channel: s['channel.name'] || row.channel, ccy: docs[0].ccy, sale_number: s.number, docs, owed, number: docs.map(d => d.number).join(', ') };
+  return { kind: 'tax', multi: true, cc: docs[0].cc, channel: s['channel.name'] || row.channel, ccy: docs[0].ccy, sale_number: s.number, docs, owed, number: docs.map(d => d.number).join(', ') };
 }
+// French customers (bill-to country FR) get the document in French (Ben 06-Nov-26), like the Xero FACTURE template
+const IL_T = {
+  en: { tax: 'TAX INVOICE', inv: 'INVOICE', pro: 'PROFORMA INVOICE', cn: 'CREDIT NOTE', from: 'From', bill: 'Bill to', ship: 'Ship to', invNo: 'Invoice number', cnNo: 'Credit note number',
+    ordNo: 'Order number', ref: 'Your reference', ord: 'Order', date: 'Date', ordDate: 'Order date', tp: 'Tax point', terms: 'Payment terms', due: 'Due date', ccy: 'Currency',
+    item: 'Item', desc: 'Description', qty: 'Qty', unit: 'Unit price', disc: 'Discount', rate: 'rate', net: 'Net', total: 'Total', paid: 'Paid', bal: 'Balance due',
+    notTax: '<b>This is not a tax invoice.</b> A tax invoice is issued when the order ships.', bankH: 'Pay by bank transfer', bankRef: 'Reference: ', notesH: 'Terms', tcH: 'Full terms and conditions',
+    pdf: 'Download PDF', pay: (m) => 'Pay ' + m + ' by card', docs: 'documents', invoice: 'Invoice', credit: 'Credit note', number: 'Number', balance: 'Balance', on: ' on ',
+  },
+  fr: { tax: 'FACTURE', inv: 'FACTURE', pro: 'FACTURE PROFORMA', cn: 'AVOIR', from: 'Vendeur', bill: 'Facturé à', ship: 'Livré à', invNo: 'Numéro de facture', cnNo: "Numéro d'avoir",
+    ordNo: 'Numéro de commande', ref: 'Votre référence', ord: 'Commande', date: 'Date de facturation', ordDate: 'Date de commande', tp: 'Fait générateur', terms: 'Conditions de paiement', due: "Date d'échéance", ccy: 'Devise',
+    item: 'Article', desc: 'Description', qty: 'Quantité', unit: 'Prix unitaire', disc: 'Remise', rate: 'taux', net: 'Montant HT', total: 'Total', paid: 'Payé', bal: 'Montant dû',
+    notTax: "<b>Ceci n'est pas une facture.</b> La facture est émise à l'expédition de la commande.", bankH: 'Paiement par virement bancaire', bankRef: 'Référence : ', notesH: 'Conditions', tcH: 'Conditions générales complètes',
+    pdf: 'Télécharger le PDF', pay: (m) => 'Payer ' + m + ' par carte', docs: 'documents', invoice: 'Facture', credit: 'Avoir', number: 'Numéro', balance: 'Solde', on: ' sur ',
+  } };
+const IL_MON_FR = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
+function ilDateL(iso, fr) { if (!fr) return ilDate(iso); const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? m[3] + '-' + IL_MON_FR[Number(m[2]) - 1] + '-' + m[1].slice(2) : ''; }
+function ilMoneyL(v, ccy, fr) { try { return new Intl.NumberFormat(fr ? 'fr-FR' : 'en-GB', { style: 'currency', currency: ccy || 'GBP' }).format(v || 0); } catch (e) { return ilMoney(v, ccy); } }
 // one A4 page per document; opts.bank = show the bank block (the last page of a set, only while money is owed)
 function ilPageHtml(d, ent, opts) {
+  const fr = !!opts.fr, T = IL_T[fr ? 'fr' : 'en'], money = v => ilMoneyL(v, d.ccy, fr), dt = v => ilDateL(v, fr);
   const tax = d.taxes.length === 1 ? d.taxes[0] : null;   // one rate: per-line VAT shown; several: totals per rate only (Fulfil keeps tax on the invoice, not the line)
-  const tn = ent.tax_name || 'VAT', isTax = d.kind === 'tax', money = v => ilMoney(v, d.ccy);
+  const tn = fr && ent.tax_label ? 'TVA' : (ent.tax_name || 'VAT'), isTax = d.kind === 'tax';
+  const pct = p => fr ? ilPct(p).replace('.', ',') : ilPct(p);
   const block = (h, arr) => arr && arr.length ? '<div class="blk"><h4>' + ilEsc(h) + '</h4>' + arr.map(x => '<div>' + ilEsc(x) + '</div>').join('') + '</div>' : '';
   const anyDisc = d.lines.some(l => l.disc);
   const rows = d.lines.map(l => '<tr><td>' + ilEsc(l.sku) + '</td><td>' + ilEsc(l.desc) + '</td><td class="n">' + ilEsc(l.qty) + '</td><td class="n">' + money(l.unit) + '</td>'
-    + (anyDisc ? '<td class="n">' + (l.disc ? ilPct(l.disc * 100) : '') + '</td>' : '')
-    + '<td class="n">' + (tax && tax.rate != null ? ilPct(tax.rate) : '') + '</td>'
+    + (anyDisc ? '<td class="n">' + (l.disc ? pct(l.disc * 100) : '') + '</td>' : '')
+    + '<td class="n">' + (tax && tax.rate != null ? pct(tax.rate) : '') + '</td>'
     + (isTax ? '<td class="n">' + (tax && tax.rate != null ? money(Math.round(l.amount * tax.rate) / 100) : '') + '</td>' : '')
     + '<td class="n">' + money(l.amount) + '</td></tr>').join('');
-  const taxRows = d.taxes.map(t => '<tr><td>' + ilEsc(tn) + (t.rate != null ? ' ' + ilPct(t.rate) : '') + (t.desc ? ' (' + ilEsc(t.desc) + ')' : '') + (isTax ? ' on ' + money(t.base) : '') + '</td><td class="n">' + money(t.amount) + '</td></tr>').join('');
-  const title = !isTax ? 'PROFORMA INVOICE' : d.credit ? 'CREDIT NOTE' : ent.tax_label ? 'TAX INVOICE' : 'INVOICE';
-  const meta = [[!isTax ? 'Order number' : d.credit ? 'Credit note number' : 'Invoice number', d.number], ['Your reference', d.ref], isTax ? ['Order', d.sale_number] : null,
-    [isTax ? 'Date' : 'Order date', ilDate(d.date)], isTax && ent.tax_label ? ['Tax point', ilDate(d.date)] : null,
-    ['Payment terms', d.terms], isTax && d.due && !d.credit ? ['Due date', ilDate(d.due)] : null, ['Currency', d.ccy]].filter(x => x && x[1]);
+  const taxRows = d.taxes.map(t => '<tr><td>' + ilEsc(tn) + (t.rate != null ? ' ' + pct(t.rate) : '') + (t.desc ? ' (' + ilEsc(t.desc) + ')' : '') + (isTax ? T.on + money(t.base) : '') + '</td><td class="n">' + money(t.amount) + '</td></tr>').join('');
+  const title = !isTax ? T.pro : d.credit ? T.cn : ent.tax_label ? T.tax : T.inv;
+  const meta = [[!isTax ? T.ordNo : d.credit ? T.cnNo : T.invNo, d.number], [T.ref, d.ref], isTax ? [T.ord, d.sale_number] : null,
+    [isTax ? T.date : T.ordDate, dt(d.date)], isTax && ent.tax_label ? [T.tp, dt(d.date)] : null,
+    [T.terms, d.terms], isTax && d.due && !d.credit ? [T.due, dt(d.due)] : null, [T.ccy, d.ccy]].filter(x => x && x[1]);
+  const notes = (fr && ent.notes_fr ? ent.notes_fr : ent.notes || []).concat(opts.payOn && (ent.card_note || ent.card_note_fr) ? [fr && ent.card_note_fr ? ent.card_note_fr : ent.card_note] : []);
+  const tcUrl = fr && ent.terms_url_fr ? ent.terms_url_fr : ent.terms_url;
   return '<div class="page"><div class="hd"><img src="/api/cp/asset/logo" alt="Dock &amp; Bay"><h1>' + title + '</h1></div>'
-    + '<div class="grid">' + block('From', [ent.legal_name].concat(ent.address || []).concat((ent.tax_numbers || []).map(v => (ent.tax_label || tn) + ' ' + v)))
-    + block('Bill to', d.bill.concat(d.customer_tax ? [tn + ' ' + d.customer_tax] : [])) + block('Ship to', d.ship) + (ent.ship_from ? block('Ship from', ent.ship_from) : '')
+    + '<div class="grid">' + block(T.from, ent.from || [ent.legal_name])
+    + block(T.bill, d.bill.concat(d.customer_tax ? [tn + ' ' + d.customer_tax] : [])) + block(T.ship, d.ship)
     + '<table class="meta">' + meta.map(m => '<tr><td>' + ilEsc(m[0]) + '</td><td>' + ilEsc(m[1]) + '</td></tr>').join('') + '</table></div>'
-    + '<table class="l"><thead><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Unit price</th>' + (anyDisc ? '<th class="n">Discount</th>' : '')
-    + '<th class="n">' + ilEsc(tn) + ' rate</th>' + (isTax ? '<th class="n">' + ilEsc(tn) + '</th>' : '') + '<th class="n">Net</th></tr></thead><tbody>' + rows + '</tbody></table>'
-    + '<table class="t"><tr><td>Net</td><td class="n">' + money(d.net) + '</td></tr>' + (taxRows || '<tr><td>' + ilEsc(tn) + '</td><td class="n">' + money(0) + '</td></tr>')
-    + '<tr class="g"><td>Total ' + ilEsc(d.ccy) + '</td><td class="n">' + money(d.total) + '</td></tr>'
-    + (!d.credit && d.owed < d.total - 0.005 ? '<tr><td>Paid</td><td class="n">' + money(d.total - d.owed) + '</td></tr><tr><td><b>Balance due</b></td><td class="n"><b>' + money(d.owed) + '</b></td></tr>' : '') + '</table>'
-    + (isTax ? '' : '<div class="note"><b>This is not a tax invoice.</b> A tax invoice is issued when the order ships.</div>')
-    + '<div class="foot">' + (opts.bank && ent.bank && ent.bank.length ? block('Pay by bank transfer', ent.bank.concat(['Reference: ' + (opts.ref || d.number)])) : '')
-    + (ent.terms_url ? block('Terms and conditions', [ent.terms_url]) : '') + '</div>'
-    + (ent.company_no ? '<div class="small">' + ilEsc(ent.legal_name) + '. ' + ilEsc(ent.company_no) + '</div>' : '') + '</div>';
+    + '<table class="l"><thead><tr><th>' + T.item + '</th><th>' + T.desc + '</th><th class="n">' + T.qty + '</th><th class="n">' + T.unit + '</th>' + (anyDisc ? '<th class="n">' + T.disc + '</th>' : '')
+    + '<th class="n">' + ilEsc(tn) + ' ' + T.rate + '</th>' + (isTax ? '<th class="n">' + ilEsc(tn) + '</th>' : '') + '<th class="n">' + T.net + '</th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<div class="tot"><table class="t"><tr><td>' + T.net + '</td><td class="n">' + money(d.net) + '</td></tr>' + (taxRows || '<tr><td>' + ilEsc(tn) + '</td><td class="n">' + money(0) + '</td></tr>')
+    + '<tr class="g"><td>' + T.total + ' ' + ilEsc(d.ccy) + '</td><td class="n">' + money(d.total) + '</td></tr>'
+    + (!d.credit && d.owed < d.total - 0.005 ? '<tr><td>' + T.paid + '</td><td class="n">' + money(d.total - d.owed) + '</td></tr><tr><td><b>' + T.bal + '</b></td><td class="n"><b>' + money(d.owed) + '</b></td></tr>' : '') + '</table></div>'
+    + (isTax ? '' : '<div class="note">' + T.notTax + '</div>')
+    + '<div class="foot">' + (opts.bank ? block(T.bankH, (fr && ent.bank_fr ? ent.bank_fr : ent.bank || []).concat((ent.bank || []).length ? [T.bankRef + (opts.ref || d.number)] : [])) : '')
+    + (notes.length && !d.credit ? block(T.notesH, notes) : '') + (tcUrl ? block(T.tcH, [tcUrl]) : '') + '</div>'
+    + (ent.extra && ent.extra.length ? '<div class="small">' + ent.extra.map(ilEsc).join('<br>') + '</div>' : '')
+    + (ent.footer ? '<div class="small ft">' + ilEsc(ent.footer) + '</div>' : '') + '</div>';
 }
 function ilRender(d, ent, token, payOn) {
-  const money = v => ilMoney(v, d.ccy), docs = d.multi ? d.docs : [d];
-  const pay = payOn && d.owed > 0.005 ? '<a class="btn pay" href="/invoice/' + ilEsc(token) + '/pay" rel="nofollow">Pay ' + money(d.owed) + ' by card</a>' : '';
-  const sum = docs.length > 1 ? '<div class="page sum"><b>Order ' + ilEsc(d.sale_number) + ': ' + docs.length + ' documents</b><table class="l"><thead><tr><th>Document</th><th>Number</th><th>Date</th><th class="n">Total</th><th class="n">Balance</th></tr></thead><tbody>'
-    + docs.map(x => '<tr><td>' + (x.credit ? 'Credit note' : 'Invoice') + '</td><td>' + ilEsc(x.number) + '</td><td>' + ilDate(x.date) + '</td><td class="n">' + money(x.total) + '</td><td class="n">' + money(x.balance) + '</td></tr>').join('')
-    + '</tbody></table><table class="t"><tr class="g"><td>Balance due</td><td class="n">' + money(d.owed) + '</td></tr></table></div>' : '';
-  const pages = docs.map((x, k) => ilPageHtml(x, ent, { bank: k === docs.length - 1 && d.owed > 0.005, ref: docs.length > 1 ? d.number : null })).join('');
-  const title = d.kind === 'tax' ? (docs.length > 1 ? 'Invoices ' : 'Invoice ') + d.number : 'Proforma ' + d.number;
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
+  const fr = d.cc === 'FR', T = IL_T[fr ? 'fr' : 'en'], money = v => ilMoneyL(v, d.ccy, fr), docs = d.multi ? d.docs : [d];
+  const pay = payOn && d.owed > 0.005 ? '<a class="btn pay" href="/invoice/' + ilEsc(token) + '/pay" rel="nofollow">' + ilEsc(T.pay(money(d.owed))) + '</a>' : '';
+  const sum = docs.length > 1 ? '<div class="page sum"><b>' + ilEsc(T.ord) + ' ' + ilEsc(d.sale_number) + ': ' + docs.length + ' ' + T.docs + '</b><table class="l"><thead><tr><th></th><th>' + T.number + '</th><th>' + T.date + '</th><th class="n">' + T.total + '</th><th class="n">' + T.balance + '</th></tr></thead><tbody>'
+    + docs.map(x => '<tr><td>' + (x.credit ? T.credit : T.invoice) + '</td><td>' + ilEsc(x.number) + '</td><td>' + ilDateL(x.date, fr) + '</td><td class="n">' + money(x.total) + '</td><td class="n">' + money(x.balance) + '</td></tr>').join('')
+    + '</tbody></table><table class="t"><tr class="g"><td>' + T.bal + '</td><td class="n">' + money(d.owed) + '</td></tr></table></div>' : '';
+  const pages = docs.map((x, k) => ilPageHtml(x, ent, { fr, payOn, bank: k === docs.length - 1 && d.owed > 0.005, ref: docs.length > 1 ? d.number : null })).join('');
+  const title = d.kind === 'tax' ? (docs.length > 1 ? T.invoice + 's ' : T.invoice + ' ') + d.number : T.pro + ' ' + d.number;
+  return '<!doctype html><html lang="' + (fr ? 'fr' : 'en') + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
     + '<title>' + ilEsc(title) + ' | Dock &amp; Bay</title><style>'
     + '*{box-sizing:border-box}body{margin:0;background:#f3f3f1;color:#1d1d1b;font:13px/1.45 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}'
     + '.bar{max-width:210mm;margin:16px auto 0;display:flex;gap:8px;justify-content:flex-end;padding:0 16px}.btn{display:inline-block;border:1px solid #1d1d1b;background:#fff;color:#1d1d1b;padding:8px 14px;border-radius:4px;text-decoration:none;font-weight:600;cursor:pointer;font:inherit}.btn.pay{background:#1d1d1b;color:#fff}'
@@ -36738,11 +36865,11 @@ function ilRender(d, ent, token, payOn) {
     + '.grid{display:flex;flex-wrap:wrap;gap:12px 32px;margin-top:18px}.blk{min-width:150px}.blk h4{margin:0 0 3px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b6b66}'
     + '.meta{margin-left:auto}.meta td{padding:1px 0 1px 12px}.meta td:first-child{color:#6b6b66;padding-left:0}'
     + 'table.l{width:100%;border-collapse:collapse;margin-top:20px}table.l th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b6b66;border-bottom:1.5px solid #1d1d1b;padding:6px 6px}table.l td{border-bottom:1px solid #e6e6e2;padding:6px;vertical-align:top}'
-    + '.n{text-align:right;white-space:nowrap}table.t{margin:12px 0 0 auto;border-collapse:collapse;min-width:260px}table.t td{padding:4px 6px}table.t tr.g td{border-top:1.5px solid #1d1d1b;font-weight:700;font-size:15px}'
-    + '.note{margin-top:18px;padding:10px 12px;background:#f6f6f3;border-radius:4px}.foot{margin-top:22px;display:flex;flex-wrap:wrap;gap:16px 40px}.small{color:#6b6b66;font-size:11px;margin-top:20px}'
+    + '.n{text-align:right;white-space:nowrap}.tot{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-start;margin-top:12px}table.t{margin-left:auto;border-collapse:collapse;min-width:260px}table.t td{padding:4px 6px}table.t tr.g td{border-top:1.5px solid #1d1d1b;font-weight:700;font-size:15px}'
+        + '.note{margin-top:18px;padding:10px 12px;background:#f6f6f3;border-radius:4px}.foot{margin-top:22px;display:flex;flex-wrap:wrap;gap:16px 40px}.foot .blk{max-width:100%}.small{color:#6b6b66;font-size:10.5px;margin-top:16px}.small.ft{border-top:1px solid #e6e6e2;padding-top:6px}.tiny{color:#6b6b66}'
     + '@media(max-width:640px){.page{padding:16px;margin:8px 0}.bar{padding:0 16px}table.l{font-size:12px}.hd h1{font-size:18px}.meta{margin-left:0}}'
     + '@media print{body{background:#fff}.bar{display:none}.page{box-shadow:none;margin:0;max-width:none;padding:0;break-after:page}.page:last-child{break-after:auto}@page{size:A4;margin:12mm}}'
-    + '</style></head><body><div class="bar">' + pay + '<button class="btn" onclick="window.print()">Download PDF</button></div>' + sum + pages + '</body></html>';
+    + '</style></head><body><div class="bar">' + pay + '<button class="btn" onclick="window.print()">' + T.pdf + '</button></div>' + sum + pages + '</body></html>';
 }
 function ilPlain(res, code, msg) { res.status(code).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' })
   .send('<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Dock &amp; Bay</title><p style="font:14px system-ui;padding:24px">' + ilEsc(msg) + '</p>'); }

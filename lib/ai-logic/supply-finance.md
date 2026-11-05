@@ -32,6 +32,8 @@ sources:
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: cchBuild, cchCogsAcct, CCH_SALES, cchXeroRun, cchEmail, /api/cron/cogs-channel (COGS and SALES by channel journals, v28.727)
   - server.mjs :: ilLoadProforma, ilLoadTax, ilRender, /api/invoice-links/ensure, /invoice/:token (public wholesale invoice pages, v28.730)
+  - server.mjs :: ksOpenLines, /api/inventory/stock-availability, /api/inventory/stock-on-order (Stock Availability + Stock On Order sheets, v28.732)
+  - artifact_v16.7.html :: renderStockAvail, renderStockOnOrder, ksaNext, ksoCalc
   - artifact_v16.7.html :: renderCogsCh
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
   - supply/inject.html :: hzUpload
@@ -858,3 +860,12 @@ verified_version: v28.616
 - Amount owed: tax page = sum of the invoices' Fulfil balance (floor 0); proforma = the posted invoices' balance once invoiced, else the order total less payment_total. Bank details show only while money is owed. Pay by card shows only when app_settings invoice_pay_enabled is true and money is owed; the Fulfil payment link API is not wired yet, so the pay route fails closed.
 - Seller, VAT and bank details per channel: app_settings invoice_link_entities over the built-in defaults (EU from Fulfil's Sales Order Confirmation template; UK and US bank lines empty).
 - Links never expire; Revoke (admin) kills a token and the next ensure issues a new one. Unknown / revoked token: plain 404. Pages are noindex, no-store, rate limited per IP.
+
+### Stock Availability and Stock On Order sheets (v28.732, DEMAND > Analysis from v28.733: #/demand/analysis/stockavail, #/demand/analysis/onorder)
+- Built from Kathryn's briefs (05-Nov-26). UK, US, EU and AU only; Canada and China out of scope.
+- On order (both sheets) = PO lines of POs with status PRODUCTION, READY TO SHIP, SHIPPING or SHIPPED TO MASTER, plus DELIVERED while confirmed_in_3pl is false. FUTURE and COMPLETE never count. Excluded inbound references and child POs (master_po set) are left out.
+- This is NOT the buy plan's on-order. The buy plan also counts FUTURE POs, the Fulfil inbound feed's remaining quantity (net of partial receipts) and internal FBA transfers (branch_transfer). The sheets count the full PO line quantity of supplier-confirmed POs only.
+- Market and destination come from the PO branch through _INV_BRANCH_MAP (UK ILG uk_3pl, UK FBA uk_fba, US Geneva us_3pl, US AWD us_awd, EU iFulfillment eu_3pl, AU Coghlans au_3pl ...). Branches with no warehouse (Direct to Client, Manufacturing, China Stock, B2B, CA) and the non-GRS branches are left out. purchase_orders.country_code is not used (it is blank or wrong on some POs).
+- Intake date = v_po_finance.eff_delivery: the linked shipment's arrival / delivery / landing date first, else production end + 7 days + the branch's transit. Next ETA (>20 units): units summed by intake date across the block's POs, earliest date over 20; Global sums the markets by date first.
+- On hand = v_product_inventory (same as the buy plan; negatives shown as held). US AWD on hand = products.inventory_us_awd (the buy plan's AWD). Non-GRS stock (inventory_uk_nongrs / us_nongrs) is not counted.
+- Stock On Order money, all £ at the Settings rates (app_settings stock_on_order_settings, locked monthly): RRP incl VAT = products.<mkt>_rt x £ per market currency (US RRP has no sales tax); FOB cost = PO line cost_price, else the product's FOB cost (cost_<supplier code>, then cost), in the supplier's default_currency, x £ rate. Retail value ex VAT = qty x RRP £ / divisor (UK 1.2, AU 1.1, US 1.0, EU planning rate: blank until set, so EU retail and margin are blank). FOB margin % = (retail - FOB cost) / retail; the totals bar uses the filtered totals of rows that have a retail value.
