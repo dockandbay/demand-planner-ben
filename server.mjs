@@ -9893,8 +9893,9 @@ async function computeXeroRunPlan(run, ctx) {
     const _lk = linkByPo[String(l.reference || '')], _bo = (!isDeposit && _lk && billOrgById[_lk.external_id]) || null;
     const home = _bo || homeOfLine(l);   // v28.629: bill's own org wins for completion/balance
     const cross = home !== paying;
-    const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
-    const useNew = (home === 'au') || (prodN != null && prodN >= 58);   // AU always new; UK P58+ new, earlier legacy
+    // v28.721 (Ben 05-Nov-26, P60-UK-BL1 deposit "unmapped": its prod_no was blank): the production also comes from the reference ("P60-UK-BL1" -> 60)
+    const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, '') || ((/^P(\d{2,3})(?![0-9])/i.exec(String(l.reference || '').trim()) || [])[1] || ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
+    const useNew = (home === 'au') || (prodN != null && prodN >= 58) || (isDeposit && prodN == null);   // AU always new; UK P58+ new, earlier legacy; v28.721: a deposit with no production at all -> Stock Deposits too (never unmapped)
     const link = linkByPo[String(l.reference || '')] || null;
     let acct, acctRole, trackOption = null, blocked = null, flag = null;
     if (isDeposit) {
@@ -9902,7 +9903,8 @@ async function computeXeroRunPlan(run, ctx) {
       // two-org-mixed deposits are flagged and blocked (no settlement posts).
       if (depositsMultiOrg) { flag = 'brightred'; blocked = 'Deposits from ' + [...depositOrgs].map(o => o.toUpperCase()).join(' + ') + ' are mixed — run each org’s deposits separately.'; }
       else if (cross) { flag = 'red'; blocked = 'Deposit must be paid from its home org (' + home.toUpperCase() + ') bank — cannot settle from a ' + paying.toUpperCase() + ' run.'; }
-      if (useNew) { acctRole = 'stock_deposits'; const a = accts['stock_deposits']; acct = a ? { code: a.code, name: a.name, id: a.id } : null; trackOption = prodDigits ? ('P' + prodDigits) : null; }
+      if (useNew) { acctRole = 'stock_deposits'; const a = accts['stock_deposits']; acct = a ? { code: a.code, name: a.name, id: a.id } : null; trackOption = prodDigits ? ('P' + prodDigits) : null;
+      }
       else { acctRole = 'legacy'; const lp = legacyProdAcct[String(l.prod_no || '').trim()]; const code = (l.account_code || '').trim() || (lp && lp.code) || ''; acct = code ? { code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null; }
     } else if (cross) {
       // Cross-org completion/balance → the supplier-payment bill line codes to the PAYING org's loan (901); the
@@ -10020,6 +10022,8 @@ async function computeXeroRunPlan(run, ctx) {
     if (missOrgs.size) checks.push({ level: 'error', msg: 'Intercompany loan (901) account not found in Xero ' + [...missOrgs].join(' + ') + ' — bind it in SUPPLY ▸ CONFIG ▸ Xero (admin).' });
     else checks.push({ level: 'ok', msg: crossPay.length + ' cross-org line(s) settle via the intercompany loan (901): ' + [...new Set(crossPay.map(l => l.reference + ' → ' + l.home_org.toUpperCase()))].join(', ') });
   }
+  { const noProd = outLines.filter(l => l.account_role === 'stock_deposits' && !l.tracking_option && !(l.tracking && l.tracking.option));   // v28.721
+    if (noProd.length) checks.push({ level: 'warn', msg: noProd.length + ' deposit(s) with no production number (' + noProd.map(l => l.reference).join(', ') + '): coded to Stock Deposits with no Production tag. Set the production on the deposit to tag it.' }); }
   ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + paying.toUpperCase() }); });
   const legacyLines = outLines.filter(l => l.account_role === 'legacy');
   if (legacyLines.length) {

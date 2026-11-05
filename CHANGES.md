@@ -1,3 +1,7 @@
+## v28.721 (05-Nov-26) Payments Report -> Xero: deposits never unmapped (production read from the reference; P58+ to Stock Deposits)
+- Ben 05-Nov-26: Ballast deposit P60-UK-BL1 (23,704.37, 27-Oct-26) showed "unmapped": its deposits.prod_no is blank, so it fell to the pre-P58 per-production account lookup. The production now also comes from the reference (P60), so it codes to Stock Deposits 602 tagged P60. A deposit with no production at all goes to 602 untagged, with a warning.
+- Files: server.mjs, lib/ai-logic/supply-finance.md. No migration, no env vars, no new cron routes.
+
 ## v28.720 (05-Nov-26) Xero payments exceptions: dismiss / reopen (remembered, hidden, toggle), due-date fixes one or all
 - Ben 05-Nov-26 (59 issues on live): Dismiss on every exception, "Show dismissed (N)" toggle; the badge counts open ones. POST /api/supply/xero/exceptions/dismiss.
 - Due-date mismatches: "HORIZON → Xero" (live Xero bill DueDate, read back) or "Xero → HORIZON" (PO balance due date override), per row or all; in-page confirm. POST /api/supply/xero/exceptions/due-fix { items, to, confirm }.
