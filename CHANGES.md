@@ -1,3 +1,11 @@
+## v28.711 (05-Nov-26) Commissions Exceptions: delivery / source / earlier orders, agent changed, Faire 0% claim (to-do for Madison), dismiss / reopen, search
+- GET /api/client/commission/checks?month= ; POST /api/client/commission/checks/dismiss { key, dismiss }. Dismissals in app_settings cm_exc_dismissed; Faire to-dos once per order (cm_faire_todo) into planner.user_todos for madison@.
+- Faire external API (read only): orders of the last 90 days, commission_bps / commission / source. NEW ENV VAR on prod: FAIRE_API_TOKEN (FAIRE_API_BASE_URL optional, default https://www.faire.com/external-api/v2). Without it the Faire check says "Faire not read" and the rest works.
+- Cron /api/cron/commission-weekly gains ?step=checks (same route, already in the auth-gate bracket). n8n hCXbKUb5BnvmQQgA (inactive) now has step 4.
+- Engine: Fulfil ship-to name / street / city read for the exceptions.
+- Oct-26 on live data (sandbox): 17 no agent (all organic Shopify wholesale), 1 agent changed (Sunny Kids, Ivystone 2023 -> Patrickco), 63 Faire orders read, 0 claims.
+- Files: server.mjs, supply/inject.html, lib/ai-logic/supply-finance.md, docs/specs/commission-agent-checks.md. No migration.
+
 ## v28.710 (05-Nov-26) Commissions: adjustments from Paid history (agent / amount, with reason) + Adjustments log
 - Paid history ▸ Adjust (column 1): change the agent and / or the commissionable / commission amount, reason required, preview of each impact before saving.
 - Agent change = negative row on the old agent + positive row on the new agent; amount change = the difference. Into the agent's draft run (this month, else the next draft month; made if absent). Build / refresh keeps them.

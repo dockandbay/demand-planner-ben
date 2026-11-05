@@ -1,6 +1,6 @@
 # Commissions: customer and agent checks (Exceptions)
 
-Ben 05-Nov-26. Spec, not built. Covers three requests made the same day.
+Ben 05-Nov-26. Built v28.711. Covers three requests made the same day.
 
 ## 1. No agent: full order detail + search
 Each "No agent" exception shows:
@@ -26,7 +26,7 @@ Faire external API per order: `source` (FAIRE_DIRECT = 0% / MARKETPLACE), `payou
 ## Schedule
 All three refresh with the commission engine (Build / refresh) and the Sunday weekly flow. Faire reads: about 1 call per 50 orders in the month (read only).
 
-## Questions for Ben
-1. Madison: a HORIZON to-do is enough, or also a weekly email listing new claims?
-2. "Recent": the month being built plus the last 90 days of customers, earlier orders over 24 months. OK?
-3. A Shopify wholesale order whose customer had an earlier agent: suggest the agent (one click), or assign automatically?
+## Ben's answers (05-Nov-26)
+1. A HORIZON to-do for Madison is enough (no email). Every exception (all types) has Dismiss / Reopen, with an Open only / All filter.
+2. Recent = the last 90 days.
+3. A suggested agent is a one-click confirm (order override); never assigned automatically.

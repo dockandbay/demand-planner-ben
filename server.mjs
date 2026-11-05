@@ -34367,7 +34367,8 @@ function _cmCnShip(lines, invShip) {
 // e.g. "Markettime WRAP-0201 [ID: 32766988]" -> WRAP-0201.
 // v28.442: the Fulfil order's ship-to, for agent rules ({country 'US', state 'FL' (from 'US-FL'), state_name 'Florida', zip '33122-1515'})
 function _cmShip(s) { if (!s) return null; const c = String(s['shipment_address.country.code'] || '').toUpperCase(), sc = String(s['shipment_address.subdivision.code'] || '').toUpperCase();
-  return (c || sc || s['shipment_address.zip']) ? { country: c, state: sc.includes('-') ? sc.split('-').slice(1).join('-') : sc, state_name: s['shipment_address.subdivision.name'] || '', zip: String(s['shipment_address.zip'] || '').trim() } : null; }
+  return (c || sc || s['shipment_address.zip']) ? { country: c, state: sc.includes('-') ? sc.split('-').slice(1).join('-') : sc, state_name: s['shipment_address.subdivision.name'] || '', zip: String(s['shipment_address.zip'] || '').trim(),
+    name: s['shipment_address.name'] || '', street: s['shipment_address.street'] || '', city: s['shipment_address.city'] || '', country_name: s['shipment_address.country.name'] || '' } : null; }   // v28.711: + name / street / city for the exceptions
 function _cmClientPo(meta, xref) {
   const mf = (meta && meta.metafields) || {}; const po = String(mf['global.po_number'] || '').trim(); if (po) return po.slice(0, 80);
   const r = String(xref || mf['global.xero_reference'] || '').trim(); if (!r) return null;
@@ -34517,7 +34518,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       .forEach(l => { const pc = String(l['product.code'] || '').trim(), sku = !!pc && !_CM_SHIP_RE.test(pc); (linesF[l.invoice] = linesF[l.invoice] || []).push({ sku, desc: l.description, amt: _cmNum(l.amount) });   // v28.708
         if (!sku) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
     const saleIds = [...new Set(invs.flatMap(i => i.sales || []))]; const sales = {};
-    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata', 'shipment_address.country.code', 'shipment_address.subdivision.code', 'shipment_address.subdivision.name', 'shipment_address.zip'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number); v28.442: + ship-to (agent rules)
+    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata', 'shipment_address.country.code', 'shipment_address.subdivision.code', 'shipment_address.subdivision.name', 'shipment_address.zip', 'shipment_address.name', 'shipment_address.street', 'shipment_address.city', 'shipment_address.country.name'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number); v28.442: + ship-to (agent rules)
     const codes = {}; try { const def = (await ff('PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']]) || [])[0];
       if (def) for (let i = 0; i < saleIds.length; i += 300) (await fAll('metafield.value', [['field', '=', def.id], ['resource', 'in', saleIds.slice(i, i + 300).map(x => 'sale.sale,' + x)]], ['resource', 'value_char']))
         .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char) codes[sid] = String(v.value_char).trim().toLowerCase(); }); } catch (e) { notes.push('Fulfil agent codes not read: ' + e.message); }
@@ -34813,7 +34814,9 @@ app.post('/api/cron/commission-weekly', async (req, res) => {
     else if (step === 'build') { out = { ok: true, months: {} };
       for (const m of [prev, cur]) { const r = await cmCronCall('POST', '/api/client/commission/runs/build-all', { month: m }, {}, 140000);
         out.months[m] = ok(r) ? { built: (r.body.built || []).length, left_alone: (r.body.skipped || []).length } : { error: (r.body && r.body.error) || ('HTTP ' + r.status) }; if (!ok(r)) out.ok = false; } }
-    else return res.status(400).json({ error: 'step = customers | catchup | build' });
+    else if (step === 'checks') { const r = await cmAgentChecks(cur, {}); const by = {}; r.items.filter(x => !x.dismissed).forEach(x => { by[x.kind] = (by[x.kind] || 0) + 1; });   // v28.711: customer / agent checks + Madison's Faire to-dos
+      out = { ok: true, month: cur, open: by, notes: r.notes }; }
+    else return res.status(400).json({ error: 'step = customers | catchup | build | checks' });
     out.step = step; out.secs = Math.round((Date.now() - t0) / 1000);
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('commission_weekly',$1,$2,$3)`, [out.ok ? 'success' : 'error', out.customers || out.saved || 0, JSON.stringify(out).slice(0, 500)]); } catch (_) {}
     res.status(out.ok ? 200 : 500).json(out);
@@ -34844,6 +34847,97 @@ app.get('/api/client/commission/import-status', async (req, res) => {
 // calculated ones). An agent change = a NEGATIVE row on the old agent (takes back what was paid) and a POSITIVE row on the new agent (pays it);
 // an amount change = one row for the difference. Every impact is logged in planner.commission_adjustments (migration 420): who, when, reason,
 // old / new values, the run it went into (Commissions ▸ Adjustments). Cancel removes the row while its run is still a draft.
+// v28.711 (Ben 05-Nov-26, docs/specs/commission-agent-checks.md): customer and agent checks on Commissions ▸ Exceptions.
+//  · every engine exception gets the delivery address, the order source and the customer's earlier orders with their agents (paid history + runs);
+//    Ben's rule: no commission for a wholesale customer ordering organically on Shopify UNLESS they ordered through a rep group before, so a no-agent
+//    order of a customer with an earlier agent order gets a SUGGESTED agent (one click = order override; never assigned automatically).
+//  · agent_changed: an order this month whose agent (or Faire / no agent) differs from the customer's latest earlier order (customers of the last 90 days).
+//  · faire_claim: a Faire order (last 90 days, Faire API) that Faire charged commission on, from a retailer earlier linked to a rep group: ask Faire for
+//    0%; a HORIZON to-do for Madison once per Faire order.
+//  · dismiss / reopen for EVERY exception (app_settings cm_exc_dismissed: key -> { by, at, note }), filter Open / All in the UI.
+const CM_FAIRE_CLAIM_TO = 'madison@dockandbay.com';
+const _cmCustKey = n => String(n || '').toLowerCase().replace(/&/g, ' and ').replace(/\b(ltd|limited|llc|inc|gmbh|sarl|sas|bv|the|co|company|pty|plc)\b/g, ' ').replace(/[^a-z0-9]+/g, '');
+const _cmExcKey = x => [x.kind, String(x.order_ref || '').toUpperCase(), String(x.invoice_ref || '').toUpperCase(), x.agent_id || ''].join('|');
+function _cmSource(x) { const ch = String(x.channel || ''), ref = String(x.order_ref || ''), src = String(x.source || '');
+  if (/faire/i.test(ch) || /^faire\b/i.test(ref)) return 'Faire'; if (/markettime/i.test(ch) || /^markettime\b/i.test(ref)) return 'MarketTime'; if (/brandwise/i.test(ref)) return 'Brandwise';
+  if (/key account/i.test(ch)) return 'Key accounts'; if (/custom/i.test(ch)) return 'Custom / co-brand'; if (/ws\b|wholesale/i.test(ch) || /^[A-Z]{2}WS-/i.test(ref)) return 'Shopify wholesale';
+  if (/shopify|dockandbay-/i.test(ch)) return 'Shopify'; if (/^xero/.test(src)) return 'Xero invoice'; return ch || src || 'other'; }
+async function cmCustomerHistory() {   // customer key -> earlier orders with agents, newest first (paid history + runs, not adjustments)
+  const r = await pool.query(`SELECT customer, rep_group agent, coalesce(invoice_no, po_no) ord, invoice_date d, 'paid history' src FROM planner.commission_paid_history WHERE coalesce(nullif(status,''),'paid')='paid' AND customer IS NOT NULL
+    UNION ALL SELECT x.customer, g.name, coalesce(x.invoice_ref, x.order_ref), coalesce(x.paid_date, x.invoice_date), 'run ' || r.month FROM planner.commission_rows x JOIN planner.commission_runs r ON r.id=x.run_id JOIN planner.rep_groups g ON g.id=r.rep_group_id
+      WHERE x.customer IS NOT NULL AND coalesce(x.source,'') <> 'adjustment' AND coalesce(x.commission,0) <> 0`);
+  const H = new Map(); r.rows.forEach(x => { const k = _cmCustKey(x.customer); if (!k) return; const d = x.d ? new Date(x.d).toISOString().slice(0, 10) : ''; (H.get(k) || H.set(k, []).get(k)).push({ agent: x.agent, order: x.ord, date: d, src: x.src }); });
+  H.forEach((l, k) => { const seen = new Set(); H.set(k, l.sort((a, b) => b.date.localeCompare(a.date)).filter(e => { const u = String(e.order || '').toUpperCase() + '|' + e.agent; if (seen.has(u)) return false; seen.add(u); return true; })); });   // one line per order + agent (paid history and runs repeat)
+  return H;
+}
+let _faireMemo = null;
+async function faireRecentOrders(days) {   // Faire external API v2, read only: orders created in the last `days` days (30 min memo)
+  if (_faireMemo && Date.now() - _faireMemo.at < 30 * 60000) return _faireMemo.v;
+  const tok = process.env.FAIRE_API_TOKEN; if (!tok) return { ok: false, error: 'FAIRE_API_TOKEN not set', orders: [] };
+  const base = (process.env.FAIRE_API_BASE_URL || 'https://www.faire.com/external-api/v2').replace(/\/$/, ''), since = new Date(Date.now() - days * 864e5).toISOString();
+  const out = []; let cursor = '';
+  for (let p = 0; p < 40; p++) { const r = await _fetchT(base + '/orders?limit=50&' + (cursor ? 'cursor=' + encodeURIComponent(cursor) : 'created_at_min=' + encodeURIComponent(since)),   /* Faire: a cursor carries the filter (both = 400) */ { headers: { 'X-FAIRE-ACCESS-TOKEN': tok, Accept: 'application/json' } }, 30000);
+    if (!r.ok) return { ok: false, error: 'Faire API ' + r.status, orders: out }; const j = await r.json(); (j.orders || []).forEach(o => out.push(o)); cursor = j.cursor || ''; if (!cursor || !(j.orders || []).length) break; }
+  const v = { ok: true, orders: out }; _faireMemo = { at: Date.now(), v }; return v;
+}
+async function cmAgentChecks(month, opts) {
+  opts = opts || {}; const v = await cmEngine(month, { env: opts.env, fresh: !!opts.fresh }), H = await cmCustomerHistory(), notes = [];
+  const G = (await pool.query(`SELECT id, name, coalesce(to_jsonb(g)->>'currency','USD') currency FROM planner.rep_groups g`)).rows, gName = {}; G.forEach(g => { gName[g.id] = g.name; });
+  const isFaireAgent = n => /faire/i.test(String(n || '')), isAgent = n => !!n && !isFaireAgent(n) && !/no agent/i.test(String(n));
+  const earlier = (cust, before, notOrder) => (H.get(_cmCustKey(cust)) || []).filter(e => (!before || !e.date || e.date < before) && String(e.order || '').toUpperCase() !== String(notOrder || '').toUpperCase());
+  const out = [];
+  // 1. every engine exception, with delivery, source, earlier orders; no-agent ones get a suggested agent from an earlier rep-group order
+  for (const x of v.exceptions || []) { const e = earlier(x.customer, x.pay_date, x.order_ref).slice(0, 6), src = _cmSource(x), y = Object.assign({}, x, { source_label: src, earlier: e });
+    if (x.kind === 'no_agent') { const ag = e.find(z => isAgent(z.agent)); const gs = ag && G.find(g => g.name === ag.agent);
+      if (gs) y.suggest = { agent_id: gs.id, agent: gs.name, why: 'earlier order ' + (ag.order || '') + ' on ' + (ag.date || '') + ' with ' + gs.name };
+      else if (/shopify/i.test(src)) y.text = 'organic ' + src + ' order, no earlier order through a rep group: no commission (Ben\'s rule); dismiss once checked'; }
+    out.push(y); }
+  // 2. agent changed: this month's rows (engine) plus run rows of the last 90 days, vs the customer's latest earlier order
+  const since90 = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10), seenCA = new Set();
+  const cur = (v.rows || []).map(r => ({ customer: r.customer, agent: r.agent, agent_id: r.agent_id, order_ref: r.order_ref, invoice_ref: r.invoice_ref, date: r.pay_date || r.earn_date, channel: r.channel, source: r.source, amount: r.commissionable, currency: r.currency }));
+  (await pool.query(`SELECT x.customer, g.name agent, g.id agent_id, x.order_ref, x.invoice_ref, coalesce(x.paid_date, x.invoice_date) d, x.commissionable amount, x.currency FROM planner.commission_rows x JOIN planner.commission_runs r ON r.id=x.run_id JOIN planner.rep_groups g ON g.id=r.rep_group_id
+      WHERE coalesce(x.paid_date, x.invoice_date) >= $1 AND coalesce(x.source,'') <> 'adjustment' AND coalesce(x.commission,0) <> 0`, [since90])).rows.forEach(r => cur.push({ customer: r.customer, agent: r.agent, agent_id: r.agent_id, order_ref: r.order_ref, invoice_ref: r.invoice_ref, date: r.d ? new Date(r.d).toISOString().slice(0, 10) : '', amount: Number(r.amount) || 0, currency: r.currency }));
+  (v.exceptions || []).filter(x => x.kind === 'no_agent').forEach(x => cur.push({ customer: x.customer, agent: 'no agent', order_ref: x.order_ref, date: x.pay_date, channel: x.channel, source: x.source, amount: x.amount, currency: x.currency, ship: x.ship }));
+  for (const c of cur) { const k = _cmCustKey(c.customer) + '|' + String(c.order_ref || '').toUpperCase(); if (!_cmCustKey(c.customer) || seenCA.has(k)) continue; seenCA.add(k);
+    const e = earlier(c.customer, c.date, c.order_ref || c.invoice_ref), last = e[0]; if (!last || !last.agent) continue;
+    const nowA = isFaireAgent(c.agent) || /faire/i.test(_cmSource(c)) ? 'Faire' : c.agent, wasA = isFaireAgent(last.agent) ? 'Faire' : last.agent;
+    if (String(nowA).toLowerCase() === String(wasA).toLowerCase()) continue;
+    out.push({ kind: 'agent_changed', order_ref: c.order_ref || c.invoice_ref, invoice_ref: c.invoice_ref, customer: c.customer, agent_id: c.agent_id || null, agent: c.agent, amount: c.amount, currency: c.currency, pay_date: c.date, ship: c.ship || null, source_label: _cmSource(c), earlier: e.slice(0, 6),
+      text: 'was ' + cmShortName(wasA) + ' (last order ' + (last.order || '') + ' on ' + (last.date || '') + '), now ' + cmShortName(nowA) }); }
+  // 3. Faire: commission charged on a retailer earlier linked to a rep group: ask Faire for 0%
+  let fr = { ok: false, orders: [] }; try { fr = await faireRecentOrders(90); } catch (e) { fr = { ok: false, error: e.message, orders: [] }; }
+  if (!fr.ok) notes.push('Faire not read: ' + fr.error);
+  const custList = new Map(); (await pool.query(`SELECT customer_name, rep_group_id FROM planner.commission_customers WHERE rep_group_id IS NOT NULL`).catch(() => ({ rows: [] }))).rows.forEach(c => { custList.set(_cmCustKey(c.customer_name), c.rep_group_id); });
+  for (const o of fr.orders || []) { if (/CANCEL/i.test(o.state || '')) continue; const pc = o.payout_costs || {}, bps = Number(pc.commission_bps) || 0, cm = pc.commission || {};
+    const amt = (Number(cm.amount_minor) || 0) / 100; if (bps <= 0 && amt <= 0) continue;
+    const a = o.address || {}, retailer = a.company_name || a.name || '', e = earlier(retailer, String(o.created_at || '').slice(0, 10), 'Faire #' + (o.display_id || '')).filter(z => isAgent(z.agent));
+    const listed = custList.get(_cmCustKey(retailer)), why = e[0] ? 'earlier order ' + (e[0].order || '') + ' on ' + (e[0].date || '') + ' with ' + e[0].agent : listed && isAgent(gName[listed]) ? 'on ' + gName[listed] + '\'s customer list (Xero group / Fulfil)' : '';
+    if (!why) continue;
+    out.push({ kind: 'faire_claim', order_ref: 'Faire #' + (o.display_id || o.id), invoice_ref: o.id, customer: retailer, amount: amt, currency: cm.currency || '', pay_date: String(o.created_at || '').slice(0, 10), source_label: 'Faire ' + (o.source === 'FAIRE_DIRECT' ? 'Direct' : 'Marketplace'),
+      ship: { name: a.name || '', street: [a.address1, a.address2].filter(Boolean).join(', '), city: a.city || '', state: a.state_code || a.state || '', zip: a.postal_code || '', country: a.country_code || '', country_name: a.country || '' }, earlier: e.slice(0, 6),
+      text: 'Faire charged ' + (bps / 100).toFixed(1) + '% (' + (cm.currency || '') + ' ' + amt.toFixed(2) + ') on a customer of a rep group (' + why + '): ask Faire for 0%', faire_id: o.id, owner: CM_FAIRE_CLAIM_TO }); }
+  // dismissals + Madison's to-dos (once per Faire order, never for a dismissed one)
+  const dis = cpJson(await cpSetting('cm_exc_dismissed', ''), {}) || {};
+  out.forEach(x => { x.key = _cmExcKey(x); const d = dis[x.key]; x.dismissed = d ? { by: d.by, at: d.at, note: d.note || '' } : null; });
+  if (opts.todos !== false) { try { const done = cpJson(await cpSetting('cm_faire_todo', ''), {}) || {}; let n = 0;
+      for (const x of out.filter(y => y.kind === 'faire_claim' && !y.dismissed && !done[y.faire_id])) {
+        await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,current_date + 7)`, [CM_FAIRE_CLAIM_TO, 'Claim 0% commission from Faire: ' + x.order_ref + ' (' + x.customer + ')', x.text + '. Commissions ▸ Exceptions shows the evidence.']);
+        done[x.faire_id] = new Date().toISOString(); n++; }
+      if (n) { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_faire_todo',$1,'commission checks',now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify(done)]); notes.push(n + ' Faire claim to-do(s) for Madison'); } }
+    catch (e) { notes.push('to-dos not written: ' + e.message); } }
+  return { ok: true, month, items: out, notes: (v.notes || []).concat(notes), faire_orders: (fr.orders || []).length };
+}
+const cmShortName = n => String(n || '').replace(/^\s*agent\s*-+\s*/i, '');
+app.get('/api/client/commission/checks', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json(await cmAgentChecks(String(req.query.month || ''), { env: req.query.env, fresh: req.query.fresh === '1' })); }
+  catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/checks/dismiss', async (req, res) => {   // { key, dismiss: true|false, note }
+  const b = req.body || {}, key = String(b.key || '').slice(0, 300); if (!key) return res.status(400).json({ error: 'key required' });
+  try { const dis = cpJson(await cpSetting('cm_exc_dismissed', ''), {}) || {};
+    if (b.dismiss === false) delete dis[key]; else dis[key] = { by: (req.me && req.me.email) || null, at: new Date().toISOString(), note: String(b.note || '').slice(0, 300) };
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_exc_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), (req.me && req.me.email) || null]);
+    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 const _cmMonth = (d, k) => { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + (k || 0), 1)); return x.toISOString().slice(0, 7); };
 async function cmAdjTarget(client, gid, dry) {   // the agent's first DRAFT run from this month on (this month if still a draft), made if absent
   for (let k = 0; k < 4; k++) { const m = _cmMonth(new Date(), k);
