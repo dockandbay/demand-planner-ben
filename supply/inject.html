@@ -1302,7 +1302,7 @@
 </style>
 <script src="/portal-view.js?v=__APP_VERSION__"></script><script src="/portal-custom.js?v=__APP_VERSION__"></script>
 <script>
-// v28.738 (Ben 06-Nov-26): supplier portal HELP page (testing, admin preview only). GET /api/supply/portal-help lists the videos; each plays
+// v28.738 (Ben 06-Nov-26): supplier portal HELP page (testing, admin preview only); v28.739 admins upload the video file here. GET /api/supply/portal-help lists the videos; each plays
 // from a short-lived signed Storage link. Sections are the planned short clips: until a clip exists, a section plays the full video from its
 // start and stops at its end. Rendered inside the portal view (PP_EXTRA tab), so it looks as suppliers will see it.
 var HZ_HELP={d:null,vid:'orders',sec:-1};
@@ -1315,6 +1315,7 @@ function hzPortalHelp(el){
       +'<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px"><b>Testing:</b> only HORIZON admins see HELP, in this preview. Suppliers do not see it yet.</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+d.videos.map(function(x){ var on=x.id===v.id;
         return '<button class="hzh-v" data-id="'+esc(x.id)+'" style="padding:8px 14px;border-radius:8px;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'#fff')+';color:'+(on?'#fff':'var(--ink)')+';cursor:pointer;text-align:left"><div style="font-weight:700;font-size:13px">'+esc(x.title)+'</div><div style="font-size:11px;opacity:.8">'+esc(x.title_zh||'')+' · '+esc(x.version||'')+'</div></button>'; }).join('')+'</div>';
+    if(d.can_upload)h+='<div style="display:flex;gap:8px;align-items:center;margin:-6px 0 12px;font-size:12px"><label class="save-btn light" style="cursor:pointer">⤒ Upload video file for “'+esc(v.title)+'”<input id="hzh-up" type="file" accept="video/mp4" style="display:none"></label><span id="hzh-upmsg" class="mut">'+(v.uploaded?'Uploaded from HORIZON.':'')+' Admins only. Replaces the video for everyone who can see HELP.</span></div>';
     if(!v.url){ el.innerHTML=h+'<div class="count">This video is coming soon. 即将推出。</div></div>'; bind(); return; }
     h+='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
       +'<div style="flex:1 1 640px;min-width:300px"><video id="hzh-player" src="'+esc(v.url)+'" controls preload="metadata" playsinline style="width:100%;border-radius:10px;background:#000;aspect-ratio:16/9"></video>'
@@ -1333,7 +1334,14 @@ function hzPortalHelp(el){
       var s=i>=0?v.sections[i]:null; document.getElementById('hzh-now').textContent=s?('Section '+(i+1)+': '+s.title+' · '+mmss(s.start)+' to '+mmss(s.end)):('Full video · '+mmss(v.duration||0));
       var go=function(){ p.currentTime=s?s.start:0; var pr=p.play(); if(pr&&pr.catch)pr.catch(function(){}); };
       if(p.readyState>=1)go(); else p.addEventListener('loadedmetadata',go,{once:true}); }; }); };
-  var bind=function(){ el.querySelectorAll('.hzh-v').forEach(function(b){ b.onclick=function(){ HZ_HELP.vid=b.dataset.id; HZ_HELP.sec=-1; draw(); }; }); };
+  var bind=function(){ el.querySelectorAll('.hzh-v').forEach(function(b){ b.onclick=function(){ HZ_HELP.vid=b.dataset.id; HZ_HELP.sec=-1; draw(); }; });
+    var up=document.getElementById('hzh-up'); if(up)up.onchange=function(){ var f=up.files&&up.files[0], m=document.getElementById('hzh-upmsg'); if(!f)return;   // v28.739: signed upload straight to Storage, then save the path
+      var say=function(t,bad){ if(m){ m.textContent=t; m.style.color=bad?'var(--neg)':''; } }, J=function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); };
+      say('Uploading '+(f.size/1048576).toFixed(1)+' MB…');
+      fetch('/api/storage/sign-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:'help',filename:f.name,mime:f.type||'video/mp4',byte_size:f.size})}).then(J)
+        .then(function(j){ return fetch(j.upload_url,{method:'PUT',headers:{'content-type':f.type||'video/mp4'},body:f}).then(function(pr){ if(!pr.ok)throw new Error('storage upload failed ('+pr.status+')'); return j; }); })
+        .then(function(j){ return fetch('/api/supply/portal-help/video/'+encodeURIComponent(HZ_HELP.vid),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({storage_path:j.storage_path,storage_sig:j.storage_sig})}).then(J); })
+        .then(function(){ HZ_HELP.d=null; hzPortalHelp(el); }).catch(function(e){ say('Upload failed: '+(e.message||e),true); }); }; };
   if(HZ_HELP.d){ draw(); return; }
   draw(); fetch('/api/supply/portal-help',{cache:'no-store'}).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
     .then(function(j){ HZ_HELP.d=j; draw(); }).catch(function(e){ HZ_HELP.d={error:'Help not available: '+(e.message||e)}; draw(); }); }

@@ -14557,14 +14557,26 @@ const PORTAL_HELP = { videos: [
   { id: 'product', title: 'Product development and samples', title_zh: '产品开发和样品', path: null, version: 'Coming soon', sections: [] } ] };
 async function portalHelpAdmin(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin only while Help is in testing' }); return null; } return me; }
   catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
+// v28.739: an admin uploads the video file from the HELP page (Storage path saved in app_settings portal_help_paths, {id: path}); it wins
+// over the default path, so a re-cut or a short clip is a new upload, not a deploy.
+async function portalHelpPaths() { try { return cpJson(await cpSetting('portal_help_paths', '{}'), {}) || {}; } catch (e) { return {}; } }
 app.get('/api/supply/portal-help', staffOnly, async (req, res) => {
-  if (!(await portalHelpAdmin(req, res))) return;
-  res.set('Cache-Control', 'no-store').json({ ok: true, testing: true, videos: PORTAL_HELP.videos.map(v => Object.assign({}, v, { path: undefined, url: v.path ? '/api/supply/portal-help/video/' + v.id : null })) });
+  const me = await portalHelpAdmin(req, res); if (!me) return; const ov = await portalHelpPaths();
+  res.set('Cache-Control', 'no-store').json({ ok: true, testing: true, can_upload: !me.live || !!me.is_admin, videos: PORTAL_HELP.videos.map(v => Object.assign({}, v, { path: undefined, uploaded: !!ov[v.id], url: (ov[v.id] || v.path) ? '/api/supply/portal-help/video/' + v.id : null })) });
+});
+app.post('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
+  const me = await portalHelpAdmin(req, res); if (!me) return;
+  const v = PORTAL_HELP.videos.find(x => x.id === req.params.id), b = req.body || {}; if (!v) return res.status(404).json({ error: 'No such video' });
+  if (!b.storage_path || !storageSigOk(b.storage_path, b.storage_sig)) return res.status(400).json({ error: 'Upload the file first (bad storage signature)' });
+  try { const ov = await portalHelpPaths(); ov[v.id] = String(b.storage_path);
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('portal_help_paths',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(ov), (me && me.email) || authUser(req) || 'admin']);
+    res.json({ ok: true, id: v.id }); }
+  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
   if (!(await portalHelpAdmin(req, res))) return;
-  const v = PORTAL_HELP.videos.find(x => x.id === req.params.id); if (!v || !v.path) return res.status(404).json({ error: 'No such video' });
-  try { res.set('Cache-Control', 'no-store').redirect(302, await storageSignDownload(v.path, { expiresIn: 3600 })); }
+  const v = PORTAL_HELP.videos.find(x => x.id === req.params.id), path = v && ((await portalHelpPaths())[v.id] || v.path); if (!path) return res.status(404).json({ error: 'No such video' });
+  try { res.set('Cache-Control', 'no-store').redirect(302, await storageSignDownload(path, { expiresIn: 3600 })); }
   catch (e) { log500(e); res.status(502).json({ error: 'Video not available: ' + String(e.message || e).slice(0, 120) }); }
 });
 app.get('/api/supply/:section', supplySectionHandler);

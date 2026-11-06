@@ -1,3 +1,7 @@
+## v28.739 (06-Nov-26) Supplier portal HELP: admins upload the video file from the page
+- So the video can go live without a storage key on anyone's machine, and so the short clips can be added later without a deploy: HELP shows "Upload video file" to admins. It uploads straight to Storage (signed link, as other large uploads) and saves the path in app_settings portal_help_paths ({video id: path}), which wins over the default path.
+- New route POST /api/supply/portal-help/video/:id {storage_path, storage_sig} (admin; checks the upload signature). No migration, no env vars, no cron routes.
+
 ## v28.738 (06-Nov-26) Supplier portal HELP page (testing, admin preview only)
 - Ben 06-Nov-26: HELP in the supplier portal with the how-to video, visible only for testing from HORIZON admin; plan to split the video into shorter sections with a table of contents, but not split yet.
 - SUPPLY > CONFIG > Portal preview now has a HELP section (admins only): video 1 "Orders, shipments and samples" (5 min 4 s, English narration, Chinese subtitles) with Contents: Full video plus 10 planned sections (Getting around, Confirm an order, Order plan and invoice, Dates and production approvals, Shipments: loading, Labels and barcodes, Update a shipment and add charges, Payments, Samples, Summary), each marked "short clip soon"; a section plays the full video from its start and pauses at its end. Video 2 (product development) shows as coming soon.

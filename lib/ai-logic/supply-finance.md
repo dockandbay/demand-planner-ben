@@ -885,5 +885,6 @@ Where: HORIZON SUPPLY > CONFIG > Portal preview > HELP (admins only). Ben 06-Nov
 - Not on the suppliers' /portal: only the admin preview registers the HELP tab (DBPortalView.addTab), and the routes need an admin (GET /api/supply/portal-help, GET /api/supply/portal-help/video/:id).
 - Videos are listed in server.mjs PORTAL_HELP: video 1 "Orders, shipments and samples" (full recording, private Storage horizon-uploads/help/supplier-portal-orders-v1.mp4, played through a 1-hour signed link) and video 2 "Product development and samples" (coming soon).
 - Contents: Full video, then 10 planned sections with their start and end times in the full video. Until each section has its own short clip, clicking a section plays the full video from its start and pauses at its end. Each section is marked "short clip soon".
+- Upload (v28.739): admins see "Upload video file" on HELP; the file goes straight to Storage and its path is saved in app_settings portal_help_paths (wins over the default path).
 - To release to suppliers later: /api/portal/ twins of the two routes (portalAuth) and the same addTab in portal.html.
 (source: server.mjs :: PORTAL_HELP, /api/supply/portal-help; supply/inject.html :: hzPortalHelp)
