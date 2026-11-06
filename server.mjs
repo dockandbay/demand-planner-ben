@@ -14537,6 +14537,36 @@ app.get('/api/supply/portal-signals', async (req, res) => {
     res.json({ unread, subs });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.738 (declared before the /api/supply/:section catch-all) (Ben 06-Nov-26): supplier portal HELP, in testing. Shown only in HORIZON's admin portal preview (CONFIG > Portal preview), never on
+// the suppliers' /portal yet. Each video is the full recording in private Storage (horizon-uploads/help/...), served by a short-lived signed
+// link; its sections are the planned short clips (Ben will review the full video first). A section with no clip of its own plays the full
+// video from its start time. To release to suppliers later: a /api/portal/ twin of these routes plus addTab in portal.html.
+const PORTAL_HELP = { videos: [
+  { id: 'orders', title: 'Orders, shipments and samples', title_zh: '订单、发运和样品', path: 'help/supplier-portal-orders-v1.mp4', duration: 304.4, version: 'Draft 06-Nov-26',
+    sections: [
+      { title: 'Getting around the portal', title_zh: '门户导航', start: 0, end: 47.2 },
+      { title: 'Confirm an order', title_zh: '确认订单', start: 47.2, end: 74.1 },
+      { title: 'Order plan and invoice', title_zh: '订单计划和发票', start: 74.1, end: 108.3 },
+      { title: 'Dates and production approvals', title_zh: '日期和生产批准', start: 108.3, end: 143.5 },
+      { title: 'Shipments: loading', title_zh: '发运：装货', start: 143.5, end: 166.8 },
+      { title: 'Labels and barcodes', title_zh: '标签和条码', start: 166.8, end: 192.0 },
+      { title: 'Update a shipment and add charges', title_zh: '更新发运和添加费用', start: 192.0, end: 225.1 },
+      { title: 'Payments', title_zh: '付款', start: 225.1, end: 239.6 },
+      { title: 'Samples: confirm and add tracking', title_zh: '样品：确认并填写追踪号', start: 239.6, end: 272.7 },
+      { title: 'Summary', title_zh: '总结', start: 272.7, end: 304.4 } ] },
+  { id: 'product', title: 'Product development and samples', title_zh: '产品开发和样品', path: null, version: 'Coming soon', sections: [] } ] };
+async function portalHelpAdmin(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin only while Help is in testing' }); return null; } return me; }
+  catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
+app.get('/api/supply/portal-help', staffOnly, async (req, res) => {
+  if (!(await portalHelpAdmin(req, res))) return;
+  res.set('Cache-Control', 'no-store').json({ ok: true, testing: true, videos: PORTAL_HELP.videos.map(v => Object.assign({}, v, { path: undefined, url: v.path ? '/api/supply/portal-help/video/' + v.id : null })) });
+});
+app.get('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
+  if (!(await portalHelpAdmin(req, res))) return;
+  const v = PORTAL_HELP.videos.find(x => x.id === req.params.id); if (!v || !v.path) return res.status(404).json({ error: 'No such video' });
+  try { res.set('Cache-Control', 'no-store').redirect(302, await storageSignDownload(v.path, { expiresIn: 3600 })); }
+  catch (e) { log500(e); res.status(502).json({ error: 'Video not available: ' + String(e.message || e).slice(0, 120) }); }
+});
 app.get('/api/supply/:section', supplySectionHandler);
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB

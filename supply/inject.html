@@ -1302,6 +1302,42 @@
 </style>
 <script src="/portal-view.js?v=__APP_VERSION__"></script><script src="/portal-custom.js?v=__APP_VERSION__"></script>
 <script>
+// v28.738 (Ben 06-Nov-26): supplier portal HELP page (testing, admin preview only). GET /api/supply/portal-help lists the videos; each plays
+// from a short-lived signed Storage link. Sections are the planned short clips: until a clip exists, a section plays the full video from its
+// start and stops at its end. Rendered inside the portal view (PP_EXTRA tab), so it looks as suppliers will see it.
+var HZ_HELP={d:null,vid:'orders',sec:-1};
+function hzPortalHelp(el){
+  var mmss=function(s){ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2); };
+  var draw=function(){ var d=HZ_HELP.d; if(!d){ el.innerHTML='<div class="count">Loading…</div>'; return; }
+    if(d.error){ el.innerHTML='<div class="count" style="color:var(--neg)">'+esc(d.error)+'</div>'; return; }
+    var v=d.videos.filter(function(x){ return x.id===HZ_HELP.vid; })[0]||d.videos[0];
+    var h='<div style="max-width:1180px">'
+      +'<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px"><b>Testing:</b> only HORIZON admins see HELP, in this preview. Suppliers do not see it yet.</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+d.videos.map(function(x){ var on=x.id===v.id;
+        return '<button class="hzh-v" data-id="'+esc(x.id)+'" style="padding:8px 14px;border-radius:8px;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'#fff')+';color:'+(on?'#fff':'var(--ink)')+';cursor:pointer;text-align:left"><div style="font-weight:700;font-size:13px">'+esc(x.title)+'</div><div style="font-size:11px;opacity:.8">'+esc(x.title_zh||'')+' · '+esc(x.version||'')+'</div></button>'; }).join('')+'</div>';
+    if(!v.url){ el.innerHTML=h+'<div class="count">This video is coming soon. 即将推出。</div></div>'; bind(); return; }
+    h+='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
+      +'<div style="flex:1 1 640px;min-width:300px"><video id="hzh-player" src="'+esc(v.url)+'" controls preload="metadata" playsinline style="width:100%;border-radius:10px;background:#000;aspect-ratio:16/9"></video>'
+      +'<div id="hzh-now" style="font-size:12px;color:var(--muted);margin-top:6px">Full video · '+mmss(v.duration||0)+'</div></div>'
+      +'<div style="flex:0 1 380px;min-width:280px"><div style="font-weight:800;font-size:13px;margin-bottom:6px">Contents · 目录</div>'
+      +'<div class="hzh-row" data-i="-1" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer;background:'+(HZ_HELP.sec===-1?'var(--blue-soft,#eef4ff)':'#fff')+'"><span style="font-weight:700;font-size:12px;min-width:38px">▶</span><div style="flex:1"><div style="font-weight:700;font-size:13px">Full video</div><div style="font-size:11px;color:var(--muted)">完整视频 · '+mmss(v.duration||0)+'</div></div></div>'
+      +v.sections.map(function(s,i){ var on=HZ_HELP.sec===i;
+        return '<div class="hzh-row" data-i="'+i+'" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer;background:'+(on?'var(--blue-soft,#eef4ff)':'#fff')+'">'
+          +'<span style="font-weight:700;font-size:12px;min-width:38px;color:var(--muted)">'+(i+1)+'.</span><div style="flex:1"><div style="font-weight:700;font-size:13px">'+esc(s.title)+'</div><div style="font-size:11px;color:var(--muted)">'+esc(s.title_zh||'')+' · '+mmss(s.start)+' to '+mmss(s.end)+'</div></div>'
+          +'<span title="This section will become its own short video after review" style="font-size:10px;font-weight:700;color:#9a3412;background:#ffedd5;border-radius:99px;padding:2px 8px;white-space:nowrap">short clip soon</span></div>'; }).join('')
+      +'</div></div></div>';
+    el.innerHTML=h; bind();
+    var p=document.getElementById('hzh-player'); if(!p)return;
+    p.ontimeupdate=function(){ var i=HZ_HELP.sec; if(i<0)return; var s=v.sections[i]; if(s&&p.currentTime>=s.end){ p.pause(); p.currentTime=s.end; } };
+    el.querySelectorAll('.hzh-row').forEach(function(r){ r.onclick=function(){ var i=+r.dataset.i; HZ_HELP.sec=i; el.querySelectorAll('.hzh-row').forEach(function(x){ x.style.background=(+x.dataset.i===i)?'var(--blue-soft,#eef4ff)':'#fff'; });
+      var s=i>=0?v.sections[i]:null; document.getElementById('hzh-now').textContent=s?('Section '+(i+1)+': '+s.title+' · '+mmss(s.start)+' to '+mmss(s.end)):('Full video · '+mmss(v.duration||0));
+      var go=function(){ p.currentTime=s?s.start:0; var pr=p.play(); if(pr&&pr.catch)pr.catch(function(){}); };
+      if(p.readyState>=1)go(); else p.addEventListener('loadedmetadata',go,{once:true}); }; }); };
+  var bind=function(){ el.querySelectorAll('.hzh-v').forEach(function(b){ b.onclick=function(){ HZ_HELP.vid=b.dataset.id; HZ_HELP.sec=-1; draw(); }; }); };
+  if(HZ_HELP.d){ draw(); return; }
+  draw(); fetch('/api/supply/portal-help',{cache:'no-store'}).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ HZ_HELP.d=j; draw(); }).catch(function(e){ HZ_HELP.d={error:'Help not available: '+(e.message||e)}; draw(); }); }
+
 // ── v28.081 perf (Ben's audit): same-origin GET coalescing ──────────────────────────────────────────────────────────
 // The audit found the PO grid (2.95 MB) requested FOUR times on load, portal-line-costs ×4, dtc/mismatch ×2 and lookups on
 // every sub-tab switch: many call sites, each doing its own fetch(). This wraps window.fetch for GET /api/… only:
@@ -10794,7 +10830,10 @@
             }) 
             // v28.504: the supplier's Custom orders tab (Customiser batches) when that supplier is linked; writes need SUPPLY edit
             if(window.HZCustomOrders&&window.DBPortalView.addTab){ var cb='/api/supply/custom-portal/'+encodeURIComponent(name)+'/';
-              window.HZCustomOrders.register(window.DBPortalView,cb,function(){ return !ME||!ME.live||!!(ME.supply_edit||ME.is_admin); },function(){ return PORTAL_SUP===name; });   /* v28.572: CUSTOM level-2 tabs */ } }
+              window.HZCustomOrders.register(window.DBPortalView,cb,function(){ return !ME||!ME.live||!!(ME.supply_edit||ME.is_admin); },function(){ return PORTAL_SUP===name; });   /* v28.572: CUSTOM level-2 tabs */ }
+            // v28.738 (Ben 06-Nov-26): HELP (supplier portal how-to videos), in testing: added ONLY here in the admin preview and only for admins;
+            // the suppliers' /portal does not register it. Full video + table of contents; each section will become its own short clip after review.
+            if(window.DBPortalView.addTab&&(!ME||!ME.live||ME.is_admin))window.DBPortalView.addTab({pt:'help',label:'How-to videos',sec:'help',secLabel:'HELP',render:function(el){ hzPortalHelp(el); }}); }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; syncHash(); mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };

@@ -1,3 +1,10 @@
+## v28.738 (06-Nov-26) Supplier portal HELP page (testing, admin preview only)
+- Ben 06-Nov-26: HELP in the supplier portal with the how-to video, visible only for testing from HORIZON admin; plan to split the video into shorter sections with a table of contents, but not split yet.
+- SUPPLY > CONFIG > Portal preview now has a HELP section (admins only): video 1 "Orders, shipments and samples" (5 min 4 s, English narration, Chinese subtitles) with Contents: Full video plus 10 planned sections (Getting around, Confirm an order, Order plan and invoice, Dates and production approvals, Shipments: loading, Labels and barcodes, Update a shipment and add charges, Payments, Samples, Summary), each marked "short clip soon"; a section plays the full video from its start and pauses at its end. Video 2 (product development) shows as coming soon.
+- Suppliers do not see it: the real /portal never registers the tab and the routes are admin only.
+- New routes: GET /api/supply/portal-help, GET /api/supply/portal-help/video/:id (session auth, admin; the video 302s to a 1-hour signed Storage link). No migration, no env vars, no cron routes.
+- DEPLOY STEP: upload the video to LIVE Storage bucket horizon-uploads at help/supplier-portal-orders-v1.mp4 (15 MB; file: ~/Downloads/supplier-portal-videos/Supplier_portal_video1.mp4). Until then the live page shows the player with "Video not available".
+
 ## v28.737 (06-Nov-26) Supplier portal: page no longer stays dimmed after Confirm order
 - Ben 06-Nov-26 ("yes fix the portal bug"), found while making the supplier portal video: after a supplier confirmed (or withdrew) an order in the PO drawer, the PO dropped out of the drawer into the list and the grey drawer backdrop stayed over the page until a refresh.
 - Cause: the in-place PO refresh (rerenderRow, used after Confirm order, notes and other edits) replaced the whole table cell, drawer wrapper included. It now re-renders only the drawer's content, so the drawer, its header and Close keep working and the backdrop clears on Close.
