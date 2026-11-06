@@ -3414,7 +3414,9 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               applyPortalPin(); }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
-              var i=row.id.replace('pp-',''), cell=row.children[0]; if(!cell)return;
+              // v28.737 (Ben 06-Nov-26): re-render INSIDE the drawer (.ppd-c). Replacing the whole cell dropped the drawer wrapper, so after Confirm order
+              // (and any other in-place refresh) the PO showed inline and the grey drawer backdrop stayed over the page.
+              var i=row.id.replace('pp-',''), cell=row.querySelector('.ppd-c')||row.children[0]; if(!cell)return;
               var cur=cell.querySelector('.pptab.active'); var want=keepPt||(cur&&cur.dataset.pt)||'orderplan';   // keep the tab the user was on
               cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]);
               wireDetail(cell); var t=cell.querySelector('.pptab[data-pt="'+want+'"]'); if(t)t.onclick(); }

@@ -1,3 +1,8 @@
+## v28.737 (06-Nov-26) Supplier portal: page no longer stays dimmed after Confirm order
+- Ben 06-Nov-26 ("yes fix the portal bug"), found while making the supplier portal video: after a supplier confirmed (or withdrew) an order in the PO drawer, the PO dropped out of the drawer into the list and the grey drawer backdrop stayed over the page until a refresh.
+- Cause: the in-place PO refresh (rerenderRow, used after Confirm order, notes and other edits) replaced the whole table cell, drawer wrapper included. It now re-renders only the drawer's content, so the drawer, its header and Close keep working and the backdrop clears on Close.
+- supply/portal-view.js only. No migration, no env vars, no cron routes.
+
 ## v28.736 (06-Nov-26) COGS journals: create, review, post
 - Ben 06-Nov-26: "the buttons preview xero and update xero journals are not clear ... simple process (1) create journals (2) review journals (3) post journals"; log "a button up top and on click pops out a drawer ... UK and AU in separate sub tabs"; email "should trigger on journal creation"; n8n fully automatic.
 - BUY & MOVE > Inventory > COGS > By channel & journals: UK | AU tabs, each showing what Xero holds for the month (Not created / Draft / Posted, read live from Xero). Three steps: Create journals (rebuild from Fulfil, then DRAFTS in Xero, confirm click), Review (totals, Xero links, net-to-zero checks, breakdown), Post (posts the drafts, confirm click). Preview Xero / Update Xero journals buttons removed; Replace moves under Advanced once posted. Journal log is a button that opens a drawer with UK and AU tabs.
