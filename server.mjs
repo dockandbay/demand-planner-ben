@@ -10516,7 +10516,9 @@ function _xeroPlanIssues(plan) {
     if (l.will_pay && !l.settle_account_id) add(block, po + ': ' + (l.settle_from === 'loan' ? 'no intercompany loan (901) account in Xero ' + String(l.settle_org || '').toUpperCase() : 'cannot settle, ' + (l.settle_problem || 'no settle account')));
     if (Math.abs(Number(l.amount) || 0) > 0.005 && !(l.account && l.account.code)) add(block, po + ': no Xero account mapped (' + (l.account_role === 'loan' ? 'intercompany loan 901' : String(l.account_role || '').replace('_', ' ')) + ')');
     if (l.blocked) return;
-    if (isDep && !l.legacy) add(warn, po + ': P58+ deposit, no payment posted (draws down via a credit note)');
+    // v28.740 (Ben 06-Nov-26: "No warning needed if it's just information"): a P58+ deposit is booked to Stock Deposits on the supplier-payment
+    // bill and drawn down later by a credit note; that is the normal path, so it no longer raises a warning.
+    if (isDep && !l.legacy) { /* normal: no warning */ }
     else if (l.group) { const P = l.group.parts, pend = P.filter(x => !x.bill && !x.ambiguous), amb = P.filter(x => x.ambiguous), over = P.filter(x => x.bill && x.amount > x.bill.due + 0.01);   // v28.376
       add(warn, po + ': master PO, shared across ' + P.length + ' client PO bills by ' + (P[0].basis || 'value') + ': ' + P.map(x => x.number + ' ' + x.pct + '% ' + _n(x.amount) + (x.bill ? ' (bill ' + (x.bill.number || '') + (x.bill.cross ? ', ' + String(x.bill.region).toUpperCase() + ' via loan 901' : '') + ')' : x.ambiguous ? ' (2 bills!)' : ' (waiting for bill)')).join(', ') + (pend.length ? '. Shares waiting for a bill are applied when it arrives.' : ''));
       amb.forEach(x => add(block, po + ': more than one Xero bill names ' + x.number + ' (' + x.ambiguous.join(', ') + ')'));

@@ -1,3 +1,8 @@
+## v28.740 (06-Nov-26) Paid > Xero: other bills and the bank total on step 2; no warning for P58+ deposits
+- Ben 06-Nov-26 (a team question: why the Lixin 03-Nov-26 bill says 55,078.35, not the 94,345.84 bank payment): "add visibility of the others and total payment showing nothing missing". Step 2 (Supplier payment bill) now lists the Other payments in the same bank payment (bills already in Xero, e.g. DHL freight, each paid in step 4, not copied onto this bill) and a sum: supplier payment bill + other bills = bank payment, green "Nothing missing" when it equals the amount that left the bank (or the run total for a foreign-currency bank), red with the difference when not.
+- Ben 06-Nov-26 "No warning needed if it's just information": a P58+ deposit no longer raises "no payment posted (draws down via a credit note)". It is the normal path (Stock Deposits on the supplier payment bill, drawn down later by a credit note).
+- supply/inject.html, server.mjs (_xeroPlanIssues). No migration, no env vars, no cron routes.
+
 ## v28.739 (06-Nov-26) Supplier portal HELP: admins upload the video file from the page
 - So the video can go live without a storage key on anyone's machine, and so the short clips can be added later without a deploy: HELP shows "Upload video file" to admins. It uploads straight to Storage (signed link, as other large uploads) and saves the path in app_settings portal_help_paths ({video id: path}), which wins over the default path.
 - New route POST /api/supply/portal-help/video/:id {storage_path, storage_sig} (admin; checks the upload signature). No migration, no env vars, no cron routes.
