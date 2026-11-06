@@ -7759,7 +7759,9 @@ async function cchXeroRun(month, orgK, opts) {
   const o = b.orgs[orgK]; if (!o) throw Object.assign(new Error('No ' + orgK + ' data in the build.'), { status: 409 });
   if (month < CCH_FROM) throw Object.assign(new Error('Months before ' + CCH_FROM + ' stay the manual journals (Fulfil\'s GL did not reach Xero before 01-Oct-26).'), { status: 400 });
   if (o.blocked) throw Object.assign(new Error(o.blocked), { status: 409 });
-  const region = orgK === 'AU' ? 'au' : 'uk', tax = orgK === 'AU' ? 'BASEXCLUDED' : 'NONE', status = orgK === 'AU' ? 'POSTED' : 'DRAFT', date = cchMonthEnd(month), res = [];
+  // v28.736 (Ben 06-Nov-26: "(1) create journals (2) review journals (3) post journals ... can also be automated in the n8n flow"): by hand HORIZON
+  // creates DRAFTS in both orgs and the user posts them from the page (cchXeroPost); the n8n runs pass status POSTED (fully automatic).
+  const region = orgK === 'AU' ? 'au' : 'uk', tax = orgK === 'AU' ? 'BASEXCLUDED' : 'NONE', status = opts.status === 'POSTED' ? 'POSTED' : 'DRAFT', date = cchMonthEnd(month), res = [];
   for (const j of ['COGS', 'SALES']) {
     const want = {}; o.journals[j].forEach(l => { want[l.code] = cchR2((want[l.code] || 0) + l.amount); });
     if (Math.abs(o.balanced[j]) > 0.004) throw Object.assign(new Error(orgK + ' ' + j + ' journal does not balance (' + o.balanced[j] + '). Nothing sent.'), { status: 500 });
@@ -7802,19 +7804,51 @@ async function cchXeroRun(month, orgK, opts) {
   }
   return res;
 }
-async function cchEmail(month, orgK, b, runs, by) {   // month end only (spec: no emails on refreshes)
+// v28.736 (Ben 06-Nov-26 "the email should trigger on journal creation"): sent whenever a run puts a NEW journal in Xero (created, top-up,
+// replaced), by hand or by n8n; not when a draft is rebuilt in place, posted, or nothing changed. Marks those run rows emailed.
+const CCH_NEW = { created: 1, top_up: 1, replaced: 1 };
+async function cchEmailIfNew(month, orgK, b, runs, by) {
+  const nw = runs.filter(r => CCH_NEW[r.action]); if (!nw.length) return false;
+  try { const e = await cchEmail(month, orgK, b, nw, by); const ok = !!(e && (e.sent || e.sandbox));
+    const ids = nw.map(r => r.xero && r.xero.id).filter(Boolean);
+    if (ok && ids.length) await pool.query(`UPDATE planner.cogs_channel_runs SET emailed=true WHERE month=$1 AND org=$2 AND xero_id = ANY($3::text[]) AND run_at > now() - interval '1 hour'`, [month, orgK, ids]).catch(() => {});
+    return ok; }
+  catch (e) { console.warn('[cogs-ch] email failed: ' + (e && e.message)); return false; } }
+async function cchEmail(month, orgK, b, runs, by) {
   const def = orgK === 'AU' ? 'ben@dockandbay.com, alex@pillaraccountants.com.au' : 'ben@dockandbay.com, harry.maxwell@ascendantaccountants.com, Pooja.Gupta@ascendantaccountants.com';
   const to = String(await cpSetting('cogs_channel_email_' + orgK.toLowerCase(), def) || def).split(/[,;\s]+/).filter(emailOk); if (!to.length) return { sent: 0 };
   const o = b.orgs[orgK], f = v => Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const tab = L => '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Account</th><th align="left">Name</th><th align="right">Debit</th><th align="right">Credit</th></tr>'
     + L.map(l => '<tr><td>' + l.code + '</td><td>' + l.name + '</td><td align="right">' + (l.amount > 0 ? f(l.amount) : '') + '</td><td align="right">' + (l.amount < 0 ? f(-l.amount) : '') + '</td></tr>').join('') + '</table>';
-  const html = '<p>' + (orgK === 'AU' ? 'Hi Alex,' : 'Hi Pooja and Harry,') + '</p><p>The ' + ddMonYy(cchMonthEnd(month)) + ' journals that move Fulfil\'s generic clearing accounts to the sales channel accounts are '
-    + (orgK === 'AU' ? '<b>posted</b> in Xero AU.' : 'in Xero UK as <b>drafts</b>, ready for you to review and post.') + ' Each moves exactly the month\'s balance, so 9006, 9002, 9003 and 9005 end the month at zero.</p>'
+  const posted = runs.every(r => /^POSTED$/i.test(String((r.xero && r.xero.status) || r.status || ''))), topUp = runs.some(r => r.action === 'top_up');
+  const html = '<p>' + (orgK === 'AU' ? 'Hi Alex,' : 'Hi Pooja and Harry,') + '</p><p>' + (topUp ? 'A top-up to the ' : 'The ') + ddMonYy(cchMonthEnd(month)) + ' journals that move Fulfil\'s generic clearing accounts to the sales channel accounts '
+    + (topUp ? 'is' : 'are') + (posted ? ' <b>posted</b> in Xero ' + orgK + '.' : ' created in Xero ' + orgK + ' as <b>drafts</b>; Dock &amp; Bay reviews them and posts them from HORIZON.') + ' Each moves exactly the month\'s balance, so 9006, 9002, 9003 and 9005 end the month at zero.</p>'
     + runs.map(r => '<p><b>' + r.narration + '</b> (' + o.ccy + ' ' + f(r.total) + (r.xero && r.xero.url ? ', <a href="' + r.xero.url + '">open in Xero</a>' : '') + ')</p>' + tab(r.lines)).join('')
     + (o.spread.cogs ? '<p>Note: ' + o.ccy + ' ' + f(o.spread.cogs) + ' of 9006 has no sale order (landed costs and supplier-bill price variances on stock already sold); it is spread over the channels pro rata to their product COGS.</p>' : '')
     + '<p>Sent by HORIZON (' + by + ').</p>';
-  return sendResendEmail({ to, subject: 'COGS and SALES by channel ' + month + ' (' + (orgK === 'AU' ? 'Xero AU, posted' : 'Xero UK, drafts') + ')', html, kind: 'cogs-channel', ref: month + ' ' + orgK, by });
+  return sendResendEmail({ to, subject: 'COGS and SALES by channel ' + month + (topUp ? ' top-up' : '') + ' (Xero ' + orgK + ', ' + (posted ? 'posted' : 'drafts') + ')', html, kind: 'cogs-channel', ref: month + ' ' + orgK, by });
 }
+// v28.736: what Xero holds now for the month (read only): per journal, every live journal with its status and total. Drives the 3 steps.
+async function cchXeroState(month, orgK) {
+  const region = orgK === 'AU' ? 'au' : 'uk', out = {};
+  for (const j of ['COGS', 'SALES']) { const ex = await cchXeroExisting(region, j, month);
+    out[j] = ex.map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: String(x.Status || '').toUpperCase(), date: cchDOf(x.Date),
+      total: cchR2((x.JournalLines || []).reduce((a, l) => a + Math.max(0, Number(l.LineAmount) || 0), 0)), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })); }
+  return out; }
+// v28.736 step 3: post every DRAFT "HORIZON COGS|SALES by channel <month>" journal (incl. a draft top-up) in Xero, lines unchanged. Logged as 'posted'.
+async function cchXeroPost(month, orgK, by, kind) {
+  const region = orgK === 'AU' ? 'au' : 'uk', res = [];
+  for (const j of ['COGS', 'SALES']) {
+    for (const x of (await cchXeroExisting(region, j, month)).filter(x => /^DRAFT$/i.test(String(x.Status || '')))) {
+      const body = { ManualJournalID: x.ManualJournalID, Narration: x.Narration, Date: cchDOf(x.Date), Status: 'POSTED', LineAmountTypes: x.LineAmountTypes || 'NoTax', ShowOnCashBasisReports: false,
+        JournalLines: (x.JournalLines || []).map(l => ({ LineAmount: l.LineAmount, AccountCode: l.AccountCode, Description: l.Description, TaxType: l.TaxType })) };
+      const w = await xeroFetch(region, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: [body] } });
+      const m = ((w && w.ManualJournals) || [])[0] || {}, total = cchR2((x.JournalLines || []).reduce((a, l) => a + Math.max(0, Number(l.LineAmount) || 0), 0));
+      const L = (x.JournalLines || []).map(l => ({ code: l.AccountCode, name: cchName(orgK, l.AccountCode), amount: Number(l.LineAmount) || 0 }));
+      try { await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, total, prev_total, xero_id, xero_status, lines, flags) VALUES ($1,$2,$3,$9,'posted',$4,$5,$5,$6,$7,$8,'{}')`,
+        [month, orgK, j, by, total, x.ManualJournalID, m.Status || 'POSTED', JSON.stringify(L), kind || 'manual']); } catch (e) { console.warn('[cogs-ch] log not written: ' + (e && e.message)); }
+      res.push({ journal: j, narration: x.Narration, total, status: m.Status || null, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID }); } }
+  return res; }
 async function cchAccessOk(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return null; }
     if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access or admin required' }); return null; } return me; }
   catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
@@ -7849,11 +7883,41 @@ app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, or
   const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK';
   if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
   if (b.push && b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
-  try { const runs = await cchXeroRun(month, orgK, { push: !!b.push, replace: b.replace === true, kind: 'manual', by: (me && me.email) || authUser(req) || 'admin' }); res.json({ ok: true, org: orgK, month, push: !!b.push, runs }); }
+  try { const by = (me && me.email) || authUser(req) || 'admin', runs = await cchXeroRun(month, orgK, { push: !!b.push, replace: b.replace === true, kind: 'manual', by });
+    const emailed = b.push ? await cchEmailIfNew(month, orgK, await cchLoad(month), runs, by) : false;
+    res.json({ ok: true, org: orgK, month, push: !!b.push, runs, emailed }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
 });
-// n8n "Horizon | COGS and SALES by channel": 1st 06:30 (month end: build last month, journals UK + AU, ONE email per org), 7th and 15th 06:30
-// (refresh: rebuild, rebuilt draft or top-up, no email). Secret-gated. ?month= overrides (testing).
+// v28.736 step 1 in one press: rebuild the month from LIVE Fulfil, then create (or rebuild) the DRAFTS in Xero for that org; emails on creation.
+app.post('/api/supply/cogs-channel/create', async (req, res) => {
+  const me = await cchAccessOk(req, res); if (!me) return;
+  const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK', by = (me && me.email) || authUser(req) || 'admin';
+  if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  if (b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
+  let build; try { build = await cchBuildStore(month, by); } catch (e) { log500(e); return res.status(502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
+  try { const runs = await cchXeroRun(month, orgK, { push: true, kind: 'manual', by, build }); const emailed = await cchEmailIfNew(month, orgK, build, runs, by);
+    res.json({ ok: true, org: orgK, month, runs, emailed }); }
+  catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/cogs-channel/state', async (req, res) => {   // v28.736: Xero now, for the step bar (reads Xero: 2 calls, more if a journal's lines are missing)
+  if (!(await cchAccessOk(req, res))) return;
+  const month = String(req.query.month || ''), orgK = req.query.org === 'AU' ? 'AU' : 'UK'; if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, month, org: orgK, xero: await cchXeroState(month, orgK) }); }
+  catch (e) { log500(e); res.status(502).json({ error: 'Xero read failed: ' + String(e.message || e) }); }
+});
+app.post('/api/supply/cogs-channel/post', async (req, res) => {   // v28.736 step 3: post the drafts (writes LIVE Xero; confirm required)
+  const me = await cchAccessOk(req, res); if (!me) return;
+  const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK';
+  if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  if (b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
+  try { const posted = await cchXeroPost(month, orgK, (me && me.email) || authUser(req) || 'admin');
+    if (!posted.length) return res.status(409).json({ error: 'No draft journals for ' + month + ' in Xero ' + orgK + ' to post.' });
+    res.json({ ok: true, org: orgK, month, posted }); }
+  catch (e) { log500(e); res.status(502).json({ error: 'Xero post failed: ' + String(e.message || e) }); }
+});
+// n8n "Horizon | COGS and SALES by channel": 1st 06:30 (month end: build last month, journals UK + AU), 7th and 15th 06:30 (refresh: rebuild,
+// rebuilt journal or top-up). v28.736 (Ben 06-Nov-26 "fully automatic"): every run creates POSTED journals (a draft made by hand is posted
+// with the new lines), and an email goes to each org's list whenever a new journal is created. Secret-gated. ?month= overrides (testing).
 app.post('/api/cron/cogs-channel', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' })), day = now.getDate();
@@ -7864,10 +7928,10 @@ app.post('/api/cron/cogs-channel', async (req, res) => {
     if (month < CCH_FROM) return res.json(Object.assign(out, { skipped: 'before ' + CCH_FROM }));
     const b = await cchBuildStore(month, by);
     for (const orgK of ['UK', 'AU']) {
-      try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b });
-        out.orgs[orgK] = runs.map(r => ({ journal: r.journal, action: r.action, total: r.total }));
-        if (kind === 'month_end' && runs.some(r => r.action !== 'no_change')) { const e = await cchEmail(month, orgK, b, runs, by); out.orgs[orgK].emailed = !!(e && e.sent);
-          if (e && e.sent) await pool.query(`UPDATE planner.cogs_channel_runs SET emailed=true WHERE month=$1 AND org=$2 AND run_kind='month_end' AND run_at > now() - interval '1 hour'`, [month, orgK]).catch(() => {}); } }
+      try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b, status: 'POSTED' });
+        out.orgs[orgK] = { journals: runs.map(r => ({ journal: r.journal, action: r.action, total: r.total })) };   // an object: properties on an array are lost in JSON
+        out.orgs[orgK].emailed = await cchEmailIfNew(month, orgK, b, runs, by);
+        out.orgs[orgK].posted_drafts = (await cchXeroPost(month, orgK, by, kind)).length; }   // an unchanged draft made by hand is posted too
       catch (e) { out.ok = false; out.orgs[orgK] = { error: String(e.message || e) };
         await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, error) VALUES ($1,$2,'COGS',$3,'error',$4,$5)`, [month, orgK, kind, by, String(e.message || e).slice(0, 500)]).catch(() => {}); }
     }
