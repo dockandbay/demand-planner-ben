@@ -13922,7 +13922,10 @@ supplySectionHandler = async (req, res, next) => {
         //   linked_pos= the POs actually assigned to the reference.
         // All three are NULL for "Other" sundry payments (is_deposit=false) — no pool concept there.
         return res.json(await q(`
-          WITH draw AS (
+          WITH xbk AS (   -- v28.741: live Xero bill numbers per org (the part before ' / '), hashed once, joined to the Other payments below
+            SELECT DISTINCT lower(region) rg, upper(trim(split_part(invoice_number,' / ',1))) k FROM planner.xero_bills
+            WHERE upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND coalesce(invoice_number,'')<>''
+          ), draw AS (
             SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
             FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL
             GROUP BY po.deposit_ref
@@ -13963,6 +13966,10 @@ supplySectionHandler = async (req, res, next) => {
                WHERE b.run_date=d.date_paid AND lower(trim(b.supplier))=lower(trim(d.supplier_name)) AND upper(coalesce(xb.currency_code,''))='USD'
                  AND upper(coalesce(b.status,'')) NOT IN ('VOIDED','DELETED')))) fx_expected,
             CASE WHEN upper(coalesce(d.country,''))='AU' AND d.date_paid >= '${PAY_REGION_SPLIT_FROM}'::date THEN 'USD/AUD' ELSE 'USD/GBP' END fx_pair,
+            -- v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): an Other payment is paid in Xero against its
+            -- own bill, so flag it as soon as no live bill with its reference is in its Xero org (doc org, else AU / UK by country). Read from the
+            -- synced copy (planner.xero_bills), the same match the Paid > Xero run uses. Deposits are not checked (they go on the supplier payment bill).
+            CASE WHEN NOT d.is_deposit AND coalesce(trim(d.reference),'')<>'' THEN xbk.k IS NOT NULL END in_xero,
             to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id, to_char(d.date_paid,'YYYY-MM-DD') date_paid,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365); v28.426: date_paid was inside this comment (Payments Due showed paid Other payments and deposits as unpaid)
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
@@ -14016,6 +14023,8 @@ supplySectionHandler = async (req, res, next) => {
               ) x
             ) END po_alloc
           FROM planner.deposits d
+          LEFT JOIN xbk ON NOT d.is_deposit AND xbk.k=upper(trim(d.reference))
+            AND xbk.rg=lower(coalesce(nullif(to_jsonb(d)->>'doc_org',''), CASE WHEN upper(coalesce(d.country,''))='AU' THEN 'au' ELSE 'uk' END))
           LEFT JOIN draw dr ON dr.deposit_ref=d.reference
           LEFT JOIN pool p ON p.reference=d.reference
           LEFT JOIN est ea ON ea.deposit_ref=d.reference
@@ -14181,6 +14190,13 @@ supplySectionHandler = async (req, res, next) => {
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
             coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}`)).rows;
+        // v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): each Other line says whether a live Xero bill
+        // with its reference is in its org (synced copy), so the Paid runs list flags a run before Paid > Xero is opened.
+        try { const _oRefs = [...new Set(lines.filter(l => l.source === 'other' && l.reference).map(l => String(l.reference).trim().toUpperCase()))];
+          if (_oRefs.length) { const _have = new Set((await pool.query(`SELECT DISTINCT lower(region)||'|'||upper(trim(split_part(invoice_number,' / ',1))) k FROM planner.xero_bills
+              WHERE upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND upper(trim(split_part(invoice_number,' / ',1))) = ANY($1)`, [_oRefs])).rows.map(r => r.k));
+            lines.forEach(l => { if (l.source === 'other' && l.reference) l.in_xero = _have.has(String(l.reg || 'UK').toLowerCase() + '|' + String(l.reference).trim().toUpperCase()); }); } }
+        catch (e) { console.warn('[payments-report] in_xero: ' + e.message); }
         // Sample-derived Other Payments: attach a per-account split (the sample's type/purpose × its Xero account code)
         // so the Payments Report Xero download can split the single total line across accounts. Register still shows the total.
         const _sampRefs = [...new Set(lines.filter(l => l.source === 'other' && /^SR-/i.test(l.reference || '')).map(l => l.reference))];
@@ -14210,7 +14226,7 @@ supplySectionHandler = async (req, res, next) => {
           g.total += Number(l.amount);
           if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
           g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '',
-            sample_split: (l.source === 'other') ? _sampleSplit(l.reference, l.amount) : null }); }
+            sample_split: (l.source === 'other') ? _sampleSplit(l.reference, l.amount) : null, in_xero: l.in_xero }); }   // v28.741 in_xero
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         // base currency = the supplier's default currency (CONFIG), not a hardcoded USD
         const ccyRows = (await pool.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`)).rows;
@@ -29576,7 +29592,10 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   if (!invId) throw new Error('Fulfil did not return the invoice id');
   // Landed cost: Fulfil only accepts a POSTED supplier invoice's landed-cost lines, so it can't be made with the draft. Once the team posts
   // the invoice in Fulfil, "Create landed cost" on the Other payment makes it (sbLandedCost). v28.329.
-  const lcId = null, warning = 'Draft invoice created. Post it in Fulfil, then use Create landed cost on the Other payment.';
+  // v28.741 (Ben 06-Nov-26, PO-DHL-LX-2026-09-B / -C): Fulfil does not send supplier invoices dated before 01-Oct-26 to Xero, so Paid > Xero
+  // could never find the bill. Say so here, when the invoice is made, not at payment time.
+  const _preOct = payload.invoice_date && payload.invoice_date < '2026-10-01';
+  const lcId = null, warning = 'Draft invoice created. Post it in Fulfil, then use Create landed cost on the Other payment.' + (_preOct ? ' Dated ' + payload.invoice_date + ', before 01-Oct-26: Fulfil will NOT send it to Xero, so also create the bill in Xero (reference ' + ref + ') or Paid > Xero cannot pay it.' : '');
   return save({ system: 'fulfil', doc_id: invId, doc_number: ref, doc_url: sbFulfilInvoiceUrl(cfg, invId), doc_status: 'draft · ' + (company === FULFIL_COMPANY_AU ? 'AU' : 'UK') + ' co.' + (cfg.env !== 'live' ? ' · ' + cfg.env : ''), landed_cost_id: lcId, warning });
 }
 // v28.329: landed cost for a pushed Fulfil sample bill, once the invoice is POSTED (Fulfil's rule: landed cost lines = posted supplier

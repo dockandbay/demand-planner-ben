@@ -1305,6 +1305,13 @@
 // v28.738 (Ben 06-Nov-26): supplier portal HELP page (testing, admin preview only); v28.739 admins upload the video file here. GET /api/supply/portal-help lists the videos; each plays
 // from a short-lived signed Storage link. Sections are the planned short clips: until a clip exists, a section plays the full video from its
 // start and stops at its end. Rendered inside the portal view (PP_EXTRA tab), so it looks as suppliers will see it.
+// v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): an Other payment is paid in Xero against its own
+// bill. When no live bill with its reference is in its Xero org (server field in_xero=false), say so wherever the payment shows, long before
+// Paid > Xero. Shown for unpaid ones and ones paid from 01-Oct-26 (older ones predate the Xero bill flow). o = {in_xero, doc_system, doc_status, date_due, date_paid}.
+function hzXeroMiss(o){ if(!o||o.in_xero!==false)return ''; if(o.date_paid&&String(o.date_paid)<'2026-10-01')return '';
+  var tip=o.doc_system==='fulfil'?('Fulfil supplier invoice ('+(o.doc_status||'draft')+'), not in Xero yet. Post it in Fulfil; Fulfil sends it to Xero. Fulfil invoices dated before 01-Oct-26 do not go to Xero: create the bill in Xero instead.'+(o.date_due&&String(o.date_due)<'2026-10-01'?' This one is due before 01-Oct-26.':''))
+    :'No Xero bill with this reference yet. Paid > Xero can only pay it once the bill is in Xero (Push Xero, or create it in Xero with this reference).';
+  return ' <span class="tool-badge bg-red" title="'+String(tip).replace(/"/g,'&quot;')+'" style="white-space:nowrap">not in Xero</span>'; }
 var HZ_HELP={d:null,vid:'orders',sec:-1};
 function hzPortalHelp(el){
   var mmss=function(s){ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2); };
@@ -12130,7 +12137,8 @@ function hzPortalHelp(el){
         var act = paid ? '' : '<button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:var(--neg)">delete</button>';
         return '<tr>'+cells+'<td class="l">'+othDoc(d)+'</td><td class="l">'+badge+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
       // v28.327: the sample bill's document. Pushed = link to the Fulfil supplier invoice / Xero bill; not yet = a push button.
-      function othDoc(d){ if(d.doc_url)return sbDocCell(d)+(d.doc_system==='fulfil'&&!d.doc_landed_cost_id?' <button class="save-btn light oth-lc" data-id="'+d.id+'" style="padding:1px 7px;font-size:11px" title="after the invoice is posted in Fulfil: landed cost by value over the PO\'s supplier shipments (draft)">Create landed cost</button>':'')+(d.doc_error?'<div class="tiny" style="color:#b45309;max-width:280px">'+esc(d.doc_error)+'</div>':''); if(!d.sample_bill_id||!d.doc_system)return '';
+      function othDoc(d){ return hzXeroMiss(d).replace(/^ /,'')+(hzXeroMiss(d)?' ':'')+othDoc0(d); }   // v28.741
+      function othDoc0(d){ if(d.doc_url)return sbDocCell(d)+(d.doc_system==='fulfil'&&!d.doc_landed_cost_id?' <button class="save-btn light oth-lc" data-id="'+d.id+'" style="padding:1px 7px;font-size:11px" title="after the invoice is posted in Fulfil: landed cost by value over the PO\'s supplier shipments (draft)">Create landed cost</button>':'')+(d.doc_error?'<div class="tiny" style="color:#b45309;max-width:280px">'+esc(d.doc_error)+'</div>':''); if(!d.sample_bill_id||!d.doc_system)return '';
         return '<button class="save-btn light oth-push" data-id="'+d.id+'" style="padding:2px 8px;font-size:11px'+(d.doc_system==='xero'?';background:#13B5EA;border-color:#13B5EA;color:#fff':'')+'">Push '+(d.doc_system==='xero'?'Xero '+String(d.doc_org||'uk').toUpperCase()+' bill':'Fulfil invoice')+'</button>'+(d.doc_error?'<div class="tiny" style="color:var(--neg);max-width:260px">'+esc(d.doc_error)+'</div>':''); }
       // mobile: same inline-editable fields, stacked into a card (bindings attach by class as on the table)
       function otherCard(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id); var paid=!!d.date_paid, stt=statusOf(d);
@@ -12366,7 +12374,7 @@ function hzPortalHelp(el){
     (function(){ var pm={}; pos.forEach(function(p){ pm[p.po]=p; }); rows.forEach(function(r){ var p=pm[r.ref]; if(p){ r.prod_no=p.prod_no||''; r.deposit_ref=p.deposit_ref||''; } }); })();   // v28.622: production + deposit ref for the copy email
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
-      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',au_dep:!!d.is_deposit&&String(d.country||'').toUpperCase()==='AU',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
+      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',au_dep:!!d.is_deposit&&String(d.country||'').toUpperCase()==='AU',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false,nx:d.is_deposit?'':hzXeroMiss(d)}); });   /* v28.741 nx: not in Xero */
     rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
     // PO milestone = paid once an AMOUNT is assigned (matches the PO detail); a scheduled date with no amount is NOT paid → still due. Deposits/other = date_paid.
     rows.forEach(function(r){ r.paid = r.po ? (!r.remaining && Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });   // v28.294: a remaining balance is never paid
@@ -12406,7 +12414,7 @@ function hzPortalHelp(el){
         : (r.likely?esc(fd(r.likely)):'<span class="mut">—</span>');
       var refCell = r.po ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
         : r.type==='Deposit' ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
-        : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
+        : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
       var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
       var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
         +mobFld('Assigned',r.noedit?pdueBxIn(r,'amount'):editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',r.noedit?pdueBxIn(r,'date'):editCell(r.ep,r.dt_field,r.dt_val,'date'));   // v28.309: next balance payment = standard boxes
@@ -12442,7 +12450,7 @@ function hzPortalHelp(el){
             ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
             : r.type==='Deposit'
             ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
-            : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
+            : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
           h+='<tr'+(r.overdue?' style="background:var(--neg-bg)"':(r.paid?' style="opacity:.6"':''))+'>'
             +'<td class="l"><span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span></td>'
             +'<td class="l">'+refCell+'</td>'
@@ -13254,7 +13262,10 @@ function hzPortalHelp(el){
     if(!runs.length)return;
     fetch('/api/supply/payments/xero-followup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({runs:runs})}).then(function(r){ return r.json(); })
       .then(function(j){ if(!j||j.error)return; Object.keys(j.results||{}).forEach(function(k){ PAY_XFU[k]=j.results[k]; }); payXfuPaint(); }).catch(function(){}); }
-  function payXeroCell0(r,i){   // v28.347 (Ben 14-Oct-26): one green "Paid > Xero" button (opens the 4-step popup); the XERO and "bank ↗" buttons are gone
+  function payXeroCell0(r,i){ var _nx=(r.lines||[]).filter(function(l){ return l.source==='other'&&l.in_xero===false; });   // v28.741: Other bills not in Xero yet
+    var _tag=(!r.xero_done&&_nx.length)?'<span class="tool-badge bg-red" title="Not in Xero yet: '+esc(_nx.map(function(l){ return l.reference; }).join(', '))+'. Paid &gt; Xero cannot pay them until the bills are in Xero." style="white-space:nowrap;margin-right:4px">'+_nx.length+' not in Xero</span>':'';
+    return _tag+payXeroCell1(r,i); }
+  function payXeroCell1(r,i){   // v28.347 (Ben 14-Oct-26): one green "Paid > Xero" button (opens the 4-step popup); the XERO and "bank ↗" buttons are gone
     var dk=' data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
     var paid=(r.other_amount!=null)&&String(r.bank_ccy||'').trim();
     if(r.xero_done){ var bills=r.xero_bills||[];
