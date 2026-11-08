@@ -158,7 +158,7 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
     const tg = hzThawGap();   // v28.231 (gap G1): a "timeout" that spanned an instance freeze
     // v28.370 (Diviyaj 14-Oct-26): which route (or 'background') and staff user made the call, so an API error can be tied to a page
     let ex = 'background', who = null; try { const st = _reqStore.getStore(), r = st && st.req; if (r) { ex = (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200); who = hzReqUser(r) || null; } } catch (_) {}
-    if (tg && timeout && ex === 'background') { _hzFrozen.integ++; return; }   // v28.490: a background call frozen mid-flight (e.g. KV reads), not a real outage
+    if (tg && ex === 'background' && (timeout || svc === 'kv')) { _hzFrozen.integ++; return; }   // v28.742: + KV 'fetch failed' right after a thaw (dead keep-alive socket; kvCmd retries on a new one): 90 a week on live, never a real outage   // v28.490: a background call frozen mid-flight (e.g. KV reads), not a real outage
     hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0) + (tg ? '|thaw' : ''), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
       meta: Object.assign({ service: svc, op, status: status || 0, timeout: !!timeout, example: ex }, who ? { user: who } : null, tg ? { thaw_gap_ms: tg } : null) });
   } catch (_) { /* measurement must never throw */ }
@@ -6030,16 +6030,28 @@ function fulfilCountryForCompany(id) { return (Number(id) === FULFIL_COMPANY_AU)
 // retried after Retry-After (or 1s, 2s, 4s, 8s), up to 4 times. Other failures (503, timeouts) keep the old rule: reads only, never writes.
 const _fulfilIsRead = (method, path) => method === 'GET' || /\/(search_read|read|search_count|search)$/.test(String(path || '').split('?')[0]);
 const _fulfilWait = (e, i) => new Promise(r => setTimeout(r, Math.min(30000, (Number(e.retryAfter) > 0 ? Number(e.retryAfter) * 1000 : 1000 * Math.pow(2, i)))));
+// v28.743 (Ben, health review 09-Nov-26): ONE gate for every Fulfil call on this instance. Live had ~950 Fulfil 429s in 7 days, in bursts
+// (3PL push-actuals 467 in one hour on 03-Nov, COGS build 315 on 05-Nov): each caller backed off on its own while the others kept firing.
+// Now at most FULFIL_MAX_CONC (default 4; Fulfil documents no number, the COGS build ran 6 and hit 429s) Fulfil calls are in flight per instance, and a 429 holds EVERY caller until Retry-After (else
+// 1s, 2s, 4s, 8s) has passed, so the retry and the next calls stop hammering the gate together. Waiting slots are handed over in order.
+const FULFIL_MAX_CONC = Math.max(1, Number(process.env.FULFIL_MAX_CONC) || 4);
+let _fulAct = 0, _fulCoolUntil = 0; const _fulQ = [];
+async function _fulGate(fn) {
+  if (_fulAct >= FULFIL_MAX_CONC) await new Promise(r => _fulQ.push(r)); else _fulAct++;
+  try { let w; while ((w = _fulCoolUntil - Date.now()) > 0) await new Promise(r => setTimeout(r, w)); return await fn(); }
+  finally { const n = _fulQ.shift(); if (n) n(); else _fulAct--; }
+}
+function _fulCool(e, i) { const ms = Math.min(30000, Number(e && e.retryAfter) > 0 ? Number(e.retryAfter) * 1000 : 1000 * Math.pow(2, i)); _fulCoolUntil = Math.max(_fulCoolUntil, Date.now() + ms); }
 async function fulfilFetch(method, path, body) {
   for (let i = 0; ; i++) {
     try { return await _fulfilFetch1(method, path, body); }
-    catch (e) { if (e.status !== 429 || i >= 4) throw e; await _fulfilWait(e, i); }
+    catch (e) { if (e.status !== 429 || i >= 4) throw e; _fulCool(e, i); }   // v28.743: the gate waits out the shared hold
   }
 }
 async function _fulfilFetch1(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const _req = (ms) => _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, ms);
+  const _req = (ms) => _fulGate(() => _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, ms));   // v28.743: through the shared gate
   // v28.314: READ-ONLY calls (GET, search_read / search / search_count / read) get one retry on a new connection when the first dies on a
   // socket that went stale while the instance was frozen ("fetch failed", or a timeout right after a thaw: first wait 10 s then). Writes are
   // never retried here (a write that reached Fulfil before the socket died must not be sent twice).
@@ -6059,11 +6071,11 @@ async function _fulfilFetch1(method, path, body) {
 async function fulfilFetchCfg(cfg, method, path, body) {
   if (!cfg || !cfg.configured) { const e = new Error('Fulfil ' + (cfg && cfg.env) + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   for (let i = 0; ; i++) {   // v28.257: same 429 retry as fulfilFetch (preorders sync, COGS, id seeder)
-    const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);
+    const r = await _fulGate(() => _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000));   // v28.743: shared gate
     const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
     if (r.ok) return j;
     const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; e.retryAfter = r.headers.get('retry-after');
-    if (r.status !== 429 || i >= 4) throw e; await _fulfilWait(e, i);
+    if (r.status !== 429 || i >= 4) throw e; _fulCool(e, i);   // v28.743: shared hold, the gate waits it out
   }
 }
 // find a Fulfil purchase order id by its reference (PO number); null if not present
@@ -7638,12 +7650,12 @@ async function cchFulfil(model, meth, body) {
   for (let i = 0, to = 0; ; i++) {
     if (_cchDeadline && Date.now() > _cchDeadline) throw new Error('Fulfil is limiting requests (429) or slow; try again in a few minutes');
     const w = _cchHold - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
-    let r; try { r = await _fetchT(cfg.base + '/model/' + model + '/' + meth, { method: 'PUT', headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 60000); }
+    let r; try { r = await _fulGate(() => _fetchT(cfg.base + '/model/' + model + '/' + meth, { method: 'PUT', headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 60000)); }   // v28.743: shared Fulfil gate
     catch (e) { if (e && e.code === 'FETCH_TIMEOUT' && !to++) continue; throw e; }
     const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
     if (r.ok) return j;
     const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); if (r.status !== 429 || i >= 7) throw e;
-    const ra = Number(r.headers.get('retry-after')); _cchHold = Math.max(_cchHold, Date.now() + (ra > 0 ? ra * 1000 : Math.min(20000, 2000 * (i + 1))));
+    const ra = Number(r.headers.get('retry-after')); _cchHold = Math.max(_cchHold, Date.now() + (ra > 0 ? ra * 1000 : Math.min(20000, 2000 * (i + 1)))); _fulCoolUntil = Math.max(_fulCoolUntil, _cchHold);   // v28.743: other Fulfil callers hold too
   } }
 async function cchPool(jobs, C) { const out = new Array(jobs.length); let i = 0;
   await Promise.all(Array.from({ length: Math.min(C || 8, jobs.length) }, async () => { while (i < jobs.length) { const k = i++; out[k] = await jobs[k](); } }));
@@ -9023,7 +9035,13 @@ async function _xeroFetch0(region, path, opts) { const token = await xeroToken(r
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
     xeroSandboxGuard(region);   // v28.703: sandbox only, see above
     { const _rs = region + ' ' + (opts.method || 'GET') + ' ' + ((String(path).match(/^\/api\.xro\/2\.0\/([A-Za-z]+)/) || [, 'other'])[1]); const _bt = _xeroCallN.by || (_xeroCallN.by = {}); _bt[_rs] = (_bt[_rs] || 0) + 1; }   // v28.703: calls by org + method + resource (bills-sync status), to aim the caching (plan item 4)
-    _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;   // v28.183 (Ben): per-instance call counter (bills-sync status)
+    _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;
+    // v28.743 (Ben, health review 09-Nov-26: Xero UK fell to 133 calls left on 04-Nov and nothing said who used them): every call is counted
+    // per org + caller (the HORIZON route or cron that made it, else 'background') + Xero resource, one 'metric' row per hour (buffered, no extra
+    // DB round trip). Weekly health report section 7b + the email list the top callers.
+    try { let cl = 'background'; const st = _reqStore.getStore(), q = st && st.req; if (q) cl = (q.method + ' ' + String(q.originalUrl || q.url || '').split('?')[0].split('/').map(hzIdSeg).join('/')).slice(0, 120);
+      const rs = (String(path).match(/^\/api\.xro\/2\.0\/([A-Za-z]+)/) || [, 'other'])[1], hr = new Date().toISOString().slice(0, 13);
+      hzHealthEvt('metric', 'xero_calls|' + region + '|' + cl + '|' + rs + '|' + hr, { path: ('xero calls ' + region + ' ' + cl).slice(0, 300), message: 'Xero ' + region.toUpperCase() + ' calls by ' + cl + ' (' + rs + ')', meta: { xero_calls: true, org: region, caller: cl, resource: rs, sandbox: !!IS_SANDBOX } }); } catch (_) {}   // v28.183 (Ben): per-instance call counter (bills-sync status)
     try { r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? ((typeof opts.body === 'string' || Buffer.isBuffer(opts.body)) ? opts.body : JSON.stringify(opts.body)) : undefined }, opts.timeoutMs || 20000); }   // v28.275: a Buffer body is sent raw (attachments)
     catch (e) { if ((opts.method || 'GET') === 'GET' && attempt < 1 && /abort|timeout/i.test(String(e && (e.name + ' ' + e.message)))) continue; throw e; }   // v28.253: a timed-out GET is retried once (opts.timeoutMs sets the per-call limit, default 20 s)
     xeroQuotaNote(region, r);
@@ -33548,6 +33566,8 @@ async function hzHealthReportExtra(days) {
         coalesce(sum(count) FILTER (WHERE meta->>'timeout' = 'true' AND meta ? 'thaw_gap_ms'), 0)::int thaw_timeouts, (array_agg(meta->>'example' ORDER BY ts DESC) FILTER (WHERE meta ? 'example'))[1] example,
         (array_agg(meta->>'user' ORDER BY ts DESC) FILTER (WHERE meta ? 'user'))[1] last_user,   -- v28.370: route + user (rows from v28.370 on), timeouts that spanned an instance freeze
         (array_agg(message ORDER BY ts DESC))[1] message, min(ts) first_seen, max(ts) last_seen FROM ev WHERE kind = 'integration_error' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
+      'xero_callers', (SELECT coalesce(json_agg(x ORDER BY x.n DESC), '[]') FROM (SELECT meta->>'org' org, meta->>'caller' caller, sum(count)::int n, string_agg(DISTINCT meta->>'resource', ', ') resources, max(ts) last_seen
+        FROM ev WHERE kind = 'metric' AND meta->>'xero_calls' = 'true' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20) x),   -- v28.743: Xero calls by caller
       'data', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC), '[]') FROM (SELECT DISTINCT ON (kind, path) kind, path, message, count n, ts first_seen, coalesce((meta->>'last_seen')::timestamptz, ts) last_seen, meta
         FROM ev WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag') ORDER BY kind, path, ts DESC) x),
       'sanity', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC), '[]') FROM (SELECT DISTINCT ON (path, source) path, source, message, count n, ts first_seen, coalesce((meta->>'last_seen')::timestamptz, ts) last_seen, user_email
@@ -33630,6 +33650,8 @@ function hzHealthMarkdown(d) {
       d.sanity.map(r => [r.path, r.source, r.message, r.n, dt(r.last_seen)]));
     tbl('## 7. Integration errors', 'Non-2xx, network errors and timeouts from outbound calls (all through _fetchT in server.mjs).', ['Service', 'Call', 'Status', 'Count', 'Timeouts', 'Max ms', 'Last message', 'Last seen', 'Likely file'],
       d.integ.map(r => [r.service, r.path, r.status || 'network', r.n, r.timeouts, r.max_ms, String(r.message || '').slice(0, 160), dt(r.last_seen), r.file]));
+    tbl('## 7b. Xero calls by caller', 'v28.743: every Xero API call counted per org and the HORIZON route / cron that made it. Each org allows 1,000 calls a day and the sandbox shares it (sandbox calls are logged in the sandbox database, not here).', ['Org', 'Caller', 'Calls', 'Resources', 'Last seen'],
+      (d.xero_callers || []).map(r => [String(r.org || '').toUpperCase(), r.caller, r.n, r.resources, dt(r.last_seen)]));
     tbl('## 8. Freezes (main thread blocked >= 1s)', 'Long tasks seen by browsers, per view. Profile the view in Chrome DevTools Performance; the likely file maps the view as in section 4.', ['View', 'Freezes', 'Max ms', 'Total ms', 'Users', 'Last seen', 'Likely file'],
       d.freezes.map(r => [r.path, r.n, r.max_ms, r.sum_ms, r.users, dt(r.last_seen), r.file]));
     tbl('## 8b. Dead clicks (nav press that did nothing)', 'v28.179: a press on a menu / tab item (left rail, view toggles, L2 / L3 tabs) after which neither the route nor the active item changed and no loading panel appeared within 1.5 s. Usually a click swallowed by a re-render of the menu under the pointer, or a handler that bailed out. Reproduce by clicking that item from that view.', ['From view', 'Nav item', 'Count', 'Users', 'Versions', 'Last seen', 'Likely file'],
@@ -33711,6 +33733,7 @@ async function hzHealthEmail(days, to) {
     + tbl('Slow views', ['View', 'Count', 'p95 ms', 'Max ms'], d.views.slice(0, 5).map(r => [r.path, r.n, r.p95, r.max_ms]))
     + (d.kpis2 ? tbl('Sanity', ['Check', 'Finding', 'Last seen'], d.sanity.slice(0, 5).map(r => [r.path, String(r.message || '').slice(0, 160), dt(r.last_seen)]))
       + tbl('Integration errors', ['Service', 'Call', 'Status', 'Count', 'Last seen'], d.integ.slice(0, 5).map(r => [r.service, r.path, r.status || 'network', r.n, dt(r.last_seen)]))
+      + tbl('Xero calls by caller', ['Org', 'Caller', 'Calls'], (d.xero_callers || []).slice(0, 5).map(r => [String(r.org || '').toUpperCase(), r.caller, r.n]))
       + tbl('Freezes (>= 1s)', ['View', 'Freezes', 'Max ms', 'Users'], d.freezes.slice(0, 5).map(r => [r.path, r.n, r.max_ms, r.users]))
       + tbl('API failures seen by browsers', ['Endpoint', 'Status', 'Count', 'Users'], d.api.slice(0, 5).map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.users]))
       + tbl('Database', ['What', 'Count', 'Max'], d.db_pool.slice(0, 3).map(r => [r.message || r.path, r.n, (r.max_waiting || 0) + ' waiting']).concat(d.slow_q.slice(0, 5 - Math.min(3, d.db_pool.length)).map(r => [r.sql, r.n, r.max_ms + ' ms'])))
@@ -33781,7 +33804,7 @@ app.post('/api/health/send-test', async (req, res) => {
 // etl_drop: latest rows_affected < 60% of the median of the previous 10 successful runs. Calibrated on live etl_runs 06-Oct-26.
 const HZ_ETL = {
   exclude: /^(ui_|supply_erp_push$)/,                                     // UI saves + event-driven ERP staging: not schedules
-  retired: new Set(['n8n_sync_inbound', 'n8n_sync_sales', 'n8n_sync_flexport']),   // replaced by cin7_inbound_direct / n8n_sync_sales_sheets / HORIZON's own /api/cron/flexport-import (v28.040; v28.491: the n8n job's last run was 07-Oct-26, so it alarmed daily as stale)
+  retired: new Set(['n8n_sync_inbound', 'n8n_sync_sales', 'n8n_sync_flexport', 'cin7_inbound_direct']),   // v28.742: Cin7 disabled 31-Oct-26 (fulfil_inbound_direct replaces it)   // replaced by cin7_inbound_direct / n8n_sync_sales_sheets / HORIZON's own /api/cron/flexport-import (v28.040; v28.491: the n8n job's last run was 07-Oct-26, so it alarmed daily as stale)
   flat_ok: new Set(['n8n_sync_categories_subcategories', 'n8n_sync_key_account_fc', 'n8n_sync_preorders']),   // reference / committed data that can legitimately repeat
   flat_ok_msg: /no change|unchanged|nothing to (do|sync)/i,                 // a job that says so in its message is not "flat"
   core: /sales|products|inbound/,                                           // red alert on a failed status
@@ -33813,7 +33836,9 @@ function hzEtlEval(jobs, now) {
   for (const j of jobs || []) {
     const runs = (j.runs || []).slice().sort((a, b) => b.t - a.t); if (!runs.length || HZ_ETL.exclude.test(j.job) || HZ_ETL.retired.has(j.job)) continue;
     if (runs.filter(r => now - r.t <= HZ_ETL.active_days * 86400000).length < HZ_ETL.min_runs) continue;
-    const last = runs[0], age = now - last.t, g = []; for (let i = 0; i + 1 < Math.min(runs.length, 20); i++) g.push(runs[i].t - runs[i + 1].t);
+    // v28.742: runs within 1h of the previous kept run are one run (commission_weekly logs several steps a minute apart, so the median gap was 0h and it alarmed "no run for 15h")
+    const last = runs[0], age = now - last.t, g = [], tk = []; for (const r of runs) if (!tk.length || tk[tk.length - 1] - r.t >= H) tk.push(r.t);
+    for (let i = 0; i + 1 < Math.min(tk.length, 20); i++) g.push(tk[i] - tk[i + 1]);
     const cad = _hzMedian(g) || 24 * H, meta = { job: j.job, last_run: new Date(last.t).toISOString(), cadence_h: +(cad / H).toFixed(1), age_h: +(age / H).toFixed(1), status: last.s, rows: last.r };
     if (last.s !== 'success' && !(/^(running|pending|started)$/i.test(last.s) && age < 2 * H))
       F.push({ kind: 'etl_stale', path: j.job, message: `${j.job}: latest run status "${last.s}"${last.m ? ' (' + String(last.m).slice(0, 160) + ')' : ''}`, meta: Object.assign({ failed: true, core: HZ_ETL.core.test(j.job) }, meta) });
@@ -33829,6 +33854,24 @@ function hzEtlEval(jobs, now) {
         F.push({ kind: 'etl_drop', path: j.job, message: `${j.job}: latest rows_affected ${Number(ok[0].r).toLocaleString('en-GB')} is ${Math.round(Number(ok[0].r) / med * 100)}% of the recent median ${Math.round(med).toLocaleString('en-GB')}`, meta: Object.assign({ median: med }, meta) });
     }
   }
+  return F;
+}
+// v28.742 (Ben, health review 09-Nov-26): pure sales freshness checks (unit-testable).
+// (1) current month: by day 4 the month must exist AND carry real volume: >= 20% of the same month last year pro-rata to the day (live
+//     09-Nov-26 had ONE November row of 1 unit, which passed the old "latest month exists" test while the sheet sync was frozen).
+// (2) last full month vs the SAME month last year (was the 3-month mean: Oct-26 39,189 vs Oct-25 38,679 alarmed 662 times as "partial"
+//     only because Jul-Sep are the peak). Falls back to the 3-month mean when last year is missing.
+function hzSalesLagEval(sm, salesMax, curYm, dom, ymAdd) {
+  const F = [], fmt = v => Math.round(v).toLocaleString('en-GB');
+  if (dom > 3) {
+    const cur = sm[curYm] || 0, ly = sm[ymAdd(curYm, -12)] || 0, dim = new Date(Date.UTC(+curYm.slice(0, 4), +curYm.slice(5, 7), 0)).getUTCDate(), exp = ly * Math.min(1, (dom - 1) / dim);
+    if (!salesMax || salesMax < curYm) F.push({ kind: 'data_lag', path: 'sales_actuals:current_month', message: `sales_actuals latest month is ${salesMax || 'none'}; ${curYm} should have partial actuals by day 4`, meta: { latest: salesMax, expected: curYm } });
+    else if (exp > 0 && cur < 0.2 * exp) F.push({ kind: 'data_lag', path: 'sales_actuals:current_month', message: `sales_actuals ${curYm} has ${fmt(cur)} units by day ${dom}; last year's ${ymAdd(curYm, -12)} pro-rata is about ${fmt(exp)}: the sales feed may have stopped`, meta: { month: curYm, units: cur, expected_pro_rata: Math.round(exp), ly_units: ly } });
+  }
+  const lastFull = ymAdd(curYm, -1), lv = sm[lastFull] || 0, lyv = sm[ymAdd(lastFull, -12)];
+  if (lyv > 0) { if (lv < 0.5 * lyv) F.push({ kind: 'data_lag', path: 'sales_actuals:last_month_partial', message: `sales_actuals ${lastFull} units ${fmt(lv)} are ${Math.round(lv / lyv * 100)}% of ${ymAdd(lastFull, -12)} (${fmt(lyv)}): actuals may be partial (the Sep-26 incident)`, meta: { month: lastFull, units: lv, ly_units: lyv } }); }
+  else { const p3 = [-2, -3, -4].map(k => sm[ymAdd(curYm, k)]).filter(v => v != null);
+    if (p3.length === 3) { const mean = (p3[0] + p3[1] + p3[2]) / 3; if (mean > 0 && lv < 0.5 * mean) F.push({ kind: 'data_lag', path: 'sales_actuals:last_month_partial', message: `sales_actuals ${lastFull} units ${fmt(lv)} are ${Math.round(lv / mean * 100)}% of the 3-month mean ${fmt(mean)}: actuals may be partial (the Sep-26 incident)`, meta: { month: lastFull, units: lv, mean3: Math.round(mean) } }); } }
   return F;
 }
 const HZ_CHECKS_SQL = `SELECT json_build_object(
@@ -33869,12 +33912,9 @@ async function runHealthChecks(opt) {
     if (age > HZ_RA.sales_max_h * H) alerts.push({ key: 'etl:sales_stale', trigger: 'data', title: 'Sales sync stale: ' + HZ_RA.sales_job + ' last success ' + (ls ? _hzH(age) + ' ago' : 'never'), n: 1, examples: [ls ? 'last success ' + hzSydney(ls.t) + ' Sydney' : 'no successful run'], file: 'n8n workflow ' + HZ_RA.sales_job }); }
   // 2. data lag
   const curYm = new Date(now).toISOString().slice(0, 7), dom = new Date(now).getUTCDate();
-  if (d.sales_max && d.sales_max < curYm && dom > 3) F.push({ kind: 'data_lag', path: 'sales_actuals:current_month', message: `sales_actuals latest month is ${d.sales_max}; ${curYm} should have partial actuals by day 4`, meta: { latest: d.sales_max, expected: curYm } });
   const sm = {}; (d.sales_months || []).forEach(x => { sm[x.m] = Number(x.u) || 0; });
   const ymAdd = (ym, k) => { const y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + k, dt = new Date(Date.UTC(y, m, 1)); return dt.toISOString().slice(0, 7); };
-  const lastFull = ymAdd(curYm, -1), prev3 = [ymAdd(curYm, -2), ymAdd(curYm, -3), ymAdd(curYm, -4)].map(m => sm[m]).filter(v => v != null);
-  if (prev3.length === 3) { const mean = (prev3[0] + prev3[1] + prev3[2]) / 3, lv = sm[lastFull] || 0;
-    if (mean > 0 && lv < 0.5 * mean) F.push({ kind: 'data_lag', path: 'sales_actuals:last_month_partial', message: `sales_actuals ${lastFull} units ${Math.round(lv).toLocaleString('en-GB')} are ${Math.round(lv / mean * 100)}% of the 3-month mean ${Math.round(mean).toLocaleString('en-GB')}: actuals may be partial (the Sep-26 incident)`, meta: { month: lastFull, units: lv, mean3: Math.round(mean) } }); }
+  F.push(...hzSalesLagEval(sm, d.sales_max, curYm, dom, ymAdd));
   const inb = d.inb || {}, inbAge = inb.loaded ? now - Date.parse(inb.loaded) : Infinity;
   if (!Number(inb.n)) F.push({ kind: 'data_lag', path: 'inbound_shipments:empty', message: 'inbound_shipments has 0 rows', meta: { rows: 0 } });
   else if (inbAge > 24 * H) F.push({ kind: 'data_lag', path: 'inbound_shipments:stale', message: `inbound_shipments last loaded ${_hzH(inbAge)} ago (${hzSydney(inb.loaded)} Sydney)`, meta: { loaded_at: inb.loaded, age_h: Math.round(inbAge / H) } });
@@ -33893,7 +33933,7 @@ async function runHealthChecks(opt) {
   try { const xv = await xeroVoidLinkFinding(); if (xv) F.push(xv); } catch (_) {}   // v28.183 (Ben): PO links to voided / deleted Xero bills (also written after every bill sync)
   // 4. daily metric snapshots (once per calendar day per path) for week-on-week compares
   const today = new Set(d.metric_today || []);
-  const mv = { inbound_total: units, inbound_rows: Number(inb.n) || 0, sales_last_month_units: sm[lastFull] || 0, scope_no_category: Number((d.nocat || {}).n) || 0, negative_on_hand_rows: Number((d.neg || {}).n) || 0 };
+  const mv = { inbound_total: units, inbound_rows: Number(inb.n) || 0, sales_last_month_units: sm[ymAdd(curYm, -1)] || 0, scope_no_category: Number((d.nocat || {}).n) || 0, negative_on_hand_rows: Number((d.neg || {}).n) || 0 };
   for (const k in mv) if (!today.has(k)) metrics.push({ kind: 'metric', path: k, message: 'daily metric ' + k, meta: { value: mv[k] }, count: 1 });
   const out = { ok: true, dry_run: dry, findings: F, alerts, metrics: Object.assign({}, mv), ms: 0 };
   if (!dry) {

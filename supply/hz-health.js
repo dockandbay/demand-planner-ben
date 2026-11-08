@@ -103,7 +103,8 @@
   // v28.188 (Ben): the supplier portal also records 4xx (session expired 401, "not your shipment" 403, 404, validation 400 / 409):
   // to a supplier these are failures too. The sign-in probe (GET /api/portal/me answering 401 on the login page) is expected, not a failure.
   // v28.195 (Ben): the client portal too (its sign-in probe is GET /api/cp/me answering 401).
-  function PORTAL4xx(m,p,s){ return (SRC==='portal'&&!(s===401&&m==='GET'&&p==='/api/portal/me'))||(SRC==='client_portal'&&!(s===401&&m==='GET'&&p==='/api/cp/me')); }
+  // v28.742 (health review 09-Nov-26): + the bootstrap prefetch, which starts alongside /me before sign-in is known (285 a week from the login page).
+  function PORTAL4xx(m,p,s){ return (SRC==='portal'&&!(s===401&&m==='GET'&&(p==='/api/portal/me'||p==='/api/portal/bootstrap')))||(SRC==='client_portal'&&!(s===401&&m==='GET'&&p==='/api/cp/me')); }
   // v28.231 (Ben, health review gap G7): a "> 10s" call that spanned the tab being hidden ('slow_hidden') or the device sleeping
   // ('slow_sleep': the wall clock and the monotonic clock drifted > 2s apart) is not a server wait; recorded separately.
   var HID=0; document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')HID++; });
@@ -112,8 +113,9 @@
   if(typeof _fetch==='function'){ window.fetch=function(input,init){
     var t0=0, d0=0, h0=0, u='', m='GET'; try{ t0=performance.now(); d0=Date.now(); h0=HID; u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
     var p=_fetch.apply(window,arguments);
-    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000||(s>=400&&PORTAL4xx(m,path,s)))apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?slowKind(t0,d0,h0):null); }catch(_){} },
-      function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
+    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; var sk=(ms>10000&&s<500)?slowKind(t0,d0,h0):null; if(sk&&sk!=='slow')return;   /* v28.742: a slow call that spanned a hidden tab / device sleep timed the time away, not the server (127 a week): not recorded */
+      if(s>=500||s===408||s===429||ms>10000||(s>=400&&PORTAL4xx(m,path,s)))apiNote(m,path,s,Math.round(ms),sk); }catch(_){} },
+      function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; if(n!=='TimeoutError'&&(navigator.onLine===false||slowKind(t0,d0,h0)!=='slow'))return;   /* v28.742: a network error while offline, hidden or after the device slept is the laptop, not HORIZON */ apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
     return p; }; }
   // v28.179 (Ben): dead_click: a press on a NAV item (left rail L1 / L2 / L3, top view toggles, L2 / L3 tab bars) that is not
   // already the active one, after which neither the route nor the active nav item changes and no loading panel appears within

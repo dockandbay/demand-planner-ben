@@ -1,3 +1,13 @@
+## v28.742 (09-Nov-26) App health: real alerts kept, false alarms removed; shared Fulfil gate; Xero calls by caller
+- Ben 09-Nov-26 health review ("Fix your recommended"). Live 7 days showed one real data gap and several checks that alarmed wrongly.
+- Sales freshness: the current-month check now needs real volume by day 4 (at least 20% of the same month last year, pro-rata to the day). Live had ONE November row of 1 unit, which passed the old "month exists" test while the sales sheet sync was frozen at 94,713 rows.
+- Last-month "partial" check compares with the same month last year (was the 3-month mean: Oct-26 39,189 vs Oct-25 38,679 alarmed 662 times only because Jul to Sep are peak months).
+- ETL: cin7_inbound_direct retired (Cin7 disabled 31-Oct-26); expected cadence ignores runs within 1h of each other (commission_weekly logs several steps a minute apart and alarmed "normally every 0h").
+- Noise: KV "fetch failed" right after an instance freeze no longer counts as an integration error (kvCmd already retries; 90 a week). Browser capture no longer records slow calls that spanned a hidden tab or device sleep, network errors while offline / hidden / after sleep, or the supplier portal bootstrap 401 on the login page (285 a week).
+- Fulfil: every Fulfil call (fulfilFetch, fulfilFetchCfg, COGS build) goes through one gate per instance: at most FULFIL_MAX_CONC (default 4) in flight, and a 429 holds every caller until Retry-After. Live had ~950 Fulfil 429s in 7 days in bursts (3PL push-actuals 467 in one hour on 03-Nov, COGS build 315 on 05-Nov).
+- Xero: every call is counted per org + caller (route or cron) + resource as an hourly health metric; weekly health report section 7b and the email list the top callers (Xero UK fell to 133 calls left on 04-Nov with no way to see who used them).
+- server.mjs, supply/hz-health.js. No migration, no cron routes. Optional env var FULFIL_MAX_CONC (default 4).
+
 ## v28.741 (06-Nov-26) Earlier warning: Other payments whose bill is not in Xero
 - Ben 06-Nov-26 ("There should have been earlier warning these were not in Xero"): PO-DHL-LX-2026-09-B / -C were Fulfil supplier invoices dated 30-Sep-26, so they never reached Xero and Paid > Xero only found out at step 3.
 - A red "not in Xero" badge now shows wherever an Other payment shows, as soon as no live bill with its reference is in its Xero org (synced copy; same match as Paid > Xero): SUPPLY > PAYMENTS > Payments Due (next to the reference), Other Payments (next to the document) and the Paid runs list ("N not in Xero" before Paid > Xero, until the run is pushed). Tooltip says why (Fulfil invoice not posted / not sent; dated before 01-Oct-26; or no Xero bill yet). Shown for unpaid ones and ones paid from 01-Oct-26.
