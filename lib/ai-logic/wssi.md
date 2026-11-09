@@ -98,7 +98,10 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 (source: lib/wssi.mjs :: wssiBuild)
 
 ## Targets and open to buy
-- Target closing units per SKU, market and pool = cover-weeks target x average weekly units of the next 3 months (actual where known, else forecast). Cover-weeks target = products.target_cover_weeks_<market>_<pool>_from_category, default 8 weeks.
+- Target closing units per SKU, market and pool = target forward cover (weeks) x average weekly units of the next 3 months (actual where known, else forecast). v28.745 (Kathryn round 2, point 13): the cover is the "Target closing stock forward cover" input, typed per month x market x channel x category group (planner.wssi_overrides measure cover_wks; DTC sets the 3PL pool, FBA the Amazon pool); blank = 12 weeks. It no longer uses products.target_cover_weeks_* (was default 8). The server builds the target at 12 weeks; the page scales each pool's target by cover / 12. With several markets, channels or groups picked, the cover row shows the demand-weighted average (target units / weekly demand).
+- Target units overrides (measure target_units, v28.548) are retired in v28.745: no longer editable or applied.
+- Cut off Stock Target (v28.745, point 14): a manual figure per month x market x channel x category group (measure cutoff), editable in any month including closed ones, no calculation behind it; the row shows the sum of what was typed for the filters picked.
+- Shortfall (v28.745): in forecast months each SKU's projected closing stops at zero and the forecast units it cannot cover show in "Shortfall units" (and £ retail). Closing = opening + intake + proposed + transfers + write-offs - sales + shortfall. One SKU's surplus never hides another SKU selling out.
 - Closing stock vs target £ cost = closing - target. Red when over target.
 - Open to buy remaining (forecast months) = target - projected closing, in £ retail, £ cost and units (v28.546: retail and units rows added). Positive = room to buy, negative = over-bought.
 - Proposed / open to buy (v28.547, Ben 28-Oct-26, WSSI phase 2 from Kathryn's template; replaced the v28.487 £-at-cost inputs) comes from DEMAND ▸ Inputs ▸ Open to buy (planner.wssi_otb_buy, migration 396): buys planned but not yet placed as a PO, by arrival month × market × channel × category group, entered as units OR £ retail (planners with demand edit rights; past months locked).
@@ -142,6 +145,12 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Saving: each change shows at once and the whole WSSI recalculates; it saves through the same endpoints as before (/api/demand/wssi-otb, /wssi-overrides, /wssi-plan/cells, demand edit rights) and is reverted with a message if the save fails. Enter moves down to the next editable row, Tab across months; a pasted block fills months across and the rows below as shown (read-only cells skipped); Undo / Ctrl+Z undoes the last 50 changes.
 - DEMAND ▸ Inputs ▸ Open to buy and WSSI plan are no longer in the menu; their links open the WSSI worksheet. The all-markets grids (for .xlsx upload or pasting many rows) are reached from "Bulk grid" on the worksheet bar.
 (source: artifact_v16.7.html :: renderWssiView, wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut)
+
+## Rows and saved views (v28.745)
+- Rows, order and labels follow Kathryn's template tab "5.11.26 - UPDATED"; rows marked Hide there are hidden by default, and the Variance: forecast v plan section starts collapsed. Planned intake, planned closing stock and the intake / closing vs plan variances were removed (Kathryn 06-Nov: drop planned closing).
+- View picker + Rows: tick rows to show; save as a named view (planner.wssi_views, migration 424), shared with the team; the author or an admin deletes. The page keeps its scroll position on every redraw.
+- Transfers D2C / B2B allocation rows are placeholders until the transfers release.
+- Intake in closed months stays on stock movement: Fulfil has no PO receipts before Sep-26 (and they land at China Port / Transit), and HORIZON's completed POs lack arrival dates (about 1,100 POs, 500k units undated).
 
 ## Cell notes (v28.559)
 - Ben 28-Oct-26: anyone viewing the WSSI reads notes; users with demand edit rights add them; the author or an admin deletes one. Each note shows who (ben@) and when (dd-mmm-yy).

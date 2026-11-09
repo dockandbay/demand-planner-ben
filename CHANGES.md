@@ -1,3 +1,15 @@
+## v28.745 (09-Nov-26) DEMAND > WSSI release 1 from Kathryn's round 2: template layout, target cover, Cut off Stock Target, shortfall, saved views
+- Kathryn 05/06-Nov-26 (sheet "WSSI _ OTB Format", tabs 5.11.26 - UPDATED and Required updates, points 1, 2, 3, 4, 13, 14; her answers 06-Nov).
+- Rows, order, labels and default Show / Hide as her template; Variance: forecast v plan collapsed by default; new ASP rows in the forecast and plan variances; planned closing stock, planned intake and the intake / closing vs plan variances removed (her answer to Q5).
+- Target closing stock forward cover: typed per month x market x channel x category group in the worksheet (DTC = 3PL pool, FBA = Amazon), default 12 weeks (was the category's cover, default 8), drives the three target rows. "Cover: fill right" and "Cover: copy to all markets". Bulk grid: Target closing units replaced by Target cover (weeks). The old target units overrides are no longer applied (4 cells on live).
+- Cut off Stock Target row: manual, editable in any month including closed ones.
+- Shortfall rows: forecast units the projected stock cannot cover, per SKU (closing still stops at zero per SKU).
+- Saved views (Rows picker), shared with the team; page keeps its place when sections collapse / expand or rows change; full row name on hover; overtyped cover / cut-off cells show who and when.
+- Worksheet Undo pressed while saving now undoes the right action (it could undo an edit made after the click).
+- Not done: closed-month intake from PO receipts (no reliable receipt dates before Fulfil, Sep-26); stays on stock movement.
+- **Migration 424** (wssi_overrides measures cover_wks + cutoff; planner.wssi_views).
+- No new cron routes. No new env vars.
+
 ## v28.744 (09-Nov-26) BUY & MOVE > Inventory > Adjustments: large Fulfil stock adjustments with reasons and tags; Amazon timing reversals (SUG-0047)
 - Ben 09-Nov-26 (SUG-0047, Alexandria): a tracker for 3PL / Amazon stock discrepancies everyone can see.
 - New page BUY & MOVE > Inventory > Adjustments (#/buy-move/inventory/adjustments): every large done Fulfil adjustment (move to / from Lost and Found) per warehouse location, tabs Needs a reason / Has a reason / Reversed (Amazon timing), reason text + tags (reason unknown, supplier labelling, add on the fly), bulk apply, CSV.

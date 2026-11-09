@@ -1458,6 +1458,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/demand/wssi-otb')   // v28.487 DEMAND ▸ Inputs ▸ Open to buy (handler re-checks demand_edit)
       || p.startsWith('/api/demand/wssi-plan') || p.startsWith('/api/demand/wssi-overrides')   // v28.559: were unlisted, so admin only; handlers re-check (lock = admin)
       || p.startsWith('/api/demand/wssi-notes')   // v28.559 WSSI cell notes (handler re-checks demand_edit; delete = own or admin)
+      || p.startsWith('/api/demand/wssi-views')   // v28.745 WSSI saved views (handler re-checks demand_edit; delete = own or admin)
       || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
       || p.startsWith('/api/demand/preorders')   // v28.245 Sync from Fulfil writes preorders + preorder_lines (Diviyaj review)
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
@@ -27694,7 +27695,7 @@ app.post('/api/demand/wssi-otb', async (req, res) => {
 // FY); an admin locks it as version n (read only, dated); the next edit starts a new draft from the latest locked version. WSSI uses the latest
 // locked version. Overrides (live, not versioned; blank = the system value): forecast sales units (open months) and target closing units.
 // GET ?fy[&v=<version id>] → {versions, shown_id, shown_status, cells (shown version), locked_cells (latest locked), overrides, snapshot}.
-const WSSI_PLAN_MEASURES = ['sales', 'units', 'close'], WSSI_OVR_MEASURES = ['fc_units', 'target_units'];
+const WSSI_PLAN_MEASURES = ['sales', 'units', 'close'], WSSI_OVR_MEASURES = ['fc_units', 'target_units', 'cover_wks', 'cutoff'];   // v28.745 cover_wks + cutoff (migration 424)
 const _planMissing = e => /wssi_plan|wssi_overrides|wssi_fc_snapshot/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
 const _planCells = async (db, vid) => vid ? (await db.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value FROM planner.wssi_plan_cells WHERE version_id=$1`, [vid])).rows : [];
 app.get('/api/demand/wssi-plan', async (req, res) => {
@@ -27705,7 +27706,7 @@ app.get('/api/demand/wssi-plan', async (req, res) => {
     const draft = versions.find(v => v.status === 'draft'), locked = versions.find(v => v.status === 'locked');
     const want = parseInt(req.query.v, 10), shown = versions.find(v => v.id === want) || draft || locked || null;
     const cells = await _planCells(pool, shown && shown.id), locked_cells = locked ? (shown && shown.id === locked.id ? cells : await _planCells(pool, locked.id)) : [];
-    const overrides = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value FROM planner.wssi_overrides
+    const overrides = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value, coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_overrides
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1)`, [fy])).rows;
     const snapshot = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, units::float8 units, sales::float8 sales FROM planner.wssi_fc_snapshot
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1)`, [fy])).rows;
@@ -27759,7 +27760,9 @@ app.post('/api/demand/wssi-overrides', async (req, res) => {
     const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save overrides' });
     const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
     const months = _otbMonths(fy), rows = Array.isArray(b.rows) ? b.rows : []; if (rows.length > 8000) return res.status(413).json({ error: 'Too many rows' });
-    const clean = []; for (const r of rows) { const c = _wssiCellOk(r, months, WSSI_OVR_MEASURES); if (c.error) return res.status(400).json(c); clean.push(Object.assign(c, { blank: r.value === '' || r.value == null })); }
+    const clean = []; for (const r of rows) { const c = _wssiCellOk(r, months, WSSI_OVR_MEASURES); if (c.error) return res.status(400).json(c);
+      if (c.me === 'cover_wks' && c.v > 104) return res.status(400).json({ error: 'Target cover must be 104 weeks or less: ' + [c.m, c.mk, c.ch, c.cg].join(' ') });
+      clean.push(Object.assign(c, { blank: r.value === '' || r.value == null })); }
     await client.query('BEGIN'); let saved = 0, removed = 0;
     for (const r of clean) {
       if (r.blank) { removed += (await client.query(`DELETE FROM planner.wssi_overrides WHERE month=($1||'-01')::date AND market=$2 AND channel=$3 AND cgroup=$4 AND measure=$5`, [r.m, r.mk, r.ch, r.cg, r.me])).rowCount; continue; }
@@ -27768,8 +27771,42 @@ app.post('/api/demand/wssi-overrides', async (req, res) => {
     }
     await client.query('COMMIT'); _wssiCache.clear();   // the month-end snapshot uses the overrides
     res.json({ ok: true, saved, removed });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'Overrides need migration 397' }); log500(e); res.status(500).json({ error: 'Could not save overrides' }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'Overrides need migration 397' });
+    if (/wssi_overrides_measure_check/.test(String(e && e.message))) return res.status(503).json({ error: 'Target cover and Cut off Stock Target need migration 424' }); log500(e); res.status(500).json({ error: 'Could not save overrides' }); }
   finally { client.release(); }
+});
+// v28.745 (Kathryn round 2, point 4): saved WSSI views, shared with the team (planner.wssi_views, migration 424). A view = the rows shown
+// and the collapsed sections. GET lists them; POST {name, rows_shown, closed} saves (same name = update, author or admin); DELETE /:id
+// removes one (author or admin).
+const _viewsMissing = e => /wssi_views/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+app.get('/api/demand/wssi-views', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT id::int id, name, rows_shown, closed, coalesce(created_by,'') created_by, coalesce(updated_by,'') updated_by,
+        to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_views ORDER BY lower(name)`)).rows;
+    res.set('Cache-Control', 'no-store').json({ views: rows });
+  } catch (e) { if (_viewsMissing(e)) return res.json({ views: [], missing: 'migration 424' }); log500(e); res.status(500).json({ error: 'Could not load WSSI views' }); }
+});
+app.post('/api/demand/wssi-views', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save a view' });
+    const b = req.body || {}, name = String(b.name || '').trim().slice(0, 60); if (!name) return res.status(400).json({ error: 'Name the view' });
+    const keys = a => [...new Set((Array.isArray(a) ? a : []).map(x => String(x).slice(0, 40)).filter(x => /^[A-Za-z0-9_]+$/.test(x)))].slice(0, 200);
+    const shown = keys(b.rows_shown), closed = keys(b.closed); if (!shown.length) return res.status(400).json({ error: 'A view needs at least one row' });
+    const ex = (await pool.query(`SELECT id, created_by FROM planner.wssi_views WHERE lower(name)=lower($1)`, [name])).rows[0];
+    if (ex && me.live && !me.is_admin && String(ex.created_by || '').toLowerCase() !== String(me.email || '').toLowerCase()) return res.status(403).json({ error: '"' + name + '" belongs to ' + (ex.created_by || 'someone else') + ': pick another name' });
+    const r = ex ? (await pool.query(`UPDATE planner.wssi_views SET rows_shown=$2, closed=$3, updated_by=$4, updated_at=now() WHERE id=$1 RETURNING id::int id`, [ex.id, shown, closed, me.email || null])).rows[0]
+      : (await pool.query(`INSERT INTO planner.wssi_views (name, rows_shown, closed, created_by, updated_by) VALUES ($1,$2,$3,$4,$4) RETURNING id::int id`, [name, shown, closed, me.email || null])).rows[0];
+    res.json({ ok: true, id: r.id, updated: !!ex });
+  } catch (e) { if (_viewsMissing(e)) return res.status(503).json({ error: 'Saved views need migration 424' }); log500(e); res.status(500).json({ error: 'Could not save the view' }); }
+});
+app.delete('/api/demand/wssi-views/:id', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed' });
+    const id = parseInt(req.params.id, 10); const ex = (await pool.query(`SELECT created_by FROM planner.wssi_views WHERE id=$1`, [id])).rows[0];
+    if (!ex) return res.status(404).json({ error: 'View not found' });
+    if (me.live && !me.is_admin && String(ex.created_by || '').toLowerCase() !== String(me.email || '').toLowerCase()) return res.status(403).json({ error: 'Only ' + (ex.created_by || 'its author') + ' or an admin can delete this view' });
+    await pool.query(`DELETE FROM planner.wssi_views WHERE id=$1`, [id]); res.json({ ok: true });
+  } catch (e) { if (_viewsMissing(e)) return res.status(503).json({ error: 'Saved views need migration 424' }); log500(e); res.status(500).json({ error: 'Could not delete the view' }); }
 });
 // v28.559 (Ben 28-Oct-26, layout picked from a mockup): notes on WSSI cells (migration 400). A note = row × column (month, period or '' = row)
 // × the filter view it was written in; the page decides where it shows. GET ?fy → {notes}; POST {fy,row_key,col,view,body} (demand edit);
