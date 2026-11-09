@@ -1,3 +1,10 @@
+## v28.748 (10-Nov-26) Sample freight weights: size types + custom types + a weight per sample line
+- PRODUCT > Config > Size weights: every product size type (products.size, e.g. TOWLB-LG, PICNIC-LG) with its PIM weight (read only: one weight per size type already), plus custom types the team adds for things that are not products yet (code, name, kg).
+- Sample request > SKUs & quantities: a product SKU shows its own weight (with an optional kg override); any other line (e.g. PICNIC-SS27) gets a Size type picker, suggested from its prefix, and a kg box, and is flagged "no weight" until one is set.
+- Sample costs report: freight is split by the kg typed on the line, else the product weight, else the line's size type; only lines with none fall back to the request average, and they are flagged "no weight". US product weights (lb) are no longer mixed in.
+- **Migration 426** (planner.size_type_weights, planner.sample_line_weights). The code tolerates it being absent until run.
+- No new cron routes. No new env vars.
+
 ## v28.747 (10-Nov-26) 3PL invoicing: ILG references with extra text now match their orders
 - Kathryn's Oct-26 UK ILG bill: 86 references (4,169.25) auto-booked to Other, most of them orders that are in Fulfil.
 - A reference that misses as written is tried cleaned: "Reference UK-905502", "IS279 Additional", UK--898186, then without the parcel suffix (UK-904655-1, CS62864_1). A suffixed reference still not found takes the cost centre every Cin7 order with that base shares (NEXT23106-14, JLEW11511-88).

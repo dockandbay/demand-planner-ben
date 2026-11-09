@@ -12519,6 +12519,13 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
     const lines = (await pool.query(`SELECT l.id, l.sku, l.qty,
       EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref = l.sku) dev
       FROM planner.sample_request_lines l WHERE l.sample_id=$1::bigint ORDER BY l.id`, [id])).rows;
+    // v28.748: per-line weight (product weight, its size type, or the size type / kg chosen for the line, mig 426)
+    try { const pw = (await pool.query(`SELECT p.sku, nullif(coalesce(p.prod_weight_uk, p.uk_prod_weight),0)::float8 w, upper(nullif(p.size,'')) size FROM planner.products p WHERE p.sku = ANY($1)`, [lines.map(l => l.sku)])).rows;
+      const pBy = {}; pw.forEach(r => { pBy[r.sku] = r; });
+      let lw = []; try { lw = (await pool.query(`SELECT sku, size_code, weight_kg::float8 weight_kg, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at FROM planner.sample_line_weights WHERE sample_id=$1::bigint`, [id])).rows; } catch (_) {}
+      const lBy = {}; lw.forEach(r => { lBy[r.sku] = r; });
+      lines.forEach(l => { const p = pBy[l.sku], x = lBy[l.sku]; l.product_kg = p && p.w > 0 ? p.w : null; l.product_size = p ? p.size : null;
+        l.size_code = x ? x.size_code : null; l.weight_kg = x ? x.weight_kg : null; l.weight_by = x ? x.updated_by : null; l.weight_at = x ? x.updated_at : null; }); } catch (_) {}
     const notes = (await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [id])).rows;
     const charges = (await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
@@ -16435,7 +16442,7 @@ app.get('/api/product/reports/sample-costs', async (_req, res) => {
     const ids = reqs.map(r => r.id), refs = reqs.map(r => r.ref);
     const lines = (await pool.query(`
       SELECT l.sample_id rid, l.sku, coalesce(l.qty,0)::int qty, nullif(p.category,'') pcat,
-        coalesce(nullif(p.prod_weight_uk::text,'')::numeric, nullif(p.uk_prod_weight::text,'')::numeric, nullif(p.us_prod_weight::text,'')::numeric) w,
+        nullif(coalesce(p.prod_weight_uk, p.uk_prod_weight),0) w,   -- v28.748: UK kg only (us_prod_weight is in lb, so never mixed in)
         (SELECT nullif(i.season,'') FROM planner.product_dev_sizes z JOIN planner.product_dev_items i ON i.id=z.item_id
           WHERE z.mapped_sku=l.sku OR z.working_sku=l.sku LIMIT 1) dseason,
         (SELECT nullif(i.category,'') FROM planner.product_dev_sizes z JOIN planner.product_dev_items i ON i.id=z.item_id
@@ -16454,6 +16461,15 @@ app.get('/api/product/reports/sample-costs', async (_req, res) => {
     const billAdj = {};   // courier bills carry their own currency
     (await pool.query(`SELECT bl.sample_ref, bl.charge, bl.amount, b.currency FROM planner.sample_bill_lines bl JOIN planner.sample_bills b ON b.id=bl.bill_id
       WHERE bl.sample_ref = ANY($1)`, [refs])).rows.forEach(b => { const a = billAdj[b.sample_ref] || (billAdj[b.sample_ref] = []); a.push(b); });
+    // v28.748 (Ben 10-Nov-26): a line's kg = the kg typed on it, else its product weight, else the size type chosen for it (mig 426).
+    const stw = await sizeTypeWeights(); let lwr = [];
+    try { lwr = (await pool.query(`SELECT sample_id, sku, size_code, weight_kg::float8 weight_kg FROM planner.sample_line_weights WHERE sample_id = ANY($1)`, [ids])).rows; } catch (_) {}
+    const lwBy = {}; lwr.forEach(r => { lwBy[r.sample_id + '|' + r.sku] = r; });
+    lines.forEach(l => { const x = lwBy[l.rid + '|' + l.sku];
+      if (x && x.weight_kg > 0) { l.w = x.weight_kg; l.wsrc = 'typed'; }
+      else if (Number(l.w) > 0) { l.w = Number(l.w); l.wsrc = 'product'; }
+      else if (x && x.size_code && stw.byCode[String(x.size_code).toUpperCase()] > 0) { l.w = stw.byCode[String(x.size_code).toUpperCase()]; l.wsrc = 'size'; l.wsize = String(x.size_code).toUpperCase(); }
+      else { l.w = null; l.wsrc = null; } });
     const byReq = {}; lines.forEach(l => { (byReq[l.rid] || (byReq[l.rid] = [])).push(l); });
     const seasonOf = (sku, ds) => ds || ((/^((?:SS|AW)\d{2})-/i.exec(String(sku || '')) || [])[1] || '').toUpperCase() || '—';
     const rows = [];
@@ -16469,7 +16485,7 @@ app.get('/api/product/reports/sample-costs', async (_req, res) => {
         category: l.pcat || l.dcat || '—', qty: l.qty,
         cost: units ? Math.round(prodGbp * l.qty / units * 100) / 100 : 0,
         freight: wSum ? Math.round(frtGbp * wt(l) / wSum * 100) / 100 : 0,
-        by_weight: avgW > 0 && ls.length > 1 });
+        by_weight: avgW > 0 && ls.length > 1, kg: Number(l.w) > 0 ? Number(l.w) : null, kg_src: l.wsrc || (avgW > 0 ? 'average' : 'units'), kg_size: l.wsize || null });
     }
     res.set('Cache-Control', 'no-store').json({ rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -16663,6 +16679,55 @@ app.post('/api/product/size-library', async (req, res) => {   // {id?, code, lab
       : await pool.query(`INSERT INTO planner.product_size_library (code, label, length_cm, width_cm, height_cm, active, sort, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, vals);
     if (!r.rowCount) return res.status(404).json({ error: 'size not found' }); res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'There is already a size with code ' + String((req.body || {}).code || '').toUpperCase() }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.748 (Ben 10-Nov-26): SIZE-TYPE WEIGHTS for sample freight. A real size type is a products.size code (TOWLB-LG, PICNIC-LG ...);
+// its weight is the PIM product weight (UK, kg), which is one value per size, so HORIZON only reads it. Custom types (mig 426,
+// planner.size_type_weights) cover things that are not products yet, e.g. a mixed SS27 picnic batch. Returns
+// { real:[{code,category,weight_kg,skus}], custom:[{code,label,weight_kg,updated_by,updated_at}], byCode:{CODE:kg}, missing }.
+async function sizeTypeWeights() {
+  const real = (await pool.query(`SELECT upper(size) code, min(nullif(category,'')) category,
+      min(nullif(coalesce(prod_weight_uk, uk_prod_weight),0))::float8 weight_kg, count(*)::int skus
+    FROM planner.products WHERE coalesce(size,'')<>'' AND size NOT ILIKE 'z\_%' GROUP BY upper(size) ORDER BY 2, 1`)).rows;
+  let custom = [], missing = false;
+  try { custom = (await pool.query(`SELECT code, label, weight_kg::float8 weight_kg, coalesce(updated_by,created_by) updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at
+      FROM planner.size_type_weights ORDER BY label`)).rows; } catch (e) { if (e.code === '42P01') missing = true; else throw e; }
+  const byCode = {}; real.forEach(r => { if (r.weight_kg > 0) byCode[r.code] = r.weight_kg; }); custom.forEach(c => { byCode[String(c.code).toUpperCase()] = c.weight_kg; });
+  return { real, custom, byCode, missing };
+}
+app.get('/api/product/size-weights', async (_req, res) => {
+  try { const w = await sizeTypeWeights(); res.set('Cache-Control', 'no-store').json({ real: w.real, custom: w.custom, missing: w.missing }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/size-weights', async (req, res) => {   // {code, label, weight_kg}: add or edit a CUSTOM size type
+  try { const b = req.body || {}, code = String(b.code || '').trim().toUpperCase().replace(/\s+/g, '-'), label = String(b.label || '').trim(), kg = Number(String(b.weight_kg == null ? '' : b.weight_kg).replace(',', '.')), by = (req.me && req.me.email) || authUser(req) || null;
+    if (!code || !label) return res.status(400).json({ error: 'Give the custom type a code and a name.' });
+    if (!(kg > 0) || kg > 500) return res.status(400).json({ error: 'Weight must be a number of kg above 0.' });
+    const clash = (await pool.query(`SELECT 1 FROM planner.products WHERE upper(size)=$1 LIMIT 1`, [code])).rowCount;
+    if (clash) return res.status(400).json({ error: code + ' is a product size: its weight comes from the PIM product weights. Pick another code.' });
+    await pool.query(`INSERT INTO planner.size_type_weights (code, label, weight_kg, created_by, updated_by) VALUES ($1,$2,$3,$4,$4)
+      ON CONFLICT (code) DO UPDATE SET label=excluded.label, weight_kg=excluded.weight_kg, updated_by=excluded.updated_by, updated_at=now()`, [code, label, kg, by]);
+    res.json({ ok: true, code });
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/size-weights/:code/delete', async (req, res) => {
+  try { const code = String(req.params.code || '').toUpperCase();
+    const used = (await pool.query(`SELECT count(*)::int n FROM planner.sample_line_weights WHERE upper(size_code)=$1`, [code])).rows[0].n;
+    if (used) return res.status(400).json({ error: code + ' is used on ' + used + ' sample line' + (used === 1 ? '' : 's') + '. Change those lines first.' });
+    await pool.query(`DELETE FROM planner.size_type_weights WHERE code=$1`, [code]); res.json({ ok: true });
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// the weight for one sample-request line: {sku, size_code, weight_kg}; both blank clears it
+app.post('/api/supply/sample/:id/line-weight', async (req, res) => {
+  try { const id = Number(req.params.id), b = req.body || {}, sku = String(b.sku || '').trim(), by = (req.me && req.me.email) || authUser(req) || null;
+    if (!id || !sku) return res.status(400).json({ error: 'sample and SKU required' });
+    const sc = String(b.size_code || '').trim().toUpperCase() || null, kgRaw = String(b.weight_kg == null ? '' : b.weight_kg).trim().replace(',', '.'), kg = kgRaw === '' ? null : Number(kgRaw);
+    if (kg != null && !(kg > 0 && kg <= 500)) return res.status(400).json({ error: 'Weight must be a number of kg above 0.' });
+    if (sc) { const w = await sizeTypeWeights(); if (!(w.byCode[sc] > 0)) return res.status(400).json({ error: 'Unknown size type ' + sc }); }
+    if (!sc && kg == null) await pool.query(`DELETE FROM planner.sample_line_weights WHERE sample_id=$1 AND sku=$2`, [id, sku]);
+    else await pool.query(`INSERT INTO planner.sample_line_weights (sample_id, sku, size_code, weight_kg, updated_by) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (sample_id, sku) DO UPDATE SET size_code=excluded.size_code, weight_kg=excluded.weight_kg, updated_by=excluded.updated_by, updated_at=now()`, [id, sku, sc, kg, by]);
+    res.json({ ok: true });
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // Product SIZES master (phase 2): claim / release a Workshop-pool barcode (mig 293) for a size. Transactional so the
 // pool's status stays in sync — one barcode ↔ one size. Body {barcode:'<ean>'} to claim (frees the size's old code first),
