@@ -1,3 +1,10 @@
+## v28.747 (10-Nov-26) 3PL invoicing: ILG references with extra text now match their orders
+- Kathryn's Oct-26 UK ILG bill: 86 references (4,169.25) auto-booked to Other, most of them orders that are in Fulfil.
+- A reference that misses as written is tried cleaned: "Reference UK-905502", "IS279 Additional", UK--898186, then without the parcel suffix (UK-904655-1, CS62864_1). A suffixed reference still not found takes the cost centre every Cin7 order with that base shares (NEXT23106-14, JLEW11511-88).
+- The "could not be reconciled" box now says the reference matched no order in Cin7 or Fulfil, or its Fulfil channel has no Config / Accounts row (it said Cin7 only).
+- Data, not code: "UK - Key Accounts" is not on any account-map row, so JLEW-555605 and 4504102838 still go to Other until it is added to UK - Wholesale's Fulfil channel (Config / Accounts).
+- No migration. No new cron routes. No new env vars.
+
 ## v28.746 (09-Nov-26) DEMAND > WSSI release 2 from Kathryn's round 2: overtyping
 - Kathryn's points 7 to 12 (sheet "WSSI _ OTB Format", Required updates).
 - Act/Fcst Sales £, units and ASP can be overtyped in forecast months: the last two typed win and the third is worked out (one typed: £ / units keep the ASP, an ASP keeps the £). The change runs through projected stock; the month-end snapshot includes overtypes.

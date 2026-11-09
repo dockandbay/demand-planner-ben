@@ -20248,6 +20248,35 @@ function _ilgReworkRef(text) {   // "Rework SA17380500 - barcode relabelling" ->
   const m = s.match(/REWORK[\s:-]+([A-Z]{2,}[A-Z0-9]*\d{3,})(?:\s*-\s*(\d+[A-Z]?)\b)?/i);
   return m ? { ref: m[1].toUpperCase() + (m[2] ? '-' + m[2].toUpperCase() : ''), base: m[1].toUpperCase() } : null;
 }
+// v28.747 (Kathryn 10-Nov-26): cleaned forms of a 3PL invoice reference, tried only after the reference as written misses.
+// "Reference UK-905502" -> UK-905502; "IS279 Additional" / "PO-56UKLX2 - Additon" -> IS279 / PO-56UKLX2; UK--898186 -> UK-898186;
+// then the parcel suffix dropped: UK-904655-1 -> UK-904655, CS62864_1 -> CS62864, NEXT23106-14 -> NEXT23106.
+function _tplRefClean(ref) {
+  let s = String(ref == null ? '' : ref).trim().replace(/^(customer\s+)?(order\s+)?(reference|ref|order)\b\s*[:#.]?\s*/i, '');
+  s = (s.split(/\s+/)[0] || '').replace(/-{2,}/g, '-').replace(/[-_]+$/, '');
+  return s.toUpperCase();
+}
+function _tplRefBase(ref) {   // the reference without a trailing -N / _N parcel suffix (1-3 digits, optional letter), or null when there is none
+  const s = _tplRefClean(ref), b = s.replace(/[-_]\d{1,3}[A-Z]?$/, '');
+  return (b !== s && b.length >= 4) ? b : null;
+}
+function _tplRefVariants(ref) {
+  const raw = String(ref == null ? '' : ref).trim(), out = [];
+  [_tplRefClean(ref), _tplRefBase(ref)].forEach(v => { if (v && v !== raw && !out.includes(v)) out.push(v); });
+  return out;
+}
+// Cin7-era orders sharing a base reference (NEXT23106-11, -12 ...): when every one of them sits on ONE cost centre, a suffixed
+// reference missing from the cache takes that cost centre (same rule rework already used). Returns { [ref]: cc }.
+async function _tplCin7SiblingCC(list) {
+  const out = {}; if (!list.length) return out;
+  const bases = [...new Set(list.map(x => x.base.replace(/[%_\\]/g, '')))];
+  let rows = [];
+  try { rows = (await pool.query(`SELECT b, array_agg(DISTINCT coalesce(nullif(o.cost_center,''), o.member_cost_center)) ccs FROM unnest($1::text[]) b
+      JOIN planner.tpl_cin7_orders o ON o.reference ILIKE b || '-%' GROUP BY b`, [bases])).rows; } catch (e) { rows = []; }
+  const byBase = {}; rows.forEach(r => { const c = (r.ccs || []).map(x => String(x || '').trim()).filter(Boolean); if (c.length === 1 && (r.ccs || []).length === 1) byBase[r.b] = c[0]; });
+  list.forEach(x => { const c = byBase[x.base.replace(/[%_\\]/g, '')]; if (c) out[x.ref] = c; });
+  return out;
+}
 async function _tplIlgAllocate(period) {
   const _xc = await tplXeroCodes('uk_ilg');   // v28.340: codes from the mapping tables
   const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
@@ -20284,10 +20313,17 @@ async function _tplIlgAllocate(period) {
   const saToRef = {}; ship.forEach(s => { if (s.sa && s.ref && !saToRef[s.sa]) saToRef[s.sa] = s.ref; });
   reworks.forEach(w => { const k = _ilgReworkRef(w.text); w.ref = k ? (k.sa ? (saToRef[k.sa] || '') : k.ref) : ''; w.base = k && k.base ? k.base : ''; w.key = k ? (k.sa || k.ref) : ''; });
   const refs = [...new Set([...ship.map(s => s.ref), ...inva.map(x => x.ref), ...reworks.map(w => w.ref)].filter(Boolean))];
-  const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
+  // v28.747 (Kathryn 10-Nov-26, Oct-26 ILG: 86 refs to Other): ILG writes extra text round the order reference (UK-904655-1, CS62864_1,
+  // "Reference UK-905502", UK--898186, "IS279 Additional"). Each ref is looked up as written first, then as its cleaned variants.
+  const refVar = {}; refs.forEach(rf => { refVar[rf] = _tplRefVariants(rf); });
+  const allRefs = [...new Set(refs.concat(...Object.values(refVar)))];
+  const dbrows = allRefs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [allRefs])).rows : [];
   const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-  const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
-  const ccOf = ref => { if (!ref) return null; const ov = _tplRefOverride(ref, 'uk_ilg'); return ov || ((byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : (shipByRef[ref] ? shipByRef[ref].cc : null))) || null; };
+  const shipByRef = await _tplFulfilShipLookup(allRefs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
+  const cc1 = ref => { if (!ref) return null; const ov = _tplRefOverride(ref, 'uk_ilg'); return ov || ((byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : (shipByRef[ref] ? shipByRef[ref].cc : null))) || null; };
+  const ccVar = ref => { let c = cc1(ref); if (c) return c; for (const v of (refVar[ref] || [])) { c = cc1(v); if (c) return c; } return null; };
+  const sib = await _tplCin7SiblingCC(refs.filter(rf => !ccVar(rf)).map(rf => ({ ref: rf, base: _tplRefBase(rf) })).filter(x => x.base));   // NEXT23106-14 -> the one cost centre every NEXT23106-* order shares
+  const ccOf = ref => { if (!ref) return null; return ccVar(ref) || sib[ref] || null; };
   const ccAcct = cc => 'Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, '');
   ship.forEach(s => { shipTotal += s.gross; shipVat += (s.vatAmt || 0); const cc = ccOf(s.ref);
     if (cc) add(ccAcct(cc), 'freight', s.vat, s.gross, s.vatAmt);
