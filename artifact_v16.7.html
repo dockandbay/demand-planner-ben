@@ -14410,14 +14410,14 @@ function wssiCompute(D){
   var PL0=WSSI.plan[D.fy]||{}, covK={}, covOn={}, defW=D.default_cover||12, tgJ=[KI.tgU,KI.tgC,KI.tgR];
   (PL0.overrides||[]).forEach(function(x){ if(x.measure==='cover_wks'&&(x.channel==='DTC'||x.channel==='FBA'))covK[x.month+'|'+x.market+'|'+(x.channel==='FBA'?'FBA':'3PL')+'|'+x.cgroup]=Number(x.value)||0; });
   // v28.746 (release 2): a price overtype revalues that pool's £ retail (or £ full) stock rows for the month: × typed price ÷ system price
-  var POV=wssiPriceOv(D.fy), SYS0=wssiSys(D), rJ=['opR','clR','inR','trR','woR','tgR','sfR'].map(function(c){ return KI[c]; }), fJ=[KI.opF,KI.clF], prOn={};
+  var POV=wssiPriceOv(D.fy), SYS0=wssiSys(D), rJ=['opR','clR','inR','trR','woR','tgR','sfR'].map(function(c){ return KI[c]; }), fJ=[KI.opF,KI.clF,KI.clFb], prOn={};
   D.stock.forEach(function(r){ if(!keep('mkt',r[1])||!pools[dict.pool[r[2]]]||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5]))return; var a=stock[r[0]];
     var ck=D.months[r[0]]+'|'+dict.mkt[r[1]]+'|'+dict.pool[r[2]]+'|'+dict.cat[r[3]], cw=covK[ck], f=cw!=null?cw/defW:1; if(cw!=null)covOn[r[0]]=true;
     var pv=POV[ck], sp=pv&&SYS0.sp[ck], fr=1, ff=1; if(pv&&sp&&sp[0]>0){ if(pv.price>0&&sp[1]>0){ fr=pv.price/(sp[1]/sp[0]); prOn[r[0]]=1; } if(pv.full>0&&sp[2]>0){ ff=pv.full/(sp[2]/sp[0]); prOn[r[0]]=1; } }
     for(j=0;j<kc.length;j++){ var v=r[6+j]; if(f!==1&&tgJ.indexOf(j)>=0)v*=f; if(fr!==1&&rJ.indexOf(j)>=0)v*=fr; if(ff!==1&&fJ.indexOf(j)>=0)v*=ff; a[j]+=v; } });
   var cols=D.months.map(function(m,x){ var s=sales[x], k=stock[x], o={i:x,m:m,act:m<=D.actual_to,weeks:D.weeks[x],fwdW:D.fwd_weeks[x]};
     o.r=s[SI.r]; o.u=s[SI.u]; o.cos=s[SI.cos]; o.fullRev=s[SI.full];
-    kc.forEach(function(c){ o[c]=k[KI[c]]||0; }); o.fullMul=onlyB2B?0.5:1; o.ovW=!!covOn[x]; o.ovP=!!prOn[x];
+    kc.forEach(function(c){ o[c]=k[KI[c]]||0; }); o.fullMul=onlyB2B?(KI.clFb!=null&&o.clF>0&&o.clFb>0?o.clFb/o.clF:0.5):1;   /* v28.749: B2B full price = 12m B2B ASP per SKU, else RRP/2 */ o.ovW=!!covOn[x]; o.ovP=!!prOn[x];
     o._p=o.clU?o.clR/o.clU:0; o._pf=o.clU?o.clF/o.clU:0; o._pc=o.clU?o.clC/o.clU:0; return o; });   // v28.746: the month's price per unit; units carried in from earlier inputs are valued at it
   // v28.487: OTB planned (DEMAND ▸ Inputs ▸ Open to buy, £ at cost by month × market × channel) fills the OTB rows in forecast
   // months and adds to projected closing stock: units = £ ÷ that month's cost per unit sold; retail = units × current selling price.

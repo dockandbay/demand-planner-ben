@@ -67,7 +67,7 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
   1. the SKU's ASP in the same month last year (then two years ago);
   2. the sub-category's ASP in the same month last year (then two years ago);
   3. the SKU's ASP over the last 3 actual months;
-  4. full price (wholesale B2B x 0.5, other channels x 0.95).
+  4. full price (wholesale B2B x 0.5, other channels x 0.95; kept at RT / 2 to match DEMAND getASP, not the B2B full price below).
   Then x price changes in effect (DEMAND > Inputs > Price changes, compounded) x (1 - ASP reduction %) and capped at 1.2 x full price.
   This mirrors DEMAND getASP but at SKU level and without the discontinued-share discount, so totals can differ slightly from DEMAND > Summary.
 - Units are as sold (a set counts as one box).
@@ -75,7 +75,7 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 (source: lib/wssi.mjs :: wssiBuild)
 
 ## Prices and cost
-- Full price per SKU and market = <market>_rt (US = us_rt etc.) converted to GBP with CONFIG > Exchange rates for that FY, then ex VAT/GST (UK and EU / 1.2, AU / 1.1). With only B2B selected, full price shows RT / 2 (wholesale).
+- Full price per SKU and market = <market>_rt (US = us_rt etc.) converted to GBP with CONFIG > Exchange rates for that FY, then ex VAT/GST (UK and EU / 1.2, AU / 1.1). B2B full price (v28.749, Kathryn 09-Nov-26) = the SKU's actual B2B ASP in that market over the 12 months to the month (forecast months hold the last actual month's figure), capped at full price; RT / 2 where the SKU had no B2B sales in those 12 months. Fulfil's wholesale price lists are not used: every line is just the product's standard price. It drives B2B full-price revenue and, with only B2B selected, Avg full price (closing stock valued at each SKU's B2B full price, server column clFb). (source: lib/wssi.mjs :: b2bFull)
 - Current selling price per SKU and market = the SKU's actual ASP over the 3 months to that month across consumer channels (DTC, FBA, ZAL, TIK), else full price x 0.95, capped at 1.2 x full price. Forecast months hold the last actual month's price.
 - Product cost (v28.546) = landed cost from the COGS feed (planner.cogs_values: Fulfil landed cost, else supplier cost / set BOM) for the warehouse of the market and pool (UK ILG / UK FBA, US Geneva / US FBA, EU iFulfillment / EU FBA, AU Coghlans / AU FBA), converted to GBP with the FY rate. Sales use the pool of the channel (FBA = FBA, others = 3PL). Without a COGS value (e.g. CA): products.cost (USD, FOB) / the FY USD rate, else the category's average PO line cost.
 - Row "Avg current selling price" = closing stock £ retail / closing units; "Avg full price" = closing stock at full price / closing units; "Avg cost per unit" = cost of sales / units sold.

@@ -1,5 +1,6 @@
-## v28.749 (10-Nov-26) COGS and SALES by channel: email when a draft is posted
+## v28.749 (10-Nov-26) COGS and SALES by channel: email when a draft is posted; WSSI B2B full price
 - A journal made as a draft (by hand, or before v28.736's email rule) and posted later by the 7th / 15th refresh or the Post button now sends the org's email once, if that journal was never emailed. Oct-26 UK fell through this gap (created 05-Nov by hand, posted 07-Nov by cron, no email); sent by hand 10-Nov.
+- WSSI B2B full price (Kathryn 09-Nov-26): each SKU's actual B2B ASP in that market over the 12 months to the month (capped at full price), RRP / 2 where it had no B2B sales; Fulfil's wholesale price lists hold no real prices yet. Changes B2B full-price revenue and, with only B2B selected, Avg full price (new stock column clFb). Sales £ unchanged (the B2B forecast ASP fallback stays RRP / 2 to match DEMAND). Sandbox: UK B2B actual full-price revenue £2.01m -> £2.37m vs £2.39m sold; UK 3PL closing at B2B full price = 63% of RRP.
 - No migration, no new env vars, no new cron routes.
 
 ## v28.748 (10-Nov-26) Sample freight weights: size types + custom types + a weight per sample line
