@@ -1,3 +1,13 @@
+## v28.743 (09-Nov-26) Sample bills: direct-to-client freight and duty go to cost of sales, not 9039
+- Ben 09-Nov-26 build note (Fulfil bill 160, invoice 71925, XR Textile, $102.63, PO-1842654 / SO56508). A Direct to Client PO is a drop shipment: never received, so no landed cost can ever clear 9039 Inventory Landed Cost Accruals.
+- Fulfil route for a Direct to Client PO (country_code DIRECT): freight -> DIRECT-FREIGHT (2266), duty -> DIRECT-DUTY (2267), every line on the market Co-Brand/Custom cost of sales: US 312.2g, UK 312.1f, EU 312.4h. Warehouse POs unchanged (LANDED-* on 9039). Import VAT to Xero unchanged.
+- Market: the linked Fulfil sale's channel (SO56508 "US - Custom/Co-Brand" -> US), else the line's ship-to, else a red "pick the market" check; Create and push refuse a direct line with no market (no UK default, also on the Xero route for a direct PO not in Fulfil).
+- Route preview shows "Direct to client: DIRECT-FREIGHT on cost of sales 312.2g ..."; the push re-derives direct lines from the PO, so lines saved before v28.743 route the same way.
+- No landed cost: a direct invoice saves landed cost id 'none' (Create landed cost hidden); Create landed cost on a direct PO is refused.
+- Fulfil records (Ben approved, created live 09-Nov-26): account category 68 Direct to Client Cost, template 1100, DIRECT-FREIGHT / DIRECT-DUTY.
+- No migration. No new cron routes. No new env vars.
+- Not in scope: bill 160 is corrected by hand in Fulfil (Dr 312.2g / Cr 9039 $102.63), do not re-push; other 9039 balances are warehouse POs waiting for landed cost.
+
 ## v28.742 (09-Nov-26) App health: real alerts kept, false alarms removed; shared Fulfil gate; Xero calls by caller
 - Ben 09-Nov-26 health review ("Fix your recommended"). Live 7 days showed one real data gap and several checks that alarmed wrongly.
 - Sales freshness: the current-month check now needs real volume by day 4 (at least 20% of the same month last year, pro-rata to the day). Live had ONE November row of 1 unit, which passed the old "month exists" test while the sales sheet sync was frozen at 94,713 rows.

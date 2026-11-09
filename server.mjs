@@ -29306,8 +29306,31 @@ function sbCharge(v, shipTo) { const s = String(v || '').toLowerCase(); let c = 
   return c; }
 function sbPurpose(t) { const s = String(t || '').toLowerCase(); if (!s) return null; if (/photo|shoot|media/.test(s)) return 'photography'; if (/market|influenc|pr\b/.test(s)) return 'marketing';
   if (/sales|custom|white ?label|wholesale|client|customer/.test(s)) return 'sales'; if (/product|develop|dev\b|design|proto/.test(s)) return 'product'; return null; }
-function sbFulfilProduct(charge, cc) { if (charge === 'freight') return 'LANDED-FREIGHT'; if (charge === 'duty') return 'LANDED-IMPORT-DUTY';
+function sbFulfilProduct(charge, cc, direct) {
+  if (direct && charge === 'freight') return 'DIRECT-FREIGHT'; if (direct && charge === 'duty') return 'DIRECT-DUTY';   // v28.743: direct-to-client, not a landed cost
+  if (charge === 'freight') return 'LANDED-FREIGHT'; if (charge === 'duty') return 'LANDED-IMPORT-DUTY';
   if (charge === 'tax') return ['UK', 'AU', 'EU'].includes(cc) ? 'LANDED-IMPORT-TAX-' + cc : 'LANDED-IMPORT-DUTY'; return 'LANDED-SUPPLIER'; }
+// v28.743 (Ben 09-Nov-26, Fulfil bill 160 / PO-1842654): a "Direct to Client" PO is a drop shipment, never received into a warehouse, so no
+// landed cost can clear 9039. Its freight / duty go on DIRECT-FREIGHT / DIRECT-DUTY (Fulfil template 1100, landed_cost false) and every line
+// on the market's Co-Brand/Custom cost of sales account. Market: the linked Fulfil sale's channel ("US - Custom/Co-Brand" -> US), else the
+// courier line's ship-to, else none (the user must pick it: never a UK default).
+const SB_DIRECT_ACC = { US: '312.2g', UK: '312.1f', EU: '312.4h' };
+const sbIsDirectPo = (cc, branch) => String(cc || '').trim().toUpperCase() === 'DIRECT' || /^direct to client/i.test(String(branch || '').trim());
+async function sbDirectMarket(fulfilPoId, shipTo, memo) {
+  const key = (Number(fulfilPoId) || 0) + '|' + String(shipTo || ''); if (memo && memo.has(key)) return memo.get(key);
+  let r = null;
+  if (Number(fulfilPoId)) { try {
+    const po = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', Number(fulfilPoId)]], 0, 1, null, ['id', 'sales']]);
+    const sales = ((Array.isArray(po) && po[0] && po[0].sales) || []).map(Number).filter(Boolean);
+    if (sales.length) { const ss = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', 'in', sales]], 0, 10, null, ['id', 'number', 'channel.name']]);
+      for (const s of (Array.isArray(ss) ? ss : [])) { const m = String(s['channel.name'] || '').trim().toUpperCase().match(/^(UK|US|EU)\b/);
+        if (m) { r = { market: m[1], source: (s.number ? s.number + ' ' : '') + 'channel ' + s['channel.name'] }; break; } } }
+  } catch (e) { /* Fulfil unreachable: fall through to the ship-to */ } }
+  if (!r) { const st = sbCountry(shipTo); if (SB_DIRECT_ACC[st]) r = { market: st, source: 'ship-to ' + st }; }
+  if (r) r.account = SB_DIRECT_ACC[r.market];
+  if (memo) memo.set(key, r); return r; }
+async function sbDirectPoSet(pos) { const up = Array.from(new Set((pos || []).map(p => String(p || '').trim().toUpperCase()).filter(Boolean))); if (!up.length) return new Set();
+  return new Set((await pool.query(`SELECT upper(po) up FROM planner.purchase_orders p WHERE upper(po) = ANY($1::text[]) AND (upper(coalesce(country_code,''))='DIRECT' OR coalesce(to_jsonb(p)->>'branch','') ILIKE 'direct to client%')`, [up])).rows.map(r => r.up)); }
 const sbR2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const sbIsPoText = t => /^\s*(PO[-\s]|\d{5,})/i.test(String(t || ''));
 // Excel cell -> plain value (formula results, rich text, hyperlinks, dates)
@@ -29377,7 +29400,7 @@ function sbPoMarket(l) {
   const b = String(l.po_branch || '').trim().toUpperCase().match(/^(UK|US|EU|AU|CA)\b/); if (b) return b[1];
   const r = String(l.po || '').toUpperCase().match(/^PO-\d*(UK|US|EU|AU|CA)(?=[A-Z0-9]|-|$)/); if (r) return r[1];
   const st = sbCountry(l.ship_to); if (/^(UK|US|EU|AU|CA)$/.test(st)) return st;
-  return 'UK';
+  return sbIsDirectPo(l.po_cc, l.po_branch) ? '' : 'UK';   // v28.743: a direct-to-client PO never defaults to UK
 }
 // Route every line: HORIZON PO -> Fulfil PO (po_links / mirror) or Xero 302/313; samples -> Xero by purpose. Returns lines + checks.
 async function sbResolve(lines) {
@@ -29406,7 +29429,7 @@ async function sbResolve(lines) {
   // sample purposes from SR refs
   const srs = Array.from(new Set(out.map(l => l.sample_ref).filter(x => /^SR-\d+$/i.test(String(x || '')))));
   const srPurpose = {}; if (srs.length) (await pool.query(`SELECT upper(ref) ref, purpose FROM planner.sample_requests WHERE upper(ref) = ANY($1::text[])`, [srs.map(s => s.toUpperCase())])).rows.forEach(r => { srPurpose[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean)[0] : null; });
-  const acc = (await sbAccounts()).byKey;
+  const acc = (await sbAccounts()).byKey, dMemo = new Map();
   for (const l of out) {
     if (l.link_locked) { if (!l.checks.length) l.checks = []; continue; }   // the user picked the route by hand: keep it
     if (l.po_found || l.po_unknown) {
@@ -29421,10 +29444,16 @@ async function sbResolve(lines) {
         // v28.616 (Ben 02-Nov-26: "allow for cogs us wholesale ... for dillards"): the Wholesale COGS account follows the PO's market (sbPoMarket):
         // UK -> cogs_pre_fulfil (311.1c), US -> cogs_pre_fulfil_us (311.2c), any other market -> its own row if mapped, else "pick the account".
         const mkt = l.xero_org === 'au' ? 'AU' : sbPoMarket(l);
-        l.xero_account = (l.xero_org === 'au' ? acc.au_cogs_pre_fulfil : mkt === 'UK' ? acc.cogs_pre_fulfil : acc['cogs_pre_fulfil_' + mkt.toLowerCase()]) || null; l.fulfil_company = null; l.fulfil_product = null;
+        l.xero_account = !mkt ? null : (l.xero_org === 'au' ? acc.au_cogs_pre_fulfil : mkt === 'UK' ? acc.cogs_pre_fulfil : acc['cogs_pre_fulfil_' + mkt.toLowerCase()]) || null; l.fulfil_company = null; l.fulfil_product = null;
+        if (!mkt) { l.checks.push({ level: 'bad', text: 'pick the market for this direct-to-client PO (' + (l.po || 'PO') + ' is not in Fulfil): set the ship-to to US / UK / EU, or pick the account' }); continue; }
         l.checks.push(l.xero_account ? { level: 'info', text: (l.po || 'This PO') + ' is not in Fulfil (old PO): Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account + ' ' + mkt + ' Wholesale COGS' } : { level: 'bad', text: (l.po || 'This PO') + ' is not in Fulfil (' + mkt + '): no ' + mkt + ' Wholesale COGS account in the sample accounts mapping, pick the account' });
         continue; }
-      if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
+      if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.xero_org = null; l.xero_account = null;
+        l.direct = sbIsDirectPo(l.po_cc, l.po_branch);
+        l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc), l.direct);
+        if (l.direct) { const dm = await sbDirectMarket(l.fulfil_po_id, l.ship_to, dMemo); l.direct_market = dm ? dm.market : null; l.fulfil_account = dm ? dm.account : null;   // v28.743
+          l.checks.push(dm ? { level: 'info', text: 'Direct to client: ' + l.fulfil_product + ' on cost of sales ' + dm.account + ' ' + dm.market + ' Co-Brand/Custom (from ' + dm.source + '), no landed cost' }
+            : { level: 'bad', text: 'pick the market for this direct-to-client PO: its Fulfil sale has no US / UK / EU channel, so set the ship-to to US / UK / EU' }); } }
       else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; const pre = l.xero_org === 'au' ? 'au_' : ''; l.xero_account = ((l.charge === 'duty' || l.charge === 'tax') ? acc[pre + 'duty'] : l.charge === 'freight' ? acc[pre + 'freight'] : acc.product) || null;
         if (!l.xero_account) l.checks.push({ level: 'bad', text: 'no Xero ' + l.xero_org.toUpperCase() + ' ' + l.charge + ' account in the sample accounts mapping: pick the account' });
         if (l.po_found && l.xero_account) l.checks.push({ level: 'info', text: l.po + ' is not in Fulfil: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account }); }
@@ -29486,7 +29515,7 @@ app.post('/api/supply/sample-bills/parse', async (req, res) => {
 });
 app.post('/api/supply/sample-bills/resolve', async (req, res) => {   // re-route after the user edits PO / sample type / ship-to on a line
   try { const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines.slice(0, 300) : [];
-    const SB_DERIVED = ['po_found', 'po_unknown', 'po_cc', 'po_branch', 'inherited', 'purpose', 'checks', 'doc_key'];
+    const SB_DERIVED = ['po_found', 'po_unknown', 'po_cc', 'po_branch', 'inherited', 'purpose', 'checks', 'doc_key', 'direct', 'direct_market', 'fulfil_account'];
     const out = await sbResolve(lines.map(l => { const o = Object.assign({}, l, { description: l.description_locked ? l.description : '' });
       if (!o.link_locked) { SB_DERIVED.forEach(k => { delete o[k]; }); delete o.fulfil_po_id; delete o.link_type; delete o.xero_org; delete o.xero_account; delete o.fulfil_company; delete o.fulfil_product; }
       return o; }));
@@ -29515,7 +29544,12 @@ async function sbCreate(b, who) {
   const head = Object.assign({}, b.head || {}), lines0 = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
   head.ref_base = String(head.ref_base || '').trim().replace(/\s+/g, '-'); head.supplier = String(head.supplier || '').trim();
   const lines = lines0.map((l, i) => Object.assign({}, l, { seq: i + 1, amount: sbR2(l.amount), description: String(l.description || '').trim() || sbDescribe(l) }));
-  const problems = sbValidate(head, lines, (await sbAccounts()).list.filter(a => a.org === 'au').map(a => a.code)); if (problems.length) throw Object.assign(new Error(problems.join(' ')), { status: 400, problems });
+  const problems = sbValidate(head, lines, (await sbAccounts()).list.filter(a => a.org === 'au').map(a => a.code));
+  { const fl = lines.filter(l => l.link_type === 'fulfil' && l.fulfil_po_id), dPos = await sbDirectPoSet(fl.map(l => l.po)), dMemo = new Map();   // v28.743: a direct-to-client line needs a market
+    for (const l of fl) { if (!dPos.has(String(l.po || '').trim().toUpperCase())) continue;
+      l.fulfil_product = sbFulfilProduct(l.charge, l.ship_to, true);
+      if (!await sbDirectMarket(l.fulfil_po_id, l.ship_to, dMemo)) problems.push('Line ' + l.seq + ': pick the market for direct-to-client ' + (l.po || 'PO') + ' (set the ship-to to US / UK / EU).'); } }
+  if (problems.length) throw Object.assign(new Error(problems.join(' ')), { status: 400, problems });
   const docs = sbGroup(lines, head.ref_base);
   const clash = (await pool.query(`SELECT reference FROM planner.deposits WHERE upper(reference) = ANY($1::text[])`, [docs.map(d => d.reference.toUpperCase())])).rows;
   if (clash.length) throw Object.assign(new Error('Reference already used in Other payments / deposits: ' + clash.map(r => r.reference).join(', ') + '. Change the supplier invoice number.'), { status: 409 });
@@ -29588,19 +29622,29 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   const sup = (await pool.query(`SELECT name, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id, coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(country,'') country, coalesce(postcode,'') postcode FROM planner.suppliers WHERE name=$1`, [dep.supplier_name])).rows[0] || { name: dep.supplier_name };
   const partyId = (/^\d+$/.test(String(sup.fulfil_id || '')) ? Number(sup.fulfil_id) : null) || await fulfilResolveParty(dep.supplier_name);
   if (!partyId) throw Object.assign(new Error('Supplier ' + dep.supplier_name + ' has no Fulfil party: set its Fulfil id in SUPPLY ▸ CONFIG ▸ Suppliers. Nothing was pushed.'), { status: 400 });
+  // v28.743: direct-to-client lines (worked out again here, so a line saved before v28.743 is routed the same way)
+  const dPos = await sbDirectPoSet(lines.map(l => l.po)), dMemo = new Map();
+  for (const l of lines) { if (!dPos.has(String(l.po || '').trim().toUpperCase())) continue;
+    l.direct = true; if (!l.fulfil_product || /^LANDED-(FREIGHT|IMPORT-DUTY)$/.test(l.fulfil_product)) l.fulfil_product = sbFulfilProduct(l.charge, l.ship_to, true);
+    const dm = await sbDirectMarket(fpo, l.ship_to, dMemo);
+    if (!dm) throw Object.assign(new Error('Line ' + l.seq + ' (' + (l.po || 'PO') + ') is direct to client and has no market: its Fulfil sale has no US / UK / EU channel and the line has no US / UK / EU ship-to. Nothing was pushed.'), { status: 400 });
+    l.fulfil_account = dm.account; }
+  const allDirect = lines.every(l => l.direct);
   const codes = Array.from(new Set(lines.map(l => l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to))));
   const prods = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', codes]], 0, codes.length + 5, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
   const pBy = {}; (prods || []).forEach(p => { pBy[p.code] = p; }); const miss = codes.filter(c => !pBy[c]); if (miss.length) throw Object.assign(new Error('Fulfil product missing: ' + miss.join(', ') + '. Nothing was pushed.'), { status: 400 });
   const LC_ACC = String(process.env.FULFIL_LANDED_ACCOUNT || '9039').trim();   // line account: 9039 Inventory Landed Cost Accruals on live (env override for a tenant without it, e.g. the Fulfil sandbox)
-  const accs = await fulfilFetch('PUT', '/model/account.account/search_read', [[['code', 'in', ['9001', LC_ACC]], ['company', '=', company]], 0, 10, null, ['id', 'code']]);
+  const dAccs = Array.from(new Set(lines.filter(l => l.direct).map(l => l.fulfil_account)));
+  const accs = await fulfilFetch('PUT', '/model/account.account/search_read', [[['code', 'in', ['9001', LC_ACC].concat(dAccs)], ['company', '=', company]], 0, 20, null, ['id', 'code']]);
   const aBy = {}; (accs || []).forEach(a => { aBy[a.code] = a.id; }); if (!aBy['9001']) throw Object.assign(new Error('Fulfil account 9001 Fulfil - Payable not found for company ' + company + '. Nothing was pushed.'), { status: 400 });
-  if (!aBy[LC_ACC]) throw Object.assign(new Error('Fulfil account ' + LC_ACC + ' (landed cost accruals) not found for company ' + company + ' in Fulfil ' + cfg.env + '. Nothing was pushed.'), { status: 400 });
+  const dMiss = dAccs.filter(c => !aBy[c]); if (dMiss.length) throw Object.assign(new Error('Fulfil cost of sales account ' + dMiss.join(', ') + ' not found for company ' + company + ' in Fulfil ' + cfg.env + '. Nothing was pushed.'), { status: 400 });
+  if (!allDirect && !aBy[LC_ACC]) throw Object.assign(new Error('Fulfil account ' + LC_ACC + ' (landed cost accruals) not found for company ' + company + ' in Fulfil ' + cfg.env + '. Nothing was pushed.'), { status: 400 });
   const currency = await fulfilResolveCurrency(cur);
   const payload = { type: 'in', company, party: partyId, currency, account: aBy['9001'], reference: ref, description: lines.map(l => l.po).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') + ' · sample bill ' + ref,
     invoice_date: L0.invoice_date ? String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10) : null,
     lines: [['create', lines.map(l => { const p = pBy[l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to)]; return { type: 'line', product: p.id, unit: p.purchase_uom || p.default_uom, quantity: 1,
-      unit_price: String(Math.round(Number(l.amount) * 10000) / 10000), description: [l.description, l.po ? 'PO ' + l.po : ''].filter(Boolean).join(' · '), account: aBy[LC_ACC] }; })]] };
-  if (opts.dry) return { dry: true, system: 'fulfil', env: cfg.env, fulfil_po_id: fpo, payload };
+      unit_price: String(Math.round(Number(l.amount) * 10000) / 10000), description: [l.description, l.po ? 'PO ' + l.po : ''].filter(Boolean).join(' · '), account: l.direct ? aBy[l.fulfil_account] : aBy[LC_ACC] }; })]] };
+  if (opts.dry) return { dry: true, system: 'fulfil', env: cfg.env, fulfil_po_id: fpo, payload, line_accounts: lines.map(l => ({ seq: l.seq, product: l.fulfil_product, account: l.direct ? l.fulfil_account : LC_ACC, direct: !!l.direct })) };
   if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was pushed.'), { status: 423 });
   const ex = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['type', '=', 'in'], ['reference', '=', ref], ['company', '=', company], ['state', '!=', 'cancel']], 0, 1, null, ['id', 'number', 'state']]);
   if (Array.isArray(ex) && ex[0]) return save({ system: 'fulfil', doc_id: ex[0].id, doc_number: ex[0].number || ref, doc_url: sbFulfilInvoiceUrl(cfg, ex[0].id), doc_status: 'existing · ' + (ex[0].state || 'draft') });
@@ -29613,7 +29657,8 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   // v28.741 (Ben 06-Nov-26, PO-DHL-LX-2026-09-B / -C): Fulfil does not send supplier invoices dated before 01-Oct-26 to Xero, so Paid > Xero
   // could never find the bill. Say so here, when the invoice is made, not at payment time.
   const _preOct = payload.invoice_date && payload.invoice_date < '2026-10-01';
-  const lcId = null, warning = 'Draft invoice created. Post it in Fulfil, then use Create landed cost on the Other payment.' + (_preOct ? ' Dated ' + payload.invoice_date + ', before 01-Oct-26: Fulfil will NOT send it to Xero, so also create the bill in Xero (reference ' + ref + ') or Paid > Xero cannot pay it.' : '');
+  // v28.743: a direct-to-client invoice never takes a landed cost: 'none' hides Create landed cost on the Other payment.
+  const lcId = allDirect ? 'none' : null, warning = (allDirect ? 'Draft invoice created. Post it in Fulfil. Direct to client: cost of sales ' + dAccs.join(' / ') + ', no landed cost.' : 'Draft invoice created. Post it in Fulfil, then use Create landed cost on the Other payment.') + (_preOct ? ' Dated ' + payload.invoice_date + ', before 01-Oct-26: Fulfil will NOT send it to Xero, so also create the bill in Xero (reference ' + ref + ') or Paid > Xero cannot pay it.' : '');
   return save({ system: 'fulfil', doc_id: invId, doc_number: ref, doc_url: sbFulfilInvoiceUrl(cfg, invId), doc_status: 'draft · ' + (company === FULFIL_COMPANY_AU ? 'AU' : 'UK') + ' co.' + (cfg.env !== 'live' ? ' · ' + cfg.env : ''), landed_cost_id: lcId, warning });
 }
 // v28.329: landed cost for a pushed Fulfil sample bill, once the invoice is POSTED (Fulfil's rule: landed cost lines = posted supplier
@@ -29621,7 +29666,10 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
 async function sbLandedCost(opId, opts) { opts = opts || {};
   const dep = (await pool.query(`SELECT id, reference, to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'doc_landed_cost_id' lc FROM planner.deposits d WHERE id=$1`, [opId])).rows[0];
   if (!dep || dep.doc_system !== 'fulfil' || !/^\d+$/.test(String(dep.doc_id || ''))) throw Object.assign(new Error('No Fulfil supplier invoice on this Other payment yet: push it first.'), { status: 400 });
+  if (dep.lc === 'none') throw Object.assign(new Error('Direct to client: this invoice books cost of sales, there is no landed cost.'), { status: 400 });
   if (dep.lc) return { already: true, landed_cost_id: dep.lc };
+  { const ls = await sbDocLines(opId); const dPos = await sbDirectPoSet(ls.map(l => l.po));   // v28.743: pushed before v28.743 or by hand
+    if (ls.length && ls.every(l => dPos.has(String(l.po || '').trim().toUpperCase()))) throw Object.assign(new Error('Direct to client: a drop shipment is never received, so there is no landed cost. Book the cost to the market Co-Brand/Custom cost of sales (312.2g US / 312.1f UK / 312.4h EU) instead.'), { status: 400 }); }
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was created.'), { status: 423 });
   const invId = Number(dep.doc_id), L0 = (await sbDocLines(opId))[0] || {};
