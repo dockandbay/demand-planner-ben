@@ -15528,7 +15528,7 @@ function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
-  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['cogs','COGS']];   // v28.235 (Ben): + COGS per unit for Airtable
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['adjustments','Adjustments'],['cogs','COGS']];   // v28.235 (Ben): + COGS per unit for Airtable; v28.744: + Adjustments (SUG-0047)
   if(INV_FBA==='AWD'&&INV_SUB!=='managefba')INV_FBA='US';   // 'AWD' is a Manage-FBA-only pseudo-market pill; don't leak it to FBA Aged / other tabs
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(it){ var c=Array.isArray(it)?it[0]:it,lbl=Array.isArray(it)?it[1]:it; var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:5px 15px;border-radius:99px;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--muted)')+';font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">'+lbl+'</button>'; }).join('')+'</div>'; }   // v27.624 Inventory v2: tokenised pills (were hardcoded hex → broke dark mode)
@@ -15542,6 +15542,7 @@ function renderInventory(){
   if(INV_SUB==='manage3pl') body=pillbar([['US_GV','US (Geneva)'],['UK','UK (ILG)'],'AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  else if(INV_SUB==='adjustments') body='<div id="sadj-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   /* v28.744 */
   else if(INV_SUB==='cogs') body=pillbar([['unit','Per-unit cost (Airtable)'],['channel','By channel & journals'],['avask','AVASK']],COGS.view||'unit','cogs-view-pill')+'<div id="cogs-panel"></div>';   /* v28.727: + COGS and SALES by channel */
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
@@ -15555,7 +15556,92 @@ function renderInventory(){
   else if(INV_SUB==='managefba'){ if(INV_FBA==='AWD')invAwdLoad(); else invFbaLoad('manage'); }
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
+  else if(INV_SUB==='adjustments')renderStockAdj();
   else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else if(COGS.view==='avask')renderCogsAvask(); else renderCogs(); }   /* v28.735: + AVASK */
+}
+// ── v28.744 (Ben 09-Nov-26, SUG-0047): BUY & MOVE ▸ Inventory ▸ Adjustments. Large Fulfil stock adjustments per warehouse location,
+// tabs Needs a reason / Has a reason / Reversed (Amazon timing), reason text + tags (add tags on the fly), bulk edit, CSV.
+// Data: /api/supply/stock-adjustments/list (synced from Fulfil hourly and on open; thresholds 3PL / Amazon in Settings).
+var SADJ={d:null,busy:false,err:'',tab:'need',loc:'',kind:'',q:'',from:'',sel:{},edit:null,showCfg:false,msg:'',sync:false};
+function sadjTab(r){ return r.reversed_at?'rev':((r.reason&&String(r.reason).trim())||(r.tags&&r.tags.length)?'has':'need'); }
+function sadjLoad(){ SADJ.busy=true; SADJ.err=''; renderStockAdj();
+  ksFetch('/api/supply/stock-adjustments/list'+(SADJ.from?'?from='+SADJ.from:''),function(e,j){ SADJ.busy=false; if(e){ SADJ.err=e.message||String(e); } else { SADJ.d=j; if(!SADJ.from&&j.from)SADJ.from=j.from; } renderStockAdj(); }); }
+function sadjPost(url,body,cb){ fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }).then(function(j){ cb(null,j); }).catch(function(e){ cb(e); }); }
+function sadjTagChips(all,on,cls){ return all.map(function(t){ var a=on.indexOf(t)>=0; return '<button type="button" class="'+cls+'" data-t="'+ksE(t)+'" style="padding:2px 9px;margin:0 4px 4px 0;border-radius:99px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid '+(a?'var(--nav)':'var(--line)')+';background:'+(a?'var(--nav)':'var(--card)')+';color:'+(a?'#fff':'var(--ink-soft)')+'">'+ksE(t)+'</button>'; }).join(''); }
+function renderStockAdj(){ ksCss(); var el=document.getElementById('sadj-panel'); if(!el)return;
+  if(!SADJ.d&&!SADJ.busy&&!SADJ.err){ sadjLoad(); return; }
+  if(SADJ.err&&!SADJ.d){ el.innerHTML='<div style="color:var(--neg)">Could not load adjustments: '+ksE(SADJ.err)+'</div>'; return; }
+  if(!SADJ.d){ el.innerHTML='<div class="mut" style="font-size:12px">Loading…</div>'; return; }
+  var d=SADJ.d; if(d.missing){ el.innerHTML='<div class="mut">Adjustments need '+ksE(d.missing)+' on this database.</div>'; return; }
+  var cfg=d.cfg||{}, all=d.rows||[], tags=d.tags||[], q=SADJ.q.toLowerCase();
+  var base=all.filter(function(r){ return (!SADJ.kind||r.kind===SADJ.kind)&&(!q||String(r.sku||'').toLowerCase().indexOf(q)>=0||String(r.reason||'').toLowerCase().indexOf(q)>=0||(r.tags||[]).join(' ').indexOf(q)>=0); });
+  var locs={}; base.forEach(function(r){ var l=r.location_name||'(none)'; locs[l]=locs[l]||{n:0,need:0}; locs[l].n++; if(sadjTab(r)==='need')locs[l].need++; });
+  var inLoc=base.filter(function(r){ return !SADJ.loc||(r.location_name||'(none)')===SADJ.loc; });
+  var cnt={need:0,has:0,rev:0}; inLoc.forEach(function(r){ cnt[sadjTab(r)]++; });
+  var rows=inLoc.filter(function(r){ return sadjTab(r)===SADJ.tab; });
+  var ls=d.last_sync, lsTxt=ls&&ls.at?('Synced '+ksDate(ls.at)+' '+String(new Date(ls.at).toTimeString()).slice(0,5)+(ls.adjustments!=null?' · '+ls.adjustments+' read':'')+(ls.reversed?' · '+ls.reversed+' reversed':'')):'Not synced yet';
+  var h='<div class="ks-bar"><b style="font-size:14px">Stock adjustments</b><span class="mut" style="font-size:12px">'+ksE(lsTxt)+((SADJ.sync||d.syncing)?' · syncing…':'')+'</span>'
+    +'<span class="mut" style="font-size:12px">· large = 3PL ≥ '+cfg.tpl_min+' units, Amazon ≥ '+cfg.amazon_min+' units · Amazon reversed within '+cfg.reversal_days+' days = timing</span>'
+    +'<span style="margin-left:auto"></span><button class="ks-btn" id="sadj-cfgb">Settings</button><button class="ks-btn" id="sadj-csv">&#8595; CSV</button><button class="ks-btn pri" id="sadj-sync"'+(SADJ.sync?' disabled':'')+'>'+(SADJ.sync?'Syncing…':'Sync from Fulfil')+'</button></div>';
+  if(SADJ.showCfg) h+='<div class="ks-set"><label>3PL: large from (units)<input id="sadj-c-tpl" type="number" min="1" value="'+cfg.tpl_min+'"></label><label>Amazon: large from (units)<input id="sadj-c-amz" type="number" min="1" value="'+cfg.amazon_min+'"></label>'
+    +'<label>Amazon reversal window (days)<input id="sadj-c-days" type="number" min="1" max="90" value="'+cfg.reversal_days+'"></label><label>Reversed when at least (%)<input id="sadj-c-pct" type="number" min="50" max="100" value="'+cfg.reversal_pct+'"></label>'
+    +'<button class="ks-btn pri" id="sadj-c-save" style="align-self:flex-end;margin-bottom:8px">Save</button><div class="mut" style="font-size:11.5px">Each location is 3PL or Amazon by its Fulfil name (Amazon FBA / AWD = Amazon). An Amazon adjustment is timing when opposite moves of the same SKU at the same location, inside the window, cover at least that % of it. China Port intake and transit legs are not adjustments.</div></div>';
+  if(SADJ.msg) h+='<div style="margin:0 0 8px;font-size:12px;color:'+(/^Not |fail|error/i.test(SADJ.msg)?'var(--neg)':'var(--pos)')+'">'+ksE(SADJ.msg)+'</div>';
+  var lk=Object.keys(locs).sort();
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px">'+[['','All locations',base.length,base.filter(function(r){return sadjTab(r)==='need';}).length]].concat(lk.map(function(l){ return [l,l,locs[l].n,locs[l].need]; })).map(function(p){ var on=p[0]===SADJ.loc;
+    return '<button class="sadj-loc" data-l="'+ksE(p[0])+'" style="padding:5px 12px;border-radius:99px;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--ink-soft)')+';font-weight:700;font-size:12px;cursor:pointer">'+ksE(p[1])+' <span style="opacity:.75">'+p[2]+'</span>'+(p[3]?' <span style="background:var(--neg);color:#fff;border-radius:99px;padding:0 6px;font-size:10.5px">'+p[3]+'</span>':'')+'</button>'; }).join('')+'</div>';
+  h+='<div class="d3nav" style="margin-bottom:8px">'+[['need','Needs a reason'],['has','Has a reason'],['rev','Reversed (Amazon timing)']].map(function(t){ return '<button class="d3tab sadj-tab'+(t[0]===SADJ.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+' ('+cnt[t[0]]+')</button>'; }).join('')+'</div>';
+  h+='<div class="ks-bar"><input type="search" id="sadj-q" placeholder="Search SKU, reason or tag" value="'+ksE(SADJ.q)+'" style="min-width:220px"><select id="sadj-kind" style="padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px">'
+    +[['','3PL + Amazon'],['3pl','3PL'],['amazon','Amazon']].map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===SADJ.kind?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'
+    +'<span class="mut" style="font-size:12px">From</span><input type="date" id="sadj-from" value="'+ksE(SADJ.from)+'">'
+    +'<span class="mut" style="font-size:12px">'+rows.length+' shown · net '+ksN(rows.reduce(function(a,r){return a+Number(r.qty||0);},0))+' units · '+(function(v){ return (v<0?'−':'')+'£'+Math.abs(Math.round(v)).toLocaleString('en-GB'); })(rows.reduce(function(a,r){return a+Number(r.value||0);},0))+' at cost</span></div>';
+  var selIds=Object.keys(SADJ.sel).filter(function(k){ return rows.some(function(r){ return String(r.move_id)===k; }); });
+  if(selIds.length) h+='<div class="ks-set" style="background:var(--amber-bg);border-color:var(--amber)"><b>'+selIds.length+' selected</b> · reason <input id="sadj-b-reason" style="width:340px" placeholder="Reason for all selected (optional)"><div style="margin-top:6px">'+sadjTagChips(tags,SADJ.bulkTags||[],'sadj-btag')+'</div>'
+    +'<button class="ks-btn pri" id="sadj-b-save">Apply to '+selIds.length+'</button> <button class="ks-btn" id="sadj-b-clear">Clear selection</button></div>';
+  var allOn=rows.length&&rows.every(function(r){ return SADJ.sel[r.move_id]; });
+  h+='<div class="ks-wrap"><table class="ks-t" style="min-width:100%"><thead><tr class="h1"><th><input type="checkbox" id="sadj-all"'+(allOn?' checked':'')+'></th><th>Date</th><th>Location</th><th>SKU</th><th>Qty</th><th>Value</th><th>Fulfil count</th><th>Reason</th><th>Tags</th><th>By</th><th></th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="11" class="mut" style="padding:14px">'+(SADJ.tab==='need'?'Nothing waiting for a reason here.':'None.')+'</td></tr>';
+  rows.slice(0,1500).forEach(function(r){ var id=String(r.move_id), ed=SADJ.edit===id, qn=Number(r.qty||0);
+    var cnt='<span class="mut">'+(r.count_number?'#'+ksE(r.count_number):'manual move')+'</span>'+(r.rebaseline_batch_id?' <span class="tool-badge bg-amber" title="sent from HORIZON">rebaseline #'+r.rebaseline_batch_id+'</span>':'')+(r.count_reason?'<div class="mut" style="font-size:11px;max-width:260px;white-space:normal">'+ksE(r.count_reason)+'</div>':'');
+    var rev=r.reversed_at?'<div style="font-size:11px;color:var(--pos)">'+(String(r.reversed_by||'').indexOf('reverses')===0?'reverses an earlier adjustment':'reversed '+ksN(r.reversed_qty)+' by '+ksDate(r.reversed_at))+'</div>':(r.kind==='amazon'&&r.reversed_qty?'<div class="mut" style="font-size:11px">'+ksN(r.reversed_qty)+' back so far</div>':'');
+    h+='<tr data-id="'+id+'"><td><input type="checkbox" class="sadj-ck" data-id="'+id+'"'+(SADJ.sel[id]?' checked':'')+'></td><td>'+ksDate(r.date)+'</td><td>'+ksE(r.location_name||'')+' <span class="mut" style="font-size:10.5px">'+(r.kind==='amazon'?'Amazon':'3PL')+'</span></td><td style="min-width:200px"><b>'+ksE(r.sku||'')+'</b></td>'
+      +'<td style="color:'+(qn<0?'var(--neg)':'var(--pos)')+';font-weight:700">'+(qn>0?'+':'')+ksN(qn)+rev+'</td><td>'+(r.value!=null?(Number(r.value)<0?'−':'')+'£'+Math.abs(Math.round(Number(r.value))).toLocaleString('en-GB'):'')+'</td><td>'+cnt+'</td>'
+      +'<td style="white-space:normal;max-width:320px">'+ksE(r.reason||'')+'</td><td style="white-space:normal;max-width:220px">'+(r.tags||[]).map(function(t){ return '<span class="tool-badge" style="background:var(--hover);color:var(--ink-soft);margin:0 3px 3px 0">'+ksE(t)+'</span>'; }).join('')+'</td>'
+      +'<td class="mut" style="font-size:11px">'+ksE(r.reason_by||'')+(r.reason_at?'<div>'+ksDate(r.reason_at)+'</div>':'')+'</td><td><button class="sadj-ed" data-id="'+id+'" style="background:none;border:0;padding:0;color:var(--blue);font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap">'+(ed?'close':(sadjTab(r)==='need'?'add reason':'edit'))+'</button></td></tr>';
+    if(ed){ var et=SADJ.editTags||[];
+      h+='<tr class="sadj-edrow"><td></td><td colspan="10" style="white-space:normal;background:var(--hover)"><textarea id="sadj-e-reason" rows="2" style="width:min(640px,100%);box-sizing:border-box;font-size:12.5px;padding:6px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)" placeholder="What happened? e.g. supplier labelled 50 units as the wrong colour">'+ksE(SADJ.editReason!=null?SADJ.editReason:(r.reason||''))+'</textarea>'
+        +'<div style="margin:6px 0">'+sadjTagChips(tags,et,'sadj-etag')+'<input id="sadj-newtag" placeholder="+ new tag" style="width:130px;padding:2px 8px;border:1px dashed var(--line);border-radius:99px;font-size:11.5px;background:var(--card);color:var(--ink)"></div>'
+        +'<button class="ks-btn pri" id="sadj-e-save">Save</button> <button class="ks-btn" id="sadj-e-cancel">Cancel</button></td></tr>'; } });
+  h+='</tbody></table></div>'+(rows.length>1500?'<div class="mut" style="font-size:12px;margin-top:6px">Showing the first 1,500: narrow by location or date.</div>':'');
+  el.innerHTML=h;
+  var $=function(id){ return document.getElementById(id); }, rerender=function(){ renderStockAdj(); };
+  el.querySelectorAll('.sadj-loc').forEach(function(b){ b.onclick=function(){ SADJ.loc=b.dataset.l; SADJ.sel={}; SADJ.edit=null; rerender(); }; });
+  el.querySelectorAll('.sadj-tab').forEach(function(b){ b.onclick=function(){ SADJ.tab=b.dataset.t; SADJ.sel={}; SADJ.edit=null; rerender(); }; });
+  if($('sadj-q'))$('sadj-q').oninput=function(){ var v=this.value; clearTimeout(SADJ._qt); SADJ._qt=setTimeout(function(){ SADJ.q=v; rerender(); var n=$('sadj-q'); if(n){ n.focus(); try{ n.setSelectionRange(v.length,v.length); }catch(e){} } },250); };
+  if($('sadj-kind'))$('sadj-kind').onchange=function(){ SADJ.kind=this.value; rerender(); };
+  if($('sadj-from'))$('sadj-from').onchange=function(){ SADJ.from=this.value; SADJ.d=null; sadjLoad(); };
+  if($('sadj-cfgb'))$('sadj-cfgb').onclick=function(){ SADJ.showCfg=!SADJ.showCfg; rerender(); };
+  if($('sadj-c-save'))$('sadj-c-save').onclick=function(){ sadjPost('/api/supply/stock-adjustments/config',{tpl_min:$('sadj-c-tpl').value,amazon_min:$('sadj-c-amz').value,reversal_days:$('sadj-c-days').value,reversal_pct:$('sadj-c-pct').value},function(e,j){
+      if(e){ SADJ.msg='Not saved: '+e.message; rerender(); return; } SADJ.d.cfg=j.cfg; SADJ.msg='Settings saved. '+(j.note||''); SADJ.showCfg=false; rerender(); }); };
+  if($('sadj-sync'))$('sadj-sync').onclick=function(){ SADJ.sync=true; SADJ.msg=''; rerender(); sadjPost('/api/supply/stock-adjustments/sync',{},function(e,j){ SADJ.sync=false; SADJ.msg=e?'Not synced: '+e.message:('Synced: '+j.adjustments+' large adjustments since '+ksDate(j.since)+(j.reversed?', '+j.reversed+' newly reversed':'')+'.'); sadjLoad(); }); };
+  if($('sadj-csv'))$('sadj-csv').onclick=function(){ ksCsv('stock_adjustments_'+(SADJ.loc||'all').replace(/[^a-z0-9]+/gi,'_')+'_'+SADJ.tab+'.csv',['Date','Location','Type','SKU','Qty','Value £','Fulfil count','Count reason','Rebaseline','Reason','Tags','By','Reversed'],
+      rows.map(function(r){ return [ksDate(r.date),r.location_name,r.kind,r.sku,r.qty,r.value,r.count_number,r.count_reason,r.rebaseline_batch_id,r.reason,(r.tags||[]).join('; '),r.reason_by,r.reversed_at?ksDate(r.reversed_at):'']; })); };
+  if($('sadj-all'))$('sadj-all').onchange=function(){ var on=this.checked; rows.forEach(function(r){ if(on)SADJ.sel[r.move_id]=1; else delete SADJ.sel[r.move_id]; }); rerender(); };
+  el.querySelectorAll('.sadj-ck').forEach(function(c){ c.onchange=function(){ if(c.checked)SADJ.sel[c.dataset.id]=1; else delete SADJ.sel[c.dataset.id]; rerender(); }; });
+  el.querySelectorAll('.sadj-btag').forEach(function(b){ b.onclick=function(){ var a=SADJ.bulkTags||(SADJ.bulkTags=[]), i=a.indexOf(b.dataset.t); if(i>=0)a.splice(i,1); else a.push(b.dataset.t); SADJ._bulkReason=$('sadj-b-reason')?$('sadj-b-reason').value:''; rerender(); if($('sadj-b-reason'))$('sadj-b-reason').value=SADJ._bulkReason||''; }; });
+  if($('sadj-b-clear'))$('sadj-b-clear').onclick=function(){ SADJ.sel={}; SADJ.bulkTags=[]; rerender(); };
+  if($('sadj-b-save'))$('sadj-b-save').onclick=function(){ var rs=$('sadj-b-reason').value.trim(), tg=SADJ.bulkTags||[]; if(!rs&&!tg.length){ SADJ.msg='Not saved: type a reason or pick a tag.'; rerender(); return; }
+    sadjPost('/api/supply/stock-adjustments/reason',{ids:selIds,reason:rs,tags:tg,mode:'add'},function(e,j){ SADJ.msg=e?'Not saved: '+e.message:('Saved on '+j.updated+' adjustments.'); if(!e){ SADJ.sel={}; SADJ.bulkTags=[]; } sadjLoad(); }); };
+  el.querySelectorAll('.sadj-ed').forEach(function(b){ b.onclick=function(){ if(SADJ.edit===b.dataset.id){ SADJ.edit=null; } else { var r=all.filter(function(x){ return String(x.move_id)===b.dataset.id; })[0]||{}; SADJ.edit=b.dataset.id; SADJ.editTags=(r.tags||[]).slice(); SADJ.editReason=null; } rerender(); }; });
+  var keepReason=function(){ var t=$('sadj-e-reason'); if(t)SADJ.editReason=t.value; };
+  el.querySelectorAll('.sadj-etag').forEach(function(b){ b.onclick=function(){ keepReason(); var a=SADJ.editTags, i=a.indexOf(b.dataset.t); if(i>=0)a.splice(i,1); else a.push(b.dataset.t); rerender(); }; });
+  if($('sadj-newtag'))$('sadj-newtag').onkeydown=function(ev){ if(ev.key!=='Enter')return; ev.preventDefault(); var t=this.value.trim().toLowerCase().replace(/\s+/g,' '); if(!t)return; keepReason();
+    sadjPost('/api/supply/stock-adjustments/tags',{tag:t},function(e,j){ if(e){ SADJ.msg='Tag not added: '+e.message; } else { if(SADJ.d.tags.indexOf(j.tag)<0)SADJ.d.tags.push(j.tag); if(SADJ.editTags.indexOf(j.tag)<0)SADJ.editTags.push(j.tag); } rerender(); var n=$('sadj-newtag'); if(n)n.focus(); }); };
+  if($('sadj-e-cancel'))$('sadj-e-cancel').onclick=function(){ SADJ.edit=null; rerender(); };
+  if($('sadj-e-save'))$('sadj-e-save').onclick=function(){ var id=SADJ.edit, rs=$('sadj-e-reason').value.trim(), tg=SADJ.editTags||[];
+    sadjPost('/api/supply/stock-adjustments/reason',{ids:[id],reason:rs,tags:tg,mode:'set'},function(e){ if(e){ SADJ.msg='Not saved: '+e.message; rerender(); return; }
+      var r=all.filter(function(x){ return String(x.move_id)===id; })[0]; if(r){ r.reason=rs||null; r.tags=tg.slice(); r.reason_by=rs||tg.length?'you':null; r.reason_at=rs||tg.length?new Date().toISOString().slice(0,10):null; }
+      SADJ.edit=null; SADJ.msg='Saved.'; rerender(); }); };
 }
 // ── v28.732 (Kathryn 05-Nov-26 build briefs): BUY & MOVE ▸ Inventory ▸ Stock Availability (per SKU: on hand, on order, commitment and
 // next landing, Global + UK / US / EU / AU, AWD in US and Global only) and Stock On Order (per SKU per PO, intake, retail ex VAT, FOB
@@ -16608,6 +16694,11 @@ function _ilgRender0(panel){ var SD=ILG_SITE_DEF[ILG.site], d=ILG.d, E=tHesc, P=
     if(ILG.review&&selRows.length){ var up=selRows.filter(function(r){ return r.diff>0; }), dn=selRows.filter(function(r){ return r.diff<0; });
       ilgReview='<div style="margin:0 0 8px;padding:12px 14px;border:1px solid var(--amber);border-radius:10px;background:var(--amber-bg)"><div style="font-weight:800;margin-bottom:6px">Review: one stock count in Fulfil warehouse "'+E(P[ILG.pool].warehouse||P[ILG.pool].label)+'" (Storage Zone)</div>'
         +'<div>'+selRows.length+' SKU lines · '+up.length+' up ('+sg(up.reduce(function(a,r){return a+r.diff;},0))+') · '+dn.length+' down ('+sg(dn.reduce(function(a,r){return a+r.diff;},0))+') · net <b>'+sg(net)+'</b> units. Each SKU is set to its Storage Zone quantity now plus the difference; Fulfil books the change to Lost and Found. The quantities are recalculated against Fulfil when you press Send.</div>'
+        +(function(){ if(!ILG.tags&&!ILG._tagReq){ ILG._tagReq=1; fetch('/api/supply/stock-adjustments/tags').then(function(r){ return r.json(); }).then(function(j){ ILG.tags=(j&&j.tags)||[]; ilgRender(); }).catch(function(){ ILG.tags=[]; }); }   // v28.744: reason + tags, shown on BUY & MOVE > Inventory > Adjustments
+          var W=ILG.why||(ILG.why={reason:'',tags:[]});
+          return '<div style="margin-top:8px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">Reason (optional, goes to Fulfil and to Inventory ▸ Adjustments)</div><textarea id="ilg-why" rows="2" style="width:min(640px,100%);box-sizing:border-box;font-size:12.5px;padding:6px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)" placeholder="e.g. supplier labelled the cartons as the wrong size">'+E(W.reason)+'</textarea>'
+            +'<div style="margin-top:4px">'+(ILG.tags||[]).map(function(t){ var on=W.tags.indexOf(t)>=0; return '<button type="button" class="ilg-wtag" data-t="'+E(t)+'" style="padding:2px 9px;margin:0 4px 4px 0;border-radius:99px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--ink-soft)')+'">'+E(t)+'</button>'; }).join('')
+            +'<input id="ilg-wnew" placeholder="+ new tag" style="width:120px;padding:2px 8px;border:1px dashed var(--line);border-radius:99px;font-size:11.5px;background:var(--card);color:var(--ink)"></div></div>'; })()
         +'<div style="margin-top:8px;display:flex;gap:8px"><button class="save-btn" id="ilg-send" style="background:var(--neg);color:#fff"'+(ILG.busy?' disabled':'')+'>'+(ILG.busy?'Sending…':'Send to Fulfil')+'</button><button class="save-btn light" id="ilg-cancel">Back</button></div></div>'; }
     h+='<div style="display:flex;gap:'+(mob?'8px':'12px')+';align-items:center;flex-wrap:wrap;margin-bottom:6px"><label style="cursor:pointer"><input type="checkbox" id="ilg-all"'+(allOn?' checked':'')+'> '+(mob?'All ':'Select all ')+rows.filter(function(r){ return r.diff&&r.product_id!=null; }).length+' shown</label>'
       +'<span>Selected <b>'+selRows.length+'</b> · net <b>'+sg(net)+'</b> units</span>'+(selRows.length?' <a href="javascript:void 0" id="ilg-clear" style="color:var(--blue)">clear</a>':'')
@@ -16694,9 +16785,13 @@ function ilgWire(panel){ var $=function(id){ return panel.querySelector('#'+id);
     var stamp=rep.report_at?inv3plAge(rep.report_at).stamp.slice(0,9):'', name=(ILG_SITE_DEF[ILG.site].name+' '+((P[ILG.pool]&&P[ILG.pool].label)||ILG.pool)+' '+stamp).trim().replace(/[^a-z0-9-]+/gi,'_')+'.csv';
     var bl=new Blob(['\ufeff'+out.map(function(r){ return r.map(q).join(','); }).join('\r\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(u); },1000); };
   if($('ilg-cancel'))$('ilg-cancel').onclick=function(){ ILG.review=false; ilgRender(); };
+  if($('ilg-why'))$('ilg-why').oninput=function(){ (ILG.why||(ILG.why={reason:'',tags:[]})).reason=this.value; };   // v28.744
+  panel.querySelectorAll('.ilg-wtag').forEach(function(b){ b.onclick=function(){ var W=ILG.why||(ILG.why={reason:'',tags:[]}), i=W.tags.indexOf(b.dataset.t); if(i>=0)W.tags.splice(i,1); else W.tags.push(b.dataset.t); ilgRender(); }; });
+  if($('ilg-wnew'))$('ilg-wnew').onkeydown=function(ev){ if(ev.key!=='Enter')return; ev.preventDefault(); var t=this.value.trim().toLowerCase().replace(/\s+/g,' '); if(!t)return; var W=ILG.why||(ILG.why={reason:'',tags:[]});
+    if((ILG.tags||[]).indexOf(t)<0)(ILG.tags=ILG.tags||[]).push(t); if(W.tags.indexOf(t)<0)W.tags.push(t); ilgRender(); var n=$('ilg-wnew'); if(n)n.focus(); };   // saved as a tag when the rebaseline is sent
   if($('ilg-send'))$('ilg-send').onclick=function(){ if(ILG.busy)return; ILG.busy=true; ilgRender();
-    fetch('/api/supply/ilg/rebaseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pool:ILG.pool,report_id:ILG.d.report&&ILG.d.report.id,skus:Object.keys(ILG.sel)})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
-      .then(function(j){ ILG.busy=false; ILG.review=false; ILG.sel={}; ILG.msg='Rebaseline #'+j.batch_id+' queued ('+j.lines+' lines'+(j.skipped&&j.skipped.length?'; skipped '+j.skipped.length:'')+'). '+(j.nudged?'n8n is writing it now.':'n8n picks it up within 15 minutes.'); ilgLoad(true); })
+    fetch('/api/supply/ilg/rebaseline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pool:ILG.pool,report_id:ILG.d.report&&ILG.d.report.id,skus:Object.keys(ILG.sel),reason:($('ilg-why')?$('ilg-why').value:((ILG.why&&ILG.why.reason)||'')),tags:(ILG.why&&ILG.why.tags)||[]})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ ILG.busy=false; ILG.review=false; ILG.sel={}; ILG.why=null; ILG.msg='Rebaseline #'+j.batch_id+' queued ('+j.lines+' lines'+(j.skipped&&j.skipped.length?'; skipped '+j.skipped.length:'')+'). '+(j.nudged?'n8n is writing it now.':'n8n picks it up within 15 minutes.'); ilgLoad(true); })
       .catch(function(e){ ILG.busy=false; ILG.msg='Not sent: '+(e.message||e); ilgRender(); }); };
   panel.querySelectorAll('.ilg-bc').forEach(function(a){ a.onclick=function(){ fetch('/api/supply/ilg/rebaseline/'+a.dataset.id+'/cancel',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ ILG.msg=j.error||('Rebaseline #'+a.dataset.id+' cancelled'); ilgLoad(); }); }; });
   if($('ilg-fresh'))$('ilg-fresh').onclick=function(){ ILG.msg=''; ilgLoad(true); };

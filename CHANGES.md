@@ -1,3 +1,13 @@
+## v28.744 (09-Nov-26) BUY & MOVE > Inventory > Adjustments: large Fulfil stock adjustments with reasons and tags; Amazon timing reversals (SUG-0047)
+- Ben 09-Nov-26 (SUG-0047, Alexandria): a tracker for 3PL / Amazon stock discrepancies everyone can see.
+- New page BUY & MOVE > Inventory > Adjustments (#/buy-move/inventory/adjustments): every large done Fulfil adjustment (move to / from Lost and Found) per warehouse location, tabs Needs a reason / Has a reason / Reversed (Amazon timing), reason text + tags (reason unknown, supplier labelling, add on the fly), bulk apply, CSV.
+- Large = per location type, 3PL and Amazon thresholds (both 30 units to start), editable on the page. China Port intake and transit legs are excluded.
+- Amazon timing: an Amazon adjustment cancelled by opposite moves of the same SKU at the same location within 14 days (at least 90%) goes to Reversed, with the reversing move. Live check: 28 of 62 large Amazon adjustments in two weeks.
+- ILG / Geneva rebaseline review: optional reason + tags; saved on the batch, added to the Fulfil count's reason text, copied onto the adjustments when they sync.
+- **Migration 423** (planner.stock_adjustments, planner.stock_adjustment_tags, ilg_rebaseline_batches.reason / tags).
+- **New cron route: POST /api/cron/stock-adjustments/sync** (x-webhook-secret, hourly via n8n). Goes inside the prod auth-gate secret bracket.
+- No new env vars. Reads Fulfil only (no Fulfil writes beyond the existing rebaseline flow).
+
 ## v28.743 (09-Nov-26) Sample bills: direct-to-client freight and duty go to cost of sales, not 9039
 - Ben 09-Nov-26 build note (Fulfil bill 160, invoice 71925, XR Textile, $102.63, PO-1842654 / SO56508). A Direct to Client PO is a drop shipment: never received, so no landed cost can ever clear 9039 Inventory Landed Cost Accruals.
 - Fulfil route for a Direct to Client PO (country_code DIRECT): freight -> DIRECT-FREIGHT (2266), duty -> DIRECT-DUTY (2267), every line on the market Co-Brand/Custom cost of sales: US 312.2g, UK 312.1f, EU 312.4h. Warehouse POs unchanged (LANDED-* on 9039). Import VAT to Xero unchanged.

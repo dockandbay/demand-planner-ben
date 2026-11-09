@@ -21224,20 +21224,22 @@ app.post('/api/supply/ilg/rebaseline', async (req, res) => {
     const open = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND status IN ('pending','sent') LIMIT 1`, [poolKey])).rows[0];
     if (open) return res.status(409).json({ error: 'Rebaseline #' + open.id + ' for this warehouse is still being written to Fulfil. Wait for it to finish (or cancel it if it is still pending).' });
     const cmp = await ilgPoolCompare(rep, poolKey, true);
-    const q = await ilgQueueBatch(rep, poolKey, cmp, skus, authUser(req) || null);
+    const q = await ilgQueueBatch(rep, poolKey, cmp, skus, authUser(req) || null, { reason: String(b.reason || '').trim().slice(0, 2000) || null, tags: sadjTagList(b.tags) });   // v28.744: reason + tags for Adjustments
     if (!q.batch_id) return res.status(400).json({ error: 'Nothing to rebaseline: ' + q.skipped.join('; ') });
     res.json({ ok: true, batch_id: q.batch_id, lines: q.lines, skipped: q.skipped, nudged: q.nudged });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.682: one batch path for the manual "Send to Fulfil" and the automated daily run: lines from the fresh compare, insert 'pending', nudge n8n
-async function ilgQueueBatch(rep, poolKey, cmp, skus, createdBy) {
+async function ilgQueueBatch(rep, poolKey, cmp, skus, createdBy, why) { why = why || {};
   const by = {}; cmp.rows.forEach(r => { by[r.sku] = r; });
   const lines = [], skipped = [];
   skus.forEach(s => { const r = by[s]; if (!r || r.product_id == null) return skipped.push(s + ' (not in Fulfil)'); if (!r.diff) return skipped.push(s + ' (no difference now)');
     lines.push({ sku: s, product_id: r.product_id, report_qty: r.report, fulfil_at_report: r.fulfil_at_report, moved_since: r.moved_since, storage_now: r.storage_now, set_to: Math.max(0, r.set_to) }); });
   if (!lines.length) return { batch_id: null, lines: 0, skipped, nudged: false };
-  const ins = (await pool.query(`INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
-    [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), createdBy])).rows[0];
+  const hasWhy = !!(why.reason || (why.tags && why.tags.length)); if (why.tags && why.tags.length) await sadjEnsureTags(why.tags, shortUser(createdBy));
+  const ins = (await pool.query(hasWhy ? `INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by, reason, tags) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::text[]) RETURNING id`
+      : `INSERT INTO planner.ilg_rebaseline_batches (report_id, pool, warehouse_id, location_id, lines, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,   // no reason: works before migration 423
+    [rep.id, poolKey, cmp.warehouse_id, cmp.storage_id, JSON.stringify(lines), createdBy].concat(hasWhy ? [why.reason, why.tags || []] : []))).rows[0];
   let nudged = false; const hook = process.env.N8N_ILG_STOCKTAKE_WEBHOOK || (IS_SANDBOX ? '' : 'https://n8n.dockandbay.com/webhook/ilg-stocktake');   // v28.685 (Ben: "can it be more instant?"): live nudges the flow's webhook at once (the 15-minute sweep stays as the fallback); never from the sandbox
   if (hook && process.env.N8N_WEBHOOK_SECRET) { try { const r = await _fetchT(hook, { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET }, body: JSON.stringify({ batch_id: ins.id }) }, 8000); nudged = r.ok; } catch (_) {} }
   return { batch_id: ins.id, lines: lines.length, skipped, nudged };
@@ -21343,11 +21345,11 @@ app.post('/api/cron/ilg-rebaseline/claim', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const only = req.body && req.body.batch_id ? Number(req.body.batch_id) : null;
     // a batch 'sent' for over 30 minutes with no result is treated as lost and offered again (n8n crashed mid-run)
-    const rows = (await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status='sent', sent_at=now() WHERE id IN (
+    const rows = (await pool.query(`UPDATE planner.ilg_rebaseline_batches rb SET status='sent', sent_at=now() WHERE id IN (
         SELECT id FROM planner.ilg_rebaseline_batches WHERE (status='pending' OR (status='sent' AND sent_at < now() - interval '30 minutes')) ${only ? 'AND id=$1' : ''} ORDER BY id LIMIT 5 FOR UPDATE SKIP LOCKED)
-      RETURNING id, pool, lines, created_by, to_char(created_at,'YYYY-MM-DD') date`, only ? [only] : [])).rows;
+      RETURNING id, pool, lines, created_by, to_char(created_at,'YYYY-MM-DD') date, to_jsonb(rb)->>'reason' why`, only ? [only] : [])).rows;
     res.json({ batches: rows.map(r => ({ id: r.id, pool: r.pool, warehouse: ILG_POOLS[r.pool].warehouse, date: r.date, created_by: r.created_by,
-      reason: 'HORIZON ' + ILG_SITES[ILG_POOLS[r.pool].site].label + ' rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')', lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
+      reason: 'HORIZON ' + ILG_SITES[ILG_POOLS[r.pool].site].label + ' rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')' + (r.why ? ': ' + String(r.why).replace(/\s+/g, ' ').slice(0, 180) : ''), lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
@@ -21357,6 +21359,145 @@ app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
     const r = await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status=$2, done_at=now(), fulfil_count_id=$3, fulfil_number=$4, result=$5::jsonb, error=$6 WHERE id=$1 AND status='sent' RETURNING id`,
       [id, ok ? 'done' : 'error', b.count_id || null, b.number != null ? String(b.number) : null, JSON.stringify(b.readback || null), ok ? null : String(b.error || 'failed').slice(0, 2000)]);
     _ilgCmp.clear(); res.json({ ok: !!r.rows[0] });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.744 (Ben 09-Nov-26, SUG-0047 Alexandria): BUY & MOVE ▸ Inventory ▸ Adjustments. Large Fulfil stock adjustments (done moves to or
+// from a Lost and Found location: 3PL and Amazon cycle counts, HORIZON ILG / Geneva rebaselines, manual counts) are synced into
+// planner.stock_adjustments (migration 423) so the team can give each one a reason and tags. "Large" is two settings, 3PL and Amazon
+// (Ben: start both at 30 units). Not adjustments: China Port intake (internal shipment lines from Lost and Found) and Transit legs.
+// Amazon timing (Ben): an Amazon adjustment cancelled by opposite moves of the same SKU at the same location within the reversal window
+// (default 14 days, at least 90% of the quantity) is a timing difference, not a loss: it goes to the Reversed tab, and so does the
+// reversing move when it is large itself. A reason typed on a HORIZON rebaseline is copied onto its adjustments when they sync.
+const SADJ_CFG_DEFAULT = { tpl_min: 30, amazon_min: 30, reversal_days: 14, reversal_pct: 90, since: '2026-10-01' };
+async function sadjCfg() { let c = {};
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_adj_cfg'`)).rows[0]; if (r && r.value) c = JSON.parse(r.value) || {}; } catch (_) {}
+  const o = Object.assign({}, SADJ_CFG_DEFAULT, c); ['tpl_min', 'amazon_min', 'reversal_days', 'reversal_pct'].forEach(k => { o[k] = Math.max(k === 'reversal_days' ? 1 : 0, Number(o[k]) || SADJ_CFG_DEFAULT[k]); });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(o.since))) o.since = SADJ_CFG_DEFAULT.since; return o; }
+const sadjKind = name => /amazon|\bawd\b|\bfba\b/i.test(String(name || '')) && !/^ilg\b|geneva/i.test(String(name || '')) ? 'amazon' : '3pl';
+const sadjLoc = name => String(name || '').replace(/\s*-\s*Storage Zone$/i, '').trim();
+let _sadjLf = null, _sadjBusy = null;
+async function sadjLostFound() { if (_sadjLf && Date.now() - _sadjLf.at < 6 * 3600000) return _sadjLf.ids;
+  const r = await fulfilFetch('PUT', '/model/stock.location/search_read', [[['type', '=', 'lost_found']], 0, 50, null, ['id']]);
+  const ids = (Array.isArray(r) ? r : []).map(x => x.id).filter(Boolean); _sadjLf = { at: Date.now(), ids }; return ids; }
+async function sadjFulfilAll(model, domain, fields, order) { const out = [];
+  for (let off = 0; off < 20000; off += 500) { const r = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, 500, order || [['id', 'ASC']], fields]);
+    const a = Array.isArray(r) ? r : []; out.push(...a); if (a.length < 500) break; }
+  return out; }
+async function stockAdjSync(opts) { if (_sadjBusy) return _sadjBusy; _sadjBusy = (async () => { opts = opts || {};
+  const t0 = Date.now(), cfg = await sadjCfg(), lf = await sadjLostFound(); if (!lf.length) throw new Error('No Lost and Found location in Fulfil');
+  const last = (await pool.query(`SELECT max(effective_date) d FROM planner.stock_adjustments`)).rows[0].d;
+  // re-read from 3 days before the newest synced adjustment (counts can be posted late); the first run starts at cfg.since
+  let since = cfg.since; if (last && !opts.full) { const d = new Date(last); d.setUTCDate(d.getUTCDate() - 3); const s = d.toISOString().slice(0, 10); if (s > since) since = s; }
+  const minQ = Math.min(cfg.tpl_min, cfg.amazon_min);
+  const mv = await sadjFulfilAll('stock.move', [['state', '=', 'done'], ['effective_date', '>=', since], ['quantity', '>=', minQ], ['OR', ['from_location', 'in', lf], ['to_location', 'in', lf]]],
+    ['id', 'product', 'product.code', 'quantity', 'from_location', 'from_location.rec_name', 'to_location', 'to_location.rec_name', 'effective_date', 'origin', 'cost_price', 'create_uid.rec_name']);
+  const rows = [];
+  for (const m of mv) { const o = String(m.origin || ''); if (/^(internal_shipment|stock\.shipment)/.test(o)) continue;   // China Port intake / transfers, not adjustments
+    const inb = lf.includes(m.from_location), locId = inb ? m.to_location : m.from_location, locName = inb ? m['to_location.rec_name'] : m['from_location.rec_name'];
+    if (lf.includes(locId) || /^transit$/i.test(String(locName || '').trim())) continue;
+    const kind = sadjKind(locName), q = Number(m.quantity) || 0; if (q < (kind === 'amazon' ? cfg.amazon_min : cfg.tpl_min)) continue;
+    const cp = Number(fulfilUnwrap(m.cost_price)) || 0, qty = inb ? q : -q;
+    rows.push({ move_id: m.id, date: String(fulfilUnwrap(m.effective_date) || '').slice(0, 10), sku: m['product.code'] || null, product_id: m.product || null, qty, location_id: locId, location_name: sadjLoc(locName), kind,
+      cost_price: cp || null, value: cp ? Math.round(qty * cp * 100) / 100 : null, origin: o || null, line_id: (o.match(/^stock\.inventory\.line,(\d+)$/) || [])[1] || null, user: m['create_uid.rec_name'] || null }); }
+  // the Fulfil count behind each line
+  const lineIds = Array.from(new Set(rows.map(r => Number(r.line_id)).filter(Boolean))), lineInv = new Map(), invs = new Map();
+  for (let i = 0; i < lineIds.length; i += 500) (await fulfilFetch('PUT', '/model/stock.inventory.line/search_read', [[['id', 'in', lineIds.slice(i, i + 500)]], 0, 500, null, ['id', 'inventory']]) || []).forEach(l => lineInv.set(l.id, l.inventory));
+  const invIds = Array.from(new Set(Array.from(lineInv.values()).filter(Boolean)));
+  for (let i = 0; i < invIds.length; i += 500) (await fulfilFetch('PUT', '/model/stock.inventory/search_read', [[['id', 'in', invIds.slice(i, i + 500)]], 0, 500, null, ['id', 'number', 'reason']]) || []).forEach(v => invs.set(v.id, v));
+  const batches = new Map(); if (invIds.length) (await pool.query(`SELECT id, fulfil_count_id, reason, coalesce(tags,'{}') tags, created_by FROM planner.ilg_rebaseline_batches WHERE fulfil_count_id = ANY($1::bigint[])`, [invIds])).rows.forEach(b => batches.set(Number(b.fulfil_count_id), b));
+  let n = 0;
+  for (const r of rows) { const inv = r.line_id ? invs.get(lineInv.get(Number(r.line_id))) : null, b = inv ? batches.get(Number(inv.id)) : null;
+    await pool.query(`INSERT INTO planner.stock_adjustments (move_id, effective_date, sku, product_id, qty, location_id, location_name, kind, cost_price, value, origin, count_id, count_number, count_reason, fulfil_user, rebaseline_batch_id, reason, tags, reason_by, reason_at, synced_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,coalesce($18::text[],'{}'),$19,CASE WHEN $17::text IS NULL AND $18::text[] IS NULL THEN NULL ELSE now() END,now())
+      ON CONFLICT (move_id) DO UPDATE SET effective_date=EXCLUDED.effective_date, sku=EXCLUDED.sku, qty=EXCLUDED.qty, location_id=EXCLUDED.location_id, location_name=EXCLUDED.location_name, kind=EXCLUDED.kind, cost_price=EXCLUDED.cost_price, value=EXCLUDED.value,
+        count_id=EXCLUDED.count_id, count_number=EXCLUDED.count_number, count_reason=EXCLUDED.count_reason, rebaseline_batch_id=EXCLUDED.rebaseline_batch_id, synced_at=now(),
+        reason=coalesce(planner.stock_adjustments.reason, EXCLUDED.reason), tags=CASE WHEN cardinality(planner.stock_adjustments.tags)=0 THEN EXCLUDED.tags ELSE planner.stock_adjustments.tags END,
+        reason_by=coalesce(planner.stock_adjustments.reason_by, EXCLUDED.reason_by), reason_at=coalesce(planner.stock_adjustments.reason_at, EXCLUDED.reason_at)`,
+      [r.move_id, r.date, r.sku, r.product_id, r.qty, r.location_id, r.location_name, r.kind, r.cost_price, r.value, r.origin, inv ? inv.id : null, inv ? String(inv.number || inv.id) : null, inv ? (inv.reason || null) : null, r.user,
+       b ? b.id : null, b && b.reason ? b.reason : null, b && b.tags && b.tags.length ? b.tags : null, b && (b.reason || (b.tags && b.tags.length)) ? shortUser(b.created_by) || 'rebaseline' : null]);
+    n++; }
+  const rev = await sadjReversals(cfg, lf);
+  const out = { ok: true, since, fulfil_moves: mv.length, adjustments: n, reversed: rev.reversed, checked: rev.checked, ms: Date.now() - t0 };
+  await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES ('stock_adj_last_sync', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [JSON.stringify(Object.assign({ at: new Date().toISOString() }, out))]);
+  return out; })(); try { return await _sadjBusy; } finally { _sadjBusy = null; } }
+// Amazon timing: for each open Amazon adjustment still inside its window (or never checked), sum the opposite moves (any size) of the same
+// SKU at the same location in the reversal window after it. At least reversal_pct % of the quantity = reversed.
+async function sadjReversals(cfg, lf) {
+  const days = cfg.reversal_days, pct = cfg.reversal_pct / 100;
+  const cand = (await pool.query(`SELECT move_id, effective_date::text d, product_id, location_id, qty FROM planner.stock_adjustments
+    WHERE kind='amazon' AND reversed_at IS NULL AND product_id IS NOT NULL AND (reversal_checked_at IS NULL OR effective_date >= current_date - ($1::int + 2)) ORDER BY effective_date LIMIT 400`, [days])).rows;
+  if (!cand.length) return { checked: 0, reversed: 0 };
+  const minD = cand.reduce((a, c) => c.d < a ? c.d : a, cand[0].d), prods = Array.from(new Set(cand.map(c => Number(c.product_id)))), locs = Array.from(new Set(cand.map(c => Number(c.location_id))));
+  const mv = [];
+  for (let i = 0; i < prods.length; i += 200) mv.push(...await sadjFulfilAll('stock.move', [['state', '=', 'done'], ['effective_date', '>=', minD], ['product', 'in', prods.slice(i, i + 200)],
+    ['OR', [['from_location', 'in', lf], ['to_location', 'in', locs]], [['to_location', 'in', lf], ['from_location', 'in', locs]]]], ['id', 'product', 'quantity', 'from_location', 'to_location', 'effective_date', 'origin']));
+  const byKey = new Map(); mv.forEach(m => { if (/^(internal_shipment|stock\.shipment)/.test(String(m.origin || ''))) return; const inb = lf.includes(m.from_location), loc = inb ? m.to_location : m.from_location;
+    const k = m.product + '|' + loc; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push({ id: m.id, d: String(fulfilUnwrap(m.effective_date) || '').slice(0, 10), q: inb ? Number(m.quantity) : -Number(m.quantity) }); });
+  let reversed = 0;
+  for (const c of cand) { const end = new Date(c.d + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + days); const endS = end.toISOString().slice(0, 10), q = Number(c.qty);
+    const opp = (byKey.get(c.product_id + '|' + c.location_id) || []).filter(m => m.id !== Number(c.move_id) && Math.sign(m.q) === -Math.sign(q) && (m.d > c.d || (m.d === c.d && m.id > Number(c.move_id))) && m.d <= endS)
+      .sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : a.id - b.id);
+    let sum = 0, at = null; const ids = []; for (const m of opp) { sum += Math.abs(m.q); ids.push(m.id); if (sum >= Math.abs(q) * pct) { at = m.d; break; } }
+    if (at) { reversed++;
+      await pool.query(`UPDATE planner.stock_adjustments SET reversed_qty=$2, reversed_at=$3, reversed_by=$4, reversal_checked_at=now() WHERE move_id=$1`, [c.move_id, Math.round(sum * 100) / 100, at, ids.join(',')]);
+      await pool.query(`UPDATE planner.stock_adjustments SET reversed_qty=abs(qty), reversed_at=effective_date, reversed_by='reverses ' || $2::text, reversal_checked_at=now() WHERE move_id = ANY($1::bigint[]) AND reversed_at IS NULL`, [ids, String(c.move_id)]); }
+    else await pool.query(`UPDATE planner.stock_adjustments SET reversed_qty=$2, reversal_checked_at=now() WHERE move_id=$1`, [c.move_id, sum ? Math.round(sum * 100) / 100 : null]); }
+  return { checked: cand.length, reversed };
+}
+async function sadjLastSync() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_adj_last_sync'`)).rows[0]; return r && r.value ? JSON.parse(r.value) : null; } catch (_) { return null; } }
+app.get('/api/supply/stock-adjustments/list', async (req, res) => {
+  try { const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? req.query.from : new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? req.query.to : '2999-12-31';
+    let last = await sadjLastSync();
+    // quiet refresh: a sync older than 30 minutes runs in the background (the cron is the main path); the next load shows it
+    if (!_sadjBusy && (!last || Date.now() - Date.parse(last.at) > 30 * 60000)) stockAdjSync().catch(e => log500(e));
+    const rows = (await pool.query(`SELECT move_id, to_char(effective_date,'YYYY-MM-DD') date, sku, qty, location_name, kind, cost_price, value, count_id, count_number, count_reason, fulfil_user, rebaseline_batch_id,
+        reason, tags, reason_by, to_char(reason_at,'YYYY-MM-DD') reason_at, reversed_qty, to_char(reversed_at,'YYYY-MM-DD') reversed_at, reversed_by
+      FROM planner.stock_adjustments WHERE effective_date BETWEEN $1 AND $2 ORDER BY effective_date DESC, location_name, sku LIMIT 5000`, [from, to])).rows;
+    const tags = (await pool.query(`SELECT tag FROM planner.stock_adjustment_tags ORDER BY (created_by='system') DESC, tag`)).rows.map(r => r.tag);
+    res.set('Cache-Control', 'no-store').json({ ok: true, from, to, cfg: await sadjCfg(), last_sync: last, syncing: !!_sadjBusy, tags, rows });
+  } catch (e) { if (/stock_adjustments" does not exist/.test(e.message)) return res.json({ ok: false, missing: 'migration 423' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/stock-adjustments/sync', async (req, res) => {
+  try { res.json(await stockAdjSync({ full: !!(req.body && req.body.full) })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/stock-adjustments/sync', async (req, res) => {   // n8n hourly
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await stockAdjSync({ full: !!(req.body && req.body.full) }); try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('stock_adjustments_sync','ok',$1,$2)`, [r.adjustments, JSON.stringify(r).slice(0, 500)]); } catch (_) {} res.json(r); }
+  catch (e) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('stock_adjustments_sync','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+});
+const sadjTagList = t => Array.from(new Set((Array.isArray(t) ? t : []).map(x => String(x || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 40)).filter(Boolean))).slice(0, 12);
+async function sadjEnsureTags(tags, who) { for (const t of tags) await pool.query(`INSERT INTO planner.stock_adjustment_tags (tag, created_by) VALUES ($1,$2) ON CONFLICT (tag) DO NOTHING`, [t, who || null]); }
+// reason + tags on one or many adjustments. mode 'set' replaces both (blank reason and no tags = back to Needs a reason); 'add' appends tags and keeps an existing reason.
+app.post('/api/supply/stock-adjustments/reason', async (req, res) => {
+  try { const b = req.body || {}, ids = (Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Boolean).slice(0, 2000); if (!ids.length) return res.status(400).json({ error: 'Pick at least one adjustment' });
+    const reason = String(b.reason == null ? '' : b.reason).trim().slice(0, 2000) || null, tags = sadjTagList(b.tags), who = shortUser(authUser(req)) || null;
+    await sadjEnsureTags(tags, who);
+    const r = b.mode === 'add'
+      ? await pool.query(`UPDATE planner.stock_adjustments SET reason=coalesce($2, reason), tags=(SELECT coalesce(array_agg(DISTINCT x),'{}') FROM unnest(tags || $3::text[]) x), reason_by=$4, reason_at=now() WHERE move_id = ANY($1::bigint[]) RETURNING move_id`, [ids, reason, tags, who])
+      : await pool.query(`UPDATE planner.stock_adjustments SET reason=$2, tags=$3::text[], reason_by=CASE WHEN $2::text IS NULL AND cardinality($3::text[])=0 THEN NULL ELSE $4 END, reason_at=CASE WHEN $2::text IS NULL AND cardinality($3::text[])=0 THEN NULL ELSE now() END WHERE move_id = ANY($1::bigint[]) RETURNING move_id`, [ids, reason, tags, who]);
+    res.json({ ok: true, updated: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/stock-adjustments/tags', async (req, res) => {   // the tag list (rebaseline review box)
+  try { res.json({ ok: true, tags: (await pool.query(`SELECT tag FROM planner.stock_adjustment_tags ORDER BY (created_by='system') DESC, tag`)).rows.map(r => r.tag) }); }
+  catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, tags: [] }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/stock-adjustments/tags', async (req, res) => {   // add a tag on the fly; {delete:true} removes an unused, non-system tag
+  try { const b = req.body || {}, t = sadjTagList([b.tag])[0]; if (!t) return res.status(400).json({ error: 'Type a tag' });
+    if (b.delete) { const used = (await pool.query(`SELECT 1 FROM planner.stock_adjustments WHERE $1 = ANY(tags) LIMIT 1`, [t])).rows[0]; if (used) return res.status(409).json({ error: 'Tag "' + t + '" is in use' });
+      await pool.query(`DELETE FROM planner.stock_adjustment_tags WHERE tag=$1 AND coalesce(created_by,'')<>'system'`, [t]); return res.json({ ok: true }); }
+    await sadjEnsureTags([t], shortUser(authUser(req))); res.json({ ok: true, tag: t });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/stock-adjustments/config', async (req, res) => {
+  try { const b = req.body || {}, cur = await sadjCfg(), o = {};
+    ['tpl_min', 'amazon_min', 'reversal_days', 'reversal_pct'].forEach(k => { const v = Number(b[k]); o[k] = Number.isFinite(v) && v >= 0 ? Math.round(v) : cur[k]; });
+    o.reversal_days = Math.min(90, Math.max(1, o.reversal_days)); o.reversal_pct = Math.min(100, Math.max(50, o.reversal_pct)); o.since = cur.since;
+    await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES ('stock_adj_cfg', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [JSON.stringify(o)]);
+    // a changed window or % re-checks every open Amazon adjustment on the next sync
+    if (o.reversal_days !== cur.reversal_days || o.reversal_pct !== cur.reversal_pct) await pool.query(`UPDATE planner.stock_adjustments SET reversal_checked_at=NULL, reversed_at=NULL, reversed_qty=NULL, reversed_by=NULL WHERE kind='amazon'`);
+    res.json({ ok: true, cfg: o, note: o.tpl_min < cur.tpl_min || o.amazon_min < cur.amazon_min ? 'Lower thresholds pick up smaller adjustments from the next full sync.' : '' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
