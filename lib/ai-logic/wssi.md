@@ -146,6 +146,15 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - DEMAND ▸ Inputs ▸ Open to buy and WSSI plan are no longer in the menu; their links open the WSSI worksheet. The all-markets grids (for .xlsx upload or pasting many rows) are reached from "Bulk grid" on the worksheet bar.
 (source: artifact_v16.7.html :: renderWssiView, wssiWsBind, wssiWsCombo, wssiWsGet, wssiWsPut)
 
+## Overtyping (v28.746, Kathryn round 2 release 2, migration 425)
+- Worksheet (one market, channel and category group). Forecast months only unless stated; every typed cell is highlighted, hover shows who typed it and when, clearing it goes back to the system value.
+- Act/Fcst Sales £, units and ASP (measures fc_sales, fc_units, fc_asp): the last two typed win and the third is worked out; typing a third clears the one typed first (same undo step). One typed: £ or units keep the forecast ASP; an ASP keeps the forecast £. The unit difference against the forecast runs through that pool's projected stock. lib/wssi.mjs wssiEff (server) and the page's wssiEff hold the rule; keep them in step.
+- Planned Sales £, units and ASP (plan cells sales, units, asp; any month): the same rule, using the forecast's ASP or £ as the reference when only one is typed. Plan cells now carry who / when (migration 425).
+- Month-end forecast snapshot = the Act/Fcst line including these overtypes.
+- Current selling price and full price (measures price, full; DTC = 3PL pool, FBA = Amazon): revalue that month's £ retail (or £ full) stock rows for the pool (× typed ÷ system price) and the Proposed conversions. Units carried in from earlier inputs (Proposed, overtypes, write-offs) are valued at each month's price, so a typed price reads back exactly.
+- Proposed (open to buy): type £ retail, £ cost or units; the other two are worked out from the current selling price and avg cost.
+- Planned write-offs (wo_units, wo_retail, wo_cost; one per cell; negative = a loss): change the pool's projected stock from that month on.
+
 ## Rows and saved views (v28.745)
 - Rows, order and labels follow Kathryn's template tab "5.11.26 - UPDATED"; rows marked Hide there are hidden by default, and the Variance: forecast v plan section starts collapsed. Planned intake, planned closing stock and the intake / closing vs plan variances were removed (Kathryn 06-Nov: drop planned closing).
 - View picker + Rows: tick rows to show; save as a named view (planner.wssi_views, migration 424), shared with the team; the author or an admin deletes. The page keeps its scroll position on every redraw.

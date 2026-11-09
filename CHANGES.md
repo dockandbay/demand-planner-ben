@@ -1,3 +1,14 @@
+## v28.746 (09-Nov-26) DEMAND > WSSI release 2 from Kathryn's round 2: overtyping
+- Kathryn's points 7 to 12 (sheet "WSSI _ OTB Format", Required updates).
+- Act/Fcst Sales £, units and ASP can be overtyped in forecast months: the last two typed win and the third is worked out (one typed: £ / units keep the ASP, an ASP keeps the £). The change runs through projected stock; the month-end snapshot includes overtypes.
+- Planned Sales £, units and ASP follow the same rule; Planned ASP is now an input.
+- Current selling price and full price can be overtyped in forecast months (DTC = 3PL pool, FBA = Amazon); they revalue the £ retail stock rows and Proposed conversions.
+- Proposed: type £ retail, £ cost or units. Write-offs: type a planned write-off in forecast months as £ retail, £ cost or units (negative = a loss).
+- Every typed cell is highlighted with who typed it and when; clearing it goes back to the system value.
+- Bulk Open to buy grid reads £ cost entries.
+- **Migration 425** (wssi_overrides measures fc_sales, fc_asp, price, full, wo_*; wssi_plan_cells asp + updated_at / updated_by; wssi_otb_buy entered_as cost). Code tolerates it being absent until run (saves of the new inputs say "needs migration 425").
+- No new cron routes. No new env vars.
+
 ## v28.745 (09-Nov-26) DEMAND > WSSI release 1 from Kathryn's round 2: template layout, target cover, Cut off Stock Target, shortfall, saved views
 - Kathryn 05/06-Nov-26 (sheet "WSSI _ OTB Format", tabs 5.11.26 - UPDATED and Required updates, points 1, 2, 3, 4, 13, 14; her answers 06-Nov).
 - Rows, order, labels and default Show / Hide as her template; Variance: forecast v plan collapsed by default; new ASP rows in the forecast and plan variances; planned closing stock, planned intake and the intake / closing vs plan variances removed (her answer to Q5).

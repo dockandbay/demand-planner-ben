@@ -13,7 +13,7 @@ import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
-import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
+import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory, wssiEff } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
 import { B2B_TYPES, B2B_CURRENCIES, B2B_STATUSES, B2B_COGS_DEFAULT, b2bRate, b2bCalc, b2bChecks, b2bSummary, b2bParseSheet, b2bSplitText, b2bParseDate, b2bDateSuspect, b2bNum, b2bPct, b2bFy, b2bCsv } from './lib/b2b_forecast.mjs';   // v28.603 CLIENT > B2B forecast
 import { ILG_POOLS, ILG_SITES, ilgPoolsOf, ILG_FILE_RE, ILG_GMAIL_Q, GENEVA_FILE_RE, GENEVA_GMAIL_Q, ilgReportAt, parseIlgReport, parseGenevaReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline; v28.682 + US Geneva
 
@@ -27652,12 +27652,12 @@ async function _otbOnPo(fy, rows) {
 app.get('/api/demand/wssi-otb', async (req, res) => {
   try {
     const fy = _otbFy(req.query.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
-    const rows = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, entered_as, value::float8 AS value, created_at FROM planner.wssi_otb_buy
+    const rows = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, entered_as, value::float8 AS value, created_at, coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_otb_buy
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY month, market, channel, cgroup`, [fy])).rows;
     const up = (await pool.query(`SELECT coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_otb_buy
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY updated_at DESC LIMIT 1`, [fy])).rows[0] || null;
     const on_po = await _otbOnPo(fy, rows);
-    res.set('Cache-Control', 'no-store').json({ fy, rows: rows.map(r => ({ month: r.month, market: r.market, channel: r.channel, cgroup: r.cgroup, entered_as: r.entered_as, value: r.value })), on_po, cgroups: WSSI_CGROUPS, updated: up });
+    res.set('Cache-Control', 'no-store').json({ fy, rows: rows.map(r => ({ month: r.month, market: r.market, channel: r.channel, cgroup: r.cgroup, entered_as: r.entered_as, value: r.value, updated_by: r.updated_by, updated_at: r.updated_at })), on_po, cgroups: WSSI_CGROUPS, updated: up });
   } catch (e) { if (_otbMissing(e)) return res.json({ fy: _otbFy(req.query.fy), rows: [], on_po: [], cgroups: WSSI_CGROUPS, updated: null, missing: 'migration 396' }); log500(e); res.status(500).json({ error: 'Could not load open to buy' }); }
 });
 app.post('/api/demand/wssi-otb', async (req, res) => {
@@ -27669,7 +27669,7 @@ app.post('/api/demand/wssi-otb', async (req, res) => {
     if (rows.length > 5000) return res.status(413).json({ error: 'Too many rows' });
     const clean = [];
     for (const r of rows) {
-      const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7), cg = _otbCg(r.cgroup), as = r.entered_as === 'retail' ? 'retail' : 'units';
+      const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7), cg = _otbCg(r.cgroup), as = r.entered_as === 'retail' ? 'retail' : (r.entered_as === 'cost' ? 'cost' : 'units');   // v28.746: £ cost too (migration 425)
       if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !months.includes(m) || !cg) return res.status(400).json({ error: 'Bad row: ' + [m, mk, ch, r.cgroup].join(' ') });
       const v = r.value === '' || r.value == null ? 0 : Number(r.value);
       if (!isFinite(v) || v < 0 || v > 1e9) return res.status(400).json({ error: 'Must be a positive number: ' + [m, mk, ch, cg].join(' ') });
@@ -27686,7 +27686,7 @@ app.post('/api/demand/wssi-otb', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, saved, removed });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_otbMissing(e)) return res.status(503).json({ error: 'Open to buy needs migration 396' }); log500(e); res.status(500).json({ error: 'Could not save open to buy' }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_otbMissing(e)) return res.status(503).json({ error: 'Open to buy needs migration 396' }); if (/entered_as_check/.test(String(e && e.message))) return res.status(503).json({ error: 'Proposed in £ cost needs migration 425' }); log500(e); res.status(500).json({ error: 'Could not save open to buy' }); }
   finally { client.release(); }
 });
 
@@ -27695,9 +27695,11 @@ app.post('/api/demand/wssi-otb', async (req, res) => {
 // FY); an admin locks it as version n (read only, dated); the next edit starts a new draft from the latest locked version. WSSI uses the latest
 // locked version. Overrides (live, not versioned; blank = the system value): forecast sales units (open months) and target closing units.
 // GET ?fy[&v=<version id>] → {versions, shown_id, shown_status, cells (shown version), locked_cells (latest locked), overrides, snapshot}.
-const WSSI_PLAN_MEASURES = ['sales', 'units', 'close'], WSSI_OVR_MEASURES = ['fc_units', 'target_units', 'cover_wks', 'cutoff'];   // v28.745 cover_wks + cutoff (migration 424)
+const WSSI_PLAN_MEASURES = ['sales', 'units', 'close', 'asp'], WSSI_OVR_MEASURES = ['fc_units', 'target_units', 'cover_wks', 'cutoff', 'fc_sales', 'fc_asp', 'price', 'full', 'wo_units', 'wo_retail', 'wo_cost'];   // v28.746 release 2 (migration 425)
+const WSSI_SIGNED = { wo_units: 1, wo_retail: 1, wo_cost: 1 };   // planned write-offs can be negative (a loss) or positive   // v28.745 cover_wks + cutoff (migration 424)
 const _planMissing = e => /wssi_plan|wssi_overrides|wssi_fc_snapshot/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
-const _planCells = async (db, vid) => vid ? (await db.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value FROM planner.wssi_plan_cells WHERE version_id=$1`, [vid])).rows : [];
+const _planCells = async (db, vid) => vid ? (await db.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value,
+  coalesce(to_jsonb(c)->>'updated_by','') updated_by, to_char(((to_jsonb(c)->>'updated_at')::timestamptz) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at, (extract(epoch from (to_jsonb(c)->>'updated_at')::timestamptz)*1000)::float8 t FROM planner.wssi_plan_cells c WHERE version_id=$1`, [vid])).rows : [];   // v28.746 who / when (migration 425; null before it)
 app.get('/api/demand/wssi-plan', async (req, res) => {
   try {
     const fy = _otbFy(req.query.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
@@ -27706,7 +27708,7 @@ app.get('/api/demand/wssi-plan', async (req, res) => {
     const draft = versions.find(v => v.status === 'draft'), locked = versions.find(v => v.status === 'locked');
     const want = parseInt(req.query.v, 10), shown = versions.find(v => v.id === want) || draft || locked || null;
     const cells = await _planCells(pool, shown && shown.id), locked_cells = locked ? (shown && shown.id === locked.id ? cells : await _planCells(pool, locked.id)) : [];
-    const overrides = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value, coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_overrides
+    const overrides = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, measure, value::float8 value, coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at, (extract(epoch from updated_at)*1000)::float8 t FROM planner.wssi_overrides
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1)`, [fy])).rows;
     const snapshot = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, cgroup, units::float8 units, sales::float8 sales FROM planner.wssi_fc_snapshot
       WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1)`, [fy])).rows;
@@ -27715,7 +27717,7 @@ app.get('/api/demand/wssi-plan', async (req, res) => {
 });
 const _wssiCellOk = (r, months, measures) => { const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7), cg = _otbCg(r.cgroup), me = String(r.measure || '');
   if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !months.includes(m) || !cg || !measures.includes(me)) return { error: 'Bad row: ' + [m, mk, ch, r.cgroup, me].join(' ') };
-  const v = r.value === '' || r.value == null ? 0 : Number(r.value); if (!isFinite(v) || v < 0 || v > 1e10) return { error: 'Must be a positive number: ' + [m, mk, ch, cg, me].join(' ') };
+  const v = r.value === '' || r.value == null ? 0 : Number(r.value); if (!isFinite(v) || (v < 0 && !WSSI_SIGNED[me]) || Math.abs(v) > 1e10) return { error: 'Must be a positive number: ' + [m, mk, ch, cg, me].join(' ') };
   return { m, mk, ch, cg, me, v: Math.round(v * 100) / 100 }; };
 // POST {fy, rows:[{month, market, channel, cgroup, measure: sales|units|close, value}]} → saved to the FY's draft (created from the latest locked
 // version when there is none). Needs demand edit.
@@ -27726,20 +27728,25 @@ app.post('/api/demand/wssi-plan/cells', async (req, res) => {
     const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
     const months = _otbMonths(fy), rows = Array.isArray(b.rows) ? b.rows : []; if (rows.length > 8000) return res.status(413).json({ error: 'Too many rows' });
     const clean = []; for (const r of rows) { const c = _wssiCellOk(r, months, WSSI_PLAN_MEASURES); if (c.error) return res.status(400).json(c); clean.push(c); }
+    const hasWho = (await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='wssi_plan_cells' AND column_name='updated_by'`)).rowCount > 0;   // v28.746 (migration 425)
     await client.query('BEGIN');
     let draft = (await client.query(`SELECT id FROM planner.wssi_plan_versions WHERE fy=$1 AND status='draft' FOR UPDATE`, [fy])).rows[0], created = false;
     if (!draft) { draft = (await client.query(`INSERT INTO planner.wssi_plan_versions (fy, status, created_by) VALUES ($1,'draft',$2) RETURNING id`, [fy, me.email || null])).rows[0]; created = true;
       const last = (await client.query(`SELECT id FROM planner.wssi_plan_versions WHERE fy=$1 AND status='locked' ORDER BY version DESC LIMIT 1`, [fy])).rows[0];
-      if (last) await client.query(`INSERT INTO planner.wssi_plan_cells (version_id, month, market, channel, cgroup, measure, value) SELECT $1, month, market, channel, cgroup, measure, value FROM planner.wssi_plan_cells WHERE version_id=$2`, [draft.id, last.id]); }
+      if (last) await client.query(`INSERT INTO planner.wssi_plan_cells (version_id, month, market, channel, cgroup, measure, value) SELECT $1, month, market, channel, cgroup, measure, value FROM planner.wssi_plan_cells WHERE version_id=$2`, [draft.id, last.id]);
+      if (last && hasWho) await client.query(`UPDATE planner.wssi_plan_cells d SET updated_at=s.updated_at, updated_by=s.updated_by FROM planner.wssi_plan_cells s WHERE d.version_id=$1 AND s.version_id=$2
+        AND s.month=d.month AND s.market=d.market AND s.channel=d.channel AND s.cgroup=d.cgroup AND s.measure=d.measure`, [draft.id, last.id]); }
     let saved = 0, removed = 0;
     for (const r of clean) {
       if (!r.v) { removed += (await client.query(`DELETE FROM planner.wssi_plan_cells WHERE version_id=$1 AND month=($2||'-01')::date AND market=$3 AND channel=$4 AND cgroup=$5 AND measure=$6`, [draft.id, r.m, r.mk, r.ch, r.cg, r.me])).rowCount; continue; }
-      await client.query(`INSERT INTO planner.wssi_plan_cells (version_id, month, market, channel, cgroup, measure, value) VALUES ($1,($2||'-01')::date,$3,$4,$5,$6,$7)
+      if (hasWho) await client.query(`INSERT INTO planner.wssi_plan_cells (version_id, month, market, channel, cgroup, measure, value, updated_at, updated_by) VALUES ($1,($2||'-01')::date,$3,$4,$5,$6,$7,now(),$8)
+        ON CONFLICT (version_id, month, market, channel, cgroup, measure) DO UPDATE SET value=EXCLUDED.value, updated_at=now(), updated_by=EXCLUDED.updated_by`, [draft.id, r.m, r.mk, r.ch, r.cg, r.me, r.v, me.email || null]);
+      else await client.query(`INSERT INTO planner.wssi_plan_cells (version_id, month, market, channel, cgroup, measure, value) VALUES ($1,($2||'-01')::date,$3,$4,$5,$6,$7)
         ON CONFLICT (version_id, month, market, channel, cgroup, measure) DO UPDATE SET value=EXCLUDED.value`, [draft.id, r.m, r.mk, r.ch, r.cg, r.me, r.v]); saved++;
     }
     await client.query('COMMIT');
     res.json({ ok: true, draft_id: Number(draft.id), draft_created: created, saved, removed });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'The WSSI plan needs migration 397' }); log500(e); res.status(500).json({ error: 'Could not save the plan' }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'The WSSI plan needs migration 397' }); if (/measure_check/.test(String(e && e.message))) return res.status(503).json({ error: 'Planned ASP needs migration 425' }); log500(e); res.status(500).json({ error: 'Could not save the plan' }); }
   finally { client.release(); }
 });
 // POST {fy, note?} → the FY's draft becomes the next locked version (admins only, Ben: "admins lock, versions kept").
@@ -27772,7 +27779,7 @@ app.post('/api/demand/wssi-overrides', async (req, res) => {
     await client.query('COMMIT'); _wssiCache.clear();   // the month-end snapshot uses the overrides
     res.json({ ok: true, saved, removed });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_planMissing(e)) return res.status(503).json({ error: 'Overrides need migration 397' });
-    if (/wssi_overrides_measure_check/.test(String(e && e.message))) return res.status(503).json({ error: 'Target cover and Cut off Stock Target need migration 424' }); log500(e); res.status(500).json({ error: 'Could not save overrides' }); }
+    if (/wssi_overrides_measure_check/.test(String(e && e.message))) return res.status(503).json({ error: 'This input needs migration ' + (/cover_wks|cutoff/.test(JSON.stringify(req.body && req.body.rows || '')) ? '424' : '425') }); log500(e); res.status(500).json({ error: 'Could not save overrides' }); }
   finally { client.release(); }
 });
 // v28.745 (Kathryn round 2, point 4): saved WSSI views, shared with the team (planner.wssi_views, migration 424). A view = the rows shown
@@ -27880,8 +27887,10 @@ async function wssiSnapshotCurrent(data, curM) {
     const mi = data.months.indexOf(curM); if (mi < 0 || curM <= data.actual_to) return;
     const d = data.dict, agg = {};
     for (const r of data.sales) { if (r[0] !== mi) continue; const k = d.mkt[r[1]] + '|' + d.ch[r[2]] + '|' + d.cat[r[3]]; const a = agg[k] || (agg[k] = [0, 0]); a[0] += r[6]; a[1] += r[7]; }
-    let ov = []; try { ov = (await pool.query(`SELECT market, channel, cgroup, value::float8 v FROM planner.wssi_overrides WHERE month=($1||'-01')::date AND measure='fc_units'`, [curM])).rows; } catch (_) { return; }
-    for (const o of ov) { const k = o.market + '|' + o.channel + '|' + o.cgroup, a = agg[k] || (agg[k] = [0, 0]); const asp = a[0] ? a[1] / a[0] : 0; a[0] = o.v; a[1] = o.v * asp; }
+    // v28.746 (point 12): the snapshot is the Act/Fcst line including overtypes of £, units or ASP (last two typed win, wssiEff)
+    let ov = []; try { ov = (await pool.query(`SELECT market, channel, cgroup, measure, value::float8 v, lpad(((extract(epoch from updated_at)*1000)::bigint)::text, 15, '0') t FROM planner.wssi_overrides WHERE month=($1||'-01')::date AND measure IN ('fc_units','fc_sales','fc_asp')`, [curM])).rows; } catch (_) { return; }
+    const anc = {}; for (const o of ov) { const k = o.market + '|' + o.channel + '|' + o.cgroup; (anc[k] || (anc[k] = [])).push({ me: o.measure === 'fc_units' ? 'u' : (o.measure === 'fc_sales' ? 'r' : 'a'), v: o.v, t: o.t }); }
+    for (const k in anc) { const a = agg[k] || (agg[k] = [0, 0]), e = wssiEff(a[0], a[1], anc[k]); if (e) { a[0] = e.u; a[1] = e.r; } }
     const keys = Object.keys(agg).filter(k => agg[k][0] || agg[k][1]); if (!keys.length) return;
     const client = await pool.connect();
     try { await client.query('BEGIN'); await client.query(`DELETE FROM planner.wssi_fc_snapshot WHERE month=($1||'-01')::date`, [curM]);
