@@ -1,3 +1,7 @@
+## v28.749 (10-Nov-26) COGS and SALES by channel: email when a draft is posted
+- A journal made as a draft (by hand, or before v28.736's email rule) and posted later by the 7th / 15th refresh or the Post button now sends the org's email once, if that journal was never emailed. Oct-26 UK fell through this gap (created 05-Nov by hand, posted 07-Nov by cron, no email); sent by hand 10-Nov.
+- No migration, no new env vars, no new cron routes.
+
 ## v28.748 (10-Nov-26) Sample freight weights: size types + custom types + a weight per sample line
 - PRODUCT > Config > Size weights: every product size type (products.size, e.g. TOWLB-LG, PICNIC-LG) with its PIM weight (read only: one weight per size type already), plus custom types the team adds for things that are not products yet (code, name, kg).
 - Sample request > SKUs & quantities: a product SKU shows its own weight (with an optional kg override); any other line (e.g. PICNIC-SS27) gets a Size type picker, suggested from its prefix, and a kg box, and is flagged "no weight" until one is set.

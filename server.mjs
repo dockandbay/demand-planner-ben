@@ -7860,8 +7860,21 @@ async function cchXeroPost(month, orgK, by, kind) {
       const L = (x.JournalLines || []).map(l => ({ code: l.AccountCode, name: cchName(orgK, l.AccountCode), amount: Number(l.LineAmount) || 0 }));
       try { await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, total, prev_total, xero_id, xero_status, lines, flags) VALUES ($1,$2,$3,$9,'posted',$4,$5,$5,$6,$7,$8,'{}')`,
         [month, orgK, j, by, total, x.ManualJournalID, m.Status || 'POSTED', JSON.stringify(L), kind || 'manual']); } catch (e) { console.warn('[cogs-ch] log not written: ' + (e && e.message)); }
-      res.push({ journal: j, narration: x.Narration, total, status: m.Status || null, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID }); } }
+      res.push({ journal: j, narration: x.Narration, total, status: m.Status || null, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID, id: x.ManualJournalID, lines: L }); } }
   return res; }
+// v28.749 (Ben 10-Nov-26, Oct-26 UK never emailed): a journal created as a draft before the email rule, or created by hand without an email,
+// and posted later (cron or the Post button) still gets its email: sent once for posted journals whose Xero id has no emailed run row.
+async function cchEmailPosted(month, orgK, b, posted, by) {
+  const ok = (posted || []).filter(p => p.id && /^POSTED$/i.test(String(p.status || 'POSTED'))); if (!ok.length) return false;
+  let done = new Set();
+  try { done = new Set((await pool.query(`SELECT DISTINCT xero_id FROM planner.cogs_channel_runs WHERE xero_id = ANY($1::text[]) AND emailed`, [ok.map(p => p.id)])).rows.map(r => r.xero_id)); }
+  catch (e) { console.warn('[cogs-ch] emailed check failed: ' + (e && e.message)); return false; }
+  const nw = ok.filter(p => !done.has(p.id)); if (!nw.length || !b || !b.orgs || !b.orgs[orgK]) return false;
+  const runs = nw.map(p => ({ journal: p.journal, action: 'posted', narration: p.narration, total: p.total, lines: p.lines, xero: { id: p.id, status: 'POSTED', url: p.url } }));
+  try { const e = await cchEmail(month, orgK, b, runs, by); const sent = !!(e && (e.sent || e.sandbox));
+    if (sent) await pool.query(`UPDATE planner.cogs_channel_runs SET emailed=true WHERE month=$1 AND org=$2 AND xero_id = ANY($3::text[]) AND action='posted' AND run_at > now() - interval '1 hour'`, [month, orgK, nw.map(p => p.id)]).catch(() => {});
+    return sent; }
+  catch (e) { console.warn('[cogs-ch] email failed: ' + (e && e.message)); return false; } }
 async function cchAccessOk(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return null; }
     if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access or admin required' }); return null; } return me; }
   catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
@@ -7925,7 +7938,8 @@ app.post('/api/supply/cogs-channel/post', async (req, res) => {   // v28.736 ste
   if (b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
   try { const posted = await cchXeroPost(month, orgK, (me && me.email) || authUser(req) || 'admin');
     if (!posted.length) return res.status(409).json({ error: 'No draft journals for ' + month + ' in Xero ' + orgK + ' to post.' });
-    res.json({ ok: true, org: orgK, month, posted }); }
+    const emailed = await cchEmailPosted(month, orgK, await cchLoad(month), posted, (me && me.email) || authUser(req) || 'admin');   // v28.749
+    res.json({ ok: true, org: orgK, month, emailed, posted: posted.map(({ lines, ...p }) => p) }); }
   catch (e) { log500(e); res.status(502).json({ error: 'Xero post failed: ' + String(e.message || e) }); }
 });
 // n8n "Horizon | COGS and SALES by channel": 1st 06:30 (month end: build last month, journals UK + AU), 7th and 15th 06:30 (refresh: rebuild,
@@ -7944,7 +7958,8 @@ app.post('/api/cron/cogs-channel', async (req, res) => {
       try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b, status: 'POSTED' });
         out.orgs[orgK] = { journals: runs.map(r => ({ journal: r.journal, action: r.action, total: r.total })) };   // an object: properties on an array are lost in JSON
         out.orgs[orgK].emailed = await cchEmailIfNew(month, orgK, b, runs, by);
-        out.orgs[orgK].posted_drafts = (await cchXeroPost(month, orgK, by, kind)).length; }   // an unchanged draft made by hand is posted too
+        const pd = await cchXeroPost(month, orgK, by, kind); out.orgs[orgK].posted_drafts = pd.length;   // an unchanged draft made by hand is posted too
+        if (await cchEmailPosted(month, orgK, b, pd, by)) out.orgs[orgK].emailed = true; }   // v28.749: and emailed if it never was
       catch (e) { out.ok = false; out.orgs[orgK] = { error: String(e.message || e) };
         await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, error) VALUES ($1,$2,'COGS',$3,'error',$4,$5)`, [month, orgK, kind, by, String(e.message || e).slice(0, 500)]).catch(() => {}); }
     }
