@@ -22622,8 +22622,9 @@ const OL_HZ_TAGGED = `EXISTS (SELECT 1 FROM planner.commission_overrides co JOIN
   AND upper(trim(co.order_ref)) IN (upper(coalesce(l.reference,'')), upper(coalesce(l.so_number,''))))`;
 const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND (NOT l.is_custom OR coalesce(l.agent_code,'')<>'' OR ${OL_HZ_TAGGED})
   AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = ${OL_SKU} AND coalesce(p.category_name_final,'') <> '')
-  AND NOT EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded
-    AND (l.qty > ${Number(thr)} OR NOT EXISTS (SELECT 1 FROM planner.order_lines l2 WHERE l2.sale_id = l.sale_id AND l2.qty > ${Number(thr)})))`;   // v28.759 (Ben 10-Nov-26): an excluded order loses its over-threshold lines; an order flagged by another anomaly rule (no line over the threshold) is excluded whole
+  AND NOT EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded)
+  AND NOT EXISTS (SELECT 1 FROM planner.order_line_exclusions e WHERE e.line_id = l.line_id AND e.excluded)
+  AND NOT EXISTS (SELECT 1 FROM planner.demand_excluded_skus z WHERE l.sku ILIKE z.pattern)`;   // v28.767 (Ben 10-Nov-26): an excluded ORDER is excluded whole; single lines can be excluded on their own; DB-WL / CUSTOM-LOGO SKUs never count   // v28.759 (Ben 10-Nov-26): an excluded order loses its over-threshold lines; an order flagged by another anomaly rule (no line over the threshold) is excluded whole
 // v28.761: every demand reader takes detail lines (OL_LIVE_SQL) PLUS the rolled-up older lines (planner.sales_rollup, already demand-only).
 // Columns: sku (HORIZON), country, channel, fulfil_channel, iso_week, month, d0 (first day held), units, units_free, revenue_gbp, revenue_local, local_ccy.
 const OL_DEMAND_SRC = (thr, where) => `(SELECT ${OL_SKU} sku, l.country, l.channel, l.fulfil_channel, l.iso_week, date_trunc('month', l.demand_date)::date AS month, l.demand_date d0,
@@ -22642,8 +22643,12 @@ async function _olCuts(db, thr) {
     WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date >= $1::date ORDER BY 1,2`, [from])).rows;
   return { from, monthly_only: mo, cuts: rows.map(r => ({ country: r.country, channel: r.channel, cut: mo.includes((r.country + ' ' + r.channel).toUpperCase()) ? null : from })) };
 }
+// v28.768: one weekly rebuild at a time (two at once collided on sales_actuals_weekly_pkey); exclusion clicks rebuild in the background.
+let _wabChain = Promise.resolve(), _wabTimer = null;
+function weeklyActualsBuild() { const run = _wabChain.then(() => _weeklyActualsBuild()); _wabChain = run.catch(() => {}); return run; }
+function weeklyActualsBuildSoon(why) { clearTimeout(_wabTimer); _wabTimer = setTimeout(() => { weeklyActualsBuild().catch(e => console.warn('[weekly] rebuild after ' + why + ' failed: ' + e.message)); }, 4000); }
 // Rebuild planner.sales_actuals_weekly in one transaction (Fulfil weeks per market x channel from its cut; monthly spread before it).
-async function weeklyActualsBuild() {
+async function _weeklyActualsBuild() {
   const t0 = Date.now(), thr = await _olThreshold();
   const client = await pool.connect();
   try {
@@ -22736,7 +22741,10 @@ async function salesFulfilBuild() {
     await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '600s'");
     // 1. ANOMALIES. History's flags are sticky (their orders keep line detail); only the detail window's flags and orphans are worked out again.
     await client.query(`DELETE FROM planner.order_anomalies a WHERE a.order_date IS NULL OR a.order_date >= $1 OR NOT EXISTS (SELECT 1 FROM planner.order_lines l WHERE l.sale_id = a.sale_id)`, [ws]);
-    const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL`;
+    // v28.768: flags of the old, too sensitive large-order rule (any order over the 99.9th percentile) that cannot meet the new one go
+    await client.query(`DELETE FROM planner.order_anomalies WHERE rule = 'order_over_p999' AND (units <= $1 OR detail NOT LIKE 'order of %')`, [thr]);
+    const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM planner.demand_excluded_skus z WHERE l.sku ILIKE z.pattern)`;   // v28.767: excluded SKUs never flag
     const a1 = await client.query(`INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
       SELECT l.sale_id, 'line_over_threshold', max(l.so_number), max(l.reference), max(l.fulfil_channel), max(l.country), max(l.channel), max(l.customer), max(l.order_date), sum(l.qty),
         'largest line ' || max(l.qty)::int || ' x ' || (array_agg(l.sku ORDER BY l.qty DESC))[1] || ' (threshold ' || $1::int || ')'
@@ -22745,8 +22753,8 @@ async function salesFulfilBuild() {
     const a2 = await client.query(`WITH o AS (SELECT l.sale_id, max(l.fulfil_channel) ch, sum(l.qty) u FROM planner.order_lines l WHERE ${LIVE} AND NOT l.is_key_account GROUP BY 1),
         p AS (SELECT ch, percentile_cont(0.999) WITHIN GROUP (ORDER BY u) p999, count(*) n FROM o WHERE NOT EXISTS (SELECT 1 FROM planner.order_anomalies x WHERE x.sale_id = o.sale_id AND x.order_date < $1) GROUP BY 1 HAVING count(*) >= 200)
       INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
-      SELECT o.sale_id, 'order_over_p999', max(l.so_number), max(l.reference), o.ch, max(l.country), max(l.channel), max(l.customer), max(l.order_date), o.u, 'order ' || o.u::int || ' units vs 99.9th percentile ' || round(p.p999::numeric,1) || ' on ' || o.ch
-      FROM o JOIN p ON p.ch = o.ch JOIN planner.order_lines l ON l.sale_id = o.sale_id WHERE o.u > greatest(p.p999, 10) GROUP BY o.sale_id, o.ch, o.u, p.p999 ON CONFLICT DO NOTHING`, [ws]);
+      SELECT o.sale_id, 'order_over_p999', max(l.so_number), max(l.reference), o.ch, max(l.country), max(l.channel), max(l.customer), max(l.order_date), o.u, 'order of ' || o.u::int || ' units: over 3 x the 99.9th percentile (' || round(p.p999::numeric,1) || ') of ' || o.ch || ' and over ' || $2::int
+      FROM o JOIN p ON p.ch = o.ch JOIN planner.order_lines l ON l.sale_id = o.sale_id WHERE o.u > greatest(3 * p.p999, $2) GROUP BY o.sale_id, o.ch, o.u, p.p999 ON CONFLICT DO NOTHING`, [ws, thr]);   // v28.768 (Ben: UK-909316, 16 units, is not an anomaly): 3 x the channel's 99.9th percentile AND over the threshold
     const a3 = await client.query(`WITH d AS (SELECT upper(trim(l.reference)) r, regexp_replace(l.fulfil_channel, '^HISTORICAL ', '') b, array_agg(DISTINCT l.sale_id) ids
         FROM planner.order_lines l WHERE ${LIVE} AND coalesce(trim(l.reference),'') <> '' GROUP BY 1,2 HAVING count(DISTINCT l.sale_id) > 1)
       INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
@@ -22760,7 +22768,7 @@ async function salesFulfilBuild() {
     // 2. ROLL-UP (v28.761, Ben 10-Nov-26: order level only for anomalies in history and the current month). Lines dated before the detail
     // window, of orders that are not flagged, excluded / decided or custom, are added to planner.sales_rollup (demand lines only) and deleted.
     await client.query(`CREATE TEMP TABLE _keep ON COMMIT DROP AS SELECT sale_id FROM planner.order_anomalies UNION SELECT sale_id FROM planner.order_exclusions
-      UNION SELECT DISTINCT sale_id FROM planner.order_lines WHERE is_custom`);
+      UNION SELECT sale_id FROM planner.order_line_exclusions UNION SELECT DISTINCT sale_id FROM planner.order_lines WHERE is_custom`);
     await client.query(`CREATE INDEX ON _keep (sale_id)`);
     const OLD = `coalesce(l.demand_date, l.order_date) < $1::date AND NOT EXISTS (SELECT 1 FROM _keep k WHERE k.sale_id = l.sale_id)`;
     const ru = await client.query(`INSERT INTO planner.sales_rollup (fulfil_channel, sku, country, channel, iso_week, month, units, units_free, revenue_gbp, revenue_local, local_ccy, lines, orders, is_historical, rolled_at)
@@ -22928,34 +22936,67 @@ app.post('/api/cron/sales-import', async (req, res) => {
     res.json(Object.assign({ ok: true }, r, { refreshed, queue_left: q.length, monthly: built })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ORDER EXCLUSIONS (Demand > Inputs): every order with a line over the threshold, searchable; toggle per order (default not excluded).
+// v28.767 (Ben 10-Nov-26): ORDER EXCLUSIONS v2. Candidates = orders flagged by an anomaly rule or with a line over the threshold (live
+// states, excluded SKUs left out), each with ALL its lines (exclude the order whole, or single lines), its rules and decisions.
+// ?show = review (default: not dismissed, nothing excluded) | excluded | dismissed | all.
 app.get('/api/demand/order-exclusions', async (req, res) => {
   try {
-    const thr = await _olThreshold(), q = String(req.query.q || '').trim().slice(0, 80), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%';
-    const rows = (await pool.query(`WITH an AS (SELECT sale_id, string_agg(rule || ': ' || coalesce(detail,''), ' | ' ORDER BY rule) rules FROM planner.order_anomalies GROUP BY 1),
-      big AS (SELECT l.* FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed')
-        AND (l.qty > $1 OR (l.sale_id IN (SELECT sale_id FROM an) AND NOT EXISTS (SELECT 1 FROM planner.order_lines l2 WHERE l2.sale_id = l.sale_id AND l2.qty > $1))))
-      SELECT b.sale_id, max(b.so_number) so, max(b.reference) reference, max(b.customer) customer, max(b.fulfil_channel) fulfil_channel, max(b.country) country, max(b.channel) channel,
-        max(b.order_date)::text order_date, max(b.ship_date)::text ship_date, bool_or(b.is_key_account) key_account, bool_or(b.is_custom) custom,
-        json_agg(json_build_object('sku', b.sku, 'qty', b.qty) ORDER BY b.qty DESC) lines, sum(b.qty) flagged_units,
-        (SELECT sum(qty) FROM planner.order_lines o WHERE o.sale_id = b.sale_id) order_units,
-        coalesce(bool_or(x.excluded), false) excluded, max(x.note) note, max(x.changed_by) changed_by, max(x.changed_at)::text changed_at,
-        (SELECT rules FROM an WHERE an.sale_id = b.sale_id) rules
-      FROM big b LEFT JOIN planner.order_exclusions x ON x.sale_id = b.sale_id
-      WHERE ($2 = '' OR b.so_number ILIKE $3 OR b.reference ILIKE $3 OR b.customer ILIKE $3 OR b.sku ILIKE $3 OR b.fulfil_channel ILIKE $3)
-      GROUP BY b.sale_id ORDER BY max(b.order_date) DESC NULLS LAST LIMIT 500`, [thr, q, like])).rows;
+    const thr = await _olThreshold(), q = String(req.query.q || '').trim().slice(0, 80), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%', show = String(req.query.show || 'review');
+    const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND NOT EXISTS (SELECT 1 FROM planner.demand_excluded_skus z WHERE l.sku ILIKE z.pattern)
+      AND upper(coalesce(l.product_category,'')) NOT IN ('SHIPPING','PERSONALISATION_HIDDEN_PRODUCT') AND upper(l.sku) <> 'SHIPPING'`;
+    const rows = (await pool.query(`WITH cand AS (SELECT sale_id FROM planner.order_anomalies UNION SELECT DISTINCT l.sale_id FROM planner.order_lines l WHERE l.qty > $1 AND ${LIVE}),
+      o AS (SELECT l.sale_id, max(l.so_number) so, max(l.reference) reference, max(l.customer) customer, max(l.fulfil_channel) fulfil_channel, max(l.country) country, max(l.channel) channel,
+          max(l.order_date)::text order_date, max(l.ship_date)::text ship_date, bool_or(l.is_key_account) key_account, bool_or(l.is_custom) custom, sum(l.qty) order_units, max(l.qty) max_qty,
+          json_agg(json_build_object('line_id', l.line_id, 'sku', l.sku, 'qty', l.qty, 'big', l.qty > $1, 'excluded', coalesce(e.excluded, false)) ORDER BY l.qty DESC, l.sku) lines,
+          coalesce(sum(l.qty) FILTER (WHERE e.excluded), 0) excluded_line_units, count(*) FILTER (WHERE e.excluded) excluded_lines
+        FROM planner.order_lines l JOIN cand c ON c.sale_id = l.sale_id LEFT JOIN planner.order_line_exclusions e ON e.line_id = l.line_id
+        WHERE ${LIVE} GROUP BY l.sale_id)
+      SELECT o.*, coalesce(x.excluded, false) excluded, coalesce(x.dismissed, false) dismissed, x.note, x.changed_by, x.changed_at::text changed_at,
+        (SELECT string_agg(a.rule || ': ' || coalesce(a.detail,''), ' | ' ORDER BY a.rule) FROM planner.order_anomalies a WHERE a.sale_id = o.sale_id) rules
+      FROM o LEFT JOIN planner.order_exclusions x ON x.sale_id = o.sale_id
+      WHERE ($2 = '' OR o.so ILIKE $3 OR o.reference ILIKE $3 OR o.customer ILIKE $3 OR o.fulfil_channel ILIKE $3 OR EXISTS (SELECT 1 FROM json_array_elements(o.lines) j WHERE j->>'sku' ILIKE $3))
+        AND CASE $4 WHEN 'excluded' THEN coalesce(x.excluded, false) OR o.excluded_lines > 0
+                    WHEN 'dismissed' THEN coalesce(x.dismissed, false)
+                    WHEN 'all' THEN true
+                    ELSE NOT coalesce(x.dismissed, false) AND NOT coalesce(x.excluded, false) AND o.excluded_lines = 0 END
+      ORDER BY o.order_date DESC NULLS LAST LIMIT 500`, [thr, q, like, show])).rows;
+    const counts = (await pool.query(`WITH c AS (SELECT sale_id FROM planner.order_anomalies UNION SELECT DISTINCT l.sale_id FROM planner.order_lines l WHERE l.qty > $1 AND ${LIVE})
+      SELECT count(*) FILTER (WHERE NOT coalesce(x.dismissed,false) AND NOT coalesce(x.excluded,false) AND NOT EXISTS (SELECT 1 FROM planner.order_line_exclusions e WHERE e.sale_id = c.sale_id AND e.excluded))::int review,
+        count(*) FILTER (WHERE coalesce(x.excluded,false) OR EXISTS (SELECT 1 FROM planner.order_line_exclusions e WHERE e.sale_id = c.sale_id AND e.excluded))::int excluded,
+        count(*) FILTER (WHERE coalesce(x.dismissed,false))::int dismissed, count(*)::int all
+      FROM c LEFT JOIN planner.order_exclusions x ON x.sale_id = c.sale_id`, [thr])).rows[0];
+    const skuEx = (await pool.query(`SELECT pattern, note FROM planner.demand_excluded_skus ORDER BY 1`).catch(() => ({ rows: [] }))).rows;
     const fc = fulfilConfigFor('live');
-    res.set('Cache-Control', 'no-store').json({ ok: true, threshold: thr, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null, synced_at: ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_lines_synced_at'`)).rows[0] || {}).value || null, rows });
+    res.set('Cache-Control', 'no-store').json({ ok: true, threshold: thr, show, counts, excluded_skus: skuEx, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null,
+      synced_at: ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_lines_synced_at'`)).rows[0] || {}).value || null, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.767: exclude / include ONE line
+app.post('/api/demand/order-exclusions/line/:line', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit || me.supply_edit)) return res.status(403).json({ error: 'Edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { const line = Number(req.params.line), b = req.body || {}, by = authUser(req) || 'unknown'; if (!(line > 0)) return res.status(400).json({ error: 'line id required' });
+    const l = (await pool.query(`SELECT sale_id, sku, so_number FROM planner.order_lines WHERE line_id = $1`, [line])).rows[0]; if (!l) return res.status(404).json({ error: 'line not found' });
+    await pool.query(`INSERT INTO planner.order_line_exclusions (line_id, sale_id, sku, excluded, note, changed_by, changed_at) VALUES ($1,$2,$3,$4,$5,$6,now())
+      ON CONFLICT (line_id) DO UPDATE SET excluded = excluded.excluded, note = coalesce(excluded.note, planner.order_line_exclusions.note), changed_by = excluded.changed_by, changed_at = now()`,
+      [line, l.sale_id, l.sku, b.excluded !== false, b.note == null ? null : String(b.note).slice(0, 500), by]);
+    await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [l.sale_id, l.so_number, b.excluded !== false, 'line ' + l.sku + (b.excluded !== false ? ' excluded' : ' included'), by]).catch(() => {});
+    salesFulfilBuildSoon('line exclusion ' + line); weeklyActualsBuildSoon('line exclusion');
+    res.json({ ok: true, rebuilding: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/order-exclusions/:sale', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit || me.supply_edit)) return res.status(403).json({ error: 'Edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const sale = Number(req.params.sale), b = req.body || {}, by = authUser(req) || 'unknown'; if (!(sale > 0)) return res.status(400).json({ error: 'sale id required' });
     const so = ((await pool.query(`SELECT max(so_number) so FROM planner.order_lines WHERE sale_id=$1`, [sale])).rows[0] || {}).so || null;
+    if (b.dismissed != null) {   // v28.767: dismiss = reviewed, keeps counting, off the list (or back on it)
+      await pool.query(`INSERT INTO planner.order_exclusions (sale_id, so_number, excluded, dismissed, dismissed_by, dismissed_at, changed_by, changed_at) VALUES ($1,$2,false,$3,$4,now(),$4,now())
+        ON CONFLICT (sale_id) DO UPDATE SET dismissed = excluded.dismissed, dismissed_by = excluded.dismissed_by, dismissed_at = now()`, [sale, so, !!b.dismissed, by]);
+      return res.json({ ok: true, dismissed: !!b.dismissed }); }
     await pool.query(`INSERT INTO planner.order_exclusions (sale_id, so_number, excluded, note, changed_by, changed_at) VALUES ($1,$2,$3,$4,$5,now())
       ON CONFLICT (sale_id) DO UPDATE SET excluded=excluded.excluded, note=coalesce(excluded.note, planner.order_exclusions.note), changed_by=excluded.changed_by, changed_at=now()`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
     await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
-    salesFulfilBuildSoon('exclusion ' + sale);   // v28.759: the final view follows the exclusion
-    res.json({ ok: true, weekly: await weeklyActualsBuild() });
+    salesFulfilBuildSoon('exclusion ' + sale); weeklyActualsBuildSoon('exclusion');   // v28.759 / 768: the final view follows, in the background
+    res.json({ ok: true, rebuilding: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/order-exclusions-threshold', async (req, res) => {

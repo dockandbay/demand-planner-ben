@@ -18359,41 +18359,71 @@ function calSkuChips(arr){ return arr.map(function(s){ var kids=calParentIdx()[s
 // export per market → server sums Queued Subscriptions per SKU (last 6mo). Shared/persistent. Surfaced as a 🔔 on the plan.
 // v28.416 (Ben 20-Oct-26): DEMAND ▸ Inputs ▸ ORDER EXCLUSIONS. Every Fulfil order with a line over the threshold (default 40 units of one
 // SKU, any channel), searchable. Toggle an order to excluded and its over-threshold lines come off the weekly actuals (default: kept).
+// v28.767 (Ben 10-Nov-26): ORDER EXCLUSIONS v2. Everything left aligned; one line per SKU x qty; order + ship date in one cell; exclude
+// the whole order or single lines; Dismiss takes an order off the review list (it keeps counting); DB-WL / CUSTOM-LOGO SKUs never count.
 function renderOrderExclusionsView(body){
-  var st={q:'',show:'all',data:null};
+  var st=window.__OX_STATE||(window.__OX_STATE={q:'',show:'review',open:{}}), data=null;
   function e2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fdt(d){ if(!d)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m?(m[3]+'-'+MN[+m[2]-1]+'-'+m[1].slice(2)):String(d); }
-  body.innerHTML='<div style="max-width:1200px">'
+  var n0=function(v){ return Math.round(Number(v)||0).toLocaleString(); };
+  var RULE={line_over_threshold:'Big line (one SKU over the threshold)',order_over_p999:'Unusually large order',duplicate_reference:'Duplicate reference',zero_price:'Free units'};
+  body.innerHTML='<div style="max-width:1400px;text-align:left">'
     +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Order exclusions</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;max-width:900px">Fulfil orders with a single-SKU line over the threshold (any channel). They stay in the actuals unless you exclude them; an excluded order&rsquo;s over-threshold lines come off the <b>weekly</b> actuals (phase 1: the monthly screens and the buy plan are not switched to weekly yet).</div>'
-    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><input id="ox-q" placeholder="Search SO, reference, customer, SKU, channel" style="flex:1;min-width:220px;max-width:380px;font-size:13px;padding:6px 9px;border:1px solid var(--line);border-radius:6px">'
-      +'<span class="mut" style="font-size:12px">Show</span>'+[['all','All'],['no','Not excluded'],['yes','Excluded']].map(function(t){ return '<button class="pill ox-show'+(t[0]==='all'?' active':'')+'" data-v="'+t[0]+'">'+t[1]+'</button>'; }).join('')
-      +'<span class="mut" style="font-size:12px;margin-left:8px">Threshold</span><input id="ox-thr" type="number" min="1" style="width:70px;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"> <span class="mut" style="font-size:12px">units</span>'
-      +'<span id="ox-n" class="mut" style="font-size:12px;margin-left:auto"></span></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;max-width:1000px">Fulfil orders that look unusual: a <b>big line</b> (one SKU over the threshold), an <b>unusually large order</b> (over 3 times the largest orders its channel normally sees and over the threshold), the <b>same reference</b> on two orders, or <b>10+ free units</b>. Exclude the <b>whole order</b> or <b>single lines</b> to take them out of the sales actuals; <b>Dismiss</b> takes an order off this list: ticked lines stay excluded, everything else keeps counting. Grouped by financial year (March to February). <span id="ox-skus"></span></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px">'
+      +'<div id="ox-tabs" style="display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden"></div>'
+      +'<input id="ox-q" placeholder="Search SO, reference, customer, SKU, channel" value="'+e2(st.q)+'" style="min-width:260px;font-size:12.5px;padding:5px 9px;border:1px solid var(--line);border-radius:6px">'
+      +'<span class="mut">Big line over</span><input id="ox-thr" type="number" min="1" style="width:64px;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"><span class="mut">units</span>'
+      +'<span id="ox-msg" class="mut"></span></div>'
     +'<div id="ox-list"><div class="mut" style="padding:12px">Loading…</div></div></div>';
-  var L=body.querySelector('#ox-list'), N=body.querySelector('#ox-n'), T=body.querySelector('#ox-thr');
-  function draw(){ var d=st.data; if(!d){ return; } if(d.error){ L.innerHTML='<div style="color:var(--neg);padding:12px">'+e2(d.error)+'</div>'; return; }
-    var FB=d.fulfil_base||'', q=st.q.toLowerCase();
-    var rows=(d.rows||[]).filter(function(r){ if(st.show==='yes'&&!r.excluded)return false; if(st.show==='no'&&r.excluded)return false; return true; });
-    var exc=(d.rows||[]).filter(function(r){return r.excluded;}), units=exc.reduce(function(a,r){return a+Number(r.flagged_units||0);},0);
-    N.innerHTML=(d.rows||[]).length+' orders flagged · '+exc.length+' excluded · '+Math.round(units).toLocaleString()+' units removed from weekly actuals'+(d.synced_at?' · Fulfil read '+e2(fdt(d.synced_at))+' '+e2(String(d.synced_at).slice(11,16)):'');
-    if(!rows.length){ L.innerHTML='<div class="mut" style="padding:12px">'+(d.synced_at?'No orders match.':'No Fulfil order lines yet: the daily order-lines sync has not run.')+'</div>'; return; }
-    L.innerHTML='<div style="overflow-x:auto"><table class="grid" style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Excluded</th><th style="text-align:left">SO</th><th style="text-align:left">Reference</th><th style="text-align:left">Customer</th><th style="text-align:left">Channel</th><th style="text-align:left">Market</th><th style="text-align:left">Order date</th><th style="text-align:left">Ship date</th><th style="text-align:left">Flagged lines (SKU × qty)</th><th style="text-align:right">Order units</th><th style="text-align:left">Note</th></tr></thead><tbody>'
-      +rows.map(function(r){ return '<tr'+(r.excluded?' style="background:var(--neg-bg,rgba(220,38,38,.06))"':'')+'><td><label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" class="ox-t" data-s="'+r.sale_id+'"'+(r.excluded?' checked':'')+'>'+(r.excluded?'<b style="color:var(--neg)">excluded</b>':'<span class="mut">kept</span>')+'</label>'+(r.changed_by?'<div class="mut" style="font-size:10px">'+e2(String(r.changed_by).replace(/@.*/,'@'))+' '+e2(fdt(r.changed_at))+'</div>':'')+'</td>'
-        +'<td style="white-space:nowrap">'+(FB?'<a href="'+FB+'/v2/erp/model/sales_order/'+r.sale_id+'" target="_blank" rel="noopener">'+e2(r.so||r.sale_id)+' &#8599;</a>':e2(r.so||r.sale_id))+'</td><td>'+e2(r.reference)+'</td><td>'+e2(r.customer)+(r.key_account?' <span class="mut" style="font-size:10px">(key account)</span>':'')+(r.custom?' <span class="mut" style="font-size:10px">(custom)</span>':'')+(r.rules?'<div style="font-size:10px;color:var(--amber)" title="'+e2(r.rules)+'">&#9873; '+e2(String(r.rules).split(' | ').map(function(x){ return ({line_over_threshold:'big line',order_over_p999:'unusually large order',duplicate_reference:'duplicate reference',zero_price:'free units'})[x.split(':')[0]]||x.split(':')[0]; }).join(', '))+'</div>':'')+'</td>'
-        +'<td>'+e2(r.fulfil_channel)+'</td><td>'+e2((r.country||'?')+' '+(r.channel||''))+'</td><td style="white-space:nowrap">'+e2(fdt(r.order_date))+'</td><td style="white-space:nowrap">'+e2(fdt(r.ship_date))+'</td>'
-        +'<td>'+(r.lines||[]).map(function(l){ return '<span style="font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+e2(l.sku)+'</span> × <b>'+Math.round(l.qty).toLocaleString()+'</b>'; }).join('<br>')+'</td><td style="text-align:right">'+Math.round(Number(r.order_units||0)).toLocaleString()+'</td>'
-        +'<td><input class="ox-note" data-s="'+r.sale_id+'" value="'+e2(r.note||'')+'" placeholder="why?" style="width:160px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"></td></tr>'; }).join('')+'</tbody></table></div>';
-    function save(sale,ex,note,cb){ fetch('/api/demand/order-exclusions/'+sale,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({excluded:ex,note:note})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(); }).catch(function(e){ alert('Could not save: '+e.message); load(); }); }
-    L.querySelectorAll('.ox-t').forEach(function(cb){ cb.onchange=function(){ var r=d.rows.find(function(x){return String(x.sale_id)===cb.dataset.s;}), n=L.querySelector('.ox-note[data-s="'+cb.dataset.s+'"]'); cb.disabled=true; save(cb.dataset.s,cb.checked,n?n.value:null,function(){ r.excluded=cb.checked; load(); }); }; });
-    L.querySelectorAll('.ox-note').forEach(function(inp){ inp.onchange=function(){ var r=d.rows.find(function(x){return String(x.sale_id)===inp.dataset.s;}); save(inp.dataset.s,!!(r&&r.excluded),inp.value); }; });
+  var $=function(id){ return body.querySelector('#'+id); }, L=$('ox-list'), T=$('ox-thr'), M=$('ox-msg');
+  function tabs(c){ c=c||{}; $('ox-tabs').innerHTML=[['review','To review'],['excluded','Excluded'],['dismissed','Dismissed'],['all','All']].map(function(t){ var on=st.show===t[0];
+      return '<button data-t="'+t[0]+'" style="border:0;padding:5px 11px;font-size:12px;cursor:pointer;background:'+(on?'var(--nav)':'transparent')+';color:'+(on?'#fff':'inherit')+'">'+t[1]+' <span style="opacity:.7">'+(c[t[0]]!=null?n0(c[t[0]]):'')+'</span></button>'; }).join('');
+    body.querySelectorAll('#ox-tabs [data-t]').forEach(function(b){ b.onclick=function(){ st.show=b.dataset.t; load(); }; }); }
+  function post(url,payload,done){ M.style.color=''; M.textContent='Saving…';
+    fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); M.style.color='var(--pos)'; M.textContent='Saved. The sales actuals update in about a minute.'; if(done)done(); })
+      .catch(function(e){ M.style.color='var(--neg)'; M.textContent='Could not save: '+e.message; load(); }); }
+  function draw(){ var d=data; if(!d)return; if(d.error){ L.innerHTML='<div style="color:var(--neg);padding:12px">'+e2(d.error)+'</div>'; return; }
+    tabs(d.counts); var FB=d.fulfil_base||'';
+    $('ox-skus').innerHTML=(d.excluded_skus||[]).length?'Never counted: '+d.excluded_skus.map(function(x){ return '<b>'+e2(String(x.pattern).replace(/%$/,'*'))+'</b>'; }).join(', ')+' SKUs.':'';
+    if(!(d.rows||[]).length){ L.innerHTML='<div class="mut" style="padding:12px">'+(st.show==='review'?'Nothing to review.':'No orders here.')+'</div>'; return; }
+    var th='text-align:left;padding:6px 8px;font-size:11px;white-space:nowrap';
+    L.innerHTML='<div style="overflow-x:auto"><table class="grid" style="width:100%;font-size:12px;text-align:left"><thead><tr>'
+      +'<th style="'+th+'">Order</th><th style="'+th+'">Customer / channel</th><th style="'+th+'">Dates</th><th style="'+th+'">Lines (tick to exclude one line)</th><th style="'+th+'">Why flagged</th><th style="'+th+'">Decision</th></tr></thead><tbody>'
+      +(function(){ var out='', fyOf=function(dt){ var y=+String(dt||'').slice(0,4), m=+String(dt||'').slice(5,7); return y?(m>=3?y:y-1):0; }, by={}, order=[];
+          st.fyClosed=st.fyClosed||{};
+          d.rows.forEach(function(r){ var f=fyOf(r.order_date); if(!by[f]){ by[f]=[]; order.push(f); } by[f].push(r); });
+          order.sort(function(a,b){return b-a;}).forEach(function(f){ var rs=by[f], u=rs.reduce(function(a,r){return a+Number(r.order_units||0);},0), closed=!!st.fyClosed[f];
+            out+='<tr class="ox-fy" data-fy="'+f+'" style="cursor:pointer;background:var(--hover)"><td colspan="6" style="text-align:left;padding:7px 8px;font-weight:700">'+(closed?'&#9656;':'&#9662;')+' '+(f?'FY'+String(f).slice(2)+'/'+String(f+1).slice(2):'No date')+' <span class="mut" style="font-weight:400">'+rs.length+' order'+(rs.length===1?'':'s')+' &middot; '+n0(u)+' units</span></td></tr>';
+            if(!closed)out+=rs.map(oxRow).join(''); });
+          return out; })()
+      +'</tbody></table></div>';
+    function oxRow(r){ return (function(r){ var ex=!!r.excluded, lines=r.lines||[], open=!!st.open[r.sale_id], shown=open?lines:lines.slice(0,6), td='text-align:left;vertical-align:top;padding:6px 8px';
+        var rules=String(r.rules||'').split(' | ').filter(Boolean).map(function(x){ var k=x.split(':')[0], det=x.slice(k.length+1).trim(); return '<div title="'+e2(det)+'"><span style="display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:9px;background:var(--amber-bg);color:#92400e;white-space:nowrap">'+e2(RULE[k]||k)+'</span></div>'; }).join('');
+        return '<tr style="'+(ex?'background:rgba(214,69,65,.06)':'')+'">'
+          +'<td style="'+td+';white-space:nowrap">'+(FB?'<a href="'+FB+'/v2/erp/model/sales_order/'+r.sale_id+'" target="_blank" rel="noopener"><b>'+e2(r.so||r.sale_id)+'</b> &#8599;</a>':'<b>'+e2(r.so||r.sale_id)+'</b>')+'<div class="mut" style="font-size:11px">'+e2(r.reference||'')+'</div></td>'
+          +'<td style="'+td+'"><div>'+e2(r.customer||'')+(r.key_account?' <span class="mut" style="font-size:10px">(key account)</span>':'')+(r.custom?' <span class="mut" style="font-size:10px">(custom)</span>':'')+'</div><div class="mut" style="font-size:11px">'+e2((r.country||'?')+' '+(r.channel||'')+' · '+(r.fulfil_channel||''))+'</div></td>'
+          +'<td style="'+td+';white-space:nowrap"><div>Ordered '+e2(fdt(r.order_date))+'</div>'+(r.ship_date&&r.ship_date!==r.order_date?'<div class="mut" style="font-size:11px">Ships '+e2(fdt(r.ship_date))+'</div>':'')+'</td>'
+          +'<td style="'+td+'">'+shown.map(function(l){ var lx=ex||l.excluded; return '<label style="display:flex;gap:6px;align-items:center;white-space:nowrap;cursor:pointer;line-height:1.7'+(lx?';text-decoration:line-through;color:var(--muted)':'')+'"><input type="checkbox" class="ox-l" data-l="'+l.line_id+'"'+(l.excluded?' checked':'')+(ex?' disabled title="The whole order is excluded"':'')+'><span style="font-family:ui-monospace,Menlo,monospace">'+e2(l.sku)+'</span><span>&times;</span><b style="'+(l.big?'color:#b45309':'')+'">'+n0(l.qty)+'</b></label>'; }).join('')
+            +(lines.length>6?'<a href="#" class="ox-more" data-s="'+r.sale_id+'" style="font-size:11px">'+(open?'show fewer':'+ '+(lines.length-6)+' more lines')+'</a>':'')+'</td>'
+          +'<td style="'+td+'">'+(rules||'<span class="mut">big line</span>')+'</td>'
+          +'<td style="'+td+';white-space:nowrap"><div style="display:flex;gap:6px;flex-wrap:wrap">'
+            +'<button class="ox-o" data-s="'+r.sale_id+'" style="font-size:11.5px;padding:3px 9px;border-radius:5px;cursor:pointer;border:1px solid '+(ex?'var(--neg)':'var(--line)')+';background:'+(ex?'var(--neg)':'transparent')+';color:'+(ex?'#fff':'inherit')+'">'+(ex?'Order excluded (undo)':'Exclude order')+'</button>'
+            +'<button class="ox-d" data-s="'+r.sale_id+'" title="Off the list. Ticked lines stay excluded; the rest of the order keeps counting." style="font-size:11.5px;padding:3px 9px;border-radius:5px;cursor:pointer;border:1px solid var(--line);background:transparent">'+(r.dismissed?'Back to review':'Dismiss')+'</button></div>'
+            +'<input class="ox-note" data-s="'+r.sale_id+'" value="'+e2(r.note||'')+'" placeholder="note (why?)" style="margin-top:5px;width:190px;font-size:11.5px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"></td></tr>'; })(r); }
+    L.querySelectorAll('.ox-fy').forEach(function(tr){ tr.onclick=function(){ var f=tr.dataset.fy; st.fyClosed[f]=!st.fyClosed[f]; draw(); }; });
+    var find=function(id){ return d.rows.find(function(x){ return String(x.sale_id)===String(id); }); };
+    L.querySelectorAll('.ox-l').forEach(function(cb){ cb.onchange=function(){ cb.disabled=true; post('/api/demand/order-exclusions/line/'+cb.dataset.l,{excluded:cb.checked},load); }; });
+    L.querySelectorAll('.ox-o').forEach(function(b){ b.onclick=function(){ var r=find(b.dataset.s), n=L.querySelector('.ox-note[data-s="'+b.dataset.s+'"]'); b.disabled=true; post('/api/demand/order-exclusions/'+b.dataset.s,{excluded:!r.excluded, note:n?n.value:null},load); }; });
+    L.querySelectorAll('.ox-d').forEach(function(b){ b.onclick=function(){ var r=find(b.dataset.s); b.disabled=true; post('/api/demand/order-exclusions/'+b.dataset.s,{dismissed:!r.dismissed},load); }; });
+    L.querySelectorAll('.ox-note').forEach(function(inp){ inp.onchange=function(){ var r=find(inp.dataset.s); post('/api/demand/order-exclusions/'+inp.dataset.s,{excluded:!!(r&&r.excluded), note:inp.value}); }; });
+    L.querySelectorAll('.ox-more').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); st.open[a.dataset.s]=!st.open[a.dataset.s]; draw(); }; });
   }
-  function load(){ fetch('/api/demand/order-exclusions?q='+encodeURIComponent(st.q)).then(function(r){return r.json();}).then(function(j){ st.data=j; if(T&&document.activeElement!==T)T.value=j.threshold||40; draw(); }).catch(function(e){ st.data={error:'Could not load: '+e.message}; draw(); }); }
-  var qt=null; body.querySelector('#ox-q').oninput=function(){ var v=this.value; clearTimeout(qt); qt=setTimeout(function(){ st.q=v.trim(); load(); },300); };
-  body.querySelectorAll('.ox-show').forEach(function(b){ b.onclick=function(){ body.querySelectorAll('.ox-show').forEach(function(x){x.classList.remove('active');}); b.classList.add('active'); st.show=b.dataset.v; draw(); }; });
-  T.onchange=function(){ var v=Math.round(Number(T.value)); if(!(v>=1))return; fetch('/api/demand/order-exclusions-threshold',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({value:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)alert(j.error); load(); }); };
-  load();
+  function load(){ fetch('/api/demand/order-exclusions?show='+st.show+'&q='+encodeURIComponent(st.q)).then(function(r){return r.json();}).then(function(j){ data=j; if(T&&document.activeElement!==T)T.value=j.threshold||40; draw(); }).catch(function(e){ data={error:'Could not load: '+e.message}; draw(); }); }
+  var qt=null; $('ox-q').oninput=function(){ var v=this.value; clearTimeout(qt); qt=setTimeout(function(){ st.q=v.trim(); load(); },300); };
+  T.onchange=function(){ var v=Math.round(Number(T.value)); if(!(v>=1))return; post('/api/demand/order-exclusions-threshold',{value:v},load); };
+  tabs(); load();
 }
 // v28.416 (Ben 20-Oct-26): DEMAND ▸ Inputs ▸ WEEKLY SWITCH-OVER. Phase 1 review page: Fulfil order-lines read, the forecast migration
 // preview (FY totals kept, months may shift) and its write, monthly actuals ship date vs order date, biggest SKU moves, unmapped channels and
