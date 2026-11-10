@@ -5602,19 +5602,22 @@ function retailAspGBP(co,ch,s){
   var ex=g/(ASP_TAX_DIV[COU]||1);                     // strip VAT (UK/EU) / GST (AU); US/CA already ex-tax
   return ex*(ch==='B2B'?0.5:0.95);                    // B2B = retail/2; all consumer channels = 5% off
 }
+// v28.773 (Ben 10-Nov-26): ASP = revenue / PAID units. A month cell is [units, revenue] or [units, revenue, paid units] when free
+// (zero-price) units were sold: they count in units (demand) but not in the ASP denominator.
+function aspU(c){ return (c&&c.length>2&&c[2]>0)?c[2]:c[0]; }
 function getASPraw(co,ch,s,year,mo){
   var a=ga(co,ch,s);
   var thisK=ym(year,mo);
   // Actual month (past / partial current) → its own real ASP; no price-change uplift applied to real data.
-  if(a[thisK]&&a[thisK][0]>0)return a[thisK][1]/a[thisK][0];
+  if(a[thisK]&&a[thisK][0]>0)return a[thisK][1]/aspU(a[thisK]);   // v28.773: free units count as demand, not in ASP
   // Projected month: base ASP = SAME calendar month LAST YEAR (walking back to earlier years if last year is
   // missing), then apply any definitive price-change uplifts (compounded). This is seasonally honest — it stops a
   // recent heavy-discount month (e.g. a summer/BF promo) from dragging every future month's ASP down: a future
   // November projects off last November, a full-price June off last June. Only when there is NO prior-year
   // same-month history at all (genuinely new SKUs/subcats) do we fall back to the most recent actual run-rate.
   var base=0;
-  for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/a[k][0]; break; } }
-  if(!base){ for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/a[am][0]; break; } } }
+  for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/aspU(a[k]); break; } }
+  if(!base){ for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/aspU(a[am]); break; } } }
   if(!base){ base=retailAspGBP(co,ch,s); }   // NO sales history at all (future SKU / new subcat) → retail-list-derived ASP so units still book revenue
   if(!base)return 0;
   var v=base*priceUpliftFactor(co,ch,s,year,mo);
@@ -17656,7 +17659,7 @@ function daForecastTrend(){
   var byPar={};
   DATA.forEach(function(row){ var par=row.c||parentCat(row.s); if(!par)return;
     var o=byPar[par]; if(!o){o={a:{},fu:{}};byPar[par]=o;}
-    var m=row.m||{}; for(var k in m){ if(!o.a[k])o.a[k]=[0,0]; o.a[k][0]+=(m[k][0]||0); o.a[k][1]+=(m[k][1]||0); }
+    var m=row.m||{}; for(var k in m){ if(!o.a[k])o.a[k]=[0,0]; o.a[k][0]+=(m[k][0]||0); o.a[k][1]+=(m[k][1]||0); if(m[k].length>2||o.a[k].length>2){ o.a[k][2]=(o.a[k].length>2?o.a[k][2]:(o.a[k][0]-(m[k][0]||0)))+(m[k].length>2?m[k][2]:(m[k][0]||0)); } }   // v28.773: paid units summed too (ASP)
     var fu=daRowFu(row); for(var k2 in fu){ o.fu[k2]=(o.fu[k2]||0)+(fu[k2]||0); }
   });
   var out=[];
@@ -18370,7 +18373,7 @@ function renderOrderExclusionsView(body){
   var RULE={line_over_threshold:'Big line (one SKU over the threshold)',order_over_p999:'Unusually large order',duplicate_reference:'Duplicate reference',zero_price:'Free units'};
   body.innerHTML='<div style="max-width:1400px;text-align:left">'
     +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Order exclusions</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;max-width:1000px">Fulfil orders that look unusual: a <b>big line</b> (one SKU over the threshold), an <b>unusually large order</b> (over 3 times the largest orders its channel normally sees and over the threshold), the <b>same reference</b> on two orders, or <b>10+ free units</b>. Exclude the <b>whole order</b> or <b>single lines</b> to take them out of the sales actuals; <b>Dismiss</b> takes an order off this list: ticked lines stay excluded, everything else keeps counting. Grouped by financial year (March to February). <span id="ox-skus"></span></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;max-width:1000px">Fulfil orders that look unusual: a <b>big line</b> (one SKU over the threshold), an <b>unusually large order</b> (over 3 times the largest orders its channel normally sees and over the threshold), or the <b>same reference</b> on two orders. Free (zero-price) units are not anomalies: they count as demand and stay out of ASP. Exclude the <b>whole order</b> or <b>single lines</b> to take them out of the sales actuals; <b>Dismiss</b> takes an order off this list: ticked lines stay excluded, everything else keeps counting. Grouped by financial year (March to February). <span id="ox-skus"></span></div>'
     +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px">'
       +'<div id="ox-tabs" style="display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden"></div>'
       +'<input id="ox-q" placeholder="Search SO, reference, customer, SKU, channel" value="'+e2(st.q)+'" style="min-width:260px;font-size:12.5px;padding:5px 9px;border:1px solid var(--line);border-radius:6px">'

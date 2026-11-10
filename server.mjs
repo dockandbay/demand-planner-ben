@@ -517,8 +517,8 @@ const EXCL_REF_LIST = EXCLUDED_INBOUND_REFS.map(s => `'${String(s).replace(/'/g,
 async function buildDATA() {
   const [salesR, availR] = await Promise.all([
     pool.query(`SELECT category c, subcategory s, country co, channel ch,
-                       is_excluded_category x, to_char(month,'YYYY_MM') ym, units::int u, revenue::float r
-                FROM planner.category_sales_summary WHERE subcategory IS NOT NULL`),
+                       is_excluded_category x, to_char(month,'YYYY_MM') ym, units::int u, revenue::float r, to_jsonb(category_sales_summary)->>'units_paid' up
+                FROM planner.category_sales_summary WHERE subcategory IS NOT NULL`),   // v28.773: units_paid (migration 434) = units less free units, for ASP
     // one row per (category, subcategory, country, channel) that has ≥1 AVAILABLE SKU in planning scope
     pool.query(`SELECT DISTINCT p.category c, p.subcategory s, upper(a.country) co, a.channel ch
                 FROM planner.v_product_availability a JOIN planner.products p ON p.sku = a.sku
@@ -528,7 +528,7 @@ async function buildDATA() {
   for (const row of salesR.rows) {
     const c = _normCat(row.c), s = _normCat(row.s), k = c + '|' + s + '|' + row.co + '|' + row.ch;
     if (!byKey[k]) byKey[k] = { c, s, co: row.co, ch: row.ch, x: row.x, m: {} };
-    byKey[k].m[row.ym] = [row.u, row.r];
+    byKey[k].m[row.ym] = (row.up != null && Number(row.up) !== Number(row.u)) ? [row.u, row.r, Number(row.up)] : [row.u, row.r];   // v28.773: [units (demand), revenue, paid units (ASP) when they differ]
   }
   for (const row of availR.rows) {   // available but unsold → add the row with an empty history so it still shows
     const c = _normCat(row.c), s = _normCat(row.s), k = c + '|' + s + '|' + row.co + '|' + row.ch;
@@ -22737,7 +22737,9 @@ async function salesImportRange(opts, by) {
 // v28.759: rebuild in the background after an exclusion / threshold change; several clicks in a row give one rebuild (the last one wins).
 let _sfbTimer = null, _sfbBusy = null;
 function salesFulfilBuildSoon(why) { clearTimeout(_sfbTimer); _sfbTimer = setTimeout(async () => { if (_sfbBusy) { salesFulfilBuildSoon(why); return; }
-  _sfbBusy = salesFulfilBuild().then(r => { _dataCache = null; console.log('[sales-final] rebuilt after ' + why + ': ' + r.monthly_rows + ' monthly rows'); })
+  _sfbBusy = salesFulfilBuild().then(async r => { try { const src = (((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_actuals_source'`)).rows[0] || {}).value) || 'sheet';
+      if (src !== 'sheet') await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY planner.category_sales_summary_mv`); } catch (e) { console.warn('[sales-final] summary refresh: ' + e.message); }   // v28.773
+    _dataCache = null; console.log('[sales-final] rebuilt after ' + why + ': ' + r.monthly_rows + ' monthly rows'); })
     .catch(e => console.warn('[sales-final] rebuild failed: ' + e.message)).finally(() => { _sfbBusy = null; }); }, 5000); }
 async function salesFulfilBuild() {
   const t0 = Date.now(), thr = await _olThreshold(), ws = await _olDetailFrom(), client = await pool.connect();
@@ -22765,10 +22767,8 @@ async function salesFulfilBuild() {
       SELECT l.sale_id, 'duplicate_reference', max(l.so_number), max(l.reference), max(l.fulfil_channel), max(l.country), max(l.channel), max(l.customer), max(l.order_date), sum(l.qty),
         'reference on ' || array_length(max(d.ids),1) || ' orders in ' || max(d.b)
       FROM d JOIN planner.order_lines l ON l.sale_id = ANY(d.ids) GROUP BY l.sale_id ON CONFLICT DO NOTHING`);
-    const a4 = await client.query(`INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
-      SELECT l.sale_id, 'zero_price', max(l.so_number), max(l.reference), max(l.fulfil_channel), max(l.country), max(l.channel), max(l.customer), max(l.order_date), sum(l.qty) FILTER (WHERE l.is_free),
-        sum(l.qty) FILTER (WHERE l.is_free)::int || ' free units (count as demand, not in ASP)'
-      FROM planner.order_lines l WHERE ${LIVE} AND l.is_free GROUP BY l.sale_id HAVING sum(l.qty) FILTER (WHERE l.is_free) >= 10 ON CONFLICT DO NOTHING`);
+    // v28.773 (Ben: "free units are not anomalies"): free (zero-price) units count as demand and stay out of ASP; they are never flagged
+    await client.query(`DELETE FROM planner.order_anomalies WHERE rule = 'zero_price'`); const a4 = { rowCount: 0 };
     // 2. ROLL-UP (v28.761, Ben 10-Nov-26: order level only for anomalies in history and the current month). Lines dated before the detail
     // window, of orders that are not flagged, excluded / decided or custom, are added to planner.sales_rollup (demand lines only) and deleted.
     await client.query(`CREATE TEMP TABLE _keep ON COMMIT DROP AS SELECT sale_id FROM planner.order_anomalies UNION SELECT sale_id FROM planner.order_exclusions
@@ -22917,6 +22917,7 @@ app.post('/api/demand/sales-source', async (req, res) => {
         if (!n.c || !n.f) return res.status(409).json({ error: 'No Fulfil history built yet: import and build first.' }); }
       await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('sales_actuals_source',$1) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, [b.source]);
       try { await pool.query(`INSERT INTO planner.sales_import_runs (finished_at, mode, scope, run_by) VALUES (now(), 'switch', $1, $2)`, [b.source, by]); } catch (_) {} }
+    try { await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY planner.category_sales_summary_mv`); } catch (e) { console.warn('[sales-source] summary refresh: ' + e.message); }   // v28.773: the plan grid follows at once
     _dataCache = null; invalidateBiCache(); try { invalidateSupplyCaches(); } catch (_) {}
     refreshDataCache().catch(e => console.warn('[sales-source] cache rebuild: ' + e.message));
     const src = (((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_actuals_source'`)).rows[0] || {}).value) || 'sheet';
