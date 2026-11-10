@@ -22541,6 +22541,9 @@ async function orderLinesSync(by, full) {
     let cursor = Number(await S('order_lines_cursor')) || 0, mode = (await S('order_lines_mode')) || 'inc', since = await S('order_lines_since');
     if (full) { cursor = 0; mode = 'full'; since = null; }
     else if (!cursor) { const last = await S('order_lines_synced_at'); mode = last ? 'inc' : 'full'; since = last ? new Date(new Date(last).getTime() - 2 * 86400000).toISOString().slice(0, 19).replace('T', ' ') : null; }
+    // v28.770 (Ben 10-Nov-26: wait for Diviyaj; history from 2024 only): never read ALL Fulfil history through this sync. History comes in
+    // through the dated re-import (salesImportRange), which sets the baseline this sync then carries on from.
+    if (mode === 'full') { _olBusy = null; throw new Error('No Fulfil history loaded yet: load it with Historical compare > Re-import from Fulfil (from ' + ((await S('sales_history_from')) || '2024-01-01') + '), then the daily sync carries on from there.'); }
     const FIELDS = OL_FIELDS;
     const rows = [], saleDate = {}; let more = false;
     const get = (path, body) => _olGet(cfg, path, body);
@@ -22717,6 +22720,7 @@ async function salesImportRange(opts, by) {
     orders += os.length; lines += (ls || []).length; saved += out.length; st.cursor = os[os.length - 1].id;
     if (os.length < 200) break; if (Date.now() - t0 > budget) { more = true; break; } }
   st.orders += orders; st.lines += lines; st.saved += saved; st.more = more; if (!more) st.finished_at = new Date().toISOString();
+  if (!more) await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('order_lines_synced_at',$1) ON CONFLICT (key) DO NOTHING`, [st.started_at]).catch(() => {});   // v28.770: the daily sync carries on from the first history load
   if (!more && st.replace && !st.removed_done) {   // the range's lines this refresh did not read again: deleted / re-imported in Fulfil
     const del = await pool.query(`DELETE FROM planner.order_lines WHERE fulfil_channel = ANY($1) AND order_date BETWEEN $2 AND $3 AND refresh_run IS DISTINCT FROM $4`, [channels, from, to, st.run]);
     // v28.761: the range's rolled-up rows give way to the fresh lines (the next build rolls them up again)
@@ -27467,7 +27471,8 @@ async function b2bHeld(skus, market, excludeId) {
   try {
     (await pool.query(`SELECT r.ref, upper(x.sku) sku, x.q, to_char(r.hold_until,'YYYY-MM-DD') until
         FROM planner.b2b_requests r, jsonb_array_elements(r.decisions) d,
-          LATERAL (VALUES (d->>'sku', coalesce((d->>'approved_qty')::int,0)), (d->>'sub_sku', coalesce((d->>'sub_approved_qty')::int,0))) x(sku, q)   -- v28.592: substitutes hold too
+          LATERAL (SELECT d->>'sku' sku, coalesce((d->>'approved_qty')::int,0) q UNION ALL SELECT d->>'sub_sku', coalesce((d->>'sub_approved_qty')::int,0)
+                   UNION ALL SELECT al->>'sku', coalesce((al->>'approved_qty')::int,0) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(d->'alts') = 'array' THEN d->'alts' ELSE '[]'::jsonb END) al) x(sku, q)   -- v28.592 / 771: alternatives hold too
         WHERE r.status='approved' AND r.hold_until >= CURRENT_DATE AND upper(r.market)=$1 AND upper(x.sku)=ANY($2)
           AND x.q > 0 AND r.id IS DISTINCT FROM $3::bigint ORDER BY r.ref`, [mk, S, excludeId])).rows
       .forEach(x => { const o = get(x.sku); o.held += x.q; o.held_refs.push({ ref: x.ref, qty: x.q, until: x.until }); });
@@ -27546,6 +27551,9 @@ function b2bReqWhatsApp(r, a) {
   return 'B2B request ' + r.ref + ': ' + (r.client || 'no client') + ', ' + r.market + (r.required_by ? ', required by ' + b2bFd(r.required_by) : '') + '\n' + L.join('\n')
     + (r.notes ? '\nNotes: ' + String(r.notes).slice(0, 300) : '') + '\nReview: ' + b2bReqLink(r.ref);
 }
+// v28.771 (Kathryn: more than one alternative per line): a decision line's alternatives, from alts[] or the older single sub_sku
+function b2bAlts(d) { if (!d) return []; if (Array.isArray(d.alts)) return d.alts.filter(x => x && x.sku);
+  return d.sub_sku ? [{ sku: d.sub_sku, qty: d.sub_qty, approved_qty: d.sub_approved_qty, route: d.sub_route }] : []; }
 function b2bReqEmailHtml(r, a, head, extra) {
   const s = a.summary || {}, V = { Yes: '#118a4e', Partial: '#b45309', Short: '#d23227' }, dec = {};
   (Array.isArray(r.decisions) ? r.decisions : []).forEach(x => { dec[x.sku] = x; });   // v28.590: per-line decision shown once decided
@@ -27557,7 +27565,7 @@ function b2bReqEmailHtml(r, a, head, extra) {
     + '<td style="' + td + ';font-weight:700;color:' + (V[x.verdict] || '#5b6b83') + '">' + b2bEsc(x.verdict) + (x.season_flag ? '<div style="color:#b45309;font-weight:400">Forecast well above recent sales</div>' : '') + '</td>'
     + (hasDec ? '<td style="' + td + ';text-align:right;font-weight:700">' + (dec[x.sku] ? b2bN(dec[x.sku].approved_qty) + (dec[x.sku].reason ? '<div style="color:#5b6b83;font-weight:400">' + b2bEsc(B2B_REASONS[dec[x.sku].reason] || dec[x.sku].reason) + '</div>' : '')
       + (dec[x.sku].route ? '<div style="color:#5b6b83;font-weight:400">' + b2bEsc(B2B_ROUTES[dec[x.sku].route]) + (dec[x.sku].price != null ? ' @ ' + b2bEsc(B2B_CUR[r.market] || '') + ' ' + dec[x.sku].price.toFixed(2) : '') + '</div>' : '')
-      + (dec[x.sku].sub_sku ? '<div style="color:#2361d8;font-weight:400">Alternative: ' + b2bN(dec[x.sku].sub_approved_qty) + ' x ' + b2bEsc(dec[x.sku].sub_sku) + ' (' + b2bEsc(B2B_ROUTES[dec[x.sku].sub_route] || '') + ')</div>' : '') : '-') + '</td>' : '') + '</tr>').join('');
+      + b2bAlts(dec[x.sku]).map(al => '<div style="color:#2361d8;font-weight:400">Alternative: ' + b2bN(al.approved_qty) + ' x ' + b2bEsc(al.sku) + ' (' + b2bEsc(B2B_ROUTES[al.route] || '') + ')</div>').join('') : '-') + '</td>' : '') + '</tr>').join('');
   return '<div style="font-family:Arial,sans-serif;color:#101828;max-width:760px">'
     + '<h2 style="margin:0 0 4px;font-size:18px">' + b2bEsc(head) + '</h2>'
     + '<div style="color:#5b6b83;font-size:13px;margin-bottom:12px">' + b2bEsc(r.ref) + ' · ' + b2bEsc(r.client || 'no client') + ' · ' + b2bEsc(r.market) + (r.required_by ? ' · required by ' + b2bFd(r.required_by) : '') + ' · from ' + b2bEsc(r.created_by || '') + '</div>'
@@ -27574,6 +27582,7 @@ const B2B_REQ_COLS = `r.id, r.ref, coalesce(r.client,'') client, r.market, to_ch
   coalesce(r.created_by,'') created_by, to_char(r.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at, coalesce(r.decided_by,'') decided_by,
   to_char(r.decided_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') decided_at, coalesce(r.decision_note,'') decision_note,
   r.decisions, to_char(r.hold_until,'YYYY-MM-DD') hold_until, coalesce(r.reason,'') reason,   -- v28.590: migration 404
+  to_jsonb(r)->'draft' draft, to_jsonb(r)->>'draft_by' draft_by, to_char((to_jsonb(r)->>'draft_at')::timestamptz AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') draft_at,   -- v28.771: migration 433
   r.stage, to_char(r.stage_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') stage_at, coalesce(r.stage_by,'') stage_by, r.stage_log, coalesce(r.fulfil_so,'') fulfil_so,   -- v28.593: migration 405
   (r.status <> 'open' AND r.decided_at > now() - interval '${B2B_REOPEN_DAYS} days') reopenable,   -- v28.591: closed requests can be reopened for 7 days
   to_char((r.decided_at + interval '${B2B_REOPEN_DAYS} days') AT TIME ZONE 'Europe/London','YYYY-MM-DD') reopen_until`;
@@ -27584,7 +27593,7 @@ function b2bFreightUsd(ar, units, route) { if (route !== 'air' && route !== 'exp
 async function b2bReqTodos(r, a, decisions, by) {
   const items = [], due = r.required_by || null;
   for (const d of decisions || []) {
-    for (const [sku, q, route] of [[d.sku, d.approved_qty, d.route], [d.sub_sku, d.sub_approved_qty, d.sub_route]]) {
+    for (const [sku, q, route] of [[d.sku, d.approved_qty, d.route]].concat(b2bAlts(d).map(al => [al.sku, al.approved_qty, al.route]))) {   // v28.771: every alternative
       if (!sku || !(q > 0) || !route || route === 'stock') continue;
       const ar = a.rows.find(y => y.sku === sku) || {}, fr = b2bFreightUsd(ar, q, route);
       const pos = (ar.exped_pos || []).map(p => p.po).join(', ');
@@ -27603,6 +27612,7 @@ app.get('/api/scenario/b2b/requests', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); const approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT);
     const rows = (await pool.query(`SELECT ${B2B_REQ_COLS}, (SELECT count(*)::int FROM planner.b2b_request_analyses a WHERE a.request_id=r.id) n_analyses,
         (SELECT a.summary FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_summary,
+        (SELECT to_char(a.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_at,   -- v28.771
         (SELECT a.rows FROM planner.b2b_request_analyses a WHERE a.request_id=r.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) last_rows   -- v28.587: SKU lines on the card
       FROM planner.b2b_requests r ORDER BY (r.status='open') DESC, coalesce(r.decided_at, r.created_at) DESC LIMIT 300`)).rows;
     const out = { me: email, can_decide: !!(me.is_admin || me.live === false || (email && approvers.includes(email))), is_admin: !!(me.is_admin || me.live === false),
@@ -27648,7 +27658,7 @@ app.post('/api/scenario/b2b/requests/:ref/analyse-sku', async (req, res) => {
 });
 app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
-    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release', 'reopen', 'stage'].includes(act)) return res.status(404).json({ error: 'not found' });
+    const act = req.params.act; if (!['reanalyse', 'decide', 'approve', 'reject', 'cancel', 'release', 'reopen', 'stage', 'draft'].includes(act)) return res.status(404).json({ error: 'not found' });
     const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
     const isAdmin = !!(me.is_admin || me.live === false), approvers = await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), canDecide = isAdmin || approvers.includes(email);
     if (act === 'stage') {   // v28.593 (Kathryn's improvement 8): offered -> accepted / declined -> shipped (+ Fulfil SO), on approved requests
@@ -27670,6 +27680,17 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
           html: '<div style="font-family:Arial,sans-serif;font-size:14px"><p><b>' + b2bEsc(r.ref) + '</b> (' + b2bEsc(r.client || 'no client') + ', ' + b2bEsc(r.market) + ') was marked <b>' + stg + '</b> by ' + b2bEsc(email) + (so ? ', Fulfil order ' + b2bEsc(so) : '') + (note ? ': ' + b2bEsc(note) : '') + '. Its held stock is released.</p><p><a href="' + b2bReqLink(r.ref) + '">Open in HORIZON</a></p></div>', kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
       }
       return res.json({ ok: true, stage: stg });
+    }
+    if (act === 'draft') {   // v28.771 (Kathryn: keep my place mid-decision): save / discard the Decide panel's state on an open request
+      if (!canDecide) return res.status(403).json({ error: 'Only an approver or an admin can decide this request.' });
+      if (r.status !== 'open') return res.status(409).json({ error: 'This request is already ' + r.status + '.' });
+      const b = req.body || {};
+      try {
+        if (b.clear) await pool.query(`UPDATE planner.b2b_requests SET draft=NULL, draft_by=NULL, draft_at=NULL WHERE id=$1`, [r.id]);
+        else { const js = JSON.stringify(b.draft || {}); if (js.length > 200000) return res.status(400).json({ error: 'Draft too large.' });
+          await pool.query(`UPDATE planner.b2b_requests SET draft=$2::jsonb, draft_by=$3, draft_at=now() WHERE id=$1 AND status='open'`, [r.id, js, email]); }
+      } catch (e) { if (e && e.code === '42703') return res.status(503).json({ error: 'Drafts need migration 433 on this server.' }); throw e; }
+      return res.json({ ok: true, cleared: !!b.clear });
     }
     if (act === 'reopen') {   // v28.591 (Ben): back to Open within 7 days of the decision; the decision, reason and any hold are cleared
       if (r.status === 'open') return res.status(409).json({ error: 'This request is already open.' });
@@ -27712,12 +27733,17 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
         const route = B2B_ROUTES[x.route] ? x.route : (q <= fs ? 'stock' : q <= fs + fp ? 'expedite' : 'air');   // v28.592: default from the analysis
         const pr = x.price === '' || x.price == null ? ar.wholesale : Number(x.price);
         const o = { sku: l.sku, qty, approved_qty: q, reason: q < qty ? rs : null, route: q > 0 ? route : null, price: Number.isFinite(pr) && pr >= 0 ? Math.round(pr * 100) / 100 : null };
-        const ss = String(x.sub_sku || '').trim().toUpperCase(), sq = parseInt(x.sub_qty, 10), sa = parseInt(x.sub_approved_qty, 10);
-        if (ss && sq > 0) Object.assign(o, { sub_sku: ss, sub_qty: sq, sub_approved_qty: Number.isFinite(sa) ? sa : NaN, sub_route: B2B_ROUTES[x.sub_route] ? x.sub_route : 'stock' });
+        // v28.771 (Kathryn): several alternatives per line, each with its own qty, approved qty and route (older clients send one sub_*)
+        const inAlts = Array.isArray(x.alts) ? x.alts : (x.sub_sku ? [{ sku: x.sub_sku, qty: x.sub_qty, approved_qty: x.sub_approved_qty, route: x.sub_route }] : []);
+        const alts = inAlts.slice(0, 10).map(al => { const ss = String(al.sku || '').trim().toUpperCase(), sq = parseInt(al.qty, 10), sa = parseInt(al.approved_qty, 10);
+          return ss && sq > 0 ? { sku: ss, qty: sq, approved_qty: Number.isFinite(sa) ? sa : NaN, route: B2B_ROUTES[al.route] ? al.route : 'stock' } : null; }).filter(Boolean);
+        if (alts.length) o.alts = alts;
         return o; });
-      const badSub = decisions.find(d => d.sub_sku && (!Number.isInteger(d.sub_approved_qty) || d.sub_approved_qty < 0 || d.sub_approved_qty > d.sub_qty));
+      let badSub = null; decisions.forEach(d => (d.alts || []).forEach(al => { if (!badSub && (!Number.isInteger(al.approved_qty) || al.approved_qty < 0 || al.approved_qty > al.qty)) badSub = { sku: d.sku, sub_sku: al.sku, sub_qty: al.qty }; }));
       if (badSub) return res.status(400).json({ error: badSub.sku + ' alternative ' + badSub.sub_sku + ': approved quantity must be a whole number from 0 to ' + badSub.sub_qty + '.' });
-      const subSkus = decisions.filter(d => d.sub_sku).map(d => d.sub_sku);
+      const dupAlt = decisions.find(d => (d.alts || []).some((al, i, arr) => al.sku === d.sku || arr.findIndex(z => z.sku === al.sku) !== i));
+      if (dupAlt) return res.status(400).json({ error: dupAlt.sku + ': each alternative must be a different SKU (and not the line itself).' });
+      const subSkus = [...new Set(decisions.flatMap(d => (d.alts || []).map(al => al.sku)))];
       if (subSkus.length) { const known = new Set((await pool.query(`SELECT upper(sku) s FROM planner.products WHERE upper(sku)=ANY($1)`, [subSkus])).rows.map(z => z.s));
         const unk = subSkus.find(s => !known.has(s)); if (unk) return res.status(400).json({ error: 'Alternative SKU ' + unk + ' is not in PRODUCT.' }); }
       const bad = decisions.find(d => !Number.isInteger(d.approved_qty) || d.approved_qty < 0 || d.approved_qty > d.qty);
@@ -27725,16 +27751,17 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
       const noWhy = decisions.find(d => d.approved_qty < d.qty && !d.reason && !note);
       if (noWhy) return res.status(400).json({ error: noWhy.sku + ': choose a reason for approving less than requested.' });
     }
-    const approvedUnits = decisions ? decisions.reduce((s, d) => s + d.approved_qty + (d.sub_approved_qty || 0), 0) : 0;   // v28.592: substitutes count as approved units
+    const approvedUnits = decisions ? decisions.reduce((s, d) => s + d.approved_qty + (d.alts || []).reduce((t, al) => t + (al.approved_qty || 0), 0), 0) : 0;   // v28.592 / 771: alternatives count as approved units
     const st = act === 'cancel' ? 'cancelled' : approvedUnits > 0 ? 'approved' : 'rejected';
     const holdUntil = st === 'approved' && r.required_by ? new Date(Date.parse(r.required_by + 'T00:00:00Z') + B2B_HOLD_DAYS * 864e5).toISOString().slice(0, 10) : null;
     let up;
+    try { await pool.query(`UPDATE planner.b2b_requests SET draft=NULL, draft_by=NULL, draft_at=NULL WHERE id=$1`, [r.id]); } catch (_) {}   // v28.771: the decision ends the draft
     try { up = await pool.query(`UPDATE planner.b2b_requests SET status=$2, decided_by=$3, decided_at=now(), decision_note=$4, decisions=$5::jsonb, hold_until=$6, reason=$7 WHERE id=$1 AND status='open'`,
       [r.id, st, email, note || null, decisions ? JSON.stringify(decisions) : null, holdUntil, reason]); }
     catch (e) { if (e && e.code === '42703') return res.status(503).json({ error: 'Per-line decisions need migration 404 on this server.' }); throw e; }
     if (!up.rowCount) return res.status(409).json({ error: 'Someone else has just decided this request. Refresh.' });
     await b2bReqSnap(r.id, st, a, email);
-    const subL = (decisions || []).filter(d => d.sub_sku && d.sub_approved_qty > 0).map(d => ({ sku: d.sub_sku, qty: d.sub_qty }));
+    const subL = []; (decisions || []).forEach(d => (d.alts || []).forEach(al => { if (al.approved_qty > 0 && !subL.some(z => z.sku === al.sku)) subL.push({ sku: al.sku, qty: al.qty }); }));
     const aT = subL.length ? { rows: a.rows.concat((await b2bReqAnalyse(subL, r.market, r.required_by, r.id)).rows) } : a;   // substitutes' own analysis for their To dos
     let todos = 0; if (st === 'approved') todos = await b2bReqTodos(r, aT, decisions, email).catch(e => { console.warn('[b2b-request] todos ' + (e && e.message)); return 0; });
     const r2 = await b2bReqGet(r.ref), notify = await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT);
