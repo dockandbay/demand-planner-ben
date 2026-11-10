@@ -96,3 +96,23 @@ Reconcile page: per market x channel x month, sheet vs Fulfil units and revenue,
 6. **All CA imported** (Shopify CA, CA wholesale, Amazon.ca) as CA history even though the stores are closed.
 7. **No-SKU lines**: fall back where possible, flag the rest as an anomaly; explore later (note: docs/specs/FULFIL_NO_SKU_LINES_NOTE_2026-11-10.md).
 8. **UK and the whole switch wait**: this is a test build. Nothing switches; UK historical is expected next week and is tested then.
+
+## 5. Sandbox test, 2025 AU + EU (10-Nov-26, v28.757-758)
+Imported 45,224 orders / 124,288 lines (HISTORICAL dockandbay-au, Amazon.com.au, dockandbay-eu, -eu-ws, Amazon DE/IT/ES/FR) in about 7 minutes (about 100 orders a second; full history about 2 hours). Compared with LIVE sales_actuals (the sheet), units / GBP:
+
+| Market channel | Sheet units | Fulfil units | Diff | Sheet GBP | Fulfil GBP | Diff |
+|---|---|---|---|---|---|---|
+| AU DTC | 60,407 | 62,281 | +3.1% | 1,077,728 | 1,125,064 | +4.4% |
+| AU FBA | 7,609 | 7,508 | -1.3% | 167,430 | 160,868 | -3.9% |
+| EU DTC | 29,115 | 28,751 | -1.3% | 610,685 | 693,950 | +13.6% |
+| EU FBA | 9,118 | 9,113 | -0.1% | 245,622 | 202,140 | -17.7% |
+| EU B2B | 42,098 | 25,861 | -38.6% | 436,696 | 299,178 | -31.5% |
+
+Findings:
+1. Units reconcile within about 3% for AU and EU DTC / FBA. Months differ by timing: the sheet is ship month, Fulfil is order month (AU Nov-25 +38%, Dec-25 -15%: Black Friday orders shipped in December).
+2. **Historical orders have no ship date.** Fulfil's line shipping date (and created_at) on imported orders is the import date (Nov-26); no metadata or shipments carry the old dispatch date. The first run put all EU wholesale 2025 into Nov-26; fixed (historical always on order date = old system created date). The "ship date if more than 2 weeks after created" rule therefore only works for live orders until Diviyaj imports a ship date.
+3. **EU B2B gap**: the 60 non-Shopify orders dropped from HISTORICAL dockandbay-eu in 2025 (55,827 units, 33 customers: TAG / Roman Forster CH 27k, DISTRIBUCIONES XKI ES 13k, Galeria, Kitchen Cabinet Onlineshop, small shops) are not all key accounts; the sheet counts about 16k of them as EU B2B. AU: 11 orders, 25,481 units dropped.
+4. **Revenue basis differs by channel**: historical orders have tax 0 in Fulfil. EU DTC revenue per unit is 15% above the sheet (Fulfil looks VAT-inclusive for Shopify EU history), EU Amazon 18% below (sheet looks VAT-inclusive for Amazon EU). Needs Diviyaj: are historical amounts gross or net?
+5. AU revenue uses the FY25 CONFIG rate for every year before FY25 (CONFIG has no older rates).
+6. The sheet has junk SKU rows (e.g. '|DTC', 684 units AU DTC Nov-25).
+7. Anomalies flagged: 122 orders with a line over 40 units (87,100 units), 165 orders over their channel's 99.9th percentile, 11 duplicate references, 2 with 10+ free units.
