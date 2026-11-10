@@ -10844,8 +10844,20 @@ async function payRunPlan(run) {
   const rec = (await pool.query(`SELECT bill_id, bill_number FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') ORDER BY updated_at DESC NULLS LAST LIMIT 1`, [rk]).catch(() => ({ rows: [] }))).rows[0];
   if (spAmt > 0.005) bills.push({ kind: 'supplier_payment', number: (rec && rec.bill_number) || ref, invoice_id: rec ? rec.bill_id : null, will_create: !rec, pay_amount: spAmt, ccy: String(run.base_ccy || 'USD').toUpperCase() });
   // 2) each Other payment's own bill (same lookup as the split-payment key line)
-  for (const o of lines.filter(l => l && /other/i.test(String(l.type || '')) && Math.abs(Number(l.amount) || 0) > 0.005)) {
-    const r2 = String(o.reference || '').trim();
+  // v28.755 (Ben 10-Nov-26): a hand-linked Xero document (migration 427) wins, read from the row (never the client). A linked bill is paid;
+  // a linked supplier credit note is ALLOCATED against the run's bill(s) and only the net leaves the bank.
+  const _oLines = lines.filter(l => l && /other/i.test(String(l.type || '')) && Math.abs(Number(l.amount) || 0) > 0.005);
+  const _oIds = _oLines.map(l => Number(l.oid)).filter(n => Number.isFinite(n) && n > 0);
+  const _links = new Map(_oIds.length ? (await pool.query(`SELECT id, to_jsonb(d)->>'xero_doc_type' t, to_jsonb(d)->>'xero_doc_id' x, to_jsonb(d)->>'xero_doc_region' r, to_jsonb(d)->>'xero_doc_number' n FROM planner.deposits d WHERE id = ANY($1::bigint[]) AND NOT is_deposit`, [_oIds]).catch(() => ({ rows: [] }))).rows.filter(r => r.x).map(r => [String(r.id), r]) : []);
+  const credits = [];
+  for (const o of _oLines) {
+    const r2 = String(o.reference || '').trim(), lk = o.oid != null ? _links.get(String(o.oid)) : null, amt = Math.round((Number(o.amount) || 0) * 100) / 100;
+    if (lk && lk.r !== org) { bills.push({ kind: 'other', number: lk.n || r2, reference: r2, invoice_id: null, pay_amount: amt, ccy: String(run.base_ccy || 'USD').toUpperCase(), problem: (lk.n || r2) + ' is linked to a ' + (lk.t === 'credit' ? 'credit note' : 'bill') + ' in Xero ' + String(lk.r).toUpperCase() + ', but this run pays from Xero ' + org.toUpperCase() + ': link the right document, or pay it in Xero' }); continue; }
+    if (lk && lk.t === 'credit') {
+      if (amt > 0) { bills.push({ kind: 'other', number: lk.n || r2, reference: r2, invoice_id: null, pay_amount: amt, ccy: String(run.base_ccy || 'USD').toUpperCase(), problem: r2 + ' is linked to a credit note but is a payment (' + amt.toFixed(2) + '): enter it as a minus amount, or link its bill' }); continue; }
+      credits.push({ credit_id: lk.x, number: lk.n || r2, reference: r2, amount: Math.round(-amt * 100) / 100, ccy: String(run.base_ccy || 'USD').toUpperCase(), allocations: [] }); continue; }
+    if (lk && lk.t === 'bill') { bills.push({ kind: 'other', number: lk.n || r2, reference: r2, invoice_id: lk.x, pay_amount: amt, ccy: String(run.base_ccy || 'USD').toUpperCase(), linked: true }); continue; }
+    if (amt < 0) { bills.push({ kind: 'other', number: r2, reference: r2, invoice_id: null, pay_amount: amt, ccy: String(run.base_ccy || 'USD').toUpperCase(), problem: (r2 || 'A credit') + ' is a credit (' + amt.toFixed(2) + '): link it to its Xero supplier credit note in Other Payments' }); continue; }
     const b = r2 ? (await pool.query(`SELECT invoice_id, invoice_number FROM planner.xero_bills WHERE lower(region)=$1 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND (upper(invoice_number)=upper($2) OR upper(invoice_number) LIKE upper($2) || ' /%') ORDER BY (upper(invoice_number)=upper($2)) DESC LIMIT 1`, [org, r2])).rows[0] : null;
     bills.push({ kind: 'other', number: b ? String(b.invoice_number).split(' / ')[0] : r2, reference: r2, invoice_id: b ? b.invoice_id : null, pay_amount: Math.round((Number(o.amount) || 0) * 100) / 100, ccy: String(run.base_ccy || 'USD').toUpperCase(), problem: b ? null : 'No Xero bill found for ' + (r2 || 'this Other payment') + ' in Xero ' + org.toUpperCase() });
   }
@@ -10857,12 +10869,40 @@ async function payRunPlan(run) {
           url: 'https://go.xero.com/AccountsPayable/' + (/DRAFT|SUBMITTED/i.test(v.Status) ? 'Edit' : 'View') + '.aspx?InvoiceID=' + v.InvoiceID }); }); }
     catch (e) { checks.push({ level: 'error', msg: 'Could not read the bills in Xero ' + org.toUpperCase() + ': ' + e.message }); } }
   const done = (await pool.query(`SELECT invoice_id, invoice_number, amount, currency, bank_name, to_char(payment_date,'YYYY-MM-DD') payment_date, xero_payment_id, status, error FROM planner.xero_run_payments WHERE run_key=$1 AND status IN ('created','creating') ORDER BY id`, [rk]).catch(() => ({ rows: [] }))).rows;
+  // v28.755: linked supplier credit notes. Live state, then allocate each against the run's bills (supplier payment bill first, then each
+  // Other bill), never more than a bill's payment; each allocation lowers that bill's payment, so the bank amount = bills less credits.
+  // An allocation already made from HORIZON (xero_run_payments invoice_id 'credit:<cn>><bill>') still lowers the payment but is not redone.
+  bills.forEach(b => { const d = done.find(x => x.invoice_id === b.invoice_id); if (d) b.paid = d; });   // already paid from HORIZON: never an allocation target
+  for (const c of credits) {
+    try { const j = await xeroFetch(org, '/api.xro/2.0/CreditNotes/' + c.credit_id); const v = j && j.CreditNotes && j.CreditNotes[0];
+      if (v) Object.assign(c, { status: String(v.Status || '').toUpperCase(), remaining: Number(v.RemainingCredit) || 0, total: Number(v.Total) || 0, ccy: String(v.CurrencyCode || c.ccy).toUpperCase(), number: v.CreditNoteNumber || c.number,
+        url: _xdocUrl('credit', c.credit_id) }); else c.problem = 'Credit note ' + c.number + ' was not found in Xero ' + org.toUpperCase(); }
+    catch (e) { c.problem = 'Could not read credit note ' + c.number + ' in Xero ' + org.toUpperCase() + ': ' + e.message; }
+    const doneHere = done.filter(x => String(x.invoice_id).startsWith('credit:' + c.credit_id + '>'));
+    const doneAmt = Math.round(doneHere.reduce((a, x) => a + (Number(x.amount) || 0), 0) * 100) / 100;
+    let left = Math.round((c.amount - doneAmt) * 100) / 100;
+    doneHere.forEach(x => { const tb = bills.find(b => b.invoice_id && x.invoice_id === 'credit:' + c.credit_id + '>' + b.invoice_id);
+      c.allocations.push({ bill_id: tb ? tb.invoice_id : String(x.invoice_id).split('>')[1], bill: tb ? tb.number : x.invoice_number, amount: Number(x.amount) || 0, done: true });
+      if (tb) tb.pay_amount = Math.round((tb.pay_amount - (Number(x.amount) || 0)) * 100) / 100; });
+    if (c.problem || left <= 0.005) continue;
+    if (c.status === 'PAID') { c.problem = 'Credit note ' + c.number + ' is already fully used in Xero (no credit left)'; continue; }
+    if (c.status && c.status !== 'AUTHORISED') { c.problem = 'Credit note ' + c.number + ' is ' + c.status.toLowerCase() + ' in Xero: approve it there first'; continue; }
+    if (c.remaining != null && c.remaining + 0.005 < left) { c.problem = 'Only ' + c.remaining.toFixed(2) + ' credit is left on ' + c.number + ' (this run uses ' + left.toFixed(2) + ')'; continue; }
+    if (c.ccy && c.ccy !== String(run.base_ccy || 'USD').toUpperCase() && bills.length && c.ccy !== bills[0].ccy) { c.problem = 'Credit note ' + c.number + ' is in ' + c.ccy + ', the bills are not'; continue; }
+    const targets = bills.filter(b => !b.problem && !b.paid && b.pay_amount > 0.005).sort((a, b) => (a.kind === 'supplier_payment' ? 0 : 1) - (b.kind === 'supplier_payment' ? 0 : 1));
+    for (const t of targets) { if (left <= 0.005) break; const a = Math.min(left, t.pay_amount); if (a <= 0.005) continue;
+      c.allocations.push({ bill_id: t.invoice_id, bill: t.number, amount: Math.round(a * 100) / 100, kind: t.kind });
+      t.pay_amount = Math.round((t.pay_amount - a) * 100) / 100; t.alloc_pending = Math.round(((t.alloc_pending || 0) + a) * 100) / 100; left = Math.round((left - a) * 100) / 100; }
+    if (left > 0.005) c.problem = 'Credit note ' + c.number + ': ' + left.toFixed(2) + ' more credit than this run pays; it cannot be used here';
+  }
+  credits.forEach(c => { if (c.problem) checks.push({ level: 'error', msg: c.problem }); });
   bills.forEach(b => { const d = done.find(x => x.invoice_id === b.invoice_id); if (d) { b.paid = d; return; }
     if (b.problem) return;
     if (b.status === 'VOIDED' || b.status === 'DELETED') { b.problem = b.number + ' is ' + b.status.toLowerCase() + ' in Xero'; return; }
     if (b.kind === 'supplier_payment' && b.will_create) { b.note = 'will be created and approved'; return; }
     if (b.status === 'PAID') { b.problem = b.number + ' is already paid in Xero'; return; }
-    const due = (b.status === 'DRAFT' || b.status === 'SUBMITTED') ? b.total : b.amount_due;
+    const due0 = (b.status === 'DRAFT' || b.status === 'SUBMITTED') ? b.total : b.amount_due, due = due0 == null ? due0 : Math.round((due0 - (b.alloc_pending || 0)) * 100) / 100;   // v28.755: less credit notes still to allocate
+    if (b.alloc_pending && b.pay_amount <= 0.005) { b.note = 'settled by credit note'; if (b.status === 'DRAFT' || b.status === 'SUBMITTED') b.approve = true; return; }
     if (due != null && b.pay_amount > due + 0.005) b.problem = 'Pays ' + b.pay_amount.toFixed(2) + ' but only ' + Number(due).toFixed(2) + ' is due on ' + b.number;
     else if (due != null && due - b.pay_amount > 0.005) b.note = (due - b.pay_amount).toFixed(2) + ' stays owing on ' + b.number;
     if (b.status === 'DRAFT' || b.status === 'SUBMITTED') b.approve = true; });
@@ -10870,7 +10910,7 @@ async function payRunPlan(run) {
   if (ccys.length > 1) checks.push({ level: 'error', msg: 'The bills are in different currencies (' + ccys.join(', ') + '): pay them separately in Xero' });
   const total = Math.round(bills.filter(b => !b.paid).reduce((a, b) => a + b.pay_amount, 0) * 100) / 100;
   return { ok: true, run_key: rk, org, base_ccy: base, bill_ccy: ccys[0] || 'USD', reference: ref, banks, favourites, last_bank: last && last.bank_account_id ? { id: last.bank_account_id, name: last.bank_name } : null,
-    bills, total, already_paid: done, checks };
+    bills, credits, total, already_paid: done, checks };
 }
 app.post('/api/supply/payments/pay-plan', async (req, res) => {   // read only: what the Paid popup shows
   try { const run = (req.body && req.body.run) || {}; if (!run.dt || !run.supplier) return res.status(400).json({ error: 'run (dt, supplier, lines) required' }); res.set('Cache-Control', 'no-store').json(await payRunPlan(run)); }
@@ -10896,19 +10936,24 @@ app.post('/api/supply/payments/pay', async (req, res) => {   // v28.305 (Ben 13-
       if (!loanBank || !loanBank.code) blocks.push('Intercompany loan (901) not found in Xero ' + bank.org.toUpperCase());
       xcBank = (req.body && req.body.confirm === true) ? await xeroContactEnsure(bank.org, run.supplier) : await xeroContactFor(bank.org, run.supplier); if ((!xcBank || !xcBank.ok) && !(xcBank && !xcBank.lookup_failed && xcBank.target && !(req.body && req.body.confirm === true))) blocks.push('Xero ' + bank.org.toUpperCase() + ' contact for ' + run.supplier + ' not found: ' + ((xcBank && xcBank.error) || 'create or merge it in Xero')); }
     else if (bank.ccy !== plan.bill_ccy && bank.ccy !== plan.base_ccy) blocks.push('A ' + bank.ccy + ' bank cannot pay ' + plan.bill_ccy + ' bills in Xero ' + plan.org.toUpperCase() + ': choose a ' + plan.bill_ccy + ' or ' + plan.base_ccy + ' bank');
-    if (!(amount > 0)) blocks.push('Enter the amount that left the bank');
+    if (!(amount > 0) && payTodo.length) blocks.push('Enter the amount that left the bank');
     else if (bank.ccy === plan.bill_ccy && Math.abs(amount - plan.total) > 0.01) blocks.push('The bank amount ' + bank.ccy + ' ' + amount.toFixed(2) + ' differs from the bills total ' + plan.bill_ccy + ' ' + plan.total.toFixed(2));
     const todo = plan.bills.filter(x => !x.paid);
-    if (!todo.length) blocks.push('Every bill in this run is already paid from HORIZON');
+    // v28.755: credit note allocations still to make (linked supplier credit notes), then payments only for bills with something left to pay
+    const allocs = (plan.credits || []).flatMap(c => (c.allocations || []).filter(a => !a.done).map(a => Object.assign({ credit_id: c.credit_id, credit_number: c.number, ccy: c.ccy }, a)));
+    const payTodo = todo.filter(x => x.pay_amount > 0.005);
+    if (allocs.some(a => !a.bill_id) && !dry) blocks.push('Create the supplier payment bill first (Create in Xero), then pay: the credit note is allocated to it');
+    if (!payTodo.length && !allocs.length) blocks.push('Every bill in this run is already paid from HORIZON');
     const sp = todo.find(x => x.kind === 'supplier_payment' && x.will_create);
     if (sp && !dry) blocks.push('Create the supplier payment bill first (Create in Xero), then pay');
     if (blocks.length) return res.status(409).json({ error: blocks.join('; '), blocks, plan });
-    const rate = (cross || bank.ccy === plan.bill_ccy) ? null : Math.round(plan.total / amount * 1e6) / 1e6;   // foreign per 1 base (Xero CurrencyRate); cross-org loan payments take Xero's day rate
+    const rate = (cross || bank.ccy === plan.bill_ccy || !(amount > 0)) ? null : Math.round(plan.total / amount * 1e6) / 1e6;   // foreign per 1 base (Xero CurrencyRate); cross-org loan payments take Xero's day rate
     const approve = todo.filter(x => x.approve || (x.kind === 'supplier_payment' && x.will_create)).map(x => ({ InvoiceID: x.invoice_id || '(created by Create in Xero)', Status: 'AUTHORISED' }));
-    const payments = todo.map(x => Object.assign({ Invoice: { InvoiceID: x.invoice_id || '(created by Create in Xero)' }, Account: { AccountID: cross ? loanBill.id : bank.id }, Date: date, Amount: x.pay_amount, Reference: plan.reference + (cross ? ' (paid from ' + bank.org.toUpperCase() + ')' : '') }, rate ? { CurrencyRate: rate } : {}));
+    const payments = payTodo.map(x => Object.assign({ Invoice: { InvoiceID: x.invoice_id || '(created by Create in Xero)' }, Account: { AccountID: cross ? loanBill.id : bank.id }, Date: date, Amount: x.pay_amount, Reference: plan.reference + (cross ? ' (paid from ' + bank.org.toUpperCase() + ')' : '') }, rate ? { CurrencyRate: rate } : {}));
     const spend = cross ? { Type: 'SPEND', Contact: { ContactID: xcBank.ContactID }, BankAccount: { AccountID: bank.id }, Date: date, Reference: plan.reference, CurrencyCode: bank.ccy, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
-      LineItems: [{ Description: 'Paid for Xero ' + plan.org.toUpperCase() + ' (intercompany loan): ' + todo.map(x => x.number + ' ' + x.pay_amount.toFixed(2)).join(', '), Quantity: 1, UnitAmount: Math.round(todo.reduce((a, x) => a + x.pay_amount, 0) * 100) / 100, AccountCode: loanBank.code }] } : null;
-    if (dry) return res.json({ ok: true, dry: true, org: plan.org, bank, cross, rate, approve, payments, spend, bills: todo.map(x => ({ number: x.number, pay_amount: x.pay_amount, approve: !!(x.approve || x.will_create), note: x.note || null })) });
+      LineItems: [{ Description: 'Paid for Xero ' + plan.org.toUpperCase() + ' (intercompany loan): ' + payTodo.map(x => x.number + ' ' + x.pay_amount.toFixed(2)).join(', '), Quantity: 1, UnitAmount: Math.round(payTodo.reduce((a, x) => a + x.pay_amount, 0) * 100) / 100, AccountCode: loanBank.code }] } : null;
+    const allocBodies = allocs.map(a => ({ credit_id: a.credit_id, credit_number: a.credit_number, bill: a.bill, body: { Allocations: [{ Invoice: { InvoiceID: a.bill_id || '(created by Create in Xero)' }, Amount: a.amount, Date: date }] } }));
+    if (dry) return res.json({ ok: true, dry: true, org: plan.org, bank, cross, rate, approve, allocations: allocBodies, payments, spend, bills: todo.map(x => ({ number: x.number, pay_amount: x.pay_amount, approve: !!(x.approve || x.will_create), note: x.note || null })) });
     const by = authUser(req) || 'system', rk = plan.run_key;
     return await _withXactLock('xero_run_pay:' + rk, { code: 'XERO_PAY_BUSY', message: 'This run is already being paid in Xero. Wait for it to finish, then refresh.' }, async () => {
       const out = { ok: true, org: plan.org, bank: bank.name, rate, approved: [], payments: [], errors: [] };
@@ -10916,7 +10961,19 @@ app.post('/api/supply/payments/pay', async (req, res) => {   // v28.305 (Ben 13-
           await pool.query(`UPDATE planner.payment_xero_bills SET status='AUTHORISED', updated_at=now() WHERE bill_id=$1`, [a.InvoiceID]).catch(() => {}); }
         catch (e) { out.errors.push('Approve failed: ' + e.message); } }
       if (out.errors.length) { out.ok = false; return res.status(502).json(out); }   // nothing paid when a bill could not be approved
-      for (let i = 0; i < todo.length; i++) { const x = todo[i], p = payments[i]; let lg;
+      // v28.755: allocate linked supplier credit notes BEFORE paying (logged first, once per credit note + bill); any failure = nothing paid
+      out.allocations = [];
+      for (const a of allocs) { let lg;
+        try { lg = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, amount, currency, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,'creating',$8) RETURNING id`,
+            [rk, plan.org, 'credit:' + a.credit_id + '>' + a.bill_id, a.credit_number + ' > ' + a.bill, a.amount, a.ccy, date, by])).rows[0].id; }
+        catch (e) { out.errors.push(a.credit_number + ' > ' + a.bill + ': ' + (/duplicate key/.test(e.message) ? 'already allocated from HORIZON' : e.message)); break; }
+        try { await xeroFetch(plan.org, '/api.xro/2.0/CreditNotes/' + a.credit_id + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: a.bill_id }, Amount: a.amount, Date: date }] } });
+          await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lg, 'allocation']);
+          out.allocations.push({ credit: a.credit_number, bill: a.bill, amount: a.amount, url: _xdocUrl('credit', a.credit_id) }); }
+        catch (e) { await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {}); out.errors.push('Allocate ' + a.credit_number + ' to ' + a.bill + ': ' + e.message); break; } }
+      if (out.errors.length) { out.ok = false; return res.status(502).json(out); }   // nothing paid when a credit note could not be allocated
+      const todo2 = payTodo;
+      for (let i = 0; i < todo2.length; i++) { const x = todo2[i], p = payments[i]; let lg;
         try { lg = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
             [rk, plan.org, x.invoice_id, x.number, bank.id, bank.name, x.pay_amount, x.ccy, rate, date, by])).rows[0].id; }
         catch (e) { out.errors.push(x.number + ': ' + (/duplicate key/.test(e.message) ? 'already paid from HORIZON' : e.message)); continue; }
@@ -14010,7 +14067,8 @@ supplySectionHandler = async (req, res, next) => {
             -- v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): an Other payment is paid in Xero against its
             -- own bill, so flag it as soon as no live bill with its reference is in its Xero org (doc org, else AU / UK by country). Read from the
             -- synced copy (planner.xero_bills), the same match the Paid > Xero run uses. Deposits are not checked (they go on the supplier payment bill).
-            CASE WHEN NOT d.is_deposit AND coalesce(trim(d.reference),'')<>'' THEN xbk.k IS NOT NULL END in_xero,
+            CASE WHEN NOT d.is_deposit AND coalesce(to_jsonb(d)->>'xero_doc_id','')<>'' THEN true WHEN NOT d.is_deposit AND coalesce(trim(d.reference),'')<>'' THEN xbk.k IS NOT NULL END in_xero,   -- v28.755: a hand-linked bill / credit note counts
+            to_jsonb(d)->>'xero_doc_type' xero_doc_type, to_jsonb(d)->>'xero_doc_id' xero_doc_id, to_jsonb(d)->>'xero_doc_region' xero_doc_region, to_jsonb(d)->>'xero_doc_number' xero_doc_number,
             to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id, to_char(d.date_paid,'YYYY-MM-DD') date_paid,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365); v28.426: date_paid was inside this comment (Payments Due showed paid Other payments and deposits as unpaid)
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
@@ -14204,19 +14262,19 @@ supplySectionHandler = async (req, res, next) => {
         const lines = (await pool.query(`
           SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, coalesce(o.supplier_name,'(none)') supplier,
             o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, 'po' source,
-            ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code, coalesce(o.prod_no,'') prod_no, 'UK' reg
+            ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code, coalesce(o.prod_no,'') prod_no, 'UK' reg, NULL::bigint oid
           FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND ${KIND('o.supplier_name')}
           UNION ALL
           SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
+            o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK', NULL
           FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND ${KIND('o.supplier_name')}
           UNION ALL
           SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
+            o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK', NULL
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND ${KIND('o.supplier_name')}
           ${_balxOn ? `UNION ALL
           SELECT to_char(bx.paid_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(bx.amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
+            o.po, round(bx.amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK', NULL
           FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0 AND ${KIND('o.supplier_name')}` : ''}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
@@ -14225,11 +14283,11 @@ supplySectionHandler = async (req, res, next) => {
               ELSE coalesce(nullif(xero_account_code,''),
                 (SELECT pn.xero_account_code FROM planner.prod_numbers pn
                    WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(deposits.prod_no,'')),'^P','')
-                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)) END, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
+                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)) END, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END, NULL
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
+            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END, id
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}`)).rows;
         // v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): each Other line says whether a live Xero bill
         // with its reference is in its org (synced copy), so the Paid runs list flags a run before Paid > Xero is opened.
@@ -14238,6 +14296,11 @@ supplySectionHandler = async (req, res, next) => {
               WHERE upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND upper(trim(split_part(invoice_number,' / ',1))) = ANY($1)`, [_oRefs])).rows.map(r => r.k));
             lines.forEach(l => { if (l.source === 'other' && l.reference) l.in_xero = _have.has(String(l.reg || 'UK').toLowerCase() + '|' + String(l.reference).trim().toUpperCase()); }); } }
         catch (e) { console.warn('[payments-report] in_xero: ' + e.message); }
+        // v28.755: a hand-linked Xero bill / credit note (migration 427) counts as in Xero, and the line says which document it is
+        try { const _oids = lines.filter(l => l.source === 'other' && l.oid != null).map(l => l.oid);
+          if (_oids.length) { const _lk = new Map((await pool.query(`SELECT id, to_jsonb(d)->>'xero_doc_type' t, to_jsonb(d)->>'xero_doc_id' x, to_jsonb(d)->>'xero_doc_region' r, to_jsonb(d)->>'xero_doc_number' n FROM planner.deposits d WHERE id = ANY($1::bigint[])`, [_oids])).rows.filter(r => r.x).map(r => [String(r.id), r]));
+            lines.forEach(l => { const k = l.oid != null && _lk.get(String(l.oid)); if (k) { l.in_xero = true; l.xero_doc = { type: k.t, id: k.x, region: k.r, number: k.n }; } }); } }
+        catch (e) { console.warn('[payments-report] xero_doc: ' + e.message); }
         // Sample-derived Other Payments: attach a per-account split (the sample's type/purpose × its Xero account code)
         // so the Payments Report Xero download can split the single total line across accounts. Register still shows the total.
         const _sampRefs = [...new Set(lines.filter(l => l.source === 'other' && /^SR-/i.test(l.reference || '')).map(l => l.reference))];
@@ -14267,7 +14330,7 @@ supplySectionHandler = async (req, res, next) => {
           g.total += Number(l.amount);
           if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
           g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '',
-            sample_split: (l.source === 'other') ? _sampleSplit(l.reference, l.amount) : null, in_xero: l.in_xero }); }   // v28.741 in_xero
+            sample_split: (l.source === 'other') ? _sampleSplit(l.reference, l.amount) : null, in_xero: l.in_xero, oid: l.oid != null ? String(l.oid) : undefined, xero_doc: l.xero_doc || undefined }); }   // v28.741 in_xero; v28.755 oid + linked Xero document
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         // base currency = the supplier's default currency (CONFIG), not a hardcoded USD
         const ccyRows = (await pool.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`)).rows;
@@ -14692,6 +14755,61 @@ app.post('/api/supply/deposit/:id', async (req, res) => {
     { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', date_likely_pay: 'date', reference: 'text',
       supplier_name: 'text', description: 'text', prod_no: 'text', country: 'text',
       xero_account_code: 'text', status: 'text' }, req.body, 'bigint');
+});
+// v28.755 (Ben 10-Nov-26): link an Other payment to its Xero bill OR supplier credit note by hand, in either org (migration 427).
+// Candidates: bills from the synced copy (planner.xero_bills), supplier credit notes read live from Xero (ACCPAYCREDIT, 10-minute memo
+// per org, only when the picker opens: the Xero daily limit is shared with live). Ranked by number / reference, supplier and amount.
+const _xcnMemo = new Map();
+async function xeroSupplierCredits(org) {
+  const m = _xcnMemo.get(org); if (m && Date.now() - m.at < 600000) return m.rows;
+  const rows = [];
+  for (let page = 1; page <= 5; page++) {
+    const j = await xeroFetch(org, '/api.xro/2.0/CreditNotes?page=' + page + '&order=' + encodeURIComponent('Date DESC') + '&where=' + encodeURIComponent('Type=="ACCPAYCREDIT" AND Status!="VOIDED" AND Status!="DELETED"'));
+    const cns = (j && j.CreditNotes) || [];
+    cns.forEach(c => rows.push({ type: 'credit', id: c.CreditNoteID, region: org, number: c.CreditNoteNumber || '', reference: c.Reference || '', contact: (c.Contact && c.Contact.Name) || '',
+      total: Number(c.Total) || 0, open: Number(c.RemainingCredit) || 0, ccy: String(c.CurrencyCode || '').toUpperCase(), status: String(c.Status || '').toUpperCase(), date: String(c.DateString || '').slice(0, 10) }));
+    if (cns.length < 100) break; }
+  _xcnMemo.set(org, { at: Date.now(), rows }); return rows;
+}
+const _xdocUrl = (type, id) => !id ? null : type === 'credit' ? 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + id : 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + id;
+app.get('/api/supply/other/:id/xero-candidates', async (req, res) => {
+  try {
+    const d = (await pool.query(`SELECT id, coalesce(reference,'') reference, coalesce(description,'') description, coalesce(supplier_name,'') supplier_name, amount FROM planner.deposits WHERE id=$1 AND NOT is_deposit`, [req.params.id])).rows[0];
+    if (!d) return res.status(404).json({ error: 'Other payment not found' });
+    const q = String(req.query.q || '').trim().toUpperCase(), amt = Math.abs(Number(d.amount) || 0);
+    const toks = [...new Set([d.reference].concat((d.reference.match(/\[([^\]]+)\]/g) || []).map(x => x.slice(1, -1))).concat(d.reference.split(/[\s\[\]]+/))
+      .map(x => String(x || '').trim().toUpperCase()).filter(x => x.length >= 5))];
+    const sup = String(d.supplier_name || '').toLowerCase().split(/[\s(]+/).filter(x => x.length >= 3)[0] || '';
+    const bills = (await pool.query(`SELECT invoice_id id, lower(region) region, invoice_number number, coalesce(reference,'') reference, coalesce(contact_name,'') contact, total, amount_due open,
+        upper(coalesce(currency_code,'')) ccy, upper(coalesce(status,'')) status, to_char(invoice_date,'YYYY-MM-DD') date FROM planner.xero_bills
+        WHERE upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND invoice_date >= current_date - 540`)).rows.map(b => Object.assign(b, { type: 'bill', total: Number(b.total) || 0, open: Number(b.open) || 0 }));
+    let credits = [], warn = [];
+    for (const org of ['uk', 'au']) { try { credits = credits.concat(await xeroSupplierCredits(org)); } catch (e) { warn.push('Could not read supplier credit notes from Xero ' + org.toUpperCase() + ': ' + e.message); } }
+    const score = x => { const num = String(x.number || '').toUpperCase(), ref = String(x.reference || '').toUpperCase(), con = String(x.contact || '').toLowerCase(); let s = 0;
+      if (q) { if (num.includes(q) || ref.includes(q)) s += 60; else if (!con.includes(q.toLowerCase())) return -1; else s += 25; }
+      if (toks.some(t => num === t || num.startsWith(t + ' /'))) s += 100; else if (toks.some(t => num.includes(t) || ref.includes(t) || t.includes(num) && num.length >= 5)) s += 50;
+      if (sup && con.includes(sup)) s += 20;
+      if (amt > 0 && Math.abs(x.total - amt) < 0.005) s += 40; else if (amt > 0 && Math.abs(x.total - amt) <= 1) s += 25;
+      if ((Number(d.amount) || 0) < 0 && x.type === 'credit') s += 10; if ((Number(d.amount) || 0) > 0 && x.type === 'bill') s += 5;
+      return s; };
+    const all = bills.concat(credits).map(x => Object.assign(x, { score: score(x), url: _xdocUrl(x.type, x.id) })).filter(x => x.score > (q ? 0 : 19)).sort((a, b) => b.score - a.score || String(b.date).localeCompare(String(a.date))).slice(0, 40);
+    res.set('Cache-Control', 'no-store').json({ ok: true, payment: { id: d.id, reference: d.reference, description: d.description, supplier: d.supplier_name, amount: Number(d.amount) || 0 }, candidates: all, warnings: warn });
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
+app.post('/api/supply/other/:id/xero-link', async (req, res) => {
+  const b = req.body || {}, by = authUser(req) || null;
+  try {
+    const d = (await pool.query(`SELECT id FROM planner.deposits WHERE id=$1 AND NOT is_deposit`, [req.params.id])).rows[0];
+    if (!d) return res.status(404).json({ error: 'Other payment not found' });
+    if (b.clear === true) await pool.query(`UPDATE planner.deposits SET xero_doc_type=NULL, xero_doc_id=NULL, xero_doc_region=NULL, xero_doc_number=NULL, xero_doc_linked_by=$2, xero_doc_linked_at=now() WHERE id=$1`, [d.id, by]);
+    else {
+      const type = String(b.type || ''), region = xeroRegion(b.region), id = String(b.doc_id || '').trim();
+      if (!['bill', 'credit'].includes(type) || !/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Choose a Xero bill or supplier credit note' });
+      await pool.query(`UPDATE planner.deposits SET xero_doc_type=$2, xero_doc_id=$3, xero_doc_region=$4, xero_doc_number=$5, xero_doc_linked_by=$6, xero_doc_linked_at=now() WHERE id=$1`,
+        [d.id, type, id, region, String(b.number || '').slice(0, 120) || null, by]); }
+    try { await invalidateSupplyCaches('deposit'); } catch (_) {} try { invalidateSupplyCaches('payment'); } catch (_) {}
+    res.json({ ok: true });
+  } catch (e) { if (/xero_doc_/.test(e.message)) return res.status(409).json({ error: 'Linking Xero documents needs migration 427' }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete a deposit / other-payment row. Other payments (is_deposit=false) delete freely. A deposit
 // (is_deposit=true) can only be deleted when NO purchase order is assigned to its reference; any

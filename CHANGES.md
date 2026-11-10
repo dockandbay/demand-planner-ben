@@ -1,3 +1,9 @@
+## v28.755 (10-Nov-26) Other Payments: link a Xero bill or supplier credit note by hand (migration 427)
+- Other Payments > Document > "Link Xero" opens a picker of Xero bills and supplier credit notes in BOTH orgs, best matches first (number, supplier, amount). Linked rows show the document (opens in Xero) with change / unlink.
+- Before, the only link was an exact match of the reference to a bill number in one org (UK unless country AU), so e.g. "8 [SYDIR02873952]" (a Xero AU bill) showed "not in Xero" and blocked Paid > Xero.
+- Paid > Xero: a linked bill is paid; a linked credit note is allocated against the run's bill(s) first and only the net is paid from the bank (the bank amount = bills less credits). A credit not linked to its credit note, or a document in the other org, blocks the run with a clear message.
+- Migration 427 (planner.deposits xero_doc_* columns). No new env vars, no new cron routes.
+
 ## v28.754 (10-Nov-26) Links to Other Payments open that payment
 - Clicking an Other payment in Payments Due, the Payments report, Cash Flow or an Action now opens Other Payments searched to that reference (a paid one was hidden by the default Unpaid filter).
 - No migration, no new env vars, no new cron routes.
