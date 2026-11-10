@@ -392,12 +392,12 @@ async function buildTierRecommendations() {
         WHERE market_tier IN ('A','B','C')
           AND (core_seasonal IN ('Core','Seasonal') OR is_core ILIKE 'true')),
       win AS (SELECT (date_trunc('month', max(month)) - interval '11 months')::date lo,
-                     to_char(max(month),'YYYY-MM') hi FROM planner.sales_actuals),
+                     to_char(max(month),'YYYY-MM') hi FROM planner.sales_actuals_final),
       perf AS (
         SELECT g.sku, g.assigned, g.ctx, g.category,
           CASE WHEN g.ctx='Seasonal' THEN coalesce(max(sa.mrev),0) ELSE coalesce(sum(sa.mrev),0) END metric
         FROM grp g
-        LEFT JOIN (SELECT sku, month, sum(revenue) mrev FROM planner.sales_actuals
+        LEFT JOIN (SELECT sku, month, sum(revenue) mrev FROM planner.sales_actuals_final
                    WHERE month >= (SELECT lo FROM win) GROUP BY 1,2) sa ON sa.sku=g.sku
         GROUP BY 1,2,3,4),
       cum AS (SELECT *, sum(metric) OVER (PARTITION BY ctx ORDER BY metric DESC)
@@ -648,7 +648,7 @@ async function buildSKURAW() {
                       AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)
                 ) z WHERE wh IS NOT NULL GROUP BY sku, wh`),
     pool.query(`SELECT sku, country co, channel ch, to_char(month,'YYYY_MM') ym, units::int u
-                FROM planner.sales_actuals`),
+                FROM planner.sales_actuals_final`),
     pool.query(`SELECT i.sku, i.destination_warehouse wh, i.reference ref, i.quantity::int qty,
                        to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.source_type type,
                        coalesce(su.name,'') supplier,
@@ -701,7 +701,7 @@ async function buildSKURAW() {
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img, nullif(trim(p.colour_swatch_url),'') sw
                 FROM planner.products p
                 WHERE NOT coalesce(p.in_planning_scope,false) AND p.sku NOT IN (${NON_SKU_LIST})
-                  AND EXISTS (SELECT 1 FROM planner.sales_actuals sa WHERE sa.sku = p.sku AND sa.month >= (current_date - interval '36 months'))`),
+                  AND EXISTS (SELECT 1 FROM planner.sales_actuals_final sa WHERE sa.sku = p.sku AND sa.month >= (current_date - interval '36 months'))`),
   ]);
   const p = {};
   for (const r of prods.rows)
@@ -1842,7 +1842,7 @@ const _trendsCache = new Map();       // key -> { at, data }
 let _trMeta = null, _trMetaAt = 0;    // cached cutoff/plan-year (avoids a max(month) round-trip per request)
 async function _trendsMeta() {
   if (_trMeta && Date.now() - _trMetaAt < _TRENDS_TTL) return _trMeta;
-  const cut = (await pool.query(`SELECT extract(month from max(month))::int mm, extract(year from max(month))::int yy FROM planner.sales_actuals`)).rows[0];
+  const cut = (await pool.query(`SELECT extract(month from max(month))::int mm, extract(year from max(month))::int yy FROM planner.sales_actuals_final`)).rows[0];
   _trMeta = { cutoffNum: Math.max(1, (cut.mm || 1) - 1), planYear: (cut.yy || 2026) + 1 }; _trMetaAt = Date.now();
   return _trMeta;
 }
@@ -1950,7 +1950,7 @@ app.get('/api/demand/trends/plan-sanity', async (req, res) => {
     const SEP = String.fromCharCode(31);
     const [actR, planR, priorR, availR] = await Promise.all([
       pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, extract(year from sa.month)::int yr, sum(sa.units)::numeric units
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
+        FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku
         WHERE extract(month from sa.month) BETWEEN $1 AND $2 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4`, [W.from, W.to]),
       pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
@@ -2001,7 +2001,7 @@ app.get('/api/demand/trends/multi-year', async (req, res) => {
     const [mR, planR] = await Promise.all([
       pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, extract(year from sa.month)::int yr, extract(month from sa.month)::int mo,
           sum(sa.units)::numeric units, count(DISTINCT sa.sku) FILTER (WHERE sa.units>0) active
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
+        FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku
         WHERE extract(month from sa.month) BETWEEN $1 AND $2 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4,5`, [W.from, W.to]),
       pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
@@ -2051,12 +2051,12 @@ app.get('/api/demand/trends/channel-mix', async (req, res) => {
     const W = _trendsWin(req, 12);   // channel mix is rolling-12; only the grain (category|subcategory) applies here
     const out = await _trendsCached('cm|' + W.grain, req.query.refresh === '1', async () => {
     const r = await pool.query(`
-      WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals ),
+      WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals_final ),
       win AS ( SELECT cutoff, (cutoff - interval '11 months')::date start FROM bounds ),
       sm AS (
         SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, sa.sku, sa.month,
           sum(sa.units) FILTER (WHERE sa.channel='DTC') dtc, sum(sa.units) FILTER (WHERE sa.channel='FBA') fba
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
+        FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
         WHERE sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3,4,5 )
       SELECT category, label, market, sum(coalesce(dtc,0))::numeric dtc_units, sum(coalesce(fba,0))::numeric fba_units,
         count(*) FILTER (WHERE coalesce(dtc,0)>0) dtc_skumonths,
@@ -2087,7 +2087,7 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
     const W = _trendsWin(req, 12);
     const out = await _trendsCached('tm|' + W.grain, req.query.refresh === '1', async () => {
       const r = await pool.query(`
-        WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals ),
+        WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals_final ),
         win AS ( SELECT cutoff, (cutoff - interval '11 months')::date start FROM bounds )
         SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market,
           sum(sa.units) FILTER (WHERE p.variant_type='SET' AND sa.channel='DTC')::numeric dtc_set,
@@ -2097,7 +2097,7 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
           sum(sa.units) FILTER (WHERE p.variant_type='MASTER' AND sa.channel='FBA')::numeric fba_master,
           sum(sa.units) FILTER (WHERE sa.channel='FBA')::numeric fba_total,
           sum(sa.units)::numeric total_units
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
+        FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
         WHERE sa.channel IN ('DTC','FBA') AND sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3`);
       const rows = r.rows.map(x => {
         const ds = Number(x.dtc_set) || 0, dm = Number(x.dtc_master) || 0, dsm = ds + dm;
@@ -2155,7 +2155,7 @@ app.get('/api/demand/stock-cover', async (_req, res) => {
     const dem = (await pool.query(`
       SELECT upper(sa.country) co, sa.channel ch, to_char(sa.month, 'YYYY-MM') ym,
              round(sum(sa.units * coalesce(p.cost, 0))::numeric, 2) dem_val
-      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku = sa.sku
+      FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku = sa.sku
       GROUP BY 1, 2, 3`)).rows;
     let target = 12; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_cover_target_wks'`)).rows[0]; if (r && Number(r.value) > 0) target = Number(r.value); } catch (e) {}
     res.json({ soh, dem, target });
@@ -2244,13 +2244,13 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
       FROM planner.inventory_snapshots GROUP BY 1,2,3`);
     const _qDem = pool.query(`SELECT to_char(month,'YYYY-MM') m, upper(country) co,
         CASE WHEN channel='FBA' THEN 'FBA' ELSE '3PL' END pool, sum(units)::float u
-      FROM planner.sales_actuals GROUP BY 1,2,3`);
+      FROM planner.sales_actuals_final GROUP BY 1,2,3`);
     const _qLead = pool.query(`SELECT 'UK' co, avg(china_to_uk_lead_time_weeks) l FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'US', avg(china_to_us_lead_time_weeks) FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'EU', avg(china_to_eu_lead_time_weeks) FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'AU', avg(china_to_au_lead_time_weeks) FROM planner.products WHERE in_planning_scope`);
     const _qCost = pool.query(`SELECT upper(sa.country) co, sum(sa.units*coalesce(p.cost,0))/nullif(sum(sa.units),0) c
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku WHERE coalesce(p.cost,0)>0 GROUP BY 1`);
+        FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku WHERE coalesce(p.cost,0)>0 GROUP BY 1`);
     const _qDates = pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`);
     [_qCfg, _qSoh, _qDem, _qLead, _qCost, _qDates].forEach((p) => p.catch(() => {}));   // failures surface through the awaits below
     try { const cr = (await _qCfg).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); if (Number.isFinite(Number(o.halfLifeMo)) && Number(o.halfLifeMo) >= 0) cfg.halfLifeMo = Number(o.halfLifeMo); } } catch (e) {}
@@ -2314,7 +2314,7 @@ app.get('/api/demand/forecast-anomalies', async (req, res) => {
     // anomalies. Detect it: if the newest candidate month's total actuals are < 60% of the older months' average,
     // treat it as incomplete and shift the window back one month.
     const cand = []; for (let k = 1; k <= 4; k++) cand.push(i2m(curIdx - k));
-    const tot = {}; (await pool.query(`SELECT to_char(month,'YYYY-MM') m, sum(units)::float u FROM planner.sales_actuals WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1`, [cand])).rows.forEach(r => { tot[r.m] = r.u; });
+    const tot = {}; (await pool.query(`SELECT to_char(month,'YYYY-MM') m, sum(units)::float u FROM planner.sales_actuals_final WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1`, [cand])).rows.forEach(r => { tot[r.m] = r.u; });
     const older = [tot[cand[2]] || 0, tot[cand[3]] || 0].filter(x => x > 0);
     const med = older.length ? older.reduce((a, b) => a + b, 0) / older.length : 0;
     let startK = 1; if (med > 0 && (tot[cand[0]] || 0) < med * 0.6) startK = 2;   // newest looks incomplete → shift back a month
@@ -2322,7 +2322,7 @@ app.get('/api/demand/forecast-anomalies', async (req, res) => {
     const fwd = []; for (let k = 0; k < 3; k++) fwd.push(i2m(curIdx + k));                       // current + next 2 (forward forecast)
     const allM = [...new Set([...lastComplete, ...fwd])];
     const act = (await pool.query(`SELECT sku, upper(country) co, channel ch, to_char(month,'YYYY-MM') m, sum(units)::float u
-      FROM planner.sales_actuals WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1,2,3,4`, [lastComplete])).rows;
+      FROM planner.sales_actuals_final WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1,2,3,4`, [lastComplete])).rows;
     const fc = (await pool.query(`SELECT sku, upper(split_part(warehouse,'_',1)) co, channel ch, to_char(month,'YYYY-MM') m, sum(units)::float u
       FROM planner.forecast_outputs WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1,2,3,4`, [allM])).rows;
     const meta = {}; (await pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') nm, coalesce(category,'') cat,
@@ -22603,7 +22603,8 @@ const OL_HZ_TAGGED = `EXISTS (SELECT 1 FROM planner.commission_overrides co JOIN
   AND upper(trim(co.order_ref)) IN (upper(coalesce(l.reference,'')), upper(coalesce(l.so_number,''))))`;
 const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND (NOT l.is_custom OR coalesce(l.agent_code,'')<>'' OR ${OL_HZ_TAGGED})
   AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = ${OL_SKU} AND coalesce(p.category_name_final,'') <> '')
-  AND NOT (l.qty > ${Number(thr)} AND EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded))`;
+  AND NOT EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded
+    AND (l.qty > ${Number(thr)} OR NOT EXISTS (SELECT 1 FROM planner.order_lines l2 WHERE l2.sale_id = l.sale_id AND l2.qty > ${Number(thr)})))`;   // v28.759 (Ben 10-Nov-26): an excluded order loses its over-threshold lines; an order flagged by another anomaly rule (no line over the threshold) is excluded whole
 // Cut per market x channel: the Fulfil cut-over month, or none (monthly spread throughout) for the monthly-only channels.
 async function _olCuts(db, thr) {
   const from = await _olFulfilFrom(), mo = await _olMonthlyOnly();
@@ -22686,6 +22687,11 @@ async function salesImportRange(opts, by) {
 // Monthly actuals from Fulfil (planner.sales_actuals_fulfil, same shape as sales_actuals): the demand-date month, demand lines only
 // (OL_LIVE_SQL: live states, mapped market + channel, real HORIZON products, no key accounts / untagged custom, excluded anomaly lines out).
 // revenue = GBP; free (zero-price) units count in units and units_free. Then the anomaly list is rebuilt.
+// v28.759: rebuild in the background after an exclusion / threshold change; several clicks in a row give one rebuild (the last one wins).
+let _sfbTimer = null, _sfbBusy = null;
+function salesFulfilBuildSoon(why) { clearTimeout(_sfbTimer); _sfbTimer = setTimeout(async () => { if (_sfbBusy) { salesFulfilBuildSoon(why); return; }
+  _sfbBusy = salesFulfilBuild().then(r => { _dataCache = null; console.log('[sales-final] rebuilt after ' + why + ': ' + r.monthly_rows + ' monthly rows'); })
+    .catch(e => console.warn('[sales-final] rebuild failed: ' + e.message)).finally(() => { _sfbBusy = null; }); }, 5000); }
 async function salesFulfilBuild() {
   const t0 = Date.now(), thr = await _olThreshold(), client = await pool.connect();
   try {
@@ -22695,6 +22701,23 @@ async function salesFulfilBuild() {
       SELECT ${OL_SKU}, l.country, l.channel, date_trunc('month', l.demand_date)::date, sum(l.qty), round(sum(coalesce(l.revenue_gbp,0)),2), round(sum(coalesce(l.revenue_local,0)),2), max(l.local_ccy),
         sum(CASE WHEN l.is_free THEN l.qty ELSE 0 END), 'fulfil', now()
       FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
+    // v28.759: the same demand lines by ISO week over the whole history (the 'fulfil_weekly' source of planner.sales_actuals_final)
+    await client.query(`DELETE FROM planner.sales_actuals_fulfil_weekly`);
+    const w = await client.query(`INSERT INTO planner.sales_actuals_fulfil_weekly (sku, country, channel, iso_week, units, revenue, revenue_local, local_ccy, units_free, loaded_at)
+      SELECT ${OL_SKU}, l.country, l.channel, l.iso_week, sum(l.qty), round(sum(coalesce(l.revenue_gbp,0)),2), round(sum(coalesce(l.revenue_local,0)),2), max(l.local_ccy),
+        sum(CASE WHEN l.is_free THEN l.qty ELSE 0 END), now()
+      FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.iso_week IS NOT NULL GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
+    // v28.759: auto cut-over per market x channel = the first FULL month of real Fulfil volume (the first month with at least a quarter of the
+    // series' median monthly units; the month after it when its first order is after the 3rd). Hand-set rows (auto=false) are kept.
+    const cuts = (await client.query(`WITH m AS (SELECT l.country, l.channel, date_trunc('month', l.demand_date)::date mo, sum(l.qty) u, min(l.demand_date) d0
+          FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL GROUP BY 1,2,3),
+        med AS (SELECT country, channel, percentile_cont(0.5) WITHIN GROUP (ORDER BY u) md FROM m GROUP BY 1,2),
+        f AS (SELECT DISTINCT ON (m.country, m.channel) m.country, m.channel, m.mo, m.d0 FROM m JOIN med USING (country, channel) WHERE m.u >= 0.25 * med.md ORDER BY m.country, m.channel, m.mo)
+      SELECT country, channel, CASE WHEN extract(day FROM d0) > 3 THEN (mo + interval '1 month')::date ELSE mo END fulfil_from FROM f`)).rows;
+    if (cuts.length) await client.query(`INSERT INTO planner.sales_source_cuts (country, channel, fulfil_from, auto, updated_by, updated_at)
+      SELECT * , true, 'import', now() FROM unnest($1::text[], $2::text[], $3::date[])
+      ON CONFLICT (country, channel) DO UPDATE SET fulfil_from = excluded.fulfil_from, updated_by = 'import', updated_at = now() WHERE planner.sales_source_cuts.auto`,
+      [cuts.map(c => c.country), cuts.map(c => c.channel), cuts.map(c => c.fulfil_from)]);
     await client.query(`DELETE FROM planner.order_anomalies`);
     const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL`;
     const a1 = await client.query(`INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
@@ -22717,7 +22740,7 @@ async function salesFulfilBuild() {
         sum(l.qty) FILTER (WHERE l.is_free)::int || ' free units (count as demand, not in ASP)'
       FROM planner.order_lines l WHERE ${LIVE} AND l.is_free GROUP BY l.sale_id HAVING sum(l.qty) FILTER (WHERE l.is_free) >= 10`);
     await client.query('COMMIT');
-    return { monthly_rows: m.rowCount, anomalies: { line_over_threshold: a1.rowCount, order_over_p999: a2.rowCount, duplicate_reference: a3.rowCount, zero_price: a4.rowCount }, threshold: thr, ms: Date.now() - t0 };
+    return { monthly_rows: m.rowCount, weekly_rows: w.rowCount, cuts: cuts.length, anomalies: { line_over_threshold: a1.rowCount, order_over_p999: a2.rowCount, duplicate_reference: a3.rowCount, zero_price: a4.rowCount }, threshold: thr, ms: Date.now() - t0 };
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
 }
 // Reconcile: per market x channel x month, today's sales_actuals (sheet) vs sales_actuals_fulfil, units and GBP revenue.
@@ -22787,6 +22810,37 @@ app.get('/api/demand/historical-compare', async (req, res) => {
     res.json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.759 (Ben 10-Nov-26): the sales actuals SOURCE switch (migration 429). GET = current source + cut-over months; POST {source} (admin)
+// = 'sheet' (Cin7 historical + Fulfil current) | 'fulfil_monthly' | 'fulfil_weekly'; POST {cut:{country, channel, fulfil_from|null}} sets
+// (or with null hands back to auto) one cut-over month. Every reader of planner.sales_actuals_final follows at once; caches are rebuilt.
+const SALES_SOURCES = { sheet: 'Cin7 historical + Fulfil current', fulfil_monthly: 'Fulfil historical monthly', fulfil_weekly: 'Fulfil historical weekly' };
+app.get('/api/demand/sales-source', async (req, res) => {
+  try { const src = (((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_actuals_source'`)).rows[0] || {}).value) || 'sheet';
+    const cuts = (await pool.query(`SELECT country, channel, to_char(fulfil_from,'YYYY-MM') fulfil_from, auto, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at FROM planner.sales_source_cuts ORDER BY 1,2`).catch(() => ({ rows: [] }))).rows;
+    const runs = (await pool.query(`SELECT mode, scope, lines_saved, to_char(finished_at,'YYYY-MM-DD"T"HH24:MI') at FROM planner.sales_import_runs ORDER BY id DESC LIMIT 1`).catch(() => ({ rows: [] }))).rows;
+    res.json({ source: src, label: SALES_SOURCES[src] || src, options: SALES_SOURCES, cuts, last_import: runs[0] || null }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/sales-source', async (req, res) => {
+  if (!(await _salesImportAdmin(req, res))) return;
+  try { const b = req.body || {}, by = authUser(req) || 'admin';
+    if (b.cut) { const c = b.cut, co = String(c.country || '').toUpperCase(), ch = String(c.channel || '').toUpperCase();
+      if (!/^[A-Z]{2}$/.test(co) || !/^[A-Z0-9]{2,4}$/.test(ch)) return res.status(400).json({ error: 'country and channel required' });
+      if (c.fulfil_from == null || c.fulfil_from === '') await pool.query(`UPDATE planner.sales_source_cuts SET auto = true, updated_by = $3, updated_at = now() WHERE country = $1 AND channel = $2`, [co, ch, by]);
+      else { if (!/^\d{4}-\d{2}$/.test(String(c.fulfil_from))) return res.status(400).json({ error: 'fulfil_from YYYY-MM' });
+        await pool.query(`INSERT INTO planner.sales_source_cuts (country, channel, fulfil_from, auto, updated_by, updated_at) VALUES ($1,$2,$3::date,false,$4,now())
+          ON CONFLICT (country, channel) DO UPDATE SET fulfil_from = excluded.fulfil_from, auto = false, updated_by = excluded.updated_by, updated_at = now()`, [co, ch, c.fulfil_from + '-01', by]); } }
+    if (b.source != null) { if (!SALES_SOURCES[b.source]) return res.status(400).json({ error: 'source must be one of ' + Object.keys(SALES_SOURCES).join(', ') });
+      if (b.source !== 'sheet') { const n = (await pool.query(`SELECT (SELECT count(*) FROM planner.sales_source_cuts)::int c, (SELECT count(*) FROM planner.sales_actuals_fulfil)::int f`)).rows[0];
+        if (!n.c || !n.f) return res.status(409).json({ error: 'No Fulfil history built yet: import and build first.' }); }
+      await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('sales_actuals_source',$1) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, [b.source]);
+      try { await pool.query(`INSERT INTO planner.sales_import_runs (finished_at, mode, scope, run_by) VALUES (now(), 'switch', $1, $2)`, [b.source, by]); } catch (_) {} }
+    _dataCache = null; invalidateBiCache(); try { invalidateSupplyCaches(); } catch (_) {}
+    refreshDataCache().catch(e => console.warn('[sales-source] cache rebuild: ' + e.message));
+    const src = (((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_actuals_source'`)).rows[0] || {}).value) || 'sheet';
+    res.json({ ok: true, source: src, label: SALES_SOURCES[src] || src }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // n8n entry (inside the /api/cron/ secret bracket): body {mode:'range', channels, from, to} for the history load (call while more), else the
 // daily incremental sync (changed lines + changed order headers since the last run) followed by the monthly build.
 app.post('/api/cron/sales-import', async (req, res) => {
@@ -22800,12 +22854,15 @@ app.post('/api/cron/sales-import', async (req, res) => {
 app.get('/api/demand/order-exclusions', async (req, res) => {
   try {
     const thr = await _olThreshold(), q = String(req.query.q || '').trim().slice(0, 80), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%';
-    const rows = (await pool.query(`WITH big AS (SELECT * FROM planner.order_lines WHERE qty > $1 AND sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed'))
+    const rows = (await pool.query(`WITH an AS (SELECT sale_id, string_agg(rule || ': ' || coalesce(detail,''), ' | ' ORDER BY rule) rules FROM planner.order_anomalies GROUP BY 1),
+      big AS (SELECT l.* FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed')
+        AND (l.qty > $1 OR (l.sale_id IN (SELECT sale_id FROM an) AND NOT EXISTS (SELECT 1 FROM planner.order_lines l2 WHERE l2.sale_id = l.sale_id AND l2.qty > $1))))
       SELECT b.sale_id, max(b.so_number) so, max(b.reference) reference, max(b.customer) customer, max(b.fulfil_channel) fulfil_channel, max(b.country) country, max(b.channel) channel,
         max(b.order_date)::text order_date, max(b.ship_date)::text ship_date, bool_or(b.is_key_account) key_account, bool_or(b.is_custom) custom,
         json_agg(json_build_object('sku', b.sku, 'qty', b.qty) ORDER BY b.qty DESC) lines, sum(b.qty) flagged_units,
         (SELECT sum(qty) FROM planner.order_lines o WHERE o.sale_id = b.sale_id) order_units,
-        coalesce(bool_or(x.excluded), false) excluded, max(x.note) note, max(x.changed_by) changed_by, max(x.changed_at)::text changed_at
+        coalesce(bool_or(x.excluded), false) excluded, max(x.note) note, max(x.changed_by) changed_by, max(x.changed_at)::text changed_at,
+        (SELECT rules FROM an WHERE an.sale_id = b.sale_id) rules
       FROM big b LEFT JOIN planner.order_exclusions x ON x.sale_id = b.sale_id
       WHERE ($2 = '' OR b.so_number ILIKE $3 OR b.reference ILIKE $3 OR b.customer ILIKE $3 OR b.sku ILIKE $3 OR b.fulfil_channel ILIKE $3)
       GROUP BY b.sale_id ORDER BY max(b.order_date) DESC NULLS LAST LIMIT 500`, [thr, q, like])).rows;
@@ -22820,6 +22877,7 @@ app.post('/api/demand/order-exclusions/:sale', async (req, res) => {
     await pool.query(`INSERT INTO planner.order_exclusions (sale_id, so_number, excluded, note, changed_by, changed_at) VALUES ($1,$2,$3,$4,$5,now())
       ON CONFLICT (sale_id) DO UPDATE SET excluded=excluded.excluded, note=coalesce(excluded.note, planner.order_exclusions.note), changed_by=excluded.changed_by, changed_at=now()`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
     await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
+    salesFulfilBuildSoon('exclusion ' + sale);   // v28.759: the final view follows the exclusion
     res.json({ ok: true, weekly: await weeklyActualsBuild() });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -22827,6 +22885,7 @@ app.post('/api/demand/order-exclusions-threshold', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const v = Math.round(Number((req.body || {}).value)); if (!(v >= 1 && v <= 100000)) return res.status(400).json({ error: 'threshold must be a whole number of units' });
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('order_exclusion_threshold', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]);
+    salesFulfilBuildSoon('threshold ' + v);
     res.json({ ok: true, threshold: v, weekly: await weeklyActualsBuild() });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -22894,6 +22953,103 @@ async function forecastWeeklyMigrate(confirm, by) {
 app.post('/api/demand/forecast-weekly/migrate', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { res.json(Object.assign({ ok: true }, await forecastWeeklyMigrate((req.body || {}).confirm === true, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.759 (Ben 10-Nov-26): DEMAND > Plan (weekly). ONE forecast kept in step with the monthly plan: planner.forecast_outputs (monthly,
+// read by the buy plan) stays the stored forecast. Weeks are worked out from it: each month's total is spread over its DAYS by last year's
+// weekly shape (the sub-category x market x channel's units per ISO week of year, else market x channel, else even), and a week = the sum
+// of its days, so a week straddling two months takes its days from each (Ben: split by days). Editing a week PINS it (planner.forecast_weekly,
+// version 'pinned') and adds the change to the month(s) it touches, split by its days in each, so the monthly plan moves too; the rest of
+// the month re-spreads around pinned weeks. Monthly edits made anywhere flow to the weeks the same way (pins kept).
+const _pwWh = (country, channel) => country.toLowerCase() + '_' + (channel === 'FBA' ? 'fba' : '3pl');
+const _pwDays = (a, n) => { const out = [], t = new Date(a + 'T00:00:00Z'); for (let i = 0; i < n; i++) { out.push(t.toISOString().slice(0, 10)); t.setUTCDate(t.getUTCDate() + 1); } return out; };
+const _pwMonday = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+// weekly shape: week-of-year (1..53) -> weight, per sub-category (fallback: the series' market x channel, else flat)
+async function _pwShapes(country, channel) {
+  const rows = (await pool.query(`SELECT coalesce(p.subcategory,'') sub, extract(week FROM w.iso_week)::int woy, sum(w.units)::float8 u
+    FROM planner.sales_actuals_fulfil_weekly w LEFT JOIN planner.products p ON p.sku = w.sku
+    WHERE w.country = $1 AND w.channel = $2 AND w.iso_week >= (current_date - 371) AND w.iso_week < (current_date - 6) GROUP BY 1,2`, [country, channel]).catch(() => ({ rows: [] }))).rows;
+  const sub = {}, all = {}; rows.forEach(r => { (sub[r.sub] = sub[r.sub] || {})[r.woy] = r.u; all[r.woy] = (all[r.woy] || 0) + r.u; });
+  const norm = o => { const v = Object.values(o).reduce((a, b) => a + b, 0); return v > 0 ? o : null; };
+  return { sub: Object.fromEntries(Object.entries(sub).filter(([, o]) => norm(o) && Object.keys(o).length >= 26)), all: norm(all) };
+}
+const _pwWoy = d => { const t = new Date(d + 'T00:00:00Z'); const th = new Date(t); th.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7)); const y1 = new Date(Date.UTC(th.getUTCFullYear(), 0, 4)); return 1 + Math.round(((th - y1) / 86400000 - 3 + ((y1.getUTCDay() + 6) % 7)) / 7); };
+// Spread one series: months {ym: total} + pinned {monday: units} -> weeks {monday: units} (fractional), over the given week range.
+function _pwSpread(months, pinned, shape, wkFrom, wkTo, dayOut) {
+  const dayW = d => { const w = shape ? (shape[_pwWoy(_pwMonday(d))] || 0) : 0; return w > 0 ? w : (shape ? 0.05 * (Object.values(shape).reduce((a, b) => a + b, 0) / 52) : 1); };
+  const weeks = {}, pinnedDays = {};
+  Object.entries(pinned || {}).forEach(([mon, u]) => _pwDays(mon, 7).forEach(d => { pinnedDays[d] = Number(u) / 7; }));
+  Object.entries(months).forEach(([ym, tot]) => {
+    const y = +ym.slice(0, 4), m = +ym.slice(5, 7), nd = new Date(Date.UTC(y, m, 0)).getUTCDate(), days = _pwDays(ym + '-01', nd);
+    const pinSum = days.reduce((a, d) => a + (pinnedDays[d] || 0), 0), free = days.filter(d => !(d in pinnedDays));
+    let rem = Number(tot) - pinSum, scale = 1; if (rem < 0) { scale = pinSum > 0 ? Number(tot) / pinSum : 0; rem = 0; }
+    const wsum = free.reduce((a, d) => a + dayW(d), 0);
+    days.forEach(d => { const v = (d in pinnedDays) ? pinnedDays[d] * scale : (wsum > 0 ? rem * dayW(d) / wsum : 0); const mon = _pwMonday(d); if (dayOut) dayOut[d] = v; if (mon >= wkFrom && mon <= wkTo) weeks[mon] = (weeks[mon] || 0) + v; });
+  });
+  return weeks;
+}
+async function planWeekly(q) {
+  const country = String(q.country || 'UK').toUpperCase(), channel = String(q.channel || 'DTC').toUpperCase(), wh = _pwWh(country, channel);
+  const nW = Math.min(Math.max(Number(q.weeks) || 26, 4), 78), back = Math.min(Math.max(Number(q.back) || 8, 0), 52);
+  const thisMon = _pwMonday(new Date().toISOString().slice(0, 10)), t0 = new Date(thisMon + 'T00:00:00Z'); t0.setUTCDate(t0.getUTCDate() - 7 * back);
+  const wkFrom = t0.toISOString().slice(0, 10), wks = []; for (let i = 0; i < nW + back; i++) { const t = new Date(t0); t.setUTCDate(t.getUTCDate() + 7 * i); wks.push(t.toISOString().slice(0, 10)); }
+  const wkTo = wks[wks.length - 1], mFrom = wkFrom.slice(0, 7) + '-01', mTo = wkTo.slice(0, 7) + '-01';
+  const qs = String(q.q || '').trim().slice(0, 60), cat = String(q.cat || '').trim(), sub = String(q.sub || '').trim();
+  const prods = (await pool.query(`SELECT p.sku, p.product_name name, coalesce(p.category_name_final,'') cat, coalesce(p.subcategory,'') sub FROM planner.products p
+    WHERE p.sku IN (SELECT DISTINCT sku FROM planner.forecast_outputs WHERE warehouse = $1 AND channel = $2 AND month BETWEEN $3 AND $4 AND units <> 0)
+      AND ($5 = '' OR p.sku ILIKE '%' || $5 || '%' OR p.product_name ILIKE '%' || $5 || '%') AND ($6 = '' OR p.category_name_final = $6) AND ($7 = '' OR p.subcategory = $7)
+    ORDER BY 3, 4, 1 LIMIT 400`, [wh, channel, mFrom, mTo, qs, cat, sub])).rows;
+  const skus = prods.map(p => p.sku);
+  const fo = (await pool.query(`SELECT sku, to_char(month,'YYYY-MM') ym, units FROM planner.forecast_outputs WHERE warehouse = $1 AND channel = $2 AND month BETWEEN $3 AND $4 AND sku = ANY($5)`, [wh, channel, mFrom, mTo, skus])).rows;
+  const pins = (await pool.query(`SELECT sku, to_char(iso_week,'YYYY-MM-DD') wk, units FROM planner.forecast_weekly WHERE version = 'pinned' AND country = $1 AND channel = $2 AND sku = ANY($3) AND iso_week BETWEEN $4 AND $5`, [country, channel, skus, wkFrom, wkTo]).catch(() => ({ rows: [] }))).rows;
+  const ly = (await pool.query(`SELECT sku, to_char(iso_week + 364,'YYYY-MM-DD') wk, sum(units)::float8 u FROM planner.sales_actuals_fulfil_weekly WHERE country = $1 AND channel = $2 AND sku = ANY($3) AND iso_week BETWEEN ($4::date - 364) AND ($5::date - 364) GROUP BY 1,2`, [country, channel, skus, wkFrom, wkTo]).catch(() => ({ rows: [] }))).rows;
+  const act = (await pool.query(`SELECT sku, to_char(iso_week,'YYYY-MM-DD') wk, sum(units)::float8 u FROM planner.sales_actuals_fulfil_weekly WHERE country = $1 AND channel = $2 AND sku = ANY($3) AND iso_week BETWEEN $4 AND $5 GROUP BY 1,2`, [country, channel, skus, wkFrom, thisMon]).catch(() => ({ rows: [] }))).rows;
+  const shp = await _pwShapes(country, channel);
+  const by = k => { const o = {}; return { o, add: (s, a, v) => { (o[s] = o[s] || {})[a] = (o[s][a] || 0) + Number(v); } }; };
+  const M = by(), P = by(), L = by(), A = by(); fo.forEach(r => M.add(r.sku, r.ym, r.units)); pins.forEach(r => P.add(r.sku, r.wk, r.units)); ly.forEach(r => L.add(r.sku, r.wk, r.u)); act.forEach(r => A.add(r.sku, r.wk, r.u));
+  const rows = prods.map(p => { const w = _pwSpread(M.o[p.sku] || {}, P.o[p.sku] || {}, shp.sub[p.sub] || shp.all, wkFrom, wkTo);
+    return Object.assign(p, { fc: Object.fromEntries(wks.map(k => [k, Math.round((w[k] || 0) * 10) / 10])), pinned: Object.keys(P.o[p.sku] || {}), ly: L.o[p.sku] || {}, act: A.o[p.sku] || {}, months: M.o[p.sku] || {} }); });
+  return { country, channel, warehouse: wh, weeks: wks, this_week: thisMon, rows, shape: shp.all ? 'last year weekly shape' : 'even (no weekly history)', capped: prods.length >= 400 };
+}
+app.get('/api/demand/plan-weekly', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.query || {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Edit one week: pin it and move the difference into the month(s) it touches by its days there (whole units, the largest share takes the rounding).
+app.post('/api/demand/plan-weekly/cell', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit)) return res.status(403).json({ error: 'Demand edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const b = req.body || {}, country = String(b.country || '').toUpperCase(), channel = String(b.channel || '').toUpperCase(), sku = String(b.sku || '').trim(), wk = String(b.iso_week || ''), units = Number(b.units);
+  if (!sku || !/^[A-Z]{2}$/.test(country) || !/^[A-Z0-9]{2,4}$/.test(channel) || !/^\d{4}-\d{2}-\d{2}$/.test(wk) || _pwMonday(wk) !== wk || !(units >= 0)) return res.status(400).json({ error: 'sku, country, channel, iso_week (a Monday) and units >= 0 required' });
+  if (wk < _pwMonday(new Date().toISOString().slice(0, 10))) return res.status(400).json({ error: 'Past weeks are actuals, not editable' });
+  const wh = _pwWh(country, channel), by = authUser(req) || 'unknown', client = await pool.connect();
+  try {
+    // the week's days as they stand now (its months spread around any pins); each month moves by (new day values - current day values) for the
+    // week's days in it, so every OTHER week keeps its value
+    const days = _pwDays(wk, 7), yms = [...new Set(days.map(d => d.slice(0, 7)))];
+    const prod = (await pool.query(`SELECT coalesce(subcategory,'') sub FROM planner.products WHERE sku = $1`, [sku])).rows[0] || { sub: '' };
+    const mo = {}; (await pool.query(`SELECT to_char(month,'YYYY-MM') ym, units FROM planner.forecast_outputs WHERE sku = $1 AND warehouse = $2 AND channel = $3 AND to_char(month,'YYYY-MM') = ANY($4)`, [sku, wh, channel, yms])).rows.forEach(r => { mo[r.ym] = Number(r.units); });
+    const pn = {}; (await pool.query(`SELECT to_char(iso_week,'YYYY-MM-DD') wk, units FROM planner.forecast_weekly WHERE version = 'pinned' AND sku = $1 AND country = $2 AND channel = $3 AND iso_week BETWEEN ($4::date - 6) AND ($4::date + 40)`, [sku, country, channel, wk]).catch(() => ({ rows: [] }))).rows.forEach(r => { pn[r.wk] = Number(r.units); });
+    const shp = await _pwShapes(country, channel), dayNow = {};
+    _pwSpread(mo, pn, shp.sub[prod.sub] || shp.all, wk, wk, dayNow);
+    const before = days.reduce((a, d) => a + (dayNow[d] || 0), 0);
+    let parts = yms.map(ym => ({ ym, x: days.filter(d => d.startsWith(ym)).reduce((a, d) => a + units / 7 - (dayNow[d] || 0), 0) }));
+    parts.forEach(p => { p.v = Math.round(p.x); });
+    const left = Math.round(units - before) - parts.reduce((a, p) => a + p.v, 0); parts.sort((a, b) => Math.abs(b.x) - Math.abs(a.x)); if (parts.length) parts[0].v += left;
+    await client.query('BEGIN');
+    for (const p of parts) if (p.v) await client.query(`INSERT INTO planner.forecast_outputs (sku, warehouse, channel, month, units, source, updated_at) VALUES ($1,$2,$3,$4::date,greatest($5,0),'weekly_ui',now())
+        ON CONFLICT (sku, warehouse, channel, month) DO UPDATE SET units = greatest(planner.forecast_outputs.units + $5, 0), source = 'weekly_ui', updated_at = now()`, [sku, wh, channel, p.ym + '-01', p.v]);
+    await client.query(`INSERT INTO planner.forecast_weekly (sku, country, channel, iso_week, units, version, entered_as, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,'pinned','week',$6,now())
+      ON CONFLICT (sku, country, channel, iso_week, version) DO UPDATE SET units = excluded.units, entered_as = 'week', updated_by = excluded.updated_by, updated_at = now()`, [sku, country, channel, wk, units, by]);
+    await client.query(`INSERT INTO planner.forecast_changes (level, item, country, channel, month, actor, action, from_val, to_val) VALUES ('sku-week',$1,$2,$3,$4,$5,'changed',$6,$7)`, [sku, country, channel, wk, by, Math.round(before * 10) / 10, units]).catch(() => {});
+    await client.query('COMMIT');
+    invalidateDataCache(); invalidateBiCache();
+    res.json({ ok: true, before, after: units, months: parts.filter(p => p.v) });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { client.release(); }
+});
+// Unpin a week: it goes back to following its month(s) (the monthly totals are kept as they are).
+app.post('/api/demand/plan-weekly/unpin', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit)) return res.status(403).json({ error: 'Demand edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const b = req.body || {};
+  try { const r = await pool.query(`DELETE FROM planner.forecast_weekly WHERE version = 'pinned' AND sku = $1 AND country = $2 AND channel = $3 AND iso_week = $4`, [String(b.sku || ''), String(b.country || '').toUpperCase(), String(b.channel || '').toUpperCase(), String(b.iso_week || '')]);
+    res.json({ ok: true, removed: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // IMPACT REPORT (phase 1, read only): monthly actuals ship-date (today, sales_actuals) vs order-date (order_lines, same exclusions as the
 // weekly build) per market x channel x month over the Fulfil months, the biggest SKU moves, and the excluded units.
@@ -26839,9 +26995,9 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
     // CLEARANCE = discontinued with stock that won't clear by the month, OR a badly overstocked slow mover.
     const VEL_WEEKS = 13, SLOW_WKS = 26, CLR_WKS = 52;
     const vel = {}; (await pool.query(`SELECT sku,
-        coalesce(sum(units) FILTER (WHERE month > (SELECT max(month) FROM planner.sales_actuals) - interval '3 months'),0)::numeric sold3,
+        coalesce(sum(units) FILTER (WHERE month > (SELECT max(month) FROM planner.sales_actuals_final) - interval '3 months'),0)::numeric sold3,
         to_char(max(month) FILTER (WHERE units>0),'YYYY-MM-DD') last_m
-      FROM planner.sales_actuals WHERE upper(country)=$1 AND channel = ANY($2) GROUP BY sku`, [country, fchs]))
+      FROM planner.sales_actuals_final WHERE upper(country)=$1 AND channel = ANY($2) GROUP BY sku`, [country, fchs]))
       .rows.forEach(r => { vel[r.sku] = r; });
     const skuSet = new Set(availSkus);
     for (const sku of Object.keys(meta)) {
@@ -27042,8 +27198,8 @@ async function b2bScenarioRows(skus, market, date) {
         coalesce(p.market_tier,'') tier, upper(coalesce(btrim(p.status),'')) pstatus, nullif(btrim(p.discontinue_date_final),'') disc,   -- v28.593: reserve by tier / lifecycle (requests)
         (coalesce((SELECT sum(available) FROM planner.v_product_inventory pi WHERE pi.sku=p.sku AND pi.warehouse LIKE $2||'\\_%'),0)
          + CASE WHEN $2='us' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int available,
-        coalesce((SELECT sum(units) FROM planner.sales_actuals sa WHERE sa.sku=p.sku AND lower(sa.country)=$2
-                  AND sa.month > (SELECT max(month) FROM planner.sales_actuals) - interval '3 months'),0)::int recent_units,
+        coalesce((SELECT sum(units) FROM planner.sales_actuals_final sa WHERE sa.sku=p.sku AND lower(sa.country)=$2
+                  AND sa.month > (SELECT max(month) FROM planner.sales_actuals_final) - interval '3 months'),0)::int recent_units,
         p.prod_weight_uk weight,
         (CASE $2 WHEN 'uk' THEN p.uk_rt WHEN 'us' THEN p.us_rt WHEN 'eu' THEN p.eu_rt
                  WHEN 'au' THEN p.au_rt WHEN 'ca' THEN p.ca_rt END) retail,
@@ -27946,10 +28102,10 @@ app.get('/api/scenario/slow-moving', async (req, res) => {
   const VEL_WEEKS = 13;                                  // trailing window ≈ 3 months
   try {
     const rows = (await pool.query(`
-      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals),
+      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals_final),
       sw AS (   -- sales mapped to a warehouse code
         SELECT sku, lower(country)||'_'||CASE WHEN channel='FBA' THEN 'fba' ELSE '3pl' END wh, month, units
-        FROM planner.sales_actuals),
+        FROM planner.sales_actuals_final),
       vel AS (
         SELECT sku, wh, sum(units)::numeric sold FROM sw, maxm
         WHERE month > maxm.m - interval '3 months' AND month <= maxm.m GROUP BY 1,2),
@@ -28018,11 +28174,11 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
     const basis = req.query.basis === 'trail' ? 'trail' : 'fc';   // default: seasonal forecast (correct for an EOS projection)
     const mfilter = (mkt !== 'all') ? ` AND inv.market = '${mkt.replace(/[^a-z]/g, '')}'` : '';
     const rows = (await pool.query(`
-      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals),
+      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals_final),
       vel AS (SELECT sku, lower(country) market, sum(units)::numeric sold       -- trailing 13wk (display run rate)
-        FROM planner.sales_actuals, maxm WHERE month > maxm.m - interval '3 months' AND month <= maxm.m GROUP BY 1,2),
+        FROM planner.sales_actuals_final, maxm WHERE month > maxm.m - interval '3 months' AND month <= maxm.m GROUP BY 1,2),
       ann AS (SELECT sku, lower(country) market, sum(units)::numeric sold        -- trailing 12mo (seasonally-neutral annual demand)
-        FROM planner.sales_actuals, maxm WHERE month > maxm.m - interval '12 months' AND month <= maxm.m GROUP BY 1,2),
+        FROM planner.sales_actuals_final, maxm WHERE month > maxm.m - interval '12 months' AND month <= maxm.m GROUP BY 1,2),
       fc AS (SELECT sku, split_part(warehouse,'_',1) market, sum(units)::numeric fsold  -- saved seasonal forecast, now → season end
         FROM planner.forecast_outputs
         WHERE month >= date_trunc('month',CURRENT_DATE) AND month <= date_trunc('month',$1::date) GROUP BY 1,2),
@@ -28724,7 +28880,7 @@ async function stActuals() {
   const _pAct = pool.query(`
     WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
     sold AS (SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
-      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, ss
+      FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku, ss
       WHERE sa.month >= ss.d AND p.category IS NOT NULL GROUP BY 1,2),
     oh AS (SELECT p.category, upper(split_part(i.warehouse,'_',1)) market,
              sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric u
@@ -28736,7 +28892,7 @@ async function stActuals() {
   const _pRun = pool.query(`
     WITH lc AS (SELECT (date_trunc('month',current_date) - interval '1 month')::date m)
     SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
-    FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, lc
+    FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku, lc
     WHERE sa.month=lc.m AND p.category IS NOT NULL GROUP BY 1,2`);
   _pRun.catch(() => {});   // a failure surfaces through the await below (never an unhandled rejection while act is awaited)
   const act = (await _pAct).rows;
@@ -28776,7 +28932,7 @@ async function _demandActionsBase() {
       SELECT p.category, upper(sa.country) market,
         sum(CASE WHEN sa.month=lc.m THEN sa.units ELSE 0 END)::numeric ty,
         sum(CASE WHEN sa.month=(lc.m - interval '1 year')::date THEN sa.units ELSE 0 END)::numeric ly
-      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, lc
+      FROM planner.sales_actuals_final sa JOIN planner.products p ON p.sku=sa.sku, lc
       WHERE p.category IS NOT NULL AND sa.month IN (lc.m, (lc.m - interval '1 year')::date)
       GROUP BY 1,2`);
     const _pCal = pool.query(`
@@ -30546,7 +30702,7 @@ async function aiExplainBuy(sku, market) {
     qs(`SELECT id, name, country, sku, category, tier, season, to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to, coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl
       FROM planner.buy_complex_rules WHERE enabled IS NOT FALSE`).catch(() => ({ rows: [] })),
     qs(`SELECT value FROM planner.app_settings WHERE key = 'ssm_enabled'`).catch(() => ({ rows: [] })),
-    qs(`SELECT to_char(month,'YYYY-MM') ym, channel ch, sum(units)::int u FROM planner.sales_actuals WHERE sku = $1 AND upper(country) = $2
+    qs(`SELECT to_char(month,'YYYY-MM') ym, channel ch, sum(units)::int u FROM planner.sales_actuals_final WHERE sku = $1 AND upper(country) = $2
       AND month >= date_trunc('month', now()) - interval '12 months' AND month < date_trunc('month', now()) GROUP BY 1,2`, [p.sku, M]).catch(() => ({ rows: [] })),
   ]);
   // forecast by month x channel (the buy's demand basis when a saved SKU forecast exists; Preorder/KA added to B2B)
@@ -33104,7 +33260,7 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
     const sel = level === 'cc' ? `country, channel` : level === 'category' ? `coalesce(category,'Uncategorised') category` : `sku, country, channel`;
     const accSql = `
       WITH act AS (
-        SELECT upper(country) country, channel, sku, month, sum(units) au FROM planner.sales_actuals
+        SELECT upper(country) country, channel, sku, month, sum(units) au FROM planner.sales_actuals_final
         WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date)
         GROUP BY 1,2,3,4),
       fc AS (   -- LOCKED basis: the SKU forecast from the most recent snapshot taken strictly BEFORE each completed month started — identical selection to buildLockedFc(), so this matches the plan-cell "fc … +%" compare
@@ -33138,7 +33294,7 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
       bias_pct: tA > 0 ? Math.round((tF - tA) / tA * 100) : null, wmape_pct: tA > 0 ? Math.round(tE / tA * 100) : null, attainment_pct: tF > 0 ? Math.round(tA / tF * 100) : null };
 
     // plan-vs-run-rate (always available): forward forecast monthly avg vs trailing complete-month actual avg
-    const ra = (await pool.query(`SELECT upper(country) co, channel ch, sum(units) u FROM planner.sales_actuals
+    const ra = (await pool.query(`SELECT upper(country) co, channel ch, sum(units) u FROM planner.sales_actuals_final
         WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date) GROUP BY 1,2`, [rr])).rows;
     const rf = (await pool.query(`SELECT upper(split_part(warehouse,'_',1)) co,
         CASE WHEN upper(channel)='FBA' THEN 'FBA' WHEN upper(channel)='B2B' THEN 'B2B' ELSE 'DTC' END ch, sum(units) u FROM planner.forecast_outputs
@@ -34566,8 +34722,8 @@ function hzSalesLagEval(sm, salesMax, curYm, dom, ymAdd) {
 const HZ_CHECKS_SQL = `SELECT json_build_object(
   'etl', (SELECT coalesce(json_agg(j), '[]') FROM (SELECT job, json_agg(json_build_object('t', floor(extract(epoch FROM ran_at) * 1000), 's', status, 'r', rows_affected, 'm', left(coalesce(message, ''), 200)) ORDER BY ran_at DESC) runs
       FROM (SELECT job, status, rows_affected, message, ran_at, row_number() OVER (PARTITION BY job ORDER BY ran_at DESC) rn FROM planner.etl_runs WHERE ran_at >= now() - interval '120 days') x WHERE rn <= 25 GROUP BY job) j),
-  'sales_max', (SELECT to_char(max(month), 'YYYY-MM') FROM planner.sales_actuals),
-  'sales_months', (SELECT coalesce(json_agg(x ORDER BY m), '[]') FROM (SELECT to_char(month, 'YYYY-MM') m, sum(units)::float8 u FROM planner.sales_actuals WHERE month >= (date_trunc('month', now()) - interval '14 months')::date GROUP BY 1) x),
+  'sales_max', (SELECT to_char(max(month), 'YYYY-MM') FROM planner.sales_actuals_final),
+  'sales_months', (SELECT coalesce(json_agg(x ORDER BY m), '[]') FROM (SELECT to_char(month, 'YYYY-MM') m, sum(units)::float8 u FROM planner.sales_actuals_final WHERE month >= (date_trunc('month', now()) - interval '14 months')::date GROUP BY 1) x),
   'inb', (SELECT json_build_object('n', count(*), 'units', coalesce(sum(quantity), 0)::float8, 'loaded', max(loaded_at)) FROM planner.inbound_shipments),
   'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(nullif(trim(category_name_final), ''), trim(category), '') = ''),   -- v28.169 (Ben): same category the app uses (category_name_final, else category); product_category is not refreshed by the n8n products sync, so it flagged 92 false positives
   'neg', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku || ' @ ' || warehouse || ' = ' || available ORDER BY available))[1:8]) FROM planner.v_product_inventory WHERE available < 0),

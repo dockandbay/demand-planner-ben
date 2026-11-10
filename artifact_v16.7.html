@@ -10969,7 +10969,8 @@ function render(){
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='orderexcl') renderOrderExclusionsView(body);   // v28.416 DEMAND ▸ Inputs ▸ Order exclusions
     else if(DEMAND_VIEW==='weeklyswitch') renderWeeklySwitchView(body);   // v28.416 DEMAND ▸ Inputs ▸ Weekly switch-over (impact report)
-    else if(DEMAND_VIEW==='histcompare') renderHistCompareView(body);   // v28.758 DEMAND ▸ Analysis ▸ Historical compare (Fulfil monthly + weekly vs today's monthly)
+    else if(DEMAND_VIEW==='histcompare') renderHistCompareView(body);
+    else if(DEMAND_VIEW==='planweekly') renderPlanWeeklyView(body);   // v28.759 DEMAND ▸ Plan weekly (one forecast with Plan monthly)   // v28.758 DEMAND ▸ Analysis ▸ Historical compare (Fulfil monthly + weekly vs today's monthly)
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);
@@ -15422,7 +15423,7 @@ function renderWssiPlanView(body){
     }).catch(function(e){ box.innerHTML='<b style="color:var(--neg)">Could not upload: '+H(e&&e.message||e)+'</b>'; }); }; rd.readAsDataURL(f); };
   totals(); paint();
 }
-var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['wssiplan','WSSI plan'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner'],['stockavail','Stock Availability'],['onorder','Stock On Order']];   /* v28.732: Kathryn's two sheets, DEMAND > Analysis (Ben 06-Nov-26) */   // Sell-through targets decommissioned (Ben 17-Aug-26)
+var DEMAND_TABS=[['plan','Plan monthly'],['planweekly','Plan weekly'],['crossmarket','Cross Market view'],['wssi','WSSI'],['otbinput','Open to buy'],['wssiplan','WSSI plan'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner'],['stockavail','Stock Availability'],['onorder','Stock On Order']];   /* v28.732: Kathryn's two sheets, DEMAND > Analysis (Ben 06-Nov-26) */   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -15439,7 +15440,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['histcompare']='Historical compare'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['campalerts']='Campaign alerts'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake','stockavail','onorder','histcompare'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj','campalerts'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','planweekly','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake','stockavail','onorder','histcompare'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj','campalerts'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -18379,7 +18380,7 @@ function renderOrderExclusionsView(body){
     if(!rows.length){ L.innerHTML='<div class="mut" style="padding:12px">'+(d.synced_at?'No orders match.':'No Fulfil order lines yet: the daily order-lines sync has not run.')+'</div>'; return; }
     L.innerHTML='<div style="overflow-x:auto"><table class="grid" style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Excluded</th><th style="text-align:left">SO</th><th style="text-align:left">Reference</th><th style="text-align:left">Customer</th><th style="text-align:left">Channel</th><th style="text-align:left">Market</th><th style="text-align:left">Order date</th><th style="text-align:left">Ship date</th><th style="text-align:left">Flagged lines (SKU × qty)</th><th style="text-align:right">Order units</th><th style="text-align:left">Note</th></tr></thead><tbody>'
       +rows.map(function(r){ return '<tr'+(r.excluded?' style="background:var(--neg-bg,rgba(220,38,38,.06))"':'')+'><td><label style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" class="ox-t" data-s="'+r.sale_id+'"'+(r.excluded?' checked':'')+'>'+(r.excluded?'<b style="color:var(--neg)">excluded</b>':'<span class="mut">kept</span>')+'</label>'+(r.changed_by?'<div class="mut" style="font-size:10px">'+e2(String(r.changed_by).replace(/@.*/,'@'))+' '+e2(fdt(r.changed_at))+'</div>':'')+'</td>'
-        +'<td style="white-space:nowrap">'+(FB?'<a href="'+FB+'/v2/erp/model/sales_order/'+r.sale_id+'" target="_blank" rel="noopener">'+e2(r.so||r.sale_id)+' &#8599;</a>':e2(r.so||r.sale_id))+'</td><td>'+e2(r.reference)+'</td><td>'+e2(r.customer)+(r.key_account?' <span class="mut" style="font-size:10px">(key account)</span>':'')+(r.custom?' <span class="mut" style="font-size:10px">(custom)</span>':'')+'</td>'
+        +'<td style="white-space:nowrap">'+(FB?'<a href="'+FB+'/v2/erp/model/sales_order/'+r.sale_id+'" target="_blank" rel="noopener">'+e2(r.so||r.sale_id)+' &#8599;</a>':e2(r.so||r.sale_id))+'</td><td>'+e2(r.reference)+'</td><td>'+e2(r.customer)+(r.key_account?' <span class="mut" style="font-size:10px">(key account)</span>':'')+(r.custom?' <span class="mut" style="font-size:10px">(custom)</span>':'')+(r.rules?'<div style="font-size:10px;color:var(--amber)" title="'+e2(r.rules)+'">&#9873; '+e2(String(r.rules).split(' | ').map(function(x){ return ({line_over_threshold:'big line',order_over_p999:'unusually large order',duplicate_reference:'duplicate reference',zero_price:'free units'})[x.split(':')[0]]||x.split(':')[0]; }).join(', '))+'</div>':'')+'</td>'
         +'<td>'+e2(r.fulfil_channel)+'</td><td>'+e2((r.country||'?')+' '+(r.channel||''))+'</td><td style="white-space:nowrap">'+e2(fdt(r.order_date))+'</td><td style="white-space:nowrap">'+e2(fdt(r.ship_date))+'</td>'
         +'<td>'+(r.lines||[]).map(function(l){ return '<span style="font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+e2(l.sku)+'</span> × <b>'+Math.round(l.qty).toLocaleString()+'</b>'; }).join('<br>')+'</td><td style="text-align:right">'+Math.round(Number(r.order_units||0)).toLocaleString()+'</td>'
         +'<td><input class="ox-note" data-s="'+r.sale_id+'" value="'+e2(r.note||'')+'" placeholder="why?" style="width:160px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px"></td></tr>'; }).join('')+'</tbody></table></div>';
@@ -18454,8 +18455,29 @@ function renderHistCompareView(body){
   body.innerHTML='<div style="max-width:1400px"><div style="font-weight:700;font-size:15px;margin-bottom:2px">Historical compare</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;max-width:1000px">Today&rsquo;s monthly actuals (<b>Sheet</b>: the Google Sheet import that drives every screen) against the new <b>Fulfil</b> monthly built from order lines (order date; key-account orders in the old Shopify channels dropped; free units counted), and the Fulfil <b>weekly</b> series rolled into months. <b>Test only</b>: nothing here changes the plan. Highlight: <span style="color:var(--neg)">over 10%</span>, <span style="color:var(--amber)">5 to 10%</span>.</div>'
     +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:12px">From <input type="month" id="hc-from" value="'+e2(S.from)+'"> to <input type="month" id="hc-to" value="'+e2(S.to)+'"> Market <select id="hc-mkt"><option value="">All</option>'+['UK','US','EU','AU','CA'].map(function(m){return '<option'+(S.mkt===m?' selected':'')+'>'+m+'</option>';}).join('')+'</select> <button class="save-btn" id="hc-go">Show</button> <span id="hc-msg" class="mut"></span></div>'
+    +'<div id="hc-src" style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:14px"></div>'
     +'<div id="hc-sum"></div><div id="hc-grid" style="margin-top:16px"></div><div id="hc-det" style="margin-top:18px"></div><div id="hc-foot" style="margin-top:18px"></div></div>';
   var $=function(id){ return body.querySelector('#'+id); };
+  // v28.759: the sales actuals SOURCE switch (every screen + the buy plan read the chosen source; rollback = back to Cin7 historical + Fulfil current)
+  function loadSrc(){ var B=$('hc-src'); B.innerHTML='<span class="mut">Loading the data source…</span>';
+    fetch('/api/demand/sales-source').then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error);
+      var opts=j.options||{}, keys=Object.keys(opts);
+      B.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>Sales actuals source</b>'
+        +'<div style="display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden">'+keys.map(function(k){ var on=k===j.source; return '<button data-src="'+k+'" style="border:0;padding:5px 10px;font-size:12px;cursor:pointer;background:'+(on?'var(--blue,#2f6fdf)':'transparent')+';color:'+(on?'#fff':'inherit')+';font-weight:'+(on?'700':'400')+'">'+e2(opts[k])+'</button>'; }).join('')+'</div>'
+        +'<span id="hc-srcmsg" class="mut" style="font-size:12px">Every DEMAND screen and the buy plan read this. '+(j.source==='sheet'?'':'<b style="color:var(--amber)">Fulfil history is live in the plan.</b>')+'</span></div>'
+        +'<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px">Cut-over month per market &times; channel ('+(j.cuts||[]).length+'): Fulfil from this month, the Cin7 sheet before it</summary>'
+        +((j.cuts||[]).length?'<table class="grid" style="font-size:11.5px;margin-top:6px"><thead><tr><th style="text-align:left">Market / channel</th><th>Fulfil from</th><th>Set by</th><th></th></tr></thead><tbody>'+j.cuts.map(function(c){ return '<tr><td style="text-align:left">'+e2(c.country+' '+c.channel)+'</td><td><input type="month" value="'+e2(c.fulfil_from)+'" data-co="'+e2(c.country)+'" data-ch="'+e2(c.channel)+'" style="font-size:11.5px"></td><td class="mut">'+(c.auto?'auto (first full month)':'hand, '+e2(c.updated_by||''))+'</td><td>'+(c.auto?'':'<a href="#" data-auto="'+e2(c.country+'|'+c.channel)+'">back to auto</a>')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="mut" style="font-size:12px;margin-top:4px">None yet: they are worked out when the Fulfil history is built.</div>')
+        +'</details>';
+      var post=function(body,done){ var m=$('hc-srcmsg'); m.style.color=''; m.textContent='Saving…';
+        fetch('/api/demand/sales-source',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(k){ if(k.error)throw new Error(k.error); if(done)done(k); loadSrc(); load(); })
+          .catch(function(e){ m.style.color='var(--neg)'; m.textContent=e.message; }); };
+      B.querySelectorAll('button[data-src]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.src; if(k===j.source)return;
+        if(b.dataset.c!=='1'){ B.querySelectorAll('button[data-src]').forEach(function(x){ x.dataset.c=''; }); b.dataset.c='1'; b.textContent='Click again: switch to '+opts[k]; return; }
+        post({source:k}, function(){ if(window.toast)toast('Sales actuals now: '+opts[k]); }); }; });
+      B.querySelectorAll('input[data-co]').forEach(function(inp){ inp.onchange=function(){ post({cut:{country:inp.dataset.co, channel:inp.dataset.ch, fulfil_from:inp.value}}); }; });
+      B.querySelectorAll('a[data-auto]').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); var p=a.dataset.auto.split('|'); post({cut:{country:p[0], channel:p[1], fulfil_from:null}}); }; }); })
+      .catch(function(e){ B.innerHTML='<span style="color:var(--neg)">'+e2(e.message)+'</span>'; }); }
+  loadSrc();
   $('hc-go').onclick=function(){ S.from=$('hc-from').value||S.from; S.to=$('hc-to').value||S.to; S.mkt=$('hc-mkt').value; S.sel=null; S.month=null; load(); };
   function load(){ $('hc-msg').textContent='Loading…';
     fetch('/api/demand/historical-compare?from='+S.from+'&to='+S.to).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error); $('hc-msg').textContent=''; draw(j); if(S.sel)detail(); })
@@ -18500,6 +18522,56 @@ function renderHistCompareView(body){
         +j.skus.map(function(r){ var pu=pct(r.sheet,r.fulfil); return '<tr><td style="text-align:left;font-family:ui-monospace,Menlo,monospace">'+e2(r.sku)+'</td><td style="text-align:left">'+e2(r.name||'')+'</td><td>'+n0(r.sheet)+'</td><td>'+n0(r.fulfil)+'</td><td style="color:'+tone(pu)+'">'+(r.fulfil-r.sheet>0?'+':'')+n0(r.fulfil-r.sheet)+'</td><td class="mut">'+n0(r.free)+'</td></tr>'; }).join('')+'</tbody></table>';
       D.innerHTML=h; D.querySelectorAll('tr[data-m]').forEach(function(tr){ tr.onclick=function(){ S.month=tr.dataset.m; detail(); }; }); })
       .catch(function(e){ D.innerHTML='<div style="color:var(--neg)">'+e2(e.message)+'</div>'; }); }
+  load();
+}
+// v28.759 (Ben 10-Nov-26): DEMAND ▸ Plan weekly, the weekly twin of Plan monthly (open both in two browser tabs to work side by side).
+// ONE forecast: weeks are the monthly plan spread over its days by last year's weekly shape; editing a week pins it and moves its months.
+function renderPlanWeeklyView(body){
+  function e2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], fdt=function(d){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m?(m[3]+'-'+MN[+m[2]-1]):''; };
+  var n0=function(v){ var x=Math.round(Number(v)||0); return x?x.toLocaleString():''; };
+  var S=window.__PW_STATE||(window.__PW_STATE={country:(typeof CUR!=='undefined'&&/^(UK|US|EU|AU|CA)$/.test(String(CUR).toUpperCase()))?String(CUR).toUpperCase():'UK', channel:'DTC', weeks:26, back:8, q:'', cat:''});
+  body.innerHTML='<div style="max-width:100%"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px"><b style="font-size:15px">Plan weekly</b>'
+    +'Market <select id="pw-co">'+['UK','US','EU','AU','CA'].map(function(m){return '<option'+(S.country===m?' selected':'')+'>'+m+'</option>';}).join('')+'</select>'
+    +'Channel <select id="pw-ch">'+['DTC','FBA','B2B','TIK','ZAL'].map(function(m){return '<option'+(S.channel===m?' selected':'')+'>'+m+'</option>';}).join('')+'</select>'
+    +'Weeks ahead <select id="pw-n">'+[13,26,52].map(function(n){return '<option'+(S.weeks===n?' selected':'')+'>'+n+'</option>';}).join('')+'</select>'
+    +'<input id="pw-q" placeholder="SKU or product" value="'+e2(S.q)+'" style="width:180px"> <input id="pw-cat" placeholder="Category" value="'+e2(S.cat)+'" style="width:130px">'
+    +'<button class="save-btn" id="pw-go">Show</button><span id="pw-msg" class="mut"></span></div>'
+    +'<div class="mut" style="font-size:11.5px;margin-bottom:8px;max-width:1100px">One forecast with <a href="#/demand/plan">Plan monthly</a>: each month is spread over its days by last year&rsquo;s weekly shape and a week is the sum of its days (a week across two months takes its days from each). Type in a future week to set it: the week is pinned (<b>&#9679;</b>) and the difference moves into its month(s), so Plan monthly and the buy plan follow. Past weeks show actuals. Grey = last year&rsquo;s same week.</div>'
+    +'<div id="pw-grid"></div></div>';
+  var $=function(id){ return body.querySelector('#'+id); };
+  $('pw-go').onclick=function(){ S.country=$('pw-co').value; S.channel=$('pw-ch').value; S.weeks=+$('pw-n').value; S.q=$('pw-q').value.trim(); S.cat=$('pw-cat').value.trim(); load(); };
+  ['pw-q','pw-cat'].forEach(function(id){ $(id).onkeydown=function(ev){ if(ev.key==='Enter')$('pw-go').click(); }; });
+  function load(){ $('pw-msg').textContent='Loading…'; $('pw-msg').style.color='';
+    fetch('/api/demand/plan-weekly?country='+S.country+'&channel='+S.channel+'&weeks='+S.weeks+'&back='+S.back+'&q='+encodeURIComponent(S.q)+'&cat='+encodeURIComponent(S.cat)).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error);
+      $('pw-msg').textContent=j.rows.length+' SKUs'+(j.capped?' (first 400: narrow with search / category)':'')+' · shape: '+j.shape; draw(j); })
+      .catch(function(e){ $('pw-msg').style.color='var(--neg)'; $('pw-msg').textContent=e.message; }); }
+  function draw(j){
+    var W=j.weeks, TW=j.this_week, mBand=[], last=null;
+    W.forEach(function(w){ var d=new Date(w+'T00:00:00Z'), ths=new Date(d); ths.setUTCDate(d.getUTCDate()+3); var ym=ths.toISOString().slice(0,7); if(last&&last.ym===ym)last.n++; else { last={ym:ym,n:1}; mBand.push(last); } });
+    var tot={}, totLy={}; j.rows.forEach(function(r){ W.forEach(function(w){ var past=w<TW; var v=past?(r.act[w]||0):(r.fc[w]||0); tot[w]=(tot[w]||0)+v; totLy[w]=(totLy[w]||0)+(r.ly[w]||0); }); });
+    // month totals split by days (forecast months from the stored monthly plan)
+    var monTot={}; j.rows.forEach(function(r){ Object.keys(r.months||{}).forEach(function(ym){ monTot[ym]=(monTot[ym]||0)+Number(r.months[ym]||0); }); });
+    var th='position:sticky;top:0;background:var(--card,#fff);z-index:2', st='position:sticky;left:0;background:var(--card,#fff);z-index:1';
+    var h='<div style="overflow:auto;max-height:75vh;border:1px solid var(--line);border-radius:6px"><table class="grid" style="font-size:11px;width:max-content;border-collapse:separate;border-spacing:0">'
+      +'<thead><tr><th style="'+th+';left:0;z-index:3;text-align:left" rowspan="2">SKU</th>'+mBand.map(function(b){ var y=b.ym.split('-'); return '<th colspan="'+b.n+'" style="'+th+';border-left:2px solid var(--line)" title="Monthly plan total (stored) for these SKUs">'+MN[+y[1]-1]+'-'+y[0].slice(2)+' <span class="mut" style="font-weight:400">'+n0(monTot[b.ym])+'</span></th>'; }).join('')+'</tr>'
+      +'<tr>'+W.map(function(w){ return '<th style="'+th+';top:22px;white-space:nowrap'+(w===TW?';color:var(--blue)':'')+'">'+fdt(w)+'</th>'; }).join('')+'</tr></thead><tbody>'
+      +'<tr style="font-weight:700"><td style="'+st+';text-align:left">Total</td>'+W.map(function(w){ return '<td style="'+(w<TW?'color:var(--muted)':'')+'"><div>'+n0(tot[w])+'</div><div class="mut" style="font-size:9.5px;font-weight:400">'+n0(totLy[w])+'</div></td>'; }).join('')+'</tr>'
+      +j.rows.map(function(r){ return '<tr><td style="'+st+';text-align:left;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis" title="'+e2(r.name||'')+'"><span style="font-family:ui-monospace,Menlo,monospace">'+e2(r.sku)+'</span></td>'
+        +W.map(function(w){ var ly='<div class="mut" style="font-size:9.5px">'+n0(r.ly[w])+'</div>';
+          if(w<TW) return '<td style="color:var(--muted)" title="Actual">'+'<div>'+n0(r.act[w])+'</div>'+ly+'</td>';
+          var pin=r.pinned.indexOf(w)>=0; return '<td style="padding:1px 2px'+(pin?';background:rgba(47,111,223,.08)':'')+'"><input data-s="'+e2(r.sku)+'" data-w="'+w+'" value="'+(Math.round(r.fc[w]||0)||'')+'" style="width:42px;text-align:right;font-size:11px;border:1px solid transparent;background:transparent">'+(pin?'<a href="#" data-un="'+e2(r.sku)+'|'+w+'" title="Pinned: click to unpin (follow the month again)" style="text-decoration:none;color:var(--blue)">&#9679;</a>':'')+ly+'</td>'; }).join('')+'</tr>'; }).join('')
+      +'</tbody></table></div>';
+    $('pw-grid').innerHTML=h;
+    body.querySelectorAll('#pw-grid input[data-s]').forEach(function(inp){ inp.onfocus=function(){ inp.style.borderColor='var(--line)'; inp.select(); }; inp.onblur=function(){ inp.style.borderColor='transparent'; };
+      inp.onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); inp.blur(); } };
+      inp.onchange=function(){ var v=Number(inp.value); if(!(v>=0)){ inp.style.borderColor='var(--neg)'; return; } inp.disabled=true;
+        fetch('/api/demand/plan-weekly/cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:inp.dataset.s, country:S.country, channel:S.channel, iso_week:inp.dataset.w, units:v})}).then(function(r){return r.json();}).then(function(k){ if(k.error)throw new Error(k.error);
+          $('pw-msg').style.color='var(--pos)'; $('pw-msg').textContent=inp.dataset.s+' '+fdt(inp.dataset.w)+': '+Math.round(k.before)+' → '+k.after+' (months: '+k.months.map(function(m){return m.ym+' '+(m.v>0?'+':'')+m.v;}).join(', ')+')'; try{ if(typeof DEMAND_BUILT!=='undefined')DEMAND_BUILT=false; }catch(_){} load(); })
+          .catch(function(e){ inp.disabled=false; inp.style.borderColor='var(--neg)'; $('pw-msg').style.color='var(--neg)'; $('pw-msg').textContent=e.message; }); }; });
+    body.querySelectorAll('#pw-grid a[data-un]').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); var p=a.dataset.un.split('|');
+      fetch('/api/demand/plan-weekly/unpin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:p[0], country:S.country, channel:S.channel, iso_week:p[1]})}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
+  }
   load();
 }
 function renderKlaviyoBisView(body){
