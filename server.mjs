@@ -14287,8 +14287,10 @@ supplySectionHandler = async (req, res, next) => {
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END, id
+            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN xero_doc_id IS NOT NULL AND xero_doc_region IN ('uk','au') THEN upper(xero_doc_region) WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END, id
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}`)).rows;
+        // v28.756 (Ben 10-Nov-26): an Other payment hand-linked to a Xero document (migration 427) sits in THAT org's run (the remittance loader
+        // uses the same rule), so a linked Xero AU bill is paid from the AU run even when the row's country is blank.
         // v28.741 (Ben 06-Nov-26 "There should have been earlier warning these were not in Xero"): each Other line says whether a live Xero bill
         // with its reference is in its org (synced copy), so the Paid runs list flags a run before Paid > Xero is opened.
         try { const _oRefs = [...new Set(lines.filter(l => l.source === 'other' && l.reference).map(l => String(l.reference).trim().toUpperCase()))];
@@ -15515,7 +15517,7 @@ async function paymentRunDetail(runDate, supplier, region) {   // v28.133: regio
         FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0` : ''}
       UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Deposit', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
         FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
-      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
+      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN xero_doc_id IS NOT NULL AND xero_doc_region IN ('uk','au') THEN upper(xero_doc_region) WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
         FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
     ) z WHERE dt=$1 AND lower(trim(sup))=lower(trim($2)) AND ($3::text IS NULL OR reg=$3)
     ORDER BY CASE type WHEN 'Deposit' THEN 0 WHEN 'Completion' THEN 1 WHEN 'Balance' THEN 2 ELSE 3 END`, [runDate, supplier, region || null])).rows;

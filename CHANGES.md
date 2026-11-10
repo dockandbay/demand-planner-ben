@@ -1,3 +1,6 @@
+## v28.756 (10-Nov-26) Paid runs: a linked Other payment goes into its Xero document's org run
+- An Other payment linked to a Xero bill or credit note now sits in the pay run of that document's org (UK or AU), whatever its country says. E.g. the Sample sale donation (blank country, Xero AU bill) moves from the UK run to the AU run, so Paid > Xero no longer blocks it as an org mismatch.
+- Unlinked rows unchanged (AU if country AU, else UK). The remittance loader uses the same rule. No migration, no new env vars, no new cron routes.
 ## v28.755 (10-Nov-26) Other Payments: link a Xero bill or supplier credit note by hand (migration 427)
 - Other Payments > Document > "Link Xero" opens a picker of Xero bills and supplier credit notes in BOTH orgs, best matches first (number, supplier, amount). Linked rows show the document (opens in Xero) with change / unlink.
 - Before, the only link was an exact match of the reference to a bill number in one org (UK unless country AU), so e.g. "8 [SYDIR02873952]" (a Xero AU bill) showed "not in Xero" and blocked Paid > Xero.
