@@ -1,3 +1,7 @@
+## v28.754 (10-Nov-26) Links to Other Payments open that payment
+- Clicking an Other payment in Payments Due, the Payments report, Cash Flow or an Action now opens Other Payments searched to that reference (a paid one was hidden by the default Unpaid filter).
+- No migration, no new env vars, no new cron routes.
+
 ## v28.753 (10-Nov-26) Other Payments: typed values no longer vanish
 - Clicking a Status pill, changing the Supplier filter or typing in Search redrew the list from the data loaded when the page opened, so anything typed since then showed blank or old (the saves themselves were fine). Each edit now updates the page's copy of the row.
 - Typing or clearing a Date paid updates the row's Paid / Unpaid / Overdue badge and the delete link straight away.

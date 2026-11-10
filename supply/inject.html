@@ -2312,7 +2312,7 @@ function hzPortalHelp(el){
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
       selectReport(rk); };});
     document.querySelectorAll('#act-sub .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
-      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else { if(typeof openPODrawer==='function')openPODrawer(k,'pay'); else gotoPO(k,'pay'); } };});   // PO payment actions → drawer (not full page)
+      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(k); else { if(typeof openPODrawer==='function')openPODrawer(k,'pay'); else gotoPO(k,'pay'); } };});   // PO payment actions → drawer (not full page)
     document.querySelectorAll('#act-sub .act-gotomfg').forEach(function(b){b.onclick=function(){ showPoSub('manufacturing'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
@@ -2984,7 +2984,7 @@ function hzPortalHelp(el){
   function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
   // → SUPPLY ▸ Samples, expand this sample request by ref (used from the PRODUCT grid / detail links + the #/supply/samples/<ref> deep link)
   function gotoSample(ref){ if(!ref)return; _pendingSampleRef=String(ref); if(typeof hideProduct==='function')hideProduct(); if(typeof showSupply==='function')showSupply(true); selectSection('samples'); }
-  function gotoOther(){ showPoSub('other'); }   // → PURCHASE ORDERS ▸ Other Payments
+  function gotoOther(ref){ if(ref){ OTH_STATE.q=String(ref); } showPoSub('other'); }   // → PAYMENTS ▸ Other Payments; v28.754 (Ben 10-Nov-26): a reference link searches for it (a paid one was hidden by the default Unpaid filter)
   function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); try{ _poGridFulfilPaint(); }catch(e){} }   // v27.885: paint Fulfil IS badges on the PO grid shipment column
   // after a view renders, expand the pending PO / shipment row (set by gotoPO / gotoShipment)
   function expandPending(sel,want){ if(!want)return false; var btn=null;
@@ -11925,7 +11925,7 @@ function hzPortalHelp(el){
         +'<tbody>'+(rows||'<tr><td colspan="10" class="l mut">No payments match.</td></tr>')+'</tbody>'
         +'<tfoot><tr class="batchrow"><td class="l" colspan="6"><b>TOTAL</b></td><td style="text-align:right"><b>$'+units(gT)+'</b></td><td colspan="3"></td></tr></tfoot></table></div>';
       // reference → open the PO (PLAN expanded) or the shipment (detail expanded) for payment review
-      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship'){ if(typeof openShipDrawer==='function')openShipDrawer(b.dataset.k); else gotoShipment(b.dataset.k); } else if(g==='dep')gotoDeposit(b.dataset.k); else if(g==='other')gotoOther(); else { if(typeof openPODrawer==='function')openPODrawer(b.dataset.k,'pay'); else gotoPO(b.dataset.k); } }; });   // PO/shipment refs → drawer
+      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship'){ if(typeof openShipDrawer==='function')openShipDrawer(b.dataset.k); else gotoShipment(b.dataset.k); } else if(g==='dep')gotoDeposit(b.dataset.k); else if(g==='other')gotoOther(b.dataset.k); else { if(typeof openPODrawer==='function')openPODrawer(b.dataset.k,'pay'); else gotoPO(b.dataset.k); } }; });   // PO/shipment refs → drawer
       // strip card → set month filter
       document.querySelectorAll('#cf-body .cf-strip').forEach(function(card){ card.onclick=function(){ _cfState.month=card.dataset.m; var sel=document.getElementById('cf-month'); if(sel)sel.value=card.dataset.m; draw(); }; });
       // likely-date saves
@@ -12435,7 +12435,7 @@ function hzPortalHelp(el){
         : (r.likely?esc(fd(r.likely)):'<span class="mut">—</span>');
       var refCell = r.po ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
         : r.type==='Deposit' ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
-        : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
+        : '<button class="lnk-btn pdue-ref" data-go="other" data-k="'+esc(r.ref)+'" title="open in Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
       var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
       var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
         +mobFld('Assigned',r.noedit?pdueBxIn(r,'amount'):editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',r.noedit?pdueBxIn(r,'date'):editCell(r.ep,r.dt_field,r.dt_val,'date'));   // v28.309: next balance payment = standard boxes
@@ -12471,7 +12471,7 @@ function hzPortalHelp(el){
             ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
             : r.type==='Deposit'
             ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
-            : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
+            : '<button class="lnk-btn pdue-ref" data-go="other" data-k="'+esc(r.ref)+'" title="open in Other Payments">'+esc(r.ref)+'</button>'+(r.nx||'');
           h+='<tr'+(r.overdue?' style="background:var(--neg-bg)"':(r.paid?' style="opacity:.6"':''))+'>'
             +'<td class="l"><span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span></td>'
             +'<td class="l">'+refCell+'</td>'
@@ -12504,7 +12504,7 @@ function hzPortalHelp(el){
           .catch(function(){ inp.classList.add('err'); }); }; });
       if(typeof bindDatePickers==='function')bindDatePickers();   // 📅 picker on the likely-date fields
       document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;
-        if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
+        if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(x.dataset.k); }; });
       document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
       // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
@@ -13753,7 +13753,7 @@ function hzPortalHelp(el){
       var lines=(r.lines||[]).map(function(l){
         var depKey=(l.reference||'').split(',')[0].trim();   // register reference is just the code (e.g. P55-UK-WK2); line ref may append the description
         var refCell = l.reference ? (l.type==='Other'
-            ? '<button class="lnk-btn pr-ref" data-go="other" title="open Other Payments">'+esc(l.reference)+'</button>'
+            ? '<button class="lnk-btn pr-ref" data-go="other" data-k="'+esc(l.reference)+'" title="open in Other Payments">'+esc(l.reference)+'</button>'
             : l.type==='Deposit'
             ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(depKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.reference)+'</button>'
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
@@ -13787,7 +13787,7 @@ function hzPortalHelp(el){
     // v28.628: clicking the row (not its inputs / buttons / links) also shows its payments
     b.querySelectorAll('tr.pay-row').forEach(function(tr){ tr.addEventListener('click',function(e){ if(e.target.closest('button,input,a,select,textarea,label'))return; var ex=document.getElementById('payexp-'+tr.dataset.i); if(!ex)return; var op=ex.style.display==='none'; ex.style.display=op?'':'none'; var bt=tr.querySelector('.pay-exp'); if(bt)bt.textContent=op?'▾':'▸'; }); });   // v28.630: ▸ button back (Ben), row click kept
     b.querySelectorAll('.pay-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('payexp-'+btn.dataset.i); if(!ex)return; var open=ex.style.display!=='none'; ex.style.display=open?'none':''; btn.textContent=open?'▸':'▾'; }; });
-    b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(); }; });
+    b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(x.dataset.k); }; });
     // bank-amount box: show with thousands separators; reformat on blur, strip commas before saving
     b.querySelectorAll('.pfx-amt').forEach(function(el){ el.onblur=function(){ if(el.value.trim()!=='') el.value=fmtAmt(el.value); }; });
     b.querySelectorAll('.pfx-ccy, .pfx-amt').forEach(function(el){ el.onchange=function(){
