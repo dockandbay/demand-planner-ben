@@ -86,11 +86,13 @@ Rules above, surfaced on DEMAND > Inputs > Order exclusions (exists) with the ru
 ### Changeover (c)
 Reconcile page: per market x channel x month, sheet vs Fulfil units and revenue, with drill to SKU; buy plan before/after snapshot before any switch (standing rule).
 
-## 4. Open questions for Ben
-1. Revenue: sale currency (as today's sheet appears to be) or GBP?
-2. Sets: count the set SKU as sold (current HORIZON) or explode to components? Need a SKU-level check of the beach towel gap first.
-3. Zero-price lines (free gifts, replacements): count as demand or not?
-4. CA history (DTC 14k, B2B 5k, FBA 9k units in 2025): import (CA is decommissioned) or skip?
-5. AU B2B and US B2B from history: currently not in HORIZON's B2B actuals (B2B is forecast from client orders). Store them and show, but keep out of the DTC/FBA demand history?
-6. UK history: is a UK historical import coming, or does UK pre-2026 stay on the sheet permanently?
-7. Amazon EU lines with no SKU: fix in Fulfil (Diviyaj) or fall back to listing SKU?
+## 4. Decisions (Ben 10-Nov-26)
+1. **Revenue in local currency** of the market / store: UK GBP, US USD, EU EUR, AU AUD, CA CAD. Strays convert to the store's currency (dockandbay-au NZD, AUD 224 in 2025; dockandbay-us CAD, 71 orders). Checked: Fulfil holds dockandbay-au in AUD, so NZD checkouts already arrive as AUD.
+   **GBP copy** (today's `sales_actuals` revenue is GBP, converted upstream; HORIZON converts nothing itself): UK-entity channels use Fulfil's own company-currency GBP (actual rate at order date); AU entity (AUD) converts with CONFIG > Exchange rates for the FY. Store both: `revenue_local` + `currency` + `revenue_gbp`.
+2. **Sets: as today** (the set SKU counts as sold, no explosion in the import).
+3. **Zero-price lines count for demand, not for ASP**: units in, revenue 0, and excluded from the ASP denominator (store `is_free`).
+4. **Key-account orders hidden in the DTC channels are dropped** (non-Shopify references in dockandbay-us / -au / -eu / -ca / -uk). Ben: almost all are key accounts.
+5. **Wholesale channels import as B2B actuals** (HISTORICAL -us-ws / -eu-ws / -ca-ws, live -uk-ws / -us-ws / -eu-ws, Faire, eZComm, Markettime); key-account and custom channels stay excluded as today.
+6. **All CA imported** (Shopify CA, CA wholesale, Amazon.ca) as CA history even though the stores are closed.
+7. **No-SKU lines**: fall back where possible, flag the rest as an anomaly; explore later (note: docs/specs/FULFIL_NO_SKU_LINES_NOTE_2026-11-10.md).
+8. **UK and the whole switch wait**: this is a test build. Nothing switches; UK historical is expected next week and is tested then.
