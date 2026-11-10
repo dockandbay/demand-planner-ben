@@ -22470,7 +22470,9 @@ function olMapLine(ctx, name, segment, ref) {
   const m = ctx.map[name], none = rule => ({ country: null, channel: null, wholesale: false, key: false, custom: false, hist: m ? !!m.is_historical : /^HISTORICAL /i.test(String(name || '')), rule });
   if (m) {
     if (m.kind === 'ignore' || m.kind === 'mkt' || !m.country || !m.channel) return none('channel_' + m.kind);
-    if (m.re && !m.re.test(String(ref || '').trim())) return none('dtc_non_shopify_ref');
+    if (m.re && !m.re.test(String(ref || '').trim())) {   // not a Shopify order: dropped, or (v28.760, EU) counted in ref_miss_channel as wholesale
+      if (!m.ref_miss_channel) return none('dtc_non_shopify_ref');
+      return { country: m.country, channel: m.ref_miss_channel, wholesale: true, key: false, custom: false, hist: !!m.is_historical, rule: 'dtc_non_shopify_ref_' + String(m.ref_miss_channel).toLowerCase() }; }
     const ch = (m.kind === 'dtc' && String(segment || '').toLowerCase() === 'tiktok') ? 'TIK' : m.channel;
     return { country: m.country, channel: ch, wholesale: ['b2b', 'key', 'custom'].includes(m.kind), key: m.kind === 'key', custom: m.kind === 'custom', hist: !!m.is_historical, rule: null }; }
   const o = olMapChannel(name, segment); return Object.assign(o, { hist: /^HISTORICAL /i.test(String(name || '')), rule: o.country ? null : 'unmapped_channel' });
@@ -22664,7 +22666,8 @@ async function salesImportRange(opts, by) {
   if (!channels.length || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error('channels, from and to (YYYY-MM-DD) required');
   const key = JSON.stringify([channels, from, to]);
   let st = null; try { st = JSON.parse(((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_import_range'`)).rows[0] || {}).value || 'null'); } catch (_) {}
-  if (opts.reset || !st || st.key !== key) st = { key, cursor: 0, orders: 0, lines: 0, saved: 0, started_at: new Date().toISOString() };
+  const replace = !!opts.replace;   // v28.760 refresh: stamp every line read; at the end remove the range's lines not read again
+  if (opts.reset || !st || st.key !== key || !!st.replace !== replace) st = { key, replace, run: replace ? Date.now() : null, cursor: 0, orders: 0, lines: 0, saved: 0, started_at: new Date().toISOString() };
   const get = (path, body) => _olGet(cfg, path, body);
   const chs = await get('/model/sale.channel/search_read', [[['name', 'in', channels]], 0, 200, null, ['id', 'name']]);
   const chIds = (chs || []).map(c => c.id); if (!chIds.length) throw new Error('no Fulfil channel matches ' + channels.join(', '));
@@ -22676,13 +22679,17 @@ async function salesImportRange(opts, by) {
     const ls = await _olLinesOf(cfg, os.map(o => o.id));
     (ls || []).forEach(l => { l._sale_date = sd[l.sale] || null; });
     const out = (ls || []).map(l => olRow(ctx, l)).filter(Boolean); await olUpsert(out);
+    if (st.replace && out.length) await pool.query(`UPDATE planner.order_lines SET refresh_run = $1 WHERE line_id = ANY($2::bigint[])`, [st.run, out.map(r => r[0])]);
     orders += os.length; lines += (ls || []).length; saved += out.length; st.cursor = os[os.length - 1].id;
     if (os.length < 200) break; if (Date.now() - t0 > budget) { more = true; break; } }
   st.orders += orders; st.lines += lines; st.saved += saved; st.more = more; if (!more) st.finished_at = new Date().toISOString();
+  if (!more && st.replace && !st.removed_done) {   // the range's lines this refresh did not read again: deleted / re-imported in Fulfil
+    const del = await pool.query(`DELETE FROM planner.order_lines WHERE fulfil_channel = ANY($1) AND order_date BETWEEN $2 AND $3 AND refresh_run IS DISTINCT FROM $4`, [channels, from, to, st.run]);
+    st.removed = del.rowCount; st.removed_done = true; salesFulfilBuildSoon('refresh ' + channels.join(', ')); }
   await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('sales_import_range',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(st)]);
   await pool.query(`INSERT INTO planner.sales_import_runs (finished_at, mode, scope, lines_read, lines_saved, orders_read, more, ms, run_by) VALUES (now(),'range',$1,$2,$3,$4,$5,$6,$7)`,
     [channels.join(', ') + ' ' + from + '..' + to, lines, saved, orders, more, Date.now() - t0, by || null]).catch(() => {});
-  return { channels, from, to, orders, lines, saved, more, total: { orders: st.orders, lines: st.lines, saved: st.saved }, ms: Date.now() - t0 };
+  return { channels, from, to, orders, lines, saved, more, replace: !!st.replace, removed: st.removed || 0, total: { orders: st.orders, lines: st.lines, saved: st.saved }, ms: Date.now() - t0 };
 }
 // Monthly actuals from Fulfil (planner.sales_actuals_fulfil, same shape as sales_actuals): the demand-date month, demand lines only
 // (OL_LIVE_SQL: live states, mapped market + channel, real HORIZON products, no key accounts / untagged custom, excluded anomaly lines out).
@@ -22761,6 +22768,16 @@ app.post('/api/demand/sales-import/range', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
   try { res.json(Object.assign({ ok: true }, await salesImportRange(req.body || {}, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.760: the Fulfil channels the refresh can pick from (the channel map) with what HORIZON holds for each
+app.get('/api/demand/sales-import/channels', async (req, res) => {
+  if (!(await _salesImportAdmin(req, res))) return;
+  try { const hf = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_history_from'`)).rows[0] || {}).value || '2024-01-01';
+    const rows = (await pool.query(`SELECT m.channel_name, m.country, m.channel, m.kind, m.is_historical, m.ref_miss_channel,
+        to_char(min(l.order_date),'YYYY-MM-DD') first, to_char(max(l.order_date),'YYYY-MM-DD') last, count(DISTINCT l.sale_id)::int orders, count(l.line_id)::int lines
+      FROM planner.fulfil_channel_map m LEFT JOIN planner.order_lines l ON l.fulfil_channel = m.channel_name
+      WHERE m.kind <> 'ignore' GROUP BY 1,2,3,4,5,6 ORDER BY m.is_historical DESC, 2, 1`)).rows;
+    res.json({ history_from: hf, channels: rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/demand/sales-import/build', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
   try { res.json(Object.assign({ ok: true }, await salesFulfilBuild())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -22805,7 +22822,7 @@ app.get('/api/demand/historical-compare', async (req, res) => {
     out.coverage = (await pool.query(`SELECT fulfil_channel, bool_or(is_historical) hist, to_char(min(order_date),'YYYY-MM-DD') first, to_char(max(order_date),'YYYY-MM-DD') last, count(DISTINCT sale_id)::int orders
       FROM planner.order_lines WHERE sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') GROUP BY 1 ORDER BY 1`)).rows;
     out.dropped = (await pool.query(`SELECT fulfil_channel, class_rule, count(DISTINCT sale_id)::int orders, sum(qty)::int units FROM planner.order_lines
-      WHERE class_rule IS NOT NULL AND order_date BETWEEN $1 AND ($2::date + interval '1 month' - interval '1 day') AND coalesce(product_category,'') <> 'Shipping' GROUP BY 1,2 ORDER BY 4 DESC`, [from, to])).rows;
+      WHERE class_rule IS NOT NULL AND order_date BETWEEN $1 AND ($2::date + interval '1 month' - interval '1 day') AND coalesce(product_category,'') <> 'Shipping' GROUP BY 1,2 ORDER BY 4 DESC`, [from, to])).rows;   // incl. v28.760 reclassified (dtc_non_shopify_ref_b2b): counted, shown for information
     out.anomalies = (await pool.query(`SELECT rule, count(*)::int orders, sum(units)::int units FROM planner.order_anomalies GROUP BY 1 ORDER BY 1`).catch(() => ({ rows: [] }))).rows;
     res.json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
