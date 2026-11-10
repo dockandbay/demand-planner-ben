@@ -1,3 +1,10 @@
+## v28.753 (10-Nov-26) Other Payments: typed values no longer vanish
+- Clicking a Status pill, changing the Supplier filter or typing in Search redrew the list from the data loaded when the page opened, so anything typed since then showed blank or old (the saves themselves were fine). Each edit now updates the page's copy of the row.
+- Typing or clearing a Date paid updates the row's Paid / Unpaid / Overdue badge and the delete link straight away.
+- "+ Other payment" puts the new row at the top with the cursor in Reference, and clears search / Paid filter so it is visible.
+- Any inline field that fails to save now says why on hover (was a red box only).
+- No migration, no new env vars, no new cron routes.
+
 ## v28.752 (10-Nov-26) Payments Due: undo after PAY
 - A small "undo" now sits beside PAID once PAY is clicked. It puts the amount and payment date back as they were (a balance payment 3+ that PAY created is removed) and the row shows as unpaid again.
 - No migration, no new env vars, no new cron routes.

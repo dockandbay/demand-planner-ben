@@ -1920,7 +1920,7 @@ function hzPortalHelp(el){
             } else { var _seen={};   // fallback: no rows in response → per-PO refresh
               document.querySelectorAll('#shipdet-DRAWER .ship-po-link[data-po]').forEach(function(b){ var p=b.dataset.po; if(!p||_seen[p])return; _seen[p]=1;
                 try{ if(window.__poRowRefresh)window.__poRowRefresh(p); if(window.__poPanelRefresh)window.__poPanelRefresh(p); }catch(e){} }); } } } })
-      .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); bindDatePickers(); }
+      .catch(function(e){ inp.classList.remove('saved'); inp.classList.add('err'); try{ inp.title='Not saved: '+((e&&e.message)||e)+' (re-type to retry)'; }catch(_){} }); }; }); bindDatePickers(); }   // v28.753: say why a red box did not save
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(key)+'<div class="bar"><input class="flt" id="sup-search" placeholder="Filter…"><span class="count" id="sup-count">'+rows.length+' rows</span></div><div id="sup-grid">'+tableHTML(rows)+'</div>';
@@ -11711,6 +11711,7 @@ function hzPortalHelp(el){
   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD). Defaults to the last 60 days so the
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
   var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='', PAY_Q='';
+  var OTH_NEW_ID=null;   // v28.753: id of the row just added with "+ Other payment" (shown first, Reference focused)
   var OTH_STATE={status:'unpaid',supplier:'',q:''};   // Other Payments filters (persist across re-renders); default to unpaid
   // v28.303 (Ben): running total of what PAY marked paid on Payments Due this session (green box above the table). Kept until the page
   // reloads or Clear; a failed save takes its entry back out. Totals per currency (suppliers pay in USD, GBP, EUR, AUD).
@@ -12160,6 +12161,8 @@ function hzPortalHelp(el){
         if(q)return hit(d,q);
         if(!matchStatus(d))return false;
         if(OTH_STATE.supplier && (d.supplier_name||'')!==OTH_STATE.supplier)return false; return true; }); }
+      function bindRowActs(root){ root.querySelectorAll('.oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
+          shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };}); }
       function draw(){ var f=filtered();
         var stPills=[['all','All'],['paid','Paid'],['overdue','Overdue'],['unpaid','Unpaid']].map(function(o){return '<span class="pill'+(OTH_STATE.status===o[0]?' active':'')+'" data-os="'+o[0]+'">'+o[1]+'</span>';}).join('');
         var supOpts='<option value="">All suppliers</option>'+sups.map(function(s){return '<option value="'+esc(s)+'"'+(OTH_STATE.supplier===s?' selected':'')+'>'+esc(s)+'</option>';}).join('');
@@ -12175,8 +12178,7 @@ function hzPortalHelp(el){
         document.querySelectorAll('#oth-wrap .pill[data-os]').forEach(function(p){p.onclick=function(){OTH_STATE.status=p.dataset.os;draw();};});
         document.getElementById('oth-sup').onchange=function(){OTH_STATE.supplier=this.value;draw();};
         var qi=document.getElementById('oth-q'); if(qi){ qi.oninput=function(){ var pos=this.selectionStart; OTH_STATE.q=this.value; draw(); var n=document.getElementById('oth-q'); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} } }; }
-        document.querySelectorAll('#oth-wrap .oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
-          shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
+        bindRowActs(document.getElementById('oth-wrap'));
         var sbb=document.getElementById('oth-sb'); if(sbb)sbb.onclick=function(){ sbOpen(function(){ renderOtherPayments(b); }); };
         document.querySelectorAll('#oth-wrap .oth-lc').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true; btn.textContent='Creating…';
           fetch('/api/supply/sample-bills/landed-cost/'+btn.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){
@@ -12190,8 +12192,27 @@ function hzPortalHelp(el){
       }
       b.innerHTML=lookupDatalists()+'<style>#supply-root #oth-wrap .fci{background:var(--card)!important;border-color:var(--line)!important;color:var(--ink)!important}#supply-root #oth-wrap .fci:focus{outline:2px solid var(--line)}#supply-root #oth-wrap .fci.saved{background:var(--pos-bg)!important;border-color:#86efac!important}</style><div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><button class="pay-filt-toggle">⚙ Filters</button><span class="count">sundry costs (freight, fees, write-offs) — edits save automatically</span></div><div id="oth-wrap"></div>';
       ensurePayFilt();
-      document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
-      draw(); })
+      // v28.753 (Ben 10-Nov-26: "when you enter some data another cell can have its data cleared"): every redraw (Status pill, Supplier
+      // filter, each keystroke in Search) rebuilt the rows from the list fetched when the page opened, so anything typed since then showed
+      // blank / old. Each edit now also lands in that list (capture phase = before the field's own saver reformats it), and the row's
+      // status badge + delete link follow a typed / cleared paid date straight away.
+      var _ow=document.getElementById('oth-wrap');
+      _ow.addEventListener('change',function(e){ var t=e.target; if(!t||!t.dataset||!t.dataset.field||!t.dataset.ep)return;
+        var m=/\/api\/supply\/deposit\/([^\/]+)$/.exec(t.dataset.ep); if(!m)return; var id=decodeURIComponent(m[1]);
+        var d=oth.filter(function(x){ return String(x.id)===id; })[0]; if(!d)return;
+        var f=t.dataset.field, v=String(t.value==null?'':t.value).trim();
+        if(t.classList.contains('dateinp')){ if(v){ var iso=parseDateLoose(v); if(!iso)return; v=iso; } else v=null; }   // invalid date: the saver rejects it, keep the stored value
+        else if(f==='amount'){ v=v===''?null:String(hzNumClean(v)).replace(/,/g,''); }
+        else if(v==='')v=null;
+        d[f]=v;
+        if(f==='date_paid'||f==='date_due'){ var tr=t.closest('tr'); if(tr&&tr.cells&&tr.cells.length>=10){ var _h=document.createElement('tbody'); _h.innerHTML=otherRow(d); var nr=_h.firstChild;
+          tr.cells[8].innerHTML=nr.cells[8].innerHTML; tr.cells[9].innerHTML=nr.cells[9].innerHTML; bindRowActs(tr); } } }, true);
+      document.getElementById('oth-new').onclick=function(){ var nb=this; nb.disabled=true;
+        shipPost('/api/supply/deposit-create',{is_deposit:false},function(j){ OTH_NEW_ID=j&&j.id; OTH_STATE.q=''; if(OTH_STATE.status==='paid')OTH_STATE.status='unpaid'; OTH_STATE.supplier=''; renderOtherPayments(b); });
+        setTimeout(function(){ nb.disabled=false; },3000); };
+      if(OTH_NEW_ID!=null){ var _ni=-1; oth.forEach(function(x,i){ if(String(x.id)===String(OTH_NEW_ID))_ni=i; }); if(_ni>0)oth.unshift(oth.splice(_ni,1)[0]); }   // the new blank row goes to the top
+      draw();
+      if(OTH_NEW_ID!=null){ var _nr=document.querySelector('#oth-wrap [data-ep="/api/supply/deposit/'+encodeURIComponent(OTH_NEW_ID)+'"][data-field="reference"]'); OTH_NEW_ID=null; if(_nr){ try{ _nr.focus(); _nr.scrollIntoView({block:'center'}); }catch(e){} } } })
       .catch(function(e){b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }); }
   // ---- PAYMENTS DUE — one worklist of every payment owed, grouped by supplier, ordered by due date.
   // Sources: PO completion + balance milestones (from the PO calc) and the deposit register + other payments.
