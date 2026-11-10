@@ -1,3 +1,7 @@
+## v28.751 (10-Nov-26) Payments Due: owed balances on COMPLETE POs show again
+- Payments Due lists a PO payment only once its Final payment due date is set (v28.622), but the PO list dropped that date (and the likely-pay dates, catch-up and credit terms) from COMPLETE POs to save payload. Every owed balance on a COMPLETE PO was hidden, e.g. PO-56UKXR2 GBP 44,411.88 due 09-Oct-26. Payment fields now stay on COMPLETE POs.
+- No migration, no new env vars, no new cron routes.
+
 ## v28.750 (10-Nov-26) 3PL invoicing (Rita, Oct-26 ILG): OTHER COSTS coded, no double count, preview shows every line
 - ILG: the OTHER COSTS cost centre (Fulfil internal shipments to another of our warehouses, TRF* branch transfers) now books to ILG's 'other' account in Config / Accounts (303.33 ILG UK - Other fees), like every other 3PL; it had no code (Oct-26: GBP 5,579.78 on "Fulfilment - Fulfilment - OTHER COSTS"), so Xero rejected the import. An "OTHER COSTS" row in the channel account map overrides it.
 - ILG: the same invoice uploaded as PDF and spreadsheet (DI1108532.pdf + DI1108532.xlsx) was counted twice. Files with the same name are one invoice (PDF wins, then .csv); byte-identical re-uploads count once; skipped files are listed in the warnings.

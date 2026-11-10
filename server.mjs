@@ -32489,10 +32489,11 @@ const PO_COMPLETE_STRIP = [
   'branch_delivery_notes', 'shipment_delivery_notes', 'ships_with_master_po',
   'client_requirements', 'client_po_ref', 'client_deadline', 'asn_numbers', 'dispatch_order_ref',
   'final_delivery_address', 'crossdock_skus', 'dtc_accepted_by',
-  'likely_start', 'likely_completion', 'likely_balance_1', 'likely_balance_2',
   'erp_final_delivery', 'erp_po_id', 'erp_is_fulfil', 'prod_confirmed_age', 'production_status',
   'end_override', 'ship_override', 'delivery_override', 'ship_carrier', 'ship_carrier_ref',
-  'catch_up', 'final_payment_due', 'credit_days', 'credit_type',
+  // v28.751 (Ben 10-Nov-26, PO-56UKXR2 missing from Payments Due): final_payment_due, likely_* dates, catch_up and credit terms are
+  // PAYMENT inputs and stay on COMPLETE POs. Payments Due lists a PO only when final_payment_due is set (v28.622), so stripping it hid
+  // every owed balance on a COMPLETE PO.
 ];
 // (Removed PO_ACTIONS_PRIORITY_SQL — the priority preview now runs the SAME full actions UNION filtered to
 //  severity='high' (see case 'actions'), so it can never drift out of sync with the full rule set.)
