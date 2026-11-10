@@ -22450,6 +22450,7 @@ const _olDate = v => v == null ? null : typeof v === 'object' ? (v.iso_string ||
 // entity = Fulfil's own company-currency GBP at the order's rate; AU entity = AUD / CONFIG > Exchange rates for the order's FY, Mar-Feb).
 // Zero-price lines are free: units count for demand, revenue 0, left out of ASP.
 const OL_LOCAL_CCY = { UK: 'GBP', US: 'USD', EU: 'EUR', AU: 'AUD', CA: 'CAD' };
+const OL_NON_MERCH = new Set(['SHIPPING', 'PERSONALISATION_HIDDEN_PRODUCT']);
 const OL_FIELDS = ['id', 'sale', 'product.code', 'quantity', 'quantity_canceled', 'unit_price', 'amount', 'untaxed_amount_cpny_ccy_cache', 'sale_date', 'shipping_date', 'is_return', 'write_date',
   'warehouse.code', 'product.account_category.name', 'sale.number', 'sale.reference', 'sale.state', 'sale.channel.name', 'sale.channel_segment', 'sale.party.name', 'sale.currency.code', 'sale.company.code'];
 const OL_COLS = ['line_id', 'sale_id', 'so_number', 'reference', 'fulfil_channel', 'channel_segment', 'customer', 'country', 'channel', 'is_wholesale', 'is_key_account', 'is_custom', 'sku', 'qty', 'unit_price', 'currency', 'order_date', 'ship_date', 'sale_state', 'basis', 'demand_date', 'iso_week',
@@ -22494,6 +22495,7 @@ function olRow(ctx, l) {
   const lc = mp.country ? OL_LOCAL_CCY[mp.country] || null : null;
   const loc = !lc ? null : sccy === lc ? amt : coCcy === lc ? amtC : gbp * (_olRate(ctx.fx, lc, od) || 1);
   const cat = l['product.account_category.name'] || null, free = qty > 0 && price === 0 && amt === 0;
+  if (OL_NON_MERCH.has(String(cat || '').toUpperCase()) || /^SHIPPING$/i.test(sku)) return null;   // v28.761: shipping / placeholders are never stored
   const wd = l.write_date ? (typeof l.write_date === 'object' ? l.write_date.iso_string : String(l.write_date)) : null;
   return [l.id, l.sale, l['sale.number'] || null, ref, l['sale.channel.name'] || null, l['sale.channel_segment'] || null, cust, mp.country, mp.channel,
     !!mp.wholesale, !!key, !!mp.custom, sku, qty, _fulfilNum(l.unit_price), l['sale.currency.code'] || null, od, sd, l['sale.state'] || null,
@@ -22510,6 +22512,20 @@ async function _olLinesOf(cfg, saleIds) { const all = []; let c = 0;
   for (;;) { const ls = await _olGet(cfg, '/model/sale.line/search_read', [[['sale', 'in', saleIds], ['type', '=', 'line'], ['product', '!=', null], ['id', '>', c]], 0, 500, [['id', 'ASC']], OL_FIELDS]);
     if (!Array.isArray(ls) || !ls.length) break; all.push(...ls); c = ls[ls.length - 1].id; if (ls.length < 500) break; }
   return all; }
+// v28.761: lines the incremental sync brought in for a month that is already rolled up would count twice: they are taken out again and
+// that Fulfil channel x month is queued (app_settings sales_refresh_queue) for a re-import, which replaces the month whole.
+async function _olStaleCheck(out) {
+  const ws = await _olDetailFrom(); const old = out.filter(r => r[20] && String(r[20]) < ws); if (!old.length) return;
+  const pairs = [...new Set(old.map(r => r[4] + '|' + String(r[20]).slice(0, 7)))];
+  const rolled = (await pool.query(`SELECT DISTINCT fulfil_channel || '|' || to_char(month,'YYYY-MM') k FROM planner.sales_rollup WHERE fulfil_channel || '|' || to_char(month,'YYYY-MM') = ANY($1)`, [pairs])).rows.map(r => r.k);
+  if (!rolled.length) return;
+  const ids = old.filter(r => rolled.includes(r[4] + '|' + String(r[20]).slice(0, 7))).map(r => r[0]);
+  await pool.query(`DELETE FROM planner.order_lines l WHERE l.line_id = ANY($1::bigint[]) AND NOT EXISTS (SELECT 1 FROM planner.order_anomalies a WHERE a.sale_id = l.sale_id)
+    AND NOT EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id) AND NOT l.is_custom`, [ids]);
+  let q = []; try { q = JSON.parse(((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_refresh_queue'`)).rows[0] || {}).value || '[]'); } catch (_) {}
+  rolled.forEach(k => { if (!q.includes(k)) q.push(k); });
+  await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('sales_refresh_queue',$1) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, [JSON.stringify(q)]);
+}
 async function _olGet(cfg, path, body) { for (let k = 0; ; k++) { try { return await fulfilFetchCfg(cfg, 'PUT', path, body); } catch (e) { if (k >= 2 || !/Timed out|ECONNRESET|fetch failed|ENOTFOUND|50[234]/.test(String(e.message))) throw e; await new Promise(r => setTimeout(r, 2000)); } } }
 let _olBusy = null;
 async function orderLinesSync(by, full) {
@@ -22547,6 +22563,7 @@ async function orderLinesSync(by, full) {
     const ctx = await olContext();
     const out = rows.map(l => olRow(ctx, l)).filter(Boolean);
     await olUpsert(out);
+    try { await _olStaleCheck(out); } catch (e) { console.warn('[order-lines] stale check: ' + e.message); }
     if (more) { await setS('order_lines_cursor', String(cursor)); await setS('order_lines_mode', mode); await setS('order_lines_since', since || '');
       return { lines: out.length, mode, since, more: true, cursor, ms: Date.now() - t0, by: by || null }; }   // call again to continue
     await setS('order_lines_cursor', '0'); await setS('order_lines_since', ''); await setS('order_lines_mode', 'inc');
@@ -22607,6 +22624,17 @@ const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel',
   AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = ${OL_SKU} AND coalesce(p.category_name_final,'') <> '')
   AND NOT EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded
     AND (l.qty > ${Number(thr)} OR NOT EXISTS (SELECT 1 FROM planner.order_lines l2 WHERE l2.sale_id = l.sale_id AND l2.qty > ${Number(thr)})))`;   // v28.759 (Ben 10-Nov-26): an excluded order loses its over-threshold lines; an order flagged by another anomaly rule (no line over the threshold) is excluded whole
+// v28.761: every demand reader takes detail lines (OL_LIVE_SQL) PLUS the rolled-up older lines (planner.sales_rollup, already demand-only).
+// Columns: sku (HORIZON), country, channel, fulfil_channel, iso_week, month, d0 (first day held), units, units_free, revenue_gbp, revenue_local, local_ccy.
+const OL_DEMAND_SRC = (thr, where) => `(SELECT ${OL_SKU} sku, l.country, l.channel, l.fulfil_channel, l.iso_week, date_trunc('month', l.demand_date)::date AS month, l.demand_date d0,
+    l.qty units, CASE WHEN l.is_free THEN l.qty ELSE 0 END units_free, coalesce(l.revenue_gbp,0) revenue_gbp, coalesce(l.revenue_local,0) revenue_local, l.local_ccy
+    FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL AND l.iso_week IS NOT NULL ${where && where.l ? 'AND ' + where.l : ''}
+  UNION ALL SELECT r.sku, r.country, r.channel, r.fulfil_channel, r.iso_week, r.month, greatest(r.iso_week, r.month) d0, r.units, r.units_free, r.revenue_gbp, r.revenue_local, r.local_ccy
+    FROM planner.sales_rollup r ${where && where.r ? 'WHERE ' + where.r : ''})`;
+// Line detail is kept from the start of the current month (minus app_settings sales_detail_months), and at least the last 35 days (the data
+// health checks read 30 days of orders, and month-end cancellations / returns land in the first days of the next month).
+async function _olDetailFrom() { const n = Math.max(0, Math.min(24, Number(await _olSetting('sales_detail_months')) || 0)); const t = new Date(); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() - n);
+  const d35 = new Date(Date.now() - 35 * 86400000); return (d35 < t ? d35 : t).toISOString().slice(0, 10); }
 // Cut per market x channel: the Fulfil cut-over month, or none (monthly spread throughout) for the monthly-only channels.
 async function _olCuts(db, thr) {
   const from = await _olFulfilFrom(), mo = await _olMonthlyOnly();
@@ -22629,11 +22657,10 @@ async function weeklyActualsBuild() {
       SELECT sku, country, channel, iso_week, units, revenue, 'import', now() FROM planner.sales_actuals_weekly_import`);
     await client.query(`CREATE TEMP TABLE _imp ON COMMIT DROP AS SELECT DISTINCT country, channel, iso_week FROM planner.sales_actuals_weekly_import`);
     const a = await client.query(`INSERT INTO planner.sales_actuals_weekly (sku, country, channel, iso_week, units, revenue, source, built_at)
-      SELECT ${OL_SKU}, l.country, l.channel, l.iso_week, sum(l.qty), sum(CASE WHEN l.revenue_gbp IS NOT NULL THEN l.revenue_gbp ELSE l.qty * coalesce(l.unit_price,0) END), 'fulfil', now()
-      FROM planner.order_lines l JOIN _cut c ON c.country = l.country AND c.channel = l.channel
-      WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date >= c.cut AND l.iso_week IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM _imp i WHERE i.country = l.country AND i.channel = l.channel AND i.iso_week = l.iso_week)
-      GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
+      SELECT x.sku, x.country, x.channel, x.iso_week, sum(x.units), sum(x.revenue_gbp), 'fulfil', now()
+      FROM ${OL_DEMAND_SRC(thr)} x JOIN _cut c ON c.country = x.country AND c.channel = x.channel
+      WHERE x.d0 >= c.cut AND NOT EXISTS (SELECT 1 FROM _imp i WHERE i.country = x.country AND i.channel = x.channel AND i.iso_week = x.iso_week)
+      GROUP BY 1,2,3,4 HAVING sum(x.units) <> 0`);   // v28.761: detail + roll-up
     const b = await client.query(`INSERT INTO planner.sales_actuals_weekly (sku, country, channel, iso_week, units, revenue, source, built_at)
       SELECT s.sku, s.country, s.channel, date_trunc('week', d)::date wk, sum(s.units / dim), sum(coalesce(s.revenue,0) / dim), 'monthly_spread', now()
       FROM (SELECT sa.sku, sa.country, sa.channel, sa.month, sum(sa.units) units, sum(sa.revenue) revenue, extract(day FROM (date_trunc('month', sa.month) + interval '1 month - 1 day'))::numeric dim, coalesce(c.cut, '2999-01-01'::date) cut
@@ -22662,7 +22689,9 @@ async function salesImportRange(opts, by) {
   const cfg = fulfilConfigFor('live'); if (!cfg.configured) throw new Error('Fulfil live API not configured (FULFIL_LIVE_SUBDOMAIN / FULFIL_LIVE_API_KEY).');
   const t0 = Date.now(), budget = Math.min(Math.max(Number(opts.budget_ms) || 45000, 5000), 280000);
   const channels = (Array.isArray(opts.channels) ? opts.channels : String(opts.channels || '').split(',')).map(x => String(x).trim()).filter(Boolean);
-  const from = String(opts.from || '').slice(0, 10), to = String(opts.to || '').slice(0, 10);
+  let from = String(opts.from || '').slice(0, 10), to = String(opts.to || '').slice(0, 10);
+  if (opts.replace && /^\d{4}-\d{2}/.test(from) && /^\d{4}-\d{2}/.test(to)) {   // v28.761: a re-import replaces whole months (the roll-up is held by month)
+    from = from.slice(0, 7) + '-01'; const t = new Date(to.slice(0, 7) + '-01T00:00:00Z'); t.setUTCMonth(t.getUTCMonth() + 1); t.setUTCDate(0); to = t.toISOString().slice(0, 10); }
   if (!channels.length || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error('channels, from and to (YYYY-MM-DD) required');
   const key = JSON.stringify([channels, from, to]);
   let st = null; try { st = JSON.parse(((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_import_range'`)).rows[0] || {}).value || 'null'); } catch (_) {}
@@ -22685,7 +22714,9 @@ async function salesImportRange(opts, by) {
   st.orders += orders; st.lines += lines; st.saved += saved; st.more = more; if (!more) st.finished_at = new Date().toISOString();
   if (!more && st.replace && !st.removed_done) {   // the range's lines this refresh did not read again: deleted / re-imported in Fulfil
     const del = await pool.query(`DELETE FROM planner.order_lines WHERE fulfil_channel = ANY($1) AND order_date BETWEEN $2 AND $3 AND refresh_run IS DISTINCT FROM $4`, [channels, from, to, st.run]);
-    st.removed = del.rowCount; st.removed_done = true; salesFulfilBuildSoon('refresh ' + channels.join(', ')); }
+    // v28.761: the range's rolled-up rows give way to the fresh lines (the next build rolls them up again)
+    const rdel = await pool.query(`DELETE FROM planner.sales_rollup WHERE fulfil_channel = ANY($1) AND month BETWEEN $2::date AND $3::date`, [channels, from, to]).catch(() => ({ rowCount: 0 }));
+    st.removed = del.rowCount; st.rollup_replaced = rdel.rowCount; st.removed_done = true; salesFulfilBuildSoon('refresh ' + channels.join(', ')); }
   await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('sales_import_range',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(st)]);
   await pool.query(`INSERT INTO planner.sales_import_runs (finished_at, mode, scope, lines_read, lines_saved, orders_read, more, ms, run_by) VALUES (now(),'range',$1,$2,$3,$4,$5,$6,$7)`,
     [channels.join(', ') + ' ' + from + '..' + to, lines, saved, orders, more, Date.now() - t0, by || null]).catch(() => {});
@@ -22700,42 +22731,22 @@ function salesFulfilBuildSoon(why) { clearTimeout(_sfbTimer); _sfbTimer = setTim
   _sfbBusy = salesFulfilBuild().then(r => { _dataCache = null; console.log('[sales-final] rebuilt after ' + why + ': ' + r.monthly_rows + ' monthly rows'); })
     .catch(e => console.warn('[sales-final] rebuild failed: ' + e.message)).finally(() => { _sfbBusy = null; }); }, 5000); }
 async function salesFulfilBuild() {
-  const t0 = Date.now(), thr = await _olThreshold(), client = await pool.connect();
+  const t0 = Date.now(), thr = await _olThreshold(), ws = await _olDetailFrom(), client = await pool.connect();
   try {
-    await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '240s'");
-    await client.query(`DELETE FROM planner.sales_actuals_fulfil`);
-    const m = await client.query(`INSERT INTO planner.sales_actuals_fulfil (sku, country, channel, month, units, revenue, revenue_local, local_ccy, units_free, source, loaded_at)
-      SELECT ${OL_SKU}, l.country, l.channel, date_trunc('month', l.demand_date)::date, sum(l.qty), round(sum(coalesce(l.revenue_gbp,0)),2), round(sum(coalesce(l.revenue_local,0)),2), max(l.local_ccy),
-        sum(CASE WHEN l.is_free THEN l.qty ELSE 0 END), 'fulfil', now()
-      FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
-    // v28.759: the same demand lines by ISO week over the whole history (the 'fulfil_weekly' source of planner.sales_actuals_final)
-    await client.query(`DELETE FROM planner.sales_actuals_fulfil_weekly`);
-    const w = await client.query(`INSERT INTO planner.sales_actuals_fulfil_weekly (sku, country, channel, iso_week, units, revenue, revenue_local, local_ccy, units_free, loaded_at)
-      SELECT ${OL_SKU}, l.country, l.channel, l.iso_week, sum(l.qty), round(sum(coalesce(l.revenue_gbp,0)),2), round(sum(coalesce(l.revenue_local,0)),2), max(l.local_ccy),
-        sum(CASE WHEN l.is_free THEN l.qty ELSE 0 END), now()
-      FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.iso_week IS NOT NULL GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
-    // v28.759: auto cut-over per market x channel = the first FULL month of real Fulfil volume (the first month with at least a quarter of the
-    // series' median monthly units; the month after it when its first order is after the 3rd). Hand-set rows (auto=false) are kept.
-    const cuts = (await client.query(`WITH m AS (SELECT l.country, l.channel, date_trunc('month', l.demand_date)::date mo, sum(l.qty) u, min(l.demand_date) d0
-          FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL GROUP BY 1,2,3),
-        med AS (SELECT country, channel, percentile_cont(0.5) WITHIN GROUP (ORDER BY u) md FROM m GROUP BY 1,2),
-        f AS (SELECT DISTINCT ON (m.country, m.channel) m.country, m.channel, m.mo, m.d0 FROM m JOIN med USING (country, channel) WHERE m.u >= 0.25 * med.md ORDER BY m.country, m.channel, m.mo)
-      SELECT country, channel, CASE WHEN extract(day FROM d0) > 3 THEN (mo + interval '1 month')::date ELSE mo END fulfil_from FROM f`)).rows;
-    if (cuts.length) await client.query(`INSERT INTO planner.sales_source_cuts (country, channel, fulfil_from, auto, updated_by, updated_at)
-      SELECT * , true, 'import', now() FROM unnest($1::text[], $2::text[], $3::date[])
-      ON CONFLICT (country, channel) DO UPDATE SET fulfil_from = excluded.fulfil_from, updated_by = 'import', updated_at = now() WHERE planner.sales_source_cuts.auto`,
-      [cuts.map(c => c.country), cuts.map(c => c.channel), cuts.map(c => c.fulfil_from)]);
-    await client.query(`DELETE FROM planner.order_anomalies`);
+    await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '600s'");
+    // 1. ANOMALIES. History's flags are sticky (their orders keep line detail); only the detail window's flags and orphans are worked out again.
+    await client.query(`DELETE FROM planner.order_anomalies a WHERE a.order_date IS NULL OR a.order_date >= $1 OR NOT EXISTS (SELECT 1 FROM planner.order_lines l WHERE l.sale_id = a.sale_id)`, [ws]);
     const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND l.country IS NOT NULL AND l.channel IS NOT NULL`;
     const a1 = await client.query(`INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
       SELECT l.sale_id, 'line_over_threshold', max(l.so_number), max(l.reference), max(l.fulfil_channel), max(l.country), max(l.channel), max(l.customer), max(l.order_date), sum(l.qty),
         'largest line ' || max(l.qty)::int || ' x ' || (array_agg(l.sku ORDER BY l.qty DESC))[1] || ' (threshold ' || $1::int || ')'
-      FROM planner.order_lines l WHERE ${LIVE} AND NOT l.is_key_account GROUP BY l.sale_id HAVING max(l.qty) > $1`, [thr]);
+      FROM planner.order_lines l WHERE ${LIVE} AND NOT l.is_key_account GROUP BY l.sale_id HAVING max(l.qty) > $1 ON CONFLICT DO NOTHING`, [thr]);
+    // 99.9th percentile per channel over the orders held in detail that are not old (sticky) flags, so kept big orders do not raise the bar
     const a2 = await client.query(`WITH o AS (SELECT l.sale_id, max(l.fulfil_channel) ch, sum(l.qty) u FROM planner.order_lines l WHERE ${LIVE} AND NOT l.is_key_account GROUP BY 1),
-        p AS (SELECT ch, percentile_cont(0.999) WITHIN GROUP (ORDER BY u) p999, count(*) n FROM o GROUP BY 1 HAVING count(*) >= 200)
+        p AS (SELECT ch, percentile_cont(0.999) WITHIN GROUP (ORDER BY u) p999, count(*) n FROM o WHERE NOT EXISTS (SELECT 1 FROM planner.order_anomalies x WHERE x.sale_id = o.sale_id AND x.order_date < $1) GROUP BY 1 HAVING count(*) >= 200)
       INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
       SELECT o.sale_id, 'order_over_p999', max(l.so_number), max(l.reference), o.ch, max(l.country), max(l.channel), max(l.customer), max(l.order_date), o.u, 'order ' || o.u::int || ' units vs 99.9th percentile ' || round(p.p999::numeric,1) || ' on ' || o.ch
-      FROM o JOIN p ON p.ch = o.ch JOIN planner.order_lines l ON l.sale_id = o.sale_id WHERE o.u > greatest(p.p999, 10) GROUP BY o.sale_id, o.ch, o.u, p.p999`);
+      FROM o JOIN p ON p.ch = o.ch JOIN planner.order_lines l ON l.sale_id = o.sale_id WHERE o.u > greatest(p.p999, 10) GROUP BY o.sale_id, o.ch, o.u, p.p999 ON CONFLICT DO NOTHING`, [ws]);
     const a3 = await client.query(`WITH d AS (SELECT upper(trim(l.reference)) r, regexp_replace(l.fulfil_channel, '^HISTORICAL ', '') b, array_agg(DISTINCT l.sale_id) ids
         FROM planner.order_lines l WHERE ${LIVE} AND coalesce(trim(l.reference),'') <> '' GROUP BY 1,2 HAVING count(DISTINCT l.sale_id) > 1)
       INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
@@ -22745,9 +22756,45 @@ async function salesFulfilBuild() {
     const a4 = await client.query(`INSERT INTO planner.order_anomalies (sale_id, rule, so_number, reference, fulfil_channel, country, channel, customer, order_date, units, detail)
       SELECT l.sale_id, 'zero_price', max(l.so_number), max(l.reference), max(l.fulfil_channel), max(l.country), max(l.channel), max(l.customer), max(l.order_date), sum(l.qty) FILTER (WHERE l.is_free),
         sum(l.qty) FILTER (WHERE l.is_free)::int || ' free units (count as demand, not in ASP)'
-      FROM planner.order_lines l WHERE ${LIVE} AND l.is_free GROUP BY l.sale_id HAVING sum(l.qty) FILTER (WHERE l.is_free) >= 10`);
+      FROM planner.order_lines l WHERE ${LIVE} AND l.is_free GROUP BY l.sale_id HAVING sum(l.qty) FILTER (WHERE l.is_free) >= 10 ON CONFLICT DO NOTHING`);
+    // 2. ROLL-UP (v28.761, Ben 10-Nov-26: order level only for anomalies in history and the current month). Lines dated before the detail
+    // window, of orders that are not flagged, excluded / decided or custom, are added to planner.sales_rollup (demand lines only) and deleted.
+    await client.query(`CREATE TEMP TABLE _keep ON COMMIT DROP AS SELECT sale_id FROM planner.order_anomalies UNION SELECT sale_id FROM planner.order_exclusions
+      UNION SELECT DISTINCT sale_id FROM planner.order_lines WHERE is_custom`);
+    await client.query(`CREATE INDEX ON _keep (sale_id)`);
+    const OLD = `coalesce(l.demand_date, l.order_date) < $1::date AND NOT EXISTS (SELECT 1 FROM _keep k WHERE k.sale_id = l.sale_id)`;
+    const ru = await client.query(`INSERT INTO planner.sales_rollup (fulfil_channel, sku, country, channel, iso_week, month, units, units_free, revenue_gbp, revenue_local, local_ccy, lines, orders, is_historical, rolled_at)
+      SELECT l.fulfil_channel, ${OL_SKU}, l.country, l.channel, l.iso_week, date_trunc('month', l.demand_date)::date, sum(l.qty), sum(CASE WHEN l.is_free THEN l.qty ELSE 0 END),
+        round(sum(coalesce(l.revenue_gbp,0)),2), round(sum(coalesce(l.revenue_local,0)),2), max(l.local_ccy), count(*), count(DISTINCT l.sale_id), bool_or(l.is_historical), now()
+      FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date IS NOT NULL AND l.iso_week IS NOT NULL AND ${OLD} GROUP BY 1,2,3,4,5,6
+      ON CONFLICT (fulfil_channel, sku, country, channel, iso_week, month) DO UPDATE SET units = planner.sales_rollup.units + excluded.units, units_free = planner.sales_rollup.units_free + excluded.units_free,
+        revenue_gbp = planner.sales_rollup.revenue_gbp + excluded.revenue_gbp, revenue_local = planner.sales_rollup.revenue_local + excluded.revenue_local, lines = planner.sales_rollup.lines + excluded.lines,
+        orders = planner.sales_rollup.orders + excluded.orders, is_historical = planner.sales_rollup.is_historical OR excluded.is_historical, rolled_at = now()`, [ws]);
+    const rd = await client.query(`DELETE FROM planner.order_lines l WHERE ${OLD}`, [ws]);
+    // 3. MONTHLY + WEEKLY actuals from detail + roll-up
+    const SRC = OL_DEMAND_SRC(thr);
+    await client.query(`DELETE FROM planner.sales_actuals_fulfil`);
+    const m = await client.query(`INSERT INTO planner.sales_actuals_fulfil (sku, country, channel, month, units, revenue, revenue_local, local_ccy, units_free, source, loaded_at)
+      SELECT x.sku, x.country, x.channel, x.month, sum(x.units), round(sum(x.revenue_gbp),2), round(sum(x.revenue_local),2), max(x.local_ccy), sum(x.units_free), 'fulfil', now()
+      FROM ${SRC} x GROUP BY 1,2,3,4 HAVING sum(x.units) <> 0`);
+    // v28.759: the same demand by ISO week over the whole history (the 'fulfil_weekly' source of planner.sales_actuals_final)
+    await client.query(`DELETE FROM planner.sales_actuals_fulfil_weekly`);
+    const w = await client.query(`INSERT INTO planner.sales_actuals_fulfil_weekly (sku, country, channel, iso_week, units, revenue, revenue_local, local_ccy, units_free, loaded_at)
+      SELECT x.sku, x.country, x.channel, x.iso_week, sum(x.units), round(sum(x.revenue_gbp),2), round(sum(x.revenue_local),2), max(x.local_ccy), sum(x.units_free), now()
+      FROM ${SRC} x GROUP BY 1,2,3,4 HAVING sum(x.units) <> 0`);
+    // v28.759: auto cut-over per market x channel = the first FULL month of real Fulfil volume (the first month with at least a quarter of the
+    // series' median monthly units; the month after it when its first order is after the 3rd). Hand-set rows (auto=false) are kept.
+    const cuts = (await client.query(`WITH m AS (SELECT x.country, x.channel, x.month mo, sum(x.units) u, min(x.d0) d0 FROM ${SRC} x GROUP BY 1,2,3),
+        med AS (SELECT country, channel, percentile_cont(0.5) WITHIN GROUP (ORDER BY u) md FROM m GROUP BY 1,2),
+        f AS (SELECT DISTINCT ON (m.country, m.channel) m.country, m.channel, m.mo, m.d0 FROM m JOIN med USING (country, channel) WHERE m.u >= 0.25 * med.md ORDER BY m.country, m.channel, m.mo)
+      SELECT country, channel, CASE WHEN extract(day FROM d0) > 3 THEN (mo + interval '1 month')::date ELSE mo END fulfil_from FROM f`)).rows;
+    if (cuts.length) await client.query(`INSERT INTO planner.sales_source_cuts (country, channel, fulfil_from, auto, updated_by, updated_at)
+      SELECT * , true, 'import', now() FROM unnest($1::text[], $2::text[], $3::date[])
+      ON CONFLICT (country, channel) DO UPDATE SET fulfil_from = excluded.fulfil_from, updated_by = 'import', updated_at = now() WHERE planner.sales_source_cuts.auto`,
+      [cuts.map(c => c.country), cuts.map(c => c.channel), cuts.map(c => c.fulfil_from)]);
     await client.query('COMMIT');
-    return { monthly_rows: m.rowCount, weekly_rows: w.rowCount, cuts: cuts.length, anomalies: { line_over_threshold: a1.rowCount, order_over_p999: a2.rowCount, duplicate_reference: a3.rowCount, zero_price: a4.rowCount }, threshold: thr, ms: Date.now() - t0 };
+    return { monthly_rows: m.rowCount, weekly_rows: w.rowCount, cuts: cuts.length, detail_from: ws, rolled: { rollup_rows: ru.rowCount, lines_removed: rd.rowCount },
+      anomalies: { line_over_threshold: a1.rowCount, order_over_p999: a2.rowCount, duplicate_reference: a3.rowCount, zero_price: a4.rowCount }, threshold: thr, ms: Date.now() - t0 };
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
 }
 // Reconcile: per market x channel x month, today's sales_actuals (sheet) vs sales_actuals_fulfil, units and GBP revenue.
@@ -22772,10 +22819,12 @@ app.post('/api/demand/sales-import/range', async (req, res) => {
 app.get('/api/demand/sales-import/channels', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
   try { const hf = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_history_from'`)).rows[0] || {}).value || '2024-01-01';
-    const rows = (await pool.query(`SELECT m.channel_name, m.country, m.channel, m.kind, m.is_historical, m.ref_miss_channel,
-        to_char(min(l.order_date),'YYYY-MM-DD') first, to_char(max(l.order_date),'YYYY-MM-DD') last, count(DISTINCT l.sale_id)::int orders, count(l.line_id)::int lines
-      FROM planner.fulfil_channel_map m LEFT JOIN planner.order_lines l ON l.fulfil_channel = m.channel_name
-      WHERE m.kind <> 'ignore' GROUP BY 1,2,3,4,5,6 ORDER BY m.is_historical DESC, 2, 1`)).rows;
+    const rows = (await pool.query(`WITH d AS (SELECT fulfil_channel, min(order_date) a, max(order_date) b, count(DISTINCT sale_id)::int orders FROM planner.order_lines GROUP BY 1),
+        r AS (SELECT fulfil_channel, min(greatest(iso_week, month)) a, max(least(iso_week + 6, (month + interval '1 month' - interval '1 day')::date)) b, sum(orders)::int orders FROM planner.sales_rollup GROUP BY 1)
+      SELECT m.channel_name, m.country, m.channel, m.kind, m.is_historical, m.ref_miss_channel,
+        to_char(least(d.a, r.a),'YYYY-MM-DD') first, to_char(greatest(d.b, r.b),'YYYY-MM-DD') last, coalesce(d.orders,0) + coalesce(r.orders,0) orders
+      FROM planner.fulfil_channel_map m LEFT JOIN d ON d.fulfil_channel = m.channel_name LEFT JOIN r ON r.fulfil_channel = m.channel_name
+      WHERE m.kind <> 'ignore' ORDER BY m.is_historical DESC, 2, 1`)).rows;   // v28.761: detail + roll-up
     res.json({ history_from: hf, channels: rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/sales-import/build', async (req, res) => {
@@ -22803,15 +22852,15 @@ app.get('/api/demand/historical-compare', async (req, res) => {
         round(coalesce(s.u,0))::int sheet_units, round(coalesce(s.r,0))::int sheet_gbp, round(coalesce(f.u,0))::int fulfil_units, round(coalesce(f.r,0))::int fulfil_gbp, round(coalesce(f.uf,0))::int free_units
       FROM s FULL JOIN f ON f.country = s.country AND f.channel = s.channel AND f.month = s.month ORDER BY 1,2,3`, [from, to])).rows;
     // weekly from the same demand lines; each week rolled to the month it starts in, and split over calendar days
-    const wk = (await pool.query(`WITH w AS (SELECT l.country, l.channel, l.iso_week, l.demand_date, sum(l.qty) u FROM planner.order_lines l
-          WHERE ${OL_LIVE_SQL(thr)} AND l.iso_week BETWEEN ($1::date - 6) AND ($2::date + interval '1 month') ${country ? 'AND l.country = $3 AND l.channel = $4' : ''} GROUP BY 1,2,3,4)
-      SELECT country, channel, to_char(date_trunc('month', iso_week),'YYYY-MM') AS ym_start, to_char(date_trunc('month', demand_date),'YYYY-MM') AS ym_day, sum(u)::int u FROM w GROUP BY 1,2,3,4`, country ? [from, to, country, channel] : [from, to])).rows;
+    const wk = (await pool.query(`WITH w AS (SELECT x.country, x.channel, x.iso_week, x.month, sum(x.units) u FROM ${OL_DEMAND_SRC(thr)} x
+          WHERE x.iso_week BETWEEN ($1::date - 6) AND ($2::date + interval '1 month') ${country ? 'AND x.country = $3 AND x.channel = $4' : ''} GROUP BY 1,2,3,4)
+      SELECT country, channel, to_char(date_trunc('month', iso_week),'YYYY-MM') AS ym_start, to_char(month,'YYYY-MM') AS ym_day, sum(u)::int u FROM w GROUP BY 1,2,3,4`, country ? [from, to, country, channel] : [from, to])).rows;
     const roll = {}; wk.forEach(r => { const k = r.country + '|' + r.channel; const a = roll[k] = roll[k] || {}; (a[r.ym_start] = a[r.ym_start] || { by_week_start: 0, by_day: 0 }).by_week_start += r.u; (a[r.ym_day] = a[r.ym_day] || { by_week_start: 0, by_day: 0 }).by_day += r.u; });
     monthly.forEach(m => { const x = (roll[m.country + '|' + m.channel] || {})[m.ym] || { by_week_start: 0, by_day: 0 }; m.weekly_by_start = x.by_week_start; m.weekly_by_day = x.by_day; });
     const out = { from: from.slice(0, 7), to: to.slice(0, 7), threshold: thr, monthly };
     if (country && channel) {
-      out.weeks = (await pool.query(`SELECT to_char(l.iso_week,'YYYY-MM-DD') wk, sum(l.qty)::int u, round(sum(coalesce(l.revenue_gbp,0)))::int gbp FROM planner.order_lines l
-        WHERE ${OL_LIVE_SQL(thr)} AND l.country = $3 AND l.channel = $4 AND l.iso_week BETWEEN ($1::date - 6) AND ($2::date + interval '1 month' - interval '1 day') GROUP BY 1 ORDER BY 1`, [from, to, country, channel])).rows;
+      out.weeks = (await pool.query(`SELECT to_char(x.iso_week,'YYYY-MM-DD') wk, sum(x.units)::int u, round(sum(x.revenue_gbp))::int gbp FROM ${OL_DEMAND_SRC(thr)} x
+        WHERE x.country = $3 AND x.channel = $4 AND x.iso_week BETWEEN ($1::date - 6) AND ($2::date + interval '1 month' - interval '1 day') GROUP BY 1 ORDER BY 1`, [from, to, country, channel])).rows;
       const mo = ym(req.query.month);
       if (mo) out.skus = (await pool.query(`WITH s AS (SELECT sku, sum(units) u FROM planner.sales_actuals WHERE country=$1 AND channel=$2 AND month=$3 GROUP BY 1),
           f AS (SELECT sku, sum(units) u, sum(units_free) uf FROM planner.sales_actuals_fulfil WHERE country=$1 AND channel=$2 AND month=$3 GROUP BY 1)
@@ -22819,8 +22868,12 @@ app.get('/api/demand/historical-compare', async (req, res) => {
           round(coalesce(s.u,0))::int sheet, round(coalesce(f.u,0))::int fulfil, round(coalesce(f.uf,0))::int free
         FROM s FULL JOIN f ON f.sku = s.sku ORDER BY abs(coalesce(f.u,0) - coalesce(s.u,0)) DESC LIMIT 60`, [country, channel, mo])).rows;
     }
-    out.coverage = (await pool.query(`SELECT fulfil_channel, bool_or(is_historical) hist, to_char(min(order_date),'YYYY-MM-DD') first, to_char(max(order_date),'YYYY-MM-DD') last, count(DISTINCT sale_id)::int orders
-      FROM planner.order_lines WHERE sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') GROUP BY 1 ORDER BY 1`)).rows;
+    out.coverage = (await pool.query(`WITH d AS (SELECT fulfil_channel, bool_or(is_historical) hist, min(order_date) a, max(order_date) b, count(DISTINCT sale_id)::int orders, count(*)::int lines
+          FROM planner.order_lines WHERE sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') GROUP BY 1),
+        r AS (SELECT fulfil_channel, bool_or(is_historical) hist, min(greatest(iso_week, month)) a, max(least(iso_week + 6, (month + interval '1 month' - interval '1 day')::date)) b, sum(orders)::int orders, sum(lines)::int lines FROM planner.sales_rollup GROUP BY 1)
+      SELECT coalesce(d.fulfil_channel, r.fulfil_channel) fulfil_channel, coalesce(d.hist, r.hist) hist, to_char(least(d.a, r.a),'YYYY-MM-DD') first, to_char(greatest(d.b, r.b),'YYYY-MM-DD') last,
+        coalesce(d.orders,0) + coalesce(r.orders,0) orders, coalesce(d.lines,0) detail_lines, coalesce(r.lines,0) rolled_lines
+      FROM d FULL JOIN r ON r.fulfil_channel = d.fulfil_channel ORDER BY 1`)).rows;   // v28.761: detail + roll-up
     out.dropped = (await pool.query(`SELECT fulfil_channel, class_rule, count(DISTINCT sale_id)::int orders, sum(qty)::int units FROM planner.order_lines
       WHERE class_rule IS NOT NULL AND order_date BETWEEN $1 AND ($2::date + interval '1 month' - interval '1 day') AND coalesce(product_category,'') <> 'Shipping' GROUP BY 1,2 ORDER BY 4 DESC`, [from, to])).rows;   // incl. v28.760 reclassified (dtc_non_shopify_ref_b2b): counted, shown for information
     out.anomalies = (await pool.query(`SELECT rule, count(*)::int orders, sum(units)::int units FROM planner.order_anomalies GROUP BY 1 ORDER BY 1`).catch(() => ({ rows: [] }))).rows;
@@ -22864,8 +22917,15 @@ app.post('/api/cron/sales-import', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {};
     if (b.mode === 'range') return res.json(Object.assign({ ok: true }, await salesImportRange(b, 'cron')));
-    const r = await orderLinesSync('cron', false); const built = r.more ? null : await salesFulfilBuild();
-    res.json(Object.assign({ ok: true }, r, { monthly: built })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    const r = await orderLinesSync('cron', false);
+    if (r.more) return res.json(Object.assign({ ok: true }, r));
+    // v28.761: re-import any rolled-up Fulfil channel x month that changed (one per call; call again while queue_left > 0)
+    let q = []; try { q = JSON.parse(((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_refresh_queue'`)).rows[0] || {}).value || '[]'); } catch (_) {}
+    let refreshed = null;
+    if (q.length) { const [ch, ym] = q[0].split('|'); refreshed = await salesImportRange({ channels: [ch], from: ym + '-01', to: ym + '-28', replace: true, budget_ms: 40000 }, 'cron');
+      if (!refreshed.more) { q.shift(); await pool.query(`UPDATE planner.app_settings SET value = $1 WHERE key = 'sales_refresh_queue'`, [JSON.stringify(q)]); } }
+    const built = (refreshed && refreshed.more) ? null : await salesFulfilBuild();
+    res.json(Object.assign({ ok: true }, r, { refreshed, queue_left: q.length, monthly: built })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ORDER EXCLUSIONS (Demand > Inputs): every order with a line over the threshold, searchable; toggle per order (default not excluded).
 app.get('/api/demand/order-exclusions', async (req, res) => {
