@@ -20248,7 +20248,10 @@ async function tplXeroCodes(tpl) {
   const cost = {}; (await pool.query(`SELECT cost_type, account_code FROM planner.tpl_cost_accounts WHERE tpl=$1`, [tpl])).rows.forEach(r => { const c = String(r.account_code || '').trim(); if (c) cost[r.cost_type] = c; });
   return { chan, cost, forChannel: label => chan[String(label || '').replace(/^(COGS|Fulfilment)\s*-\s*/i, '').trim().toLowerCase()] || '' };
 }
-function ilgCode(x, account) { return account === 'Storage Fees' ? (x.cost.storage || '') : account === 'Other Fees' ? (x.cost.other || '') : x.forChannel(account); }
+// v28.750 (Rita 10-Nov-26, Oct-26 ILG "Fulfilment - Fulfilment - OTHER COSTS" uncoded): the OTHER COSTS cost centre (Fulfil internal shipments to
+// another of our warehouses, TRF* branch transfers) takes the 3PL's 'other' account (ILG UK - Other fees 303.33), as every other 3PL's bill does,
+// unless Config / Accounts maps an "OTHER COSTS" channel row.
+function ilgCode(x, account) { return account === 'Storage Fees' ? (x.cost.storage || '') : account === 'Other Fees' ? (x.cost.other || '') : (x.forChannel(account) || (/OTHER COSTS$/i.test(String(account || '')) ? (x.cost.other || '') : '')); }
 const ILG_FEEMAP = { 'GOODS-IN': 'Other Fees', 'MANAGEMENT-FEE': 'Other Fees', 'MANAGEMENT FEE': 'Other Fees', 'REWORK': 'Other Fees', 'PACKAGING': 'Other Fees', 'PERSONALISATION FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION-FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION': 'Fulfilment - UK - Shopify', 'RETURN-CHARGES': 'Fulfilment - UK - Shopify', 'LABOUR-CHARGE': 'Fulfilment - UK - Shopify', 'TICKETING': 'Fulfilment - UK - Shopify', 'FUSION INTEGRATION': 'Fulfilment - UK - Shopify' };
 const ILG_CHAN = { WHOLESALE: 'Wholesale', FBA: 'Amazon', AMAZON: 'Amazon', ECOM: 'Shopify', RETAIL: 'Shopify' };
 async function _tplIlgDiItems(buf) {
@@ -20359,7 +20362,19 @@ async function _tplCin7SiblingCC(list) {
 }
 async function _tplIlgAllocate(period) {
   const _xc = await tplXeroCodes('uk_ilg');   // v28.340: codes from the mapping tables
-  const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
+  const files0 = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
+  // v28.750 (Rita 10-Nov-26, Oct-26 DI1108532.pdf + DI1108532.xlsx): one invoice uploaded as both PDF and spreadsheet was read twice (the PDF as the
+  // DI invoice, the .xlsx as a detail report). Same name = same invoice: the PDF wins; between spreadsheets the .csv wins. Byte-identical re-uploads
+  // count once. Each skipped file is listed in the bill's warnings.
+  const _stem = f => String(f.filename || '').replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)$/, '').trim().toUpperCase();
+  const _isPdf = f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || '');
+  const _rank = f => _isPdf(f) ? 0 : (/\.csv$/i.test(f.filename || '') ? 1 : 2);
+  const _seenStem = {}, _seenHash = new Set(), dupSkipped = [];
+  const files = files0.slice().sort((a, b) => _rank(a) - _rank(b)).filter(f => {
+    const h = crypto.createHash('md5').update(f.content || Buffer.alloc(0)).digest('hex');
+    if (_seenHash.has(h)) { dupSkipped.push(f.filename + ' (same file uploaded twice)'); return false; } _seenHash.add(h);
+    const st = _stem(f); if (st && _seenStem[st]) { dupSkipped.push(f.filename + ' (same invoice as ' + _seenStem[st] + ')'); return false; } if (st) _seenStem[st] = f.filename;
+    return true; });
   const pdfs = files.filter(f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || ''));
   if (!pdfs.length) return { ok: false, error: 'Upload the ILG DI invoice PDFs for this period first.' };
   const bucket = {}; const key = (a, k, v) => a + '|' + k + '|' + (v ? 'V' : 'N');
@@ -20426,6 +20441,7 @@ async function _tplIlgAllocate(period) {
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
   readWarn.forEach(w => missing.push(w));   // v28.296: an invoice whose printed total differs from what was read
+  dupSkipped.forEach(w => missing.push('Not counted, to avoid double counting: ' + w + '.'));   // v28.750
   reworkOut.filter(w => w.account === 'Other Fees' && w.order).forEach(w => missing.push('Rework ' + w.order + ' ' + w.amount.toFixed(2) + ': order not found, booked to Other Fees.'));
   if (files.some(f => /\bINVA\d{4,}/i.test(f.filename || '')) && !inva.length) missing.push('ILG Invoice Detail Report (.xlsx) for the INVA invoice: without it the handling charges cannot be split by order. Not uploaded.');
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)

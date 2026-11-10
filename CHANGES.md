@@ -1,3 +1,9 @@
+## v28.750 (10-Nov-26) 3PL invoicing (Rita, Oct-26 ILG): OTHER COSTS coded, no double count, preview shows every line
+- ILG: the OTHER COSTS cost centre (Fulfil internal shipments to another of our warehouses, TRF* branch transfers) now books to ILG's 'other' account in Config / Accounts (303.33 ILG UK - Other fees), like every other 3PL; it had no code (Oct-26: GBP 5,579.78 on "Fulfilment - Fulfilment - OTHER COSTS"), so Xero rejected the import. An "OTHER COSTS" row in the channel account map overrides it.
+- ILG: the same invoice uploaded as PDF and spreadsheet (DI1108532.pdf + DI1108532.xlsx) was counted twice. Files with the same name are one invoice (PDF wins, then .csv); byte-identical re-uploads count once; skipped files are listed in the warnings.
+- Xero bill preview: ILG lines (freight / fulfilment / other fees) and Geneva's overhead / other lines were never drawn; the preview now shows every line.
+- No migration, no new env vars, no new cron routes.
+
 ## v28.749 (10-Nov-26) COGS and SALES by channel: email when a draft is posted; WSSI B2B full price
 - A journal made as a draft (by hand, or before v28.736's email rule) and posted later by the 7th / 15th refresh or the Post button now sends the org's email once, if that journal was never emailed. Oct-26 UK fell through this gap (created 05-Nov by hand, posted 07-Nov by cron, no email); sent by hand 10-Nov.
 - WSSI B2B full price (Kathryn 09-Nov-26): each SKU's actual B2B ASP in that market over the 12 months to the month (capped at full price), RRP / 2 where it had no B2B sales; Fulfil's wholesale price lists hold no real prices yet. Changes B2B full-price revenue and, with only B2B selected, Avg full price (new stock column clFb). Sales £ unchanged (the B2B forecast ASP fallback stays RRP / 2 to match DEMAND). Sandbox: UK B2B actual full-price revenue £2.01m -> £2.37m vs £2.39m sold; UK 3PL closing at B2B full price = 63% of RRP.
