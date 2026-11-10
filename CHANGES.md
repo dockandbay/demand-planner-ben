@@ -1,3 +1,8 @@
+## v28.775 (11-Nov-26) Manufacturing-branch POs: nothing to pay unless a final invoice and final payment due are entered (migration 435)
+- Ben (PO-57BUNDLE-XR): the Manufacturing branch means $0 to pay. In planner.v_po_finance, for branch Manufacturing only: value used = final invoice amount, else 0; start % and completion % = 0 (no start deposit, completion, deposit-ref prompt or deposit-unassigned action); balance due date = final payment due only when a final invoice amount is also entered. Recorded payments still count and still show.
+- PO > Payments still shows Estimate (order plan); a Manufacturing note explains the rule and "blank = nothing to pay".
+- Live today (10 Manufacturing POs): PO-57BUNDLE-XR loses its 2,007.07 start deposit and 06-Dec-26 balance; PO-58MANU1 loses its 4,584.00 start draw on P58-UK-WK1 and 06-Nov-26 balance; PO-56XR-MANU-1 and PO-55WK-MANU lose calculated due dates. The 4 Weierken AW26 POs and PO-56WK-MANU-1 keep their final-invoice due dates; PO-55WK-MANU-1 keeps its recorded 751.75 deposit.
+- Migration 435 replaces the view (guarded on 322's md5); sandbox: all 1,373 non-Manufacturing rows identical. No new env vars, no new cron routes.
 ## v28.774 (11-Nov-26) Email sends from horizon@dockandbay.com
 - dockandbay.com is now verified in Resend (checked 11-Nov). Admin, supplier portal and client emails send From horizon@dockandbay.com (was horizon@supplier.dockandbay.com; client email was PORTAL_FROM). Reply-to addresses unchanged.
 - Commission statements send From the chosen sales mailbox (sales@ / sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@) by default; EMAIL_ROOT_DOMAIN_OK=0 brings back the supplier.dockandbay.com relay.

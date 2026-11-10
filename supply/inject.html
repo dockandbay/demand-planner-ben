@@ -5117,7 +5117,10 @@ function hzPortalHelp(el){
     var h='<div class="sect-h">Order value — final invoice overrides the estimate for all payment &amp; landed calcs</div>'
       +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
-      +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
+      // v28.775 (Ben 11-Nov-26): a MANUFACTURING-branch PO has nothing to pay unless a final invoice amount is entered; it is only due once a
+      // final payment due date is entered as well (v_po_finance, migration 435). No start deposit / completion milestone, no deposit ref.
+      +(/manufactur/i.test(r.branch||'')?cliRow('<b>Manufacturing branch</b>','<span class="mut tiny">nothing to pay by default: no start deposit, completion or deposit ref. A payment is only due once both a <b>final invoice amount</b> and a <b>final payment due</b> date are entered.</span>'):'')
+      +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">'+(/manufactur/i.test(r.branch||'')?'blank = nothing to pay':'blank = use estimate')+'</span>')
       // ---- Additional costs (supplier-submitted: freight / tooling / surcharges) + a standing Credit amount row —
       // slimline; both add to the invoice. Credit writes to credit_amount (PO field); the rest are portal lines. ----
       +(function(){ var ac=(d&&d.additional_costs)||[]; var pon=esc(r.po);
