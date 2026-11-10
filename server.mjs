@@ -23065,13 +23065,24 @@ function _pwSpread(months, pinned, shape, wkFrom, wkTo, dayOut) {
   return weeks;
 }
 async function planWeekly(q) {
-  const country = String(q.country || 'UK').toUpperCase(), channel = String(q.channel || 'DTC').toUpperCase(), wh = _pwWh(country, channel);
+  // v28.762: q.skus = the SKUs Plan monthly shows for the same filters (the page sends them); channel 'ALL' = Combine (read only, summed)
+  const country = String(q.country || 'UK').toUpperCase(), channel = String(q.channel || 'DTC').toUpperCase();
+  if (channel === 'ALL') {
+    const chs = ['DTC', 'FBA', 'B2B', 'TIK'], parts = [];
+    for (const ch of chs) parts.push(await planWeekly(Object.assign({}, q, { channel: ch })));
+    const by = {}; parts.forEach(pt => pt.rows.forEach(r => { const o = by[r.sku] = by[r.sku] || { sku: r.sku, name: r.name, cat: r.cat, sub: r.sub, fc: {}, ly: {}, act: {}, months: {}, pinned: [] };
+      ['fc', 'ly', 'act', 'months'].forEach(k => Object.entries(r[k] || {}).forEach(([w, v]) => { o[k][w] = Math.round(((o[k][w] || 0) + Number(v)) * 10) / 10; })); }));
+    return Object.assign({}, parts[0], { channel: 'ALL', rows: Object.values(by), read_only: true, capped: parts.some(pt => pt.capped) });
+  }
+  const wh = _pwWh(country, channel);
   const nW = Math.min(Math.max(Number(q.weeks) || 26, 4), 78), back = Math.min(Math.max(Number(q.back) || 8, 0), 52);
   const thisMon = _pwMonday(new Date().toISOString().slice(0, 10)), t0 = new Date(thisMon + 'T00:00:00Z'); t0.setUTCDate(t0.getUTCDate() - 7 * back);
   const wkFrom = t0.toISOString().slice(0, 10), wks = []; for (let i = 0; i < nW + back; i++) { const t = new Date(t0); t.setUTCDate(t.getUTCDate() + 7 * i); wks.push(t.toISOString().slice(0, 10)); }
   const wkTo = wks[wks.length - 1], mFrom = wkFrom.slice(0, 7) + '-01', mTo = wkTo.slice(0, 7) + '-01';
   const qs = String(q.q || '').trim().slice(0, 60), cat = String(q.cat || '').trim(), sub = String(q.sub || '').trim();
-  const prods = (await pool.query(`SELECT p.sku, p.product_name name, coalesce(p.category_name_final,'') cat, coalesce(p.subcategory,'') sub FROM planner.products p
+  const want = Array.isArray(q.skus) ? q.skus.map(x => String(x)).filter(Boolean).slice(0, 3000) : null;
+  const prods = want ? (await pool.query(`SELECT p.sku, p.product_name name, coalesce(p.category_name_final,'') cat, coalesce(p.subcategory,'') sub FROM planner.products p WHERE p.sku = ANY($1) ORDER BY 3, 4, 1`, [want])).rows
+    : (await pool.query(`SELECT p.sku, p.product_name name, coalesce(p.category_name_final,'') cat, coalesce(p.subcategory,'') sub FROM planner.products p
     WHERE p.sku IN (SELECT DISTINCT sku FROM planner.forecast_outputs WHERE warehouse = $1 AND channel = $2 AND month BETWEEN $3 AND $4 AND units <> 0)
       AND ($5 = '' OR p.sku ILIKE '%' || $5 || '%' OR p.product_name ILIKE '%' || $5 || '%') AND ($6 = '' OR p.category_name_final = $6) AND ($7 = '' OR p.subcategory = $7)
     ORDER BY 3, 4, 1 LIMIT 400`, [wh, channel, mFrom, mTo, qs, cat, sub])).rows;
@@ -23085,8 +23096,11 @@ async function planWeekly(q) {
   const M = by(), P = by(), L = by(), A = by(); fo.forEach(r => M.add(r.sku, r.ym, r.units)); pins.forEach(r => P.add(r.sku, r.wk, r.units)); ly.forEach(r => L.add(r.sku, r.wk, r.u)); act.forEach(r => A.add(r.sku, r.wk, r.u));
   const rows = prods.map(p => { const w = _pwSpread(M.o[p.sku] || {}, P.o[p.sku] || {}, shp.sub[p.sub] || shp.all, wkFrom, wkTo);
     return Object.assign(p, { fc: Object.fromEntries(wks.map(k => [k, Math.round((w[k] || 0) * 10) / 10])), pinned: Object.keys(P.o[p.sku] || {}), ly: L.o[p.sku] || {}, act: A.o[p.sku] || {}, months: M.o[p.sku] || {} }); });
-  return { country, channel, warehouse: wh, weeks: wks, this_week: thisMon, rows, shape: shp.all ? 'last year weekly shape' : 'even (no weekly history)', capped: prods.length >= 400 };
+  return { country, channel, warehouse: wh, weeks: wks, this_week: thisMon, rows, shape: shp.all ? 'last year weekly shape' : 'even (no weekly history)', capped: !want && prods.length >= 400 };
 }
+app.post('/api/demand/plan-weekly', async (req, res) => {   // v28.762: the page posts the SKU list Plan monthly shows
+  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.body || {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/demand/plan-weekly', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.query || {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

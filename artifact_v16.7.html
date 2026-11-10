@@ -10609,6 +10609,7 @@ function remapExpanded(dim,newVal){
   EXPANDED=ne;
 }
 function renderMain(viewOnly){
+  if(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==='planning'&&typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW==='planweekly'){ var _pwb=document.getElementById('demand-body'); if(_pwb){ renderPlanWeeklyView(_pwb); return; } }   // v28.762: Plan monthly's filters drive Plan weekly
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
   if(!viewOnly){ try{ hzShareMemoCheck(); }catch(e){} CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // v28.215 (Diviyaj v28.150.2): no ASPADJ_MEMO reset here, it cost ~1.5s per render; cleared by refreshRow, the ASP save and data reloads. v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
@@ -10951,7 +10952,7 @@ function render(){
     return;
   }
   if(DEMAND_VIEW!=='plan'){
-    planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=(DEMAND_VIEW==='planweekly')?'':'none';});   // v28.762: Plan weekly keeps Plan monthly's filters
     var tw0=document.getElementById('tw'); if(tw0)tw0.style.display='none';
     var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
     var body=document.getElementById('demand-body');
@@ -18545,55 +18546,91 @@ function renderHistCompareView(body){
       .catch(function(e){ D.innerHTML='<div style="color:var(--neg)">'+e2(e.message)+'</div>'; }); }
   load();
 }
-// v28.759 (Ben 10-Nov-26): DEMAND ▸ Plan weekly, the weekly twin of Plan monthly (open both in two browser tabs to work side by side).
-// ONE forecast: weeks are the monthly plan spread over its days by last year's weekly shape; editing a week pins it and moves its months.
+// v28.762 (Ben 10-Nov-26: "more reflect UX and UI of demand monthly"): DEMAND ▸ Plan weekly uses Plan monthly's own controls (country +
+// channel pills, Show / search / category filters) and the same rows (filteredCats + filteredSkus, so both tabs list the same SKUs), the
+// dark All categories band, sub-category rows that open to SKUs, and the monthly cell style (last year faint, units bold, % vs last year).
+// ONE forecast with Plan monthly: weeks = the month spread over its days by last year's weekly shape; typing a future week pins it and
+// moves its month(s); Combine is read only.
+var PW_WEEKS=26, PW_OPEN=window.__PW_OPEN||(window.__PW_OPEN={}), PW_ALL_OPEN=null;
 function renderPlanWeeklyView(body){
+  if(!body)return;
   function e2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], fdt=function(d){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m?(m[3]+'-'+MN[+m[2]-1]):''; };
-  var n0=function(v){ var x=Math.round(Number(v)||0); return x?x.toLocaleString():''; };
-  var S=window.__PW_STATE||(window.__PW_STATE={country:(typeof CUR!=='undefined'&&/^(UK|US|EU|AU|CA)$/.test(String(CUR).toUpperCase()))?String(CUR).toUpperCase():'UK', channel:'DTC', weeks:26, back:8, q:'', cat:''});
-  body.innerHTML='<div style="max-width:100%"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px"><b style="font-size:15px">Plan weekly</b>'
-    +'Market <select id="pw-co">'+['UK','US','EU','AU','CA'].map(function(m){return '<option'+(S.country===m?' selected':'')+'>'+m+'</option>';}).join('')+'</select>'
-    +'Channel <select id="pw-ch">'+['DTC','FBA','B2B','TIK','ZAL'].map(function(m){return '<option'+(S.channel===m?' selected':'')+'>'+m+'</option>';}).join('')+'</select>'
-    +'Weeks ahead <select id="pw-n">'+[13,26,52].map(function(n){return '<option'+(S.weeks===n?' selected':'')+'>'+n+'</option>';}).join('')+'</select>'
-    +'<input id="pw-q" placeholder="SKU or product" value="'+e2(S.q)+'" style="width:180px"> <input id="pw-cat" placeholder="Category" value="'+e2(S.cat)+'" style="width:130px">'
-    +'<button class="save-btn" id="pw-go">Show</button><span id="pw-msg" class="mut"></span></div>'
-    +'<div class="mut" style="font-size:11.5px;margin-bottom:8px;max-width:1100px">One forecast with <a href="#/demand/plan">Plan monthly</a>: each month is spread over its days by last year&rsquo;s weekly shape and a week is the sum of its days (a week across two months takes its days from each). Type in a future week to set it: the week is pinned (<b>&#9679;</b>) and the difference moves into its month(s), so Plan monthly and the buy plan follow. Past weeks show actuals. Grey = last year&rsquo;s same week.</div>'
-    +'<div id="pw-grid"></div></div>';
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], wd=function(d){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m?(+m[3]+' '+MN[+m[2]-1].toUpperCase()):''; };
+  var n0=function(v){ var f=Number(v)||0; if(f>0&&f<9.95)return String(Math.round(f*10)/10); var x=Math.round(f); return x?x.toLocaleString():''; };
+  var pc=function(a,b){ a=Number(a)||0; b=Number(b)||0; if(!a||a<Math.max(3,Math.abs(b)*0.05))return ''; var p=Math.round((b-a)/a*100); return '<div style="font-size:9px;color:'+(p>0?'var(--pos)':p<0?'var(--neg)':'var(--muted)')+'">'+(p>0?'+':'')+p+'%</div>'; };
+  try{ if(typeof syncTabs==='function')syncTabs(); }catch(e){}   // pills show the current country / channel (Plan monthly does this in its own render)
+  var _agg=(typeof PLAN_AGG!=='undefined'&&PLAN_AGG.on);
+  var co=String(CUR).toUpperCase(), ch=(_agg||!CF)?'ALL':CF, ctry=co.toLowerCase();
+  // the same rows Plan monthly shows for the current filters
+  var cm={}; try{ cm=filteredCats(); }catch(e){}
+  var groups=[], skus={};
+  Object.keys(cm).forEach(function(cat){ (cm[cat]||[]).slice().sort(function(a,b){return a.s.localeCompare(b.s)||a.ch.localeCompare(b.ch);}).forEach(function(row){
+    var list=[]; try{ list=filteredSkus(row.s,CUR,row.ch)||[]; }catch(e){} if(!list.length)return;
+    groups.push({cat:cat, s:row.s, ch:row.ch, skus:list}); list.forEach(function(k){ skus[k]=1; }); }); });
+  body.innerHTML='<div id="pw-wrap" style="max-width:100%">'
+    +'<div style="background:var(--amber-bg);border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:9px 14px;margin:4px 0 8px;font-size:13px;display:flex;gap:10px;align-items:center"><span style="font-size:16px">&#9888;</span><span><b>Work in progress only.</b> Plan weekly is being built and tested: do not rely on it for planning yet. Weekly numbers come from the monthly plan; edits here change Plan monthly too.</span></div>'   // Ben 10-Nov-26
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 0 6px;font-size:12px">'
+    +'<span class="mut">Weeks ahead</span><div style="display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden">'+[13,26,52].map(function(n){ var on=PW_WEEKS===n; return '<button data-pwn="'+n+'" style="border:0;padding:3px 9px;font-size:11.5px;cursor:pointer;background:'+(on?'var(--nav)':'transparent')+';color:'+(on?'#fff':'inherit')+'">'+n+'</button>'; }).join('')+'</div>'
+    +'<button class="pl-tog" id="pw-exp" style="font-size:11.5px">'+(PW_ALL_OPEN?'Collapse all':'Expand all')+'</button>'
+    +'<span id="pw-msg" class="mut"></span><span class="mut" style="margin-left:auto;font-size:11px">One forecast with <a href="#/demand/plan">Plan monthly</a>: type a future week to set it (&#9679; pinned, moves its month). Grey = last year.</span></div>'
+    +'<div id="pw-grid"><div class="mut" style="padding:10px">Loading weeks…</div></div></div>';
   var $=function(id){ return body.querySelector('#'+id); };
-  $('pw-go').onclick=function(){ S.country=$('pw-co').value; S.channel=$('pw-ch').value; S.weeks=+$('pw-n').value; S.q=$('pw-q').value.trim(); S.cat=$('pw-cat').value.trim(); load(); };
-  ['pw-q','pw-cat'].forEach(function(id){ $(id).onkeydown=function(ev){ if(ev.key==='Enter')$('pw-go').click(); }; });
-  function load(){ $('pw-msg').textContent='Loading…'; $('pw-msg').style.color='';
-    fetch('/api/demand/plan-weekly?country='+S.country+'&channel='+S.channel+'&weeks='+S.weeks+'&back='+S.back+'&q='+encodeURIComponent(S.q)+'&cat='+encodeURIComponent(S.cat)).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error);
-      $('pw-msg').textContent=j.rows.length+' SKUs'+(j.capped?' (first 400: narrow with search / category)':'')+' · shape: '+j.shape; draw(j); })
-      .catch(function(e){ $('pw-msg').style.color='var(--neg)'; $('pw-msg').textContent=e.message; }); }
-  function draw(j){
-    var W=j.weeks, TW=j.this_week, mBand=[], last=null;
-    W.forEach(function(w){ var d=new Date(w+'T00:00:00Z'), ths=new Date(d); ths.setUTCDate(d.getUTCDate()+3); var ym=ths.toISOString().slice(0,7); if(last&&last.ym===ym)last.n++; else { last={ym:ym,n:1}; mBand.push(last); } });
-    var tot={}, totLy={}; j.rows.forEach(function(r){ W.forEach(function(w){ var past=w<TW; var v=past?(r.act[w]||0):(r.fc[w]||0); tot[w]=(tot[w]||0)+v; totLy[w]=(totLy[w]||0)+(r.ly[w]||0); }); });
-    // month totals split by days (forecast months from the stored monthly plan)
-    var monTot={}; j.rows.forEach(function(r){ Object.keys(r.months||{}).forEach(function(ym){ monTot[ym]=(monTot[ym]||0)+Number(r.months[ym]||0); }); });
-    var th='position:sticky;top:0;background:var(--card,#fff);z-index:2', st='position:sticky;left:0;background:var(--card,#fff);z-index:1';
-    var h='<div style="overflow:auto;max-height:75vh;border:1px solid var(--line);border-radius:6px"><table class="grid" style="font-size:11px;width:max-content;border-collapse:separate;border-spacing:0">'
-      +'<thead><tr><th style="'+th+';left:0;z-index:3;text-align:left" rowspan="2">SKU</th>'+mBand.map(function(b){ var y=b.ym.split('-'); return '<th colspan="'+b.n+'" style="'+th+';border-left:2px solid var(--line)" title="Monthly plan total (stored) for these SKUs">'+MN[+y[1]-1]+'-'+y[0].slice(2)+' <span class="mut" style="font-weight:400">'+n0(monTot[b.ym])+'</span></th>'; }).join('')+'</tr>'
-      +'<tr>'+W.map(function(w){ return '<th style="'+th+';top:22px;white-space:nowrap'+(w===TW?';color:var(--blue)':'')+'">'+fdt(w)+'</th>'; }).join('')+'</tr></thead><tbody>'
-      +'<tr style="font-weight:700"><td style="'+st+';text-align:left">Total</td>'+W.map(function(w){ return '<td style="'+(w<TW?'color:var(--muted)':'')+'"><div>'+n0(tot[w])+'</div><div class="mut" style="font-size:9.5px;font-weight:400">'+n0(totLy[w])+'</div></td>'; }).join('')+'</tr>'
-      +j.rows.map(function(r){ return '<tr><td style="'+st+';text-align:left;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis" title="'+e2(r.name||'')+'"><span style="font-family:ui-monospace,Menlo,monospace">'+e2(r.sku)+'</span></td>'
-        +W.map(function(w){ var ly='<div class="mut" style="font-size:9.5px">'+n0(r.ly[w])+'</div>';
-          if(w<TW) return '<td style="color:var(--muted)" title="Actual">'+'<div>'+n0(r.act[w])+'</div>'+ly+'</td>';
-          var pin=r.pinned.indexOf(w)>=0; return '<td style="padding:1px 2px'+(pin?';background:rgba(47,111,223,.08)':'')+'"><input data-s="'+e2(r.sku)+'" data-w="'+w+'" value="'+(Math.round(r.fc[w]||0)||'')+'" style="width:42px;text-align:right;font-size:11px;border:1px solid transparent;background:transparent">'+(pin?'<a href="#" data-un="'+e2(r.sku)+'|'+w+'" title="Pinned: click to unpin (follow the month again)" style="text-decoration:none;color:var(--blue)">&#9679;</a>':'')+ly+'</td>'; }).join('')+'</tr>'; }).join('')
-      +'</tbody></table></div>';
-    $('pw-grid').innerHTML=h;
-    body.querySelectorAll('#pw-grid input[data-s]').forEach(function(inp){ inp.onfocus=function(){ inp.style.borderColor='var(--line)'; inp.select(); }; inp.onblur=function(){ inp.style.borderColor='transparent'; };
+  body.querySelectorAll('[data-pwn]').forEach(function(b){ b.onclick=function(){ PW_WEEKS=+b.dataset.pwn; renderPlanWeeklyView(body); }; });
+  $('pw-exp').onclick=function(){ PW_ALL_OPEN=!PW_ALL_OPEN; groups.forEach(function(g){ PW_OPEN[co+'|'+g.s+'|'+g.ch]=PW_ALL_OPEN; }); renderPlanWeeklyView(body); };
+  var list=Object.keys(skus);
+  if(!list.length){ $('pw-grid').innerHTML='<div class="mut" style="padding:10px">No SKUs for these filters.</div>'; return; }
+  var seq=(window.__PW_SEQ=(window.__PW_SEQ||0)+1);
+  fetch('/api/demand/plan-weekly',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:co, channel:ch, skus:list, weeks:PW_WEEKS, back:8})}).then(function(r){return r.json();}).then(function(j){
+    if(seq!==window.__PW_SEQ)return; if(j.error)throw new Error(j.error);
+    var R={}; (j.rows||[]).forEach(function(r){ R[r.sku]=r; });
+    draw(j,R); })
+    .catch(function(e){ var m=$('pw-msg'); if(m){ m.style.color='var(--neg)'; m.textContent=e.message; } });
+  function draw(j,R){
+    var W=j.weeks, TW=j.this_week, ro=!!j.read_only;
+    var val=function(r,w){ return w<TW?(Number(r.act[w])||0):(Number(r.fc[w])||0); };
+    // month band (a week belongs to the month holding its Thursday, for the header only; totals use days)
+    var band=[], last=null; W.forEach(function(w){ var t=new Date(w+'T00:00:00Z'); t.setUTCDate(t.getUTCDate()+3); var ym=t.toISOString().slice(0,7); if(last&&last.ym===ym)last.n++; else { last={ym:ym,n:1}; band.push(last); } });
+    var sumRows=function(list){ var o={v:{},ly:{}}; list.forEach(function(k){ var r=R[k]; if(!r)return; W.forEach(function(w){ o.v[w]=(o.v[w]||0)+val(r,w); o.ly[w]=(o.ly[w]||0)+(Number(r.ly[w])||0); }); }); return o; };
+    var cell=function(w,v,ly,extra){ var past=w<TW, cur=w===TW;
+      return '<td class="fctd'+(past?' actual':'')+'" style="text-align:right;padding:2px 4px;min-width:58px'+(cur?';border-left:2px dashed var(--blue)':'')+'">'+(extra||'<div style="font-size:12px;font-weight:700">'+n0(v)+'</div>')+'<div class="mut" style="font-size:9.5px">'+n0(ly)+'</div>'+pc(ly,v)+'</td>'; };
+    var hd='<thead><tr class="grp"><th class="stk" style="position:sticky;left:0;top:0;z-index:4;background:var(--card);min-width:300px"></th><th style="position:sticky;top:0;background:var(--card)"></th>'
+      +band.map(function(b){ var y=b.ym.split('-'); return '<th class="grpbar grpbar-exp" colspan="'+b.n+'" style="position:sticky;top:0;z-index:3;text-align:center">'+MN[+y[1]-1].toUpperCase()+' '+y[0].slice(2)+'</th>'; }).join('')+'</tr>'
+      +'<tr><th class="stk" style="position:sticky;left:0;top:24px;z-index:4;background:var(--card);text-align:left">SUBCATEGORY / SKU</th><th style="position:sticky;top:24px;background:var(--card);font-size:9px">TOTAL</th>'
+      +W.map(function(w){ var past=w<TW, cur=w===TW; return '<th style="position:sticky;top:24px;z-index:3;background:'+(past?'var(--pos-bg)':'var(--card)')+';white-space:nowrap;font-size:10.5px'+(cur?';border-left:2px dashed var(--blue);color:var(--blue)':'')+'">'+wd(w)+'<div style="font-size:8.5px;font-weight:600;color:'+(cur?'var(--blue)':past?'var(--pos)':'var(--muted)')+'">'+(cur?'CURRENT':past?'ACTUAL':'FCST')+'</div></th>'; }).join('')+'</tr></thead>';
+    var allSk=[]; groups.forEach(function(g){ allSk=allSk.concat(g.skus); });
+    var gt=sumRows(allSk), gtot=0, gly=0; W.forEach(function(w){ if(w>=TW){ gtot+=gt.v[w]||0; gly+=gt.ly[w]||0; } });
+    var h='<tr class="grand-tot"><td class="stk" style="position:sticky;left:0;z-index:2;text-align:left;padding:8px">ALL CATEGORIES</td><td style="text-align:right;padding:2px 6px"><div style="font-size:12px">'+n0(gtot)+'</div><div style="font-size:9.5px;opacity:.7">'+n0(gly)+'</div></td>'
+      +W.map(function(w){ return '<td style="text-align:right;padding:2px 4px'+(w===TW?';border-left:2px dashed #93c5fd':'')+'"><div style="font-size:12px">'+n0(gt.v[w])+'</div><div style="font-size:9.5px;opacity:.7">'+n0(gt.ly[w])+'</div></td>'; }).join('')+'</tr>';
+    var prevCat=null, autoOpen=(groups.length<=3)||!!(typeof PLAN_SKU_QRY!=='undefined'&&PLAN_SKU_QRY);
+    groups.forEach(function(g){ var key=co+'|'+g.s+'|'+g.ch, open=(key in PW_OPEN)?PW_OPEN[key]:autoOpen, sm=sumRows(g.skus), tot=0, tly=0;
+      W.forEach(function(w){ if(w>=TW){ tot+=sm.v[w]||0; tly+=sm.ly[w]||0; } });
+      h+='<tr class="sub-row'+(g.cat!==prevCat?' cat-start':'')+'" data-g="'+e2(key)+'" style="cursor:pointer"><td class="stk" style="position:sticky;left:0;z-index:2;background:var(--card);text-align:left;padding:6px 8px"><span style="display:inline-block;width:12px">'+(open?'&#9662;':'&#9656;')+'</span> <b style="font-size:13px">'+e2(g.s)+'</b> <span class="mut" style="font-size:10.5px">'+e2(g.ch)+' &middot; '+g.skus.length+' SKUs'+(g.cat!==prevCat?' &middot; '+e2(g.cat):'')+'</span></td>'
+        +'<td style="text-align:right;padding:2px 6px"><div style="font-weight:700">'+n0(tot)+'</div><div class="mut" style="font-size:9.5px">'+n0(tly)+'</div>'+pc(tly,tot)+'</td>'
+        +W.map(function(w){ return cell(w,sm.v[w],sm.ly[w]); }).join('')+'</tr>';
+      prevCat=g.cat;
+      if(!open)return;
+      g.skus.forEach(function(k){ var r=R[k]||{fc:{},ly:{},act:{},pinned:[]}, m=(typeof SKUM!=='undefined'&&SKUM[k])||{}, lch=m.lch&&(m.lch[ctry]||m.lch[co])||null, disc=m.disc&&(m.disc[ctry]||m.disc[co])||null, t=0, tl=0;
+        W.forEach(function(w){ if(w>=TW){ t+=Number(r.fc[w])||0; tl+=Number(r.ly[w])||0; } });
+        h+='<tr class="sku-inline"><td class="stk" style="position:sticky;left:0;z-index:2;background:var(--card);text-align:left;padding:3px 8px 3px 22px;max-width:300px"><div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700">'+e2(k)+'</div><div style="font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+e2(m.n||r.name||'')+'">'+(typeof skuStatusBadge==='function'?skuStatusBadge(lch,disc)+' ':'')+e2(m.n||r.name||'')+'</div></td>'
+          +'<td style="text-align:right;padding:2px 6px"><div style="font-weight:700">'+n0(t)+'</div><div class="mut" style="font-size:9.5px">'+n0(tl)+'</div>'+pc(tl,t)+'</td>'
+          +W.map(function(w){ if(w<TW||ro)return cell(w,val(r,w),r.ly[w]);
+            var pin=(r.pinned||[]).indexOf(w)>=0, fv=Number(r.fc[w])||0, v=fv>0&&fv<10?Math.round(fv*10)/10:Math.round(fv);   // small weeks keep one decimal (0.5 a week would show blank)
+            return cell(w,v,r.ly[w],'<div style="display:flex;align-items:center;justify-content:flex-end;gap:1px">'+(pin?'<a href="#" data-un="'+e2(k)+'|'+w+'" title="Pinned week: click to follow its month again" style="text-decoration:none;color:var(--blue);font-size:9px">&#9679;</a>':'')+'<input data-s="'+e2(k)+'" data-w="'+w+'" value="'+(v||'')+'" style="width:44px;text-align:right;font-size:12px;font-weight:700;border:1px solid transparent;background:'+(pin?'var(--blue-soft)':'transparent')+';border-radius:3px;padding:0 2px"></div>'); }).join('')+'</tr>'; }); });
+    $('pw-grid').innerHTML='<div class="tw" style="overflow:auto;max-height:calc(100vh - 230px)"><table id="pw-t" style="border-collapse:separate;border-spacing:0;font-size:11px;width:max-content">'+hd+'<tbody>'+h+'</tbody></table></div>';
+    try{ var _h1=body.querySelector('#pw-t thead tr'); var _top=_h1?_h1.getBoundingClientRect().height:24; body.querySelectorAll('#pw-t thead tr:nth-child(2) th').forEach(function(th){ th.style.top=_top+'px'; });   // second header row sits under the month band
+      var _hh=body.querySelector('#pw-t thead').getBoundingClientRect().height; var _gt=body.querySelector('#pw-t tr.grand-tot'); if(_gt)_gt.querySelectorAll('td').forEach(function(td){ td.style.position='sticky'; td.style.top=_hh+'px'; td.style.zIndex=td.classList.contains('stk')?'3':'2'; }); }catch(_){}   // All categories band stays under the header like Plan monthly
+    var msg=$('pw-msg'); msg.style.color=''; msg.textContent=allSk.length+' SKUs · '+(ro?'Combine: read only (pick a channel to edit) · ':'')+'shape: '+j.shape;
+    body.querySelectorAll('#pw-t tr[data-g]').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.g; PW_OPEN[k]=!((k in PW_OPEN)?PW_OPEN[k]:autoOpen); draw(j,R); }; });
+    body.querySelectorAll('#pw-t input[data-s]').forEach(function(inp){ inp.onclick=function(ev){ ev.stopPropagation(); }; inp.onfocus=function(){ inp.style.borderColor='var(--blue)'; inp.select(); }; inp.onblur=function(){ inp.style.borderColor='transparent'; };
       inp.onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); inp.blur(); } };
       inp.onchange=function(){ var v=Number(inp.value); if(!(v>=0)){ inp.style.borderColor='var(--neg)'; return; } inp.disabled=true;
-        fetch('/api/demand/plan-weekly/cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:inp.dataset.s, country:S.country, channel:S.channel, iso_week:inp.dataset.w, units:v})}).then(function(r){return r.json();}).then(function(k){ if(k.error)throw new Error(k.error);
-          $('pw-msg').style.color='var(--pos)'; $('pw-msg').textContent=inp.dataset.s+' '+fdt(inp.dataset.w)+': '+Math.round(k.before)+' → '+k.after+' (months: '+k.months.map(function(m){return m.ym+' '+(m.v>0?'+':'')+m.v;}).join(', ')+')'; try{ if(typeof DEMAND_BUILT!=='undefined')DEMAND_BUILT=false; }catch(_){} load(); })
-          .catch(function(e){ inp.disabled=false; inp.style.borderColor='var(--neg)'; $('pw-msg').style.color='var(--neg)'; $('pw-msg').textContent=e.message; }); }; });
-    body.querySelectorAll('#pw-grid a[data-un]').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); var p=a.dataset.un.split('|');
-      fetch('/api/demand/plan-weekly/unpin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:p[0], country:S.country, channel:S.channel, iso_week:p[1]})}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
+        fetch('/api/demand/plan-weekly/cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:inp.dataset.s, country:co, channel:ch, iso_week:inp.dataset.w, units:v})}).then(function(r){return r.json();}).then(function(k){ if(k.error)throw new Error(k.error);
+          msg.style.color='var(--pos)'; msg.textContent=inp.dataset.s+' '+wd(inp.dataset.w)+': '+Math.round(k.before)+' → '+k.after+' ('+k.months.map(function(m){return MN[+m.ym.slice(5,7)-1]+' '+(m.v>0?'+':'')+m.v;}).join(', ')+' in Plan monthly)';
+          try{ if(typeof DEMAND_BUILT!=='undefined')DEMAND_BUILT=false; }catch(_){} renderPlanWeeklyView(body); })
+          .catch(function(e){ inp.disabled=false; inp.style.borderColor='var(--neg)'; msg.style.color='var(--neg)'; msg.textContent=e.message; }); }; });
+    body.querySelectorAll('#pw-t a[data-un]').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); var p=a.dataset.un.split('|');
+      fetch('/api/demand/plan-weekly/unpin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sku:p[0], country:co, channel:ch, iso_week:p[1]})}).then(function(r){return r.json();}).then(function(){ renderPlanWeeklyView(body); }); }; });
   }
-  load();
 }
 function renderKlaviyoBisView(body){
   var MK=['UK','US','EU','AU'], KMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
