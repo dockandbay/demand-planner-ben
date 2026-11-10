@@ -1,3 +1,7 @@
+## v28.752 (10-Nov-26) Payments Due: undo after PAY
+- A small "undo" now sits beside PAID once PAY is clicked. It puts the amount and payment date back as they were (a balance payment 3+ that PAY created is removed) and the row shows as unpaid again.
+- No migration, no new env vars, no new cron routes.
+
 ## v28.751 (10-Nov-26) Payments Due: owed balances on COMPLETE POs show again
 - Payments Due lists a PO payment only once its Final payment due date is set (v28.622), but the PO list dropped that date (and the likely-pay dates, catch-up and credit terms) from COMPLETE POs to save payload. Every owed balance on a COMPLETE PO was hidden, e.g. PO-56UKXR2 GBP 44,411.88 due 09-Oct-26. Payment fields now stay on COMPLETE POs.
 - No migration, no new env vars, no new cron routes.

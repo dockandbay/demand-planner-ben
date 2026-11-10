@@ -12499,16 +12499,32 @@ function hzPortalHelp(el){
         if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
           _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
         var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',type:(r&&r.type)||'',prod_no:(r&&r.prod_no)||'',deposit_ref:(r&&r.deposit_ref)||'',au_dep:!!(r&&r.au_dep),amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
-        var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
+        var _undoBtn=null, host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
         if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
           var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }
           if(host.tagName==='TR')host.style.opacity='.6';
-          b.outerHTML='<span class="tool-badge bg-green" title="marked paid — stays here until you re-open or refresh Payments">paid</span>'; }
-        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r2){return r2.json();})
+          // v28.752 (Ben 10-Nov-26): small "undo" beside PAID puts the amount + payment date back as they were (a new balance payment 3+ is removed)
+          var _w=document.createElement('span'); _w.innerHTML='<span class="tool-badge bg-green" title="marked paid — stays here until you re-open or refresh Payments">paid</span> <button class="lnk-btn pdue-undo" style="font-size:11px" title="undo: put the amount and payment date back as they were">undo</button>';
+          b.replaceWith(_w); _undoBtn=_w.querySelector('.pdue-undo'); }
+        var _ep=b.dataset.ep, _af=b.dataset.af, _df=b.dataset.df;
+        var _prevAmt=(r&&r.remaining)?((Number(r.pay_amt)-Number(r.due_amt))>0.009?String(Math.round((Number(r.pay_amt)-Number(r.due_amt))*100)/100):''):((prev&&prev.amt_val!=null)?String(prev.amt_val):'');
+        var _prevDt=(prev&&prev.dt_val)?String(prev.dt_val).slice(0,10):'';
+        var _saved=fetch(_ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r2){return r2.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error);
             if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }   // keep the PO row fresh so opening the PO shows the payment
-            invalidateDerived();
-          }).catch(function(e){ var _i=PDUE_PAID.indexOf(_pe); if(_i>=0){ PDUE_PAID.splice(_i,1); pduePaidBox(); } if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); } alert('Save failed: '+(e.message||e)); }); }; }); }
+            invalidateDerived(); return j;
+          });
+        if(_undoBtn)_undoBtn.onclick=function(){ var ub=this; ub.disabled=true; ub.textContent='undoing…';
+          _saved.then(function(j){ var uep=_ep, ubody={};
+              if(/\/balance-x$/.test(_ep)){ var bx=(j&&j.row&&j.row.balance_x)||[]; var nx=bx[bx.length-1]; if(!nx)throw new Error('could not find the new balance payment'); uep=_ep+'/'+nx.id; ubody.remove=true; }
+              else { ubody[_af]=_prevAmt; ubody[_df]=_prevDt; }
+              return fetch(uep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ubody)}).then(function(x){return x.json();}); })
+            .then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }
+              var _i=PDUE_PAID.indexOf(_pe); if(_i>=0){ PDUE_PAID.splice(_i,1); pduePaidBox(); }
+              if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; }
+              _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); invalidateDerived(); draw(); })
+            .catch(function(e){ ub.disabled=false; ub.textContent='undo'; alert('Undo failed: '+(e.message||e)); }); };
+        _saved.catch(function(e){ var _i=PDUE_PAID.indexOf(_pe); if(_i>=0){ PDUE_PAID.splice(_i,1); pduePaidBox(); } if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); } alert('Save failed: '+(e.message||e)); }); }; }); }
     draw(); }
   // PAYMENTS ▸ By Supplier — one row per supplier PO: invoice total + starting / completion / balance (summed).
   // Filter by supplier / production / batch; PO opens the drawer; a totals footer sums the current view.
