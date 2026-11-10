@@ -1,3 +1,7 @@
+## v28.774 (11-Nov-26) Email sends from horizon@dockandbay.com
+- dockandbay.com is now verified in Resend (checked 11-Nov). Admin, supplier portal and client emails send From horizon@dockandbay.com (was horizon@supplier.dockandbay.com; client email was PORTAL_FROM). Reply-to addresses unchanged.
+- Commission statements send From the chosen sales mailbox (sales@ / sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@) by default; EMAIL_ROOT_DOMAIN_OK=0 brings back the supplier.dockandbay.com relay.
+- No migration, no new cron routes. Env: if production sets EMAIL_FROM_ADMIN / _SUPPLIER / _CLIENT or PORTAL_FROM to a supplier.dockandbay.com address, EMAIL_FROM_* still wins and must be removed or updated.
 ## v28.773 (10-Nov-26) Plan monthly follows the final sales view; free units = demand, not ASP (migration 434)
 - Found while checking ASP: Plan monthly's sub-category history and ASP come from planner.category_sales_summary(_mv), which read planner.sales_actuals (the sheet) directly, so the source switch and the DB-WL / CUSTOM-LOGO exclusion did not reach the plan grid. Migration 434 rebuilds it from planner.sales_actuals_final (same columns, same unique index, so the hourly pg_cron refresh keeps working) and adds units_paid.
 - Free (zero-price) units (Ben: "free units are not anomalies"): count in units (demand) everywhere, and ASP = revenue / paid units (buildDATA sends [units, revenue, paid units] when they differ; getASPraw uses aspU). The free-units anomaly rule is removed and its flags deleted.

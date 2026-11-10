@@ -15350,8 +15350,10 @@ async function logEmail(m) {
 // sales-eu@ / keyaccounts@, v28.502) via the `reply` argument; ops@ only when the email is not about one client (or it has no owner).
 // v28.648 (Ben 03-Nov-26): the supplier portal and the main (admin) account send from horizon@ on the verified Resend domain
 // supplier.dockandbay.com; this beats PORTAL_FROM. Client email still uses PORTAL_FROM. EMAIL_FROM_<CHANNEL> still overrides all.
-const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com', from: 'HORIZON <horizon@supplier.dockandbay.com>' },
-  supplier: { reply: 'supplierportal@dockandbay.com', from: 'Dock & Bay <horizon@supplier.dockandbay.com>' }, client: { reply: 'ops@dockandbay.com' } };
+// v28.774 (Ben 11-Nov-26): dockandbay.com is verified in Resend, so every channel sends from horizon@dockandbay.com (was horizon@supplier.dockandbay.com;
+// client email was PORTAL_FROM). EMAIL_FROM_<CHANNEL> still overrides.
+const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com', from: 'HORIZON <horizon@dockandbay.com>' },
+  supplier: { reply: 'supplierportal@dockandbay.com', from: 'Dock & Bay <horizon@dockandbay.com>' }, client: { reply: 'ops@dockandbay.com', from: 'Dock & Bay <horizon@dockandbay.com>' } };
 const emailOk = e => /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(String(e || '').trim());
 function emailSender(channel) {
   const ch = EMAIL_CHANNELS[channel] ? channel : 'admin', K = ch.toUpperCase();
@@ -37198,7 +37200,8 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
     // sends from a verified domain (today supplier.dockandbay.com), so until dockandbay.com is verified (EMAIL_ROOT_DOMAIN_OK=1) the From is
     // "Dock & Bay Sales" on the verified domain and the chosen mailbox is the Reply-To (the agency's replies land there).
     const box = CM_FROM_BOXES.includes(String(g.from_box || '').toLowerCase()) ? String(g.from_box).toLowerCase() : 'sales@dockandbay.com';
-    const fromHdr = process.env.EMAIL_ROOT_DOMAIN_OK === '1' ? 'Dock & Bay <' + box + '>' : 'Dock & Bay Sales <' + (process.env.EMAIL_SALES_RELAY || 'sales@supplier.dockandbay.com') + '>';
+    // v28.774 (Ben 11-Nov-26): dockandbay.com is verified, so the statement sends from the chosen mailbox by default (EMAIL_ROOT_DOMAIN_OK=0 restores the relay)
+    const fromHdr = process.env.EMAIL_ROOT_DOMAIN_OK !== '0' ? 'Dock & Bay <' + box + '>' : 'Dock & Bay Sales <' + (process.env.EMAIL_SALES_RELAY || 'sales@supplier.dockandbay.com') + '>';
     if (b.preview) return res.json({ ok: true, preview: true, draft, to, cc, cc_default: g.cc_default || '', from: fromHdr, reply_to: box, subject, html, note, attachments: [p.filename].concat(xl && xl.filename ? [xl.filename] : []) });
     const r = await sendResendEmail({ to, cc, subject, html, from: fromHdr, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: box, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
