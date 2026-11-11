@@ -12996,7 +12996,7 @@ function hzPortalHelp(el){
             (r.lines||[]).forEach(function(l){ vals.push(Number(String(l.amount==null?'':l.amount).replace(/,/g,''))); });
             return vals.some(function(v){ return isFinite(v) && (v.toFixed(2).indexOf(qn)>=0 || (isFinite(qNum)&&Math.abs(qNum-v)<0.005)); }); }
           var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
-        var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep);
+        var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep); try{ payXchkLoad(); }catch(_){}   /* v28.782: Xero ticks */
         // read the LIVE bank ccy/amount from the row inputs so a just-typed currency applies without refresh
         function liveFx(btn){ var tr=btn.closest('tr,.mob-card'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
         rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
@@ -13286,7 +13286,28 @@ function hzPortalHelp(el){
   // v28.383 (Ben 15-Oct-26): follow-up check for every run (database only): a PO line with no Xero bill linked, or a PO bill payment not made /
   // failed, turns the Paid > Xero button RED and lists each issue under it with what to do (Link bill opens the PO's Linked records).
   var PAY_XFU={};
-  function payXeroCell(r,i){ return '<span class="pay-xfu-wrap" data-k="'+esc(payRunKey(r))+'">'+payXeroCell0(r,i)+'<div class="pay-xfu" data-k="'+esc(payRunKey(r))+'">'+payXfuInner(PAY_XFU[payRunKey(r)])+'</div></span>'; }
+  // v28.782 (Ben 11-Nov-26): Xero ticks. Each PO payment line gets a green tick when the PO's Xero bill has that payment (or credit-note
+  // allocation) recorded, an amber ! when it does not; each run a tick when all its PO payments are in Xero, a warning when some are missing.
+  // One read-only call (/api/supply/xero/po-payments-check, cached 1 h on the server), painted after the report draws.
+  var PAY_XCHK=null, PAY_RUNPO={}, _payXchkReq=null;
+  function payXchkLoad(){ if(PAY_XCHK){ payXchkPaint(); return; } if(_payXchkReq)return;
+    _payXchkReq=fetch('/api/supply/xero/po-payments-check').then(function(r){ return r.json(); }).then(function(j){ _payXchkReq=null; if(!j||j.error){ PAY_XCHK={err:(j&&j.error)||'Xero check failed'}; } else PAY_XCHK=j.by_po||{}; payXchkPaint(); })
+      .catch(function(e){ _payXchkReq=null; PAY_XCHK={err:String(e&&e.message||e)}; payXchkPaint(); }); }
+  function payXchkLine(po,amt,dt){ if(!PAY_XCHK||PAY_XCHK.err)return null; var c=PAY_XCHK[po]; if(!c)return {k:'nolink'};
+    var best=null, a=Number(amt)||0; (c.payments||[]).forEach(function(p){ if(Math.abs((Number(p.amount)||0)-a)<=1){ var d=Math.abs(new Date(p.date)-new Date(dt)); if(!best||d<best.d)best={p:p,d:d}; } });
+    if(!best)return {k:'nomatch'}; return best.p.in_xero?{k:'ok',p:best.p}:{k:'missing',p:best.p}; }
+  function payXchkPaint(){
+    document.querySelectorAll('.pay-xck').forEach(function(el){ var x=payXchkLine(el.dataset.po,el.dataset.amt,el.dataset.dt);
+      if(!x){ el.innerHTML=(PAY_XCHK&&PAY_XCHK.err)?'<span class="mut tiny" title="'+esc(PAY_XCHK.err)+'">?</span>':''; return; }
+      el.innerHTML=x.k==='ok'?'<span title="Recorded on the Xero bill ('+esc(x.p.xero_kind||'payment')+' '+esc(fd(x.p.xero_date))+')" style="color:var(--pos);font-weight:800">✓</span>'
+        :x.k==='missing'?'<span title="Not recorded on the PO&rsquo;s Xero bill" style="color:var(--amber);font-weight:800">!</span>'
+        :x.k==='nolink'?'<span class="mut tiny" title="No Xero bill linked to this PO">no bill</span>':'<span class="mut tiny" title="No matching HORIZON payment found for this amount">?</span>'; });
+    document.querySelectorAll('.pay-xck-run').forEach(function(el){ var L=PAY_RUNPO[el.dataset.k]||[]; if(!L.length||!PAY_XCHK||PAY_XCHK.err){ el.innerHTML=''; return; }
+      var miss=0, nob=0; L.forEach(function(l){ var x=payXchkLine(l.reference,l.amount,l.dt); if(!x)return; if(x.k==='missing'||x.k==='nomatch')miss++; else if(x.k==='nolink')nob++; });
+      el.innerHTML=miss?'<span class="tool-badge bg-amber" title="'+miss+' PO payment'+(miss>1?'s':'')+' in this run not recorded on the Xero bill'+(miss>1?'s':'')+'" style="margin-right:4px">⚠ '+miss+' not in Xero</span>'
+        :nob===L.length?'':'<span title="All PO payments in this run are recorded on their Xero bills" style="color:var(--pos);font-weight:800;margin-right:4px">✓</span>'; }); }
+  function payXeroCell(r,i){ PAY_RUNPO[payRunKey(r)]=(r.lines||[]).filter(function(l){ return l.source==='po'; }).map(function(l){ return {reference:l.reference,amount:l.amount,dt:r.dt}; });
+    return '<span class="pay-xck-run" data-k="'+esc(payRunKey(r))+'"></span><span class="pay-xfu-wrap" data-k="'+esc(payRunKey(r))+'">'+payXeroCell0(r,i)+'<div class="pay-xfu" data-k="'+esc(payRunKey(r))+'">'+payXfuInner(PAY_XFU[payRunKey(r)])+'</div></span>'; }
   function payXfuInner(x){ if(!x||!(x.items||[]).length)return '';
     return '<div style="margin-top:4px;text-align:left;max-width:340px;font-size:11px;line-height:1.35;color:var(--neg)"><b>⚠ '+x.items.length+' to follow up</b>'
       +x.items.map(function(it){ return '<div style="margin-top:2px"><b>'+esc(it.po)+'</b>: '+esc(it.issue)+(it.link?' <a href="'+esc(it.link)+'" style="color:var(--blue);font-weight:700;white-space:nowrap">'+esc(it.fix)+' &rarr;</a>':(it.fix?' <span class="mut">('+esc(it.fix)+')</span>':''))+'</div>'; }).join('')+'</div>'; }
@@ -13520,7 +13541,9 @@ function hzPortalHelp(el){
       var posList=single?'':'<div class="xr-meta" style="margin-top:3px">'+e.pos.map(function(p){ return esc(p.po)+' '+xrNum(p.total); }).join(' · ')+'</div>';
       return '<div class="xr-card'+(e.dismissed?' dis':'')+'"><div><div class="xr-po">'+esc(single?e.po:'Bill '+(e.bill_ref||''))+'</div><div class="xr-meta">'+esc(e.supplier||'')+' · Xero '+esc(e.region||'')+'</div>'
         +'<div class="xr-meta">'+(single?'Bill '+esc(e.bill_ref||''):e.pos.length+' POs on this bill')+' · '+esc(e.bill_status||'')+'</div>'+posList+(e.dismissed?'<div class="xr-meta">dismissed</div>':'')+'</div>'
-        +'<div style="min-width:0">'+led+'</div><div class="xr-fix"><div>'+esc(e.reason||e.insight||'')+'</div><div class="xr-btns">'+b.join('')+'</div><div class="xpq-usex-cfm"></div></div></div>'; }
+        +'<div style="min-width:0">'+led+'</div><div class="xr-fix"><div>'+esc(e.reason||e.insight||'')+'</div>'
+        +((e.recommendation&&e.recommendation.length)?'<div style="background:var(--blue-soft);border-radius:6px;padding:5px 8px">'+e.recommendation.map(function(t){ return '<div><b>RECOMMENDATION:</b> '+esc(t)+'</div>'; }).join('')+'</div>':'')   /* v28.782 */
+        +'<div class="xr-btns">'+b.join('')+'</div><div class="xpq-usex-cfm"></div></div></div>'; }
     XR_CAUSE.forEach(function(c){ if(f!=='all'&&f!==c.k)return; var L=amt.filter(function(e){ return (e.cause||'pay')===c.k; }); if(!L.length)return;
       L.sort(function(a,b){ return Math.max(Math.abs((b.diff||{}).total||0),Math.abs((b.diff||{}).paid||0))-Math.max(Math.abs((a.diff||{}).total||0),Math.abs((a.diff||{}).paid||0)); });
       h+='<div class="xr-sec"><h4><i class="xr-dot" style="background:'+c.dot+'"></i>'+esc(c.t)+' <span class="mut tiny">('+L.length+')</span></h4><p>'+esc(c.b)+'</p>'+L.map(card).join('')+'</div>'; });
@@ -13817,7 +13840,7 @@ function hzPortalHelp(el){
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
+        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+(l.source==='po'?' <span class="pay-xck" data-po="'+esc(l.reference||'')+'" data-amt="'+esc(l.amount)+'" data-dt="'+esc(r.dt)+'"></span>':'')+'</td>'
           +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');

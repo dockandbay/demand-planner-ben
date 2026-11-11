@@ -11486,6 +11486,15 @@ async function _computeXeroExceptions() {
       diff: { due: dueDiff, paid: paidDiff, total: totalDiff },
       message: (rows.length > 1 ? 'Bill ' + g.bill_ref : pos[0].po) + ' \u00b7 amounts don\u2019t reconcile with Xero', insight: reason, action: cause === 'link' ? 'find_links' : 'review_po' });
   }
+  // v28.782 (Ben 11-Nov-26: "show that as a RECOMMENDATION: payment on 02-Oct-26 of +2,923.26 is not recorded in Xero"): for a single-PO bill whose
+  // paid amounts differ, name the HORIZON payment(s) the Xero bill does not have (and any Xero payment HORIZON does not have). Cached Xero reads.
+  try { const payEx = out.filter(e => e.type === 'amount_mismatch' && e.cause === 'pay' && !(e.pos && e.pos.length > 1));
+    if (payEx.length) { const chk = (await poXeroPayCheck(payEx.map(e => e.po))).by_po, f2 = v => _usd(Math.abs(v)).replace('$', '');
+      payEx.forEach(e => { const c = chk[e.po]; if (!c) return; const recs = [];
+        c.payments.filter(p => !p.in_xero).forEach(p => recs.push(p.type + ' payment on ' + ddMonYy(p.date) + ' of ' + f2(p.amount) + ' is not recorded in Xero.'));
+        (c.xero_unmatched || []).forEach(x => recs.push('Xero has a ' + x.kind + ' on ' + ddMonYy(x.date) + ' of ' + f2(x.amount) + ' that HORIZON does not record on this PO.'));
+        if (recs.length) e.recommendation = recs; }); } }
+  catch (err) { console.warn('[xero exc] payment match skipped: ' + (err && err.message)); }
   // uncreated credit notes (a common cause of a paid mismatch): starting deposit + linked bill, none queued
   const cn = (await pool.query(
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.pay_start_deposit_assigned,0) amt,
@@ -11507,6 +11516,54 @@ async function _computeXeroExceptions() {
   const byType = {}; out.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
   return { count: out.length, by_type: byType, exceptions: out, groups_ok: groupsOk, computed_at: new Date().toISOString() };
 }
+// v28.782 (Ben 11-Nov-26): which HORIZON PO payments are recorded on the PO's Xero bill. One cached read per org (1 h): every ACCPAY bill payment
+// and every supplier credit-note allocation since 01-Jul-25 (paged, about 10-20 Xero calls per org per hour at most). HORIZON's dated payments
+// on a PO (start deposit, completion, balance 1 / 2, balance 3+) are matched to the bill's Xero payments / allocations by amount (within 1.00),
+// closest date first, each Xero entry used once. Feeds the Payments Report ticks and the Exceptions "not recorded in Xero" recommendation.
+async function xeroBillPaysMap() {
+  return swrGet('xero:billpays', 60 * 60 * 1000, async () => {
+    const out = {};   // invoice_id -> [{ date, amount, kind }]
+    const add = (id, e) => { if (!id) return; (out[id] || (out[id] = [])).push(e); };
+    for (const org of ['uk', 'au']) {
+      const pays = await upfxPaged('/api.xro/2.0/Payments?where=' + encodeURIComponent('PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(2025,7,1)'), 'Payments', org);
+      pays.forEach(p => { if (/^DELETED$/i.test(String(p.Status || ''))) return; add(p.Invoice && p.Invoice.InvoiceID, { date: _xd(p.Date), amount: Number(p.Amount) || 0, kind: 'payment' }); });
+      const cns = await upfxPaged('/api.xro/2.0/CreditNotes?where=' + encodeURIComponent('Type=="ACCPAYCREDIT" AND Date>=DateTime(2025,7,1)'), 'CreditNotes', org);
+      cns.forEach(c => (c.Allocations || []).forEach(a => add(a.Invoice && a.Invoice.InvoiceID, { date: _xd(a.Date), amount: Number(a.Amount) || 0, kind: 'credit note' })));
+    }
+    return { at: new Date().toISOString(), by_bill: out };
+  });
+}
+// HORIZON's dated payments per PO, matched to its linked Xero bill: { po: { bill_id, bill_ref, payments: [{ type, date, amount, in_xero, xero_date, xero_kind }] } }
+async function poXeroPayCheck(poList) {
+  const m = await xeroBillPaysMap(), byBill = (m && m.by_bill) || {};
+  const rows = (await pool.query(`SELECT p.po, l.external_id bill_id, l.external_ref bill_ref, coalesce(p.deposit_ref,'') deposit_ref,
+      to_char(p.pay_start_deposit_date,'YYYY-MM-DD') sd, p.pay_start_deposit_assigned sa, to_char(p.pay_completion_date,'YYYY-MM-DD') cd, p.pay_completion_assigned ca,
+      to_char(p.pay_balance_1_date,'YYYY-MM-DD') b1d, p.pay_balance_1_amount b1, to_char(p.pay_balance_2_date,'YYYY-MM-DD') b2d, p.pay_balance_2_amount b2,
+      coalesce((SELECT json_agg(json_build_object('seq', bx.seq, 'd', to_char(bx.paid_date,'YYYY-MM-DD'), 'a', bx.amount) ORDER BY bx.seq) FROM planner.po_balance_payments bx
+        WHERE bx.po=p.po AND bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0), '[]'::json) bx
+    FROM planner.purchase_orders p JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id IS NOT NULL
+    ${poList ? 'WHERE p.po = ANY($1)' : ''}`, poList ? [poList] : []).catch(e => { if (/po_balance_payments/.test(e.message)) return { rows: [] }; throw e; })).rows;
+  const days = (a, b) => (a && b) ? Math.abs((new Date(a) - new Date(b)) / 86400000) : 9999, out = {};
+  rows.forEach(r => {
+    const hz = [];
+    if (Number(r.sa) > 0 && r.sd) hz.push({ type: 'Start deposit', date: r.sd, amount: Number(r.sa) });
+    if (Number(r.ca) > 0 && r.cd) hz.push({ type: 'Completion', date: r.cd, amount: Number(r.ca) });
+    if (Number(r.b1) > 0 && r.b1d) hz.push({ type: 'Balance', date: r.b1d, amount: Number(r.b1) });
+    if (Number(r.b2) > 0 && r.b2d) hz.push({ type: 'Balance 2', date: r.b2d, amount: Number(r.b2) });
+    (Array.isArray(r.bx) ? r.bx : []).forEach(x => hz.push({ type: 'Balance ' + x.seq, date: x.d, amount: Number(x.a) }));
+    const xs = (byBill[r.bill_id] || []).map(x => Object.assign({ used: false }, x));
+    hz.sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(h => {
+      let best = null; xs.forEach(x => { if (!x.used && Math.abs(x.amount - h.amount) <= 1 && (!best || days(x.date, h.date) < days(best.date, h.date))) best = x; });
+      if (best) { best.used = true; h.in_xero = true; h.xero_date = best.date; h.xero_kind = best.kind; } else h.in_xero = false; });
+    out[r.po] = { bill_id: r.bill_id, bill_ref: r.bill_ref, deposit_ref: r.deposit_ref, payments: hz, xero_unmatched: xs.filter(x => !x.used).map(({ used, ...x }) => x) };
+  });
+  return { at: m && m.at, by_po: out };
+}
+app.get('/api/supply/xero/po-payments-check', async (req, res) => {   // v28.782: read only (cached Xero reads, 1 h)
+  try { const pos = req.query.pos ? String(req.query.pos).split(',').map(x => x.trim()).filter(Boolean).slice(0, 2000) : null;
+    res.set('Cache-Control', 'private, no-store').json(await poXeroPayCheck(pos)); }
+  catch (e) { log500(e); res.status(502).json({ error: 'Xero read failed: ' + clientErr(e) }); }
+});
 // v28.720 (Ben 05-Nov-26: "can we add a DISMISS section which remembers the dismissed items and can be hidden from view (and toggled to view
 // again)"): each exception has a key (type | PO | bill); dismissals live in app_settings xero_exc_dismissed { key: { by, at, note } }, applied on
 // every read (the cached reconciliation is never changed). count = OPEN exceptions (the nav badge); dismissed ones come back flagged.
