@@ -22786,6 +22786,7 @@ function olRow(ctx, l) {
     co, l['warehouse.code'] || null, !!mp.hist, _olR2(amt), _olR2(amtC), lc, _olR2(loc), _olR2(gbp), free, mp.rule || (l._orphan ? 'kit_child_orphan' : null), cat, wd ? wd.replace('T', ' ').slice(0, 26) + '+00' : null];
 }
 async function olUpsert(out) {   // batched multi-row upsert (one statement per 1,000 lines)
+  { const seen = new Map(); out.forEach(r => seen.set(r[0], r)); out = [...seen.values()]; }   // v28.783: one row per line_id (a set order re-read whole can repeat a line; Postgres refuses a double ON CONFLICT update)
   for (let i = 0; i < out.length; i += 1000) { const b = out.slice(i, i + 1000);
     await pool.query(`INSERT INTO planner.order_lines (${OL_COLS.join(',')}, synced_at) SELECT ${OL_COLS.map((c, k) => 'u.c' + k).join(',')}, now() FROM unnest(${OL_TYP.map((t, k) => '$' + (k + 1) + '::' + t + '[]').join(',')}) AS u(${OL_COLS.map((c, k) => 'c' + k).join(',')})
       ON CONFLICT (line_id) DO UPDATE SET ${OL_COLS.filter(c => c !== 'line_id').map(c => c + '=excluded.' + c).join(', ')}, synced_at=now(), agent_checked=false`, OL_COLS.map((c, k) => b.map(r => r[k]))); }   // v28.431: a changed line has its agency tag read again

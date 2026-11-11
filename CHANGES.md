@@ -1,3 +1,6 @@
+## v28.783 (11-Nov-26) Fulfil sync: one row per sale line per save
+- The v28.782 sync re-reads a set order whole; the same line could then appear twice in one batch and the save failed ("ON CONFLICT DO UPDATE command cannot affect row a second time"). olUpsert keeps one row per line_id.
+
 ## v28.782 (11-Nov-26) Xero payment ticks on the Payments Report; missing-payment recommendation on Xero exceptions
 - Daily Fulfil sync (orderLinesSync): skips the HISTORICAL channels unless app_settings sales_history_in_sync = '1' (on 11-Nov an incremental run read history Diviyaj's ship-date / VAT rewrite had touched: 1.23M lines changed since 10-Nov), and reads set orders whole (bundle + children through _olLinesOf), so components are never stored as singles.
 - Ben: on SUPPLY > Payments > Payments Report each PO payment line shows a green tick when the PO's Xero bill has that payment (or a supplier credit-note allocation) recorded, an amber ! when it does not ("no bill" when the PO has no Xero bill linked); each payment run shows a tick when all its PO payments are in Xero, or "⚠ N not in Xero".
