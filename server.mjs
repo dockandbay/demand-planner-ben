@@ -22807,7 +22807,9 @@ function olFoldKits(lines) {
   lines.forEach(l => { const p = l.parent ? byId.get(Number(l.parent)) : null;
     if (l.parent && p && p._kit) { p._kit.amt += num(l.amount); p._kit.amtC += num(l.untaxed_amount_cpny_ccy_cache); p._kit.n++; return; }
     if (l.parent) l._orphan = true; out.push(l); });
-  out.forEach(l => { if (l._kit) { l.amount = { decimal: String(Math.round((num(l.amount) + l._kit.amt) * 100) / 100) }; l.untaxed_amount_cpny_ccy_cache = { decimal: String(Math.round((num(l.untaxed_amount_cpny_ccy_cache) + l._kit.amtC) * 100) / 100) }; } });
+  // v28.785: the set's revenue is its children's only. The bundle line repeats the whole set price in its company-currency cache (amount 0,
+  // cache = the price), so adding it double counted set revenue (AU-TOWLB-CAB-LG-4SETG: 150 + 4 x 37.50).
+  out.forEach(l => { if (l._kit && l._kit.n) { l.amount = { decimal: String(Math.round(l._kit.amt * 100) / 100) }; l.untaxed_amount_cpny_ccy_cache = { decimal: String(Math.round(l._kit.amtC * 100) / 100) }; } });
   return out; }
 // v28.761: lines the incremental sync brought in for a month that is already rolled up would count twice: they are taken out again and
 // that Fulfil channel x month is queued (app_settings sales_refresh_queue) for a re-import, which replaces the month whole.

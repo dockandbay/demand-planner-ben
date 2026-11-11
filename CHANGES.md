@@ -1,3 +1,6 @@
+## v28.785 (11-Nov-26) Fulfil sets: revenue counted once
+- A Fulfil bundle line holds the whole set price in its company-currency cache (amount 0); v28.781 added it to its children's amounts, so set revenue counted twice (found tracing UK DTC Oct revenue +13% vs the sheet). The set's revenue is now its children's only. Units unchanged. Needs a re-import of Sep-Nov.
+
 ## v28.784 (11-Nov-26) Payments Report: Xero column
 - Ben: the Xero tick sits in its own Xero column on each payment run's lines; a payment missing from the Xero bill shows an orange ⚠️ that opens the PO's bill in Xero; the run badge uses ⚠️ too.
 
