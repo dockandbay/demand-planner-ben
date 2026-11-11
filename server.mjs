@@ -22529,6 +22529,7 @@ function olMapLine(ctx, name, segment, ref) {
   const o = olMapChannel(name, segment); return Object.assign(o, { hist: /^HISTORICAL /i.test(String(name || '')), rule: o.country ? null : 'unmapped_channel' });
 }
 const _olR2 = x => x == null || !isFinite(x) ? null : Math.round(x * 100) / 100;
+const OL_HIST_IMPORT_FROM = '2026-11-01';   // v28.777: historical lines with a shipping_date from here on carry the import date, not a dispatch date
 function olRow(ctx, l) {
   const sku = String(l['product.code'] || '').trim(); if (!sku) return null;
   const ref = l['sale.reference'] || null, mp = olMapLine(ctx, l['sale.channel.name'], l['sale.channel_segment'], ref);
@@ -22536,9 +22537,11 @@ function olRow(ctx, l) {
   const qty0 = (Number(_fulfilNum(l.quantity)) || 0) - (Number(_fulfilNum(l.quantity_canceled)) || 0), qty = l.is_return ? -Math.abs(qty0) : qty0;
   const od = l._sale_date || _olDate(l.sale_date), sd = _olDate(l.shipping_date);   // the order date lives on the ORDER (line sale_date is empty for most, incl. imported history)
   // Ben 10-Nov-26: every order (retail and wholesale) counts on its created / order date, or on its ship date when it ships more than 2 weeks
-  // later. Historical (imported) orders carry the IMPORT date as their line shipping date (Nov-26) and no real ship date, so they count on the
-  // order date (the old system's created date) until a ship date is imported.
-  const shipBasis = !mp.hist && od && sd && (new Date(sd) - new Date(od)) > 14 * 86400000, dd = shipBasis ? sd : od;
+  // later. v28.777 (Ben 11-Nov-26): Diviyaj wrote the Cin7 dispatched date onto the historical lines' shipping_date (10-Nov), so history follows
+  // the same rule. A historical ship date on or after OL_HIST_IMPORT_FROM is the import date (Cin7 had no usable dispatch date: 171 lines), so
+  // those lines stay on the order date. A dispatch date before the order date never moves the line (only > 2 weeks later does).
+  const sdOk = sd && (!mp.hist || sd < OL_HIST_IMPORT_FROM);
+  const shipBasis = !!(od && sdOk && (new Date(sd) - new Date(od)) > 14 * 86400000), dd = shipBasis ? sd : od;
   const price = Number(_fulfilNum(l.unit_price)) || 0, amt = Number(_fulfilNum(l.amount)) || 0, amtC = Number(_fulfilNum(l.untaxed_amount_cpny_ccy_cache)) || 0;
   const co = l['sale.company.code'] || null, coCcy = (co === 'AU' || co === 'DBA') ? 'AUD' : 'GBP', sccy = String(l['sale.currency.code'] || '').toUpperCase();
   const gbp = coCcy === 'GBP' ? amtC : (amtC / (_olRate(ctx.fx, 'AUD', od) || 1.9));
