@@ -1,3 +1,6 @@
+## v28.784 (11-Nov-26) Payments Report: Xero column
+- Ben: the Xero tick sits in its own Xero column on each payment run's lines; a payment missing from the Xero bill shows an orange ⚠️ that opens the PO's bill in Xero; the run badge uses ⚠️ too.
+
 ## v28.783 (11-Nov-26) Fulfil sync: one row per sale line per save
 - The v28.782 sync re-reads a set order whole; the same line could then appear twice in one batch and the save failed ("ON CONFLICT DO UPDATE command cannot affect row a second time"). olUpsert keeps one row per line_id.
 

@@ -13300,11 +13300,11 @@ function hzPortalHelp(el){
     document.querySelectorAll('.pay-xck').forEach(function(el){ var x=payXchkLine(el.dataset.po,el.dataset.amt,el.dataset.dt);
       if(!x){ el.innerHTML=(PAY_XCHK&&PAY_XCHK.err)?'<span class="mut tiny" title="'+esc(PAY_XCHK.err)+'">?</span>':''; return; }
       el.innerHTML=x.k==='ok'?'<span title="Recorded on the Xero bill ('+esc(x.p.xero_kind||'payment')+' '+esc(fd(x.p.xero_date))+')" style="color:var(--pos);font-weight:800">✓</span>'
-        :x.k==='missing'?'<span title="Not recorded on the PO&rsquo;s Xero bill" style="color:var(--amber);font-weight:800">!</span>'
+        :x.k==='missing'?'<a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+esc((PAY_XCHK[el.dataset.po]||{}).bill_id||'')+'" target="_blank" rel="noopener" title="Not recorded on the PO&rsquo;s Xero bill: open the bill in Xero" style="text-decoration:none;font-size:13px">⚠️</a>'
         :x.k==='nolink'?'<span class="mut tiny" title="No Xero bill linked to this PO">no bill</span>':'<span class="mut tiny" title="No matching HORIZON payment found for this amount">?</span>'; });
     document.querySelectorAll('.pay-xck-run').forEach(function(el){ var L=PAY_RUNPO[el.dataset.k]||[]; if(!L.length||!PAY_XCHK||PAY_XCHK.err){ el.innerHTML=''; return; }
       var miss=0, nob=0; L.forEach(function(l){ var x=payXchkLine(l.reference,l.amount,l.dt); if(!x)return; if(x.k==='missing'||x.k==='nomatch')miss++; else if(x.k==='nolink')nob++; });
-      el.innerHTML=miss?'<span class="tool-badge bg-amber" title="'+miss+' PO payment'+(miss>1?'s':'')+' in this run not recorded on the Xero bill'+(miss>1?'s':'')+'" style="margin-right:4px">⚠ '+miss+' not in Xero</span>'
+      el.innerHTML=miss?'<span class="tool-badge bg-amber" title="'+miss+' PO payment'+(miss>1?'s':'')+' in this run not recorded on the Xero bill'+(miss>1?'s':'')+'" style="margin-right:4px">⚠️ '+miss+' not in Xero</span>'
         :nob===L.length?'':'<span title="All PO payments in this run are recorded on their Xero bills" style="color:var(--pos);font-weight:800;margin-right:4px">✓</span>'; }); }
   function payXeroCell(r,i){ PAY_RUNPO[payRunKey(r)]=(r.lines||[]).filter(function(l){ return l.source==='po'; }).map(function(l){ return {reference:l.reference,amount:l.amount,dt:r.dt}; });
     return '<span class="pay-xck-run" data-k="'+esc(payRunKey(r))+'"></span><span class="pay-xfu-wrap" data-k="'+esc(payRunKey(r))+'">'+payXeroCell0(r,i)+'<div class="pay-xfu" data-k="'+esc(payRunKey(r))+'">'+payXfuInner(PAY_XFU[payRunKey(r)])+'</div></span>'; }
@@ -13840,13 +13840,13 @@ function hzPortalHelp(el){
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+(l.source==='po'?' <span class="pay-xck" data-po="'+esc(l.reference||'')+'" data-amt="'+esc(l.amount)+'" data-dt="'+esc(r.dt)+'"></span>':'')+'</td>'
+        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l" style="text-align:center">'+(l.source==='po'?'<span class="pay-xck" data-po="'+esc(l.reference||'')+'" data-amt="'+esc(l.amount)+'" data-dt="'+esc(r.dt)+'"></span>':'')+'</td>'
           +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:'+(_poHit?'':'none')+'"><td colspan="9"><div style="padding:2px">'
         +payRefLine(r)+'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
-        +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
+        +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l" title="Recorded on the PO&rsquo;s Xero bill">Xero</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
