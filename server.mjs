@@ -4624,6 +4624,134 @@ async function dhlImportPlan(fresh) {
       uk_total: Math.round(ships.filter(s => s.business === 'uk').reduce((a, s) => a + s.amount, 0) * 100) / 100, au_total: Math.round(ships.filter(s => s.business === 'au').reduce((a, s) => a + s.amount, 0) * 100) / 100 }); }); }
 async function dhlAccountsGate(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return false; }
   if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access required' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
+// v28.788 (Ben 11-Nov-26): BUY & MOVE > Inventory > AMAZON FEES. Proves Fulfil books the fees Amazon actually charged. Per month: Amazon finance
+// events (read only: n8n SP-API finances proxy, GET /finances/v0/financialEvents, one day at a time, regions EU / NA / AU) and Fulfil's Amazon
+// fee journal lines (read only: account.move.line on the "Cost of Sales - xx - Amazon" and "Fulfilment - xx - Amazon" accounts) are copied to
+// planner.amz_fee_lines as one row per order x fee type, then compared by marketplace x fee type, with orders behind each difference.
+// Fees are compared in the marketplace's currency (Fulfil amount_second_currency when set). Sign: a fee charged is positive on both sides.
+// Long job: POST .../run does about 20 s of work and returns more:true; the page keeps calling it. Nothing is written to Amazon or Fulfil.
+const AMZF_REGIONS = ['EU', 'NA', 'AU'];
+const AMZF_MKT = { UK: 'Amazon.co.uk', US: 'Amazon.com', CA: 'Amazon.ca', DE: 'Amazon.de', FR: 'Amazon.fr', IT: 'Amazon.it', ES: 'Amazon.es', AU: 'Amazon.com.au' };
+const AMZF_CCY = { 'Amazon.co.uk': 'GBP', 'Amazon.com': 'USD', 'Amazon.ca': 'CAD', 'Amazon.de': 'EUR', 'Amazon.fr': 'EUR', 'Amazon.it': 'EUR', 'Amazon.es': 'EUR', 'Amazon.com.au': 'AUD' };
+const AMZF_BY_CCY = { GBP: 'Amazon.co.uk', USD: 'Amazon.com', CAD: 'Amazon.ca', AUD: 'Amazon.com.au', EUR: 'Amazon EU (EUR, account-level)' };
+const AMZF_EU_ACC = 'Amazon EU (EUR, account-level)', AMZF_EUR = new Set(['Amazon.de', 'Amazon.fr', 'Amazon.it', 'Amazon.es']);   // EU ads / storage / service fees are billed to the whole EU account; Fulfil splits them by country, so compare them as one row
+const _amzfSq = s => String(s || '').replace(/\s+/g, '');
+// service fees are named differently on each side (Amazon FeeType FBAStorageFee, Fulfil event FBAStorageBilling): one shared name
+const amzfSvc = x => { x = _amzfSq(x); return /LongTerm/i.test(x) ? 'Long-term storage' : /AWD|STAR/i.test(x) ? 'AWD storage' : /Storage/i.test(x) ? 'Storage' : /Deal/i.test(x) ? 'Deal fees'
+  : /Inbound|Transport/i.test(x) ? 'Inbound transport' : /Removal/i.test(x) ? 'Removal fees' : /Subscription/i.test(x) ? 'Subscription' : 'Service ' + (x.replace(/(Unit)?(Fee|Event|Charge|Billing)s?$/i, '') || x); };
+const _amzfUrl = () => process.env.N8N_SPAPI_FINANCES_URL || 'https://n8n.dockandbay.com/webhook/horizon-spapi-finances';
+async function amzfCall(region, query) {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret) { const e = new Error('N8N_WEBHOOK_SECRET is not set: HORIZON cannot reach the n8n Amazon proxy'); e.code = 503; throw e; }
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 45000);
+  try { const r = await fetch(_amzfUrl(), { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': secret },
+      body: JSON.stringify({ region, method: 'GET', path: '/finances/v0/financialEvents', query }), signal: ctl.signal });
+    const txt = await r.text(); let j = null; try { j = JSON.parse(txt); } catch (_) {}
+    if (!r.ok || !j) { const e = new Error('n8n Amazon finances proxy ' + r.status + ': ' + txt.slice(0, 200)); e.status = r.status; throw e; }
+    const p = j.response && j.response.payload; if (!p) { const e = new Error('Amazon: ' + String(JSON.stringify(j.error || j.response || j)).slice(0, 300)); e.throttled = /QuotaExceeded|429|throttl/i.test(e.message); throw e; }
+    return p;
+  } finally { clearTimeout(t); } }
+// Fulfil fee line description -> { ord, type } (null = not a fee, e.g. "Refunded Sales")
+function amzfFfClass(desc) { const d = String(desc || ''), m = /^(\d{3}-\d{7}-\d{7})\s*-\s*(.*)$/.exec(d), ord = m ? m[1] : null, rest = (m ? m[2] : d).split('/').map(x => x.trim());
+  if (rest[0] === 'Refunded Sales') return null;
+  if (/^Cost of Advertising$/i.test(rest[0])) return { ord, type: 'Advertising' };   // Amazon ads paid by card (bank statement, Marketing - Amazon - UK / AU)
+  if (rest[0] === 'ItemFees') return { ord, type: _amzfSq(rest[1]) };
+  if (rest[0] === 'Expenses' && rest[1] === 'Shipment') { const t = rest.filter(x => x !== 'Base' && x !== 'Tax'); return { ord, type: _amzfSq(t[t.length - 1]) }; }
+  if (rest[0] === 'Refunded Expenses') { const b = _amzfSq(rest[rest.length - 1]); if (b === 'PromoRebates') return null; return { ord, type: 'Refund ' + (b === 'DigitalServicesFee' ? 'DigitalServicesFee' : 'AmazonFees') }; }
+  if (rest[0] === 'Expenses' && rest[1] === 'ServiceFee') return { ord, type: amzfSvc(rest[2]) };
+  if (rest[0] === 'Expenses' && rest[1] === 'ProductAdsPayment') return { ord, type: 'Advertising' };
+  if (rest[0] === 'Expenses' && rest[1] === 'RemovalShipment') return { ord, type: 'Removal fees' };
+  return { ord, type: 'Other: ' + rest.join(' / ').slice(0, 60) }; }
+// Amazon FinancialEvents -> rows { mk, ord, type, amt (charged = positive), ccy, posted, kind }
+function amzfAmzRows(fe, day) { const out = [];   // day: the day read (service fee events carry no PostedDate)
+  const push = (mk, ord, type, money, posted, kind) => { posted = posted || day; const a = Number(money && money.CurrencyAmount) || 0; if (!a) return; const ccy = money.CurrencyCode || null;
+    if (/^Non-Amazon\s+(UK|US|CA|DE|FR|IT|ES|AU)$/i.test(mk || '')) mk = AMZF_MKT[/(UK|US|CA|DE|FR|IT|ES|AU)$/i.exec(mk)[1].toUpperCase()];   // multi-channel fulfilment: Fulfil books it under that marketplace
+    if (AMZF_EUR.has(mk) && !ord) mk = null;
+    out.push({ mk: mk || AMZF_BY_CCY[ccy] || 'Unassigned', ord: ord || null, type, amt: -a, ccy, posted: posted ? String(posted).slice(0, 10) : null, kind }); };
+  (fe.ShipmentEventList || []).forEach(e => { (e.ShipmentItemList || []).forEach(it => (it.ItemFeeList || []).forEach(f => push(e.MarketplaceName, e.AmazonOrderId, _amzfSq(f.FeeType), f.FeeAmount, e.PostedDate, 'shipment')));
+    (e.ShipmentFeeList || []).forEach(f => push(e.MarketplaceName, e.AmazonOrderId, _amzfSq(f.FeeType), f.FeeAmount, e.PostedDate, 'shipment')); });
+  (fe.RefundEventList || []).forEach(e => (e.ShipmentItemAdjustmentList || []).forEach(it => (it.ItemFeeAdjustmentList || []).forEach(f =>
+    push(e.MarketplaceName, e.AmazonOrderId, 'Refund ' + (_amzfSq(f.FeeType) === 'DigitalServicesFee' ? 'DigitalServicesFee' : 'AmazonFees'), f.FeeAmount, e.PostedDate, 'refund'))));
+  (fe.ServiceFeeEventList || []).forEach(e => (e.FeeList || []).forEach(f => push(e.MarketplaceName, e.AmazonOrderId, amzfSvc(f.FeeType), f.FeeAmount, e.PostedDate, 'service')));
+  (fe.ProductAdsPaymentEventList || []).forEach(e => push(null, null, 'Advertising', e.transactionValue, e.postedDate, 'ads'));
+  (fe.RemovalShipmentEventList || []).forEach(e => (e.RemovalShipmentItemList || []).forEach(it => push(e.MarketplaceName, null, 'Removal fees', it.FeeAmount, e.PostedDate, 'removal')));
+  return out; }
+async function amzfInsert(month, source, rows) { for (let i = 0; i < rows.length; i += 1000) { const b = rows.slice(i, i + 1000);
+    await pool.query(`INSERT INTO planner.amz_fee_lines (month, source, marketplace, order_id, fee_type, amount, currency, posted, ref)
+      SELECT $1::date, $2, x.mk, x.ord, x.type, x.amt, x.ccy, x.posted::date, x.ref FROM jsonb_to_recordset($3::jsonb) AS x(mk text, ord text, type text, amt numeric, ccy text, posted text, ref text)`,
+      [month, source, JSON.stringify(b)]); } }
+async function amzfFulfilAccounts(cfg) { const acc = await fulfilFetchCfg(cfg, 'PUT', '/model/account.account/search_read', [[['name', 'ilike', '%Amazon%'], ['OR', ['name', 'ilike', 'Cost of Sales%'], ['name', 'ilike', 'Fulfilment%'], ['name', 'ilike', 'Marketing%']]], 0, 100, null, ['id', 'code', 'name']]);   // Marketing - Amazon - UK / AU: ads paid by card
+  const map = {}; (acc || []).forEach(a => { const m = / - (UK|US|CA|DE|FR|IT|ES|AU)( - |\s*$)/i.exec(a.name || ''); if (m) map[a.id] = AMZF_MKT[m[1].toUpperCase()]; }); return map; }
+async function amzfStep(month, by, restart) {
+  const t0 = Date.now(), BUDGET = 20000, m0 = month + '-01', mEnd = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 1)).toISOString().slice(0, 10);
+  let run = (await pool.query(`SELECT * FROM planner.amz_fee_runs WHERE month = $1::date`, [m0])).rows[0];
+  if (!run || restart || run.status === 'error') {
+    await pool.query(`DELETE FROM planner.amz_fee_lines WHERE month = $1::date`, [m0]);
+    run = (await pool.query(`INSERT INTO planner.amz_fee_runs (month, status, cursor, started_by, started_at, updated_at, finished_at, error) VALUES ($1::date,'running',$2,$3,now(),now(),null,null)
+      ON CONFLICT (month) DO UPDATE SET status='running', cursor=excluded.cursor, started_by=excluded.started_by, started_at=now(), updated_at=now(), finished_at=null, error=null RETURNING *`,
+      [m0, JSON.stringify({ phase: 'fulfil', last_id: 0, ri: 0, day: m0, token: null, n_ff: 0, n_amz: 0 }), by || null])).rows[0];
+  }
+  if (run.status === 'done') return { status: 'done', more: false };
+  const c = run.cursor || {}, save = async (status, err) => pool.query(`UPDATE planner.amz_fee_runs SET cursor=$2, status=$3, error=$4, updated_at=now(), finished_at=CASE WHEN $3='done' THEN now() ELSE finished_at END WHERE month=$1::date`, [m0, JSON.stringify(c), status, err || null]);
+  try {
+    const cfg = fulfilConfigFor('live');
+    while (Date.now() - t0 < BUDGET && c.phase === 'fulfil') {
+      if (!c.acc) { c.acc = await amzfFulfilAccounts(cfg); if (!Object.keys(c.acc).length) throw new Error('No Amazon fee accounts found in Fulfil'); }
+      const ids = Object.keys(c.acc).map(Number);
+      const lines = await fulfilFetchCfg(cfg, 'PUT', '/model/account.move.line/search_read', [[['account', 'in', ids], ['date', '>=', m0], ['date', '<', mEnd], ['id', '>', c.last_id || 0]], 0, 500, [['id', 'ASC']],
+        ['id', 'description', 'debit', 'credit', 'account', 'date', 'amount_second_currency']]);
+      const rows = []; (lines || []).forEach(l => { c.last_id = Math.max(c.last_id || 0, l.id); const k = amzfFfClass(l.description); if (!k) return; let mk = c.acc[l.account]; if (!mk) return; if (AMZF_EUR.has(mk) && !k.ord) mk = AMZF_EU_ACC;
+        const dc = Number((l.debit && l.debit.decimal) || l.debit || 0) - Number((l.credit && l.credit.decimal) || l.credit || 0), sc = l.amount_second_currency ? Math.abs(Number(l.amount_second_currency.decimal || l.amount_second_currency)) : null;
+        const amt = sc != null ? (dc < 0 ? -sc : sc) : dc; if (!amt) return;
+        rows.push({ mk, ord: k.ord, type: k.type, amt: Math.round(amt * 100) / 100, ccy: AMZF_CCY[mk] || null, posted: l.date && (l.date.iso_string || l.date), ref: 'fulfil:' + l.id }); });
+      await amzfInsert(m0, 'fulfil', rows); c.n_ff = (c.n_ff || 0) + rows.length;
+      if ((lines || []).length < 500) { c.phase = 'amazon'; c.ri = 0; c.day = m0; c.token = null; }
+      else await new Promise(r => setTimeout(r, 300));   // gentle on the live Fulfil API (shared with live HORIZON)
+    }
+    const stopAt = new Date(Date.now() - 5 * 60000).toISOString();
+    while (Date.now() - t0 < BUDGET && c.phase === 'amazon') {
+      if (c.ri >= AMZF_REGIONS.length) { c.phase = 'done'; break; }
+      const dayStart = c.day + 'T00:00:00Z', next = new Date(Date.parse(dayStart) + 86400000).toISOString(), dayEnd = next < stopAt ? next : stopAt;
+      if (c.day >= mEnd || dayStart >= stopAt) { c.ri++; c.day = m0; c.token = null; continue; }
+      let p; try { p = await amzfCall(AMZF_REGIONS[c.ri], c.token ? { NextToken: c.token } : { PostedAfter: dayStart, PostedBefore: dayEnd, MaxResultsPerPage: 100 }); }
+      catch (e) { if (e.throttled) { await save('running'); return { status: 'running', more: true, wait: 5000, cursor: amzfProgress(c, month) }; } throw e; }
+      const rows = amzfAmzRows(p.FinancialEvents || {}, c.day).map(r => ({ ...r, amt: Math.round(r.amt * 100) / 100, ref: 'amazon:' + r.kind }));
+      await amzfInsert(m0, 'amazon', rows); c.n_amz = (c.n_amz || 0) + rows.length;
+      if (p.NextToken) c.token = p.NextToken; else { c.token = null; c.day = next.slice(0, 10); }
+    }
+    if (c.phase === 'done') { await save('done'); return { status: 'done', more: false, cursor: amzfProgress(c, month) }; }
+    await save('running'); return { status: 'running', more: true, cursor: amzfProgress(c, month) };
+  } catch (e) { await save('error', String(e.message || e).slice(0, 500)); throw e; }
+}
+function amzfProgress(c, month) { return { phase: c.phase, region: AMZF_REGIONS[c.ri] || null, day: c.day, fulfil_rows: c.n_ff || 0, amazon_rows: c.n_amz || 0 }; }
+const _amzfMonth = v => { const m = /^(\d{4})-(\d{2})$/.exec(String(v || '')); return m && +m[2] >= 1 && +m[2] <= 12 ? m[0] : null; };
+app.post('/api/accounts/amazon-fees/run', async (req, res) => { if (!(await dhlAccountsGate(req, res))) return;
+  const month = _amzfMonth((req.body || {}).month); if (!month) return res.status(400).json({ error: 'month must be YYYY-MM' });
+  try { res.json({ ok: true, ...(await amzfStep(month, authUser(req) || null, !!(req.body || {}).restart)) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.get('/api/accounts/amazon-fees', async (req, res) => { if (!(await dhlAccountsGate(req, res))) return;
+  const month = _amzfMonth(req.query.month); if (!month) return res.status(400).json({ error: 'month must be YYYY-MM' });
+  try { const m0 = month + '-01', run = (await pool.query(`SELECT status, cursor, started_by, started_at::text, updated_at::text, finished_at::text, error FROM planner.amz_fee_runs WHERE month=$1::date`, [m0])).rows[0] || null;
+    const rows = (await pool.query(`SELECT marketplace, fee_type, max(currency) currency,
+        round(coalesce(sum(amount) FILTER (WHERE source='amazon'),0),2)::float amazon, round(coalesce(sum(amount) FILTER (WHERE source='fulfil'),0),2)::float fulfil,
+        count(DISTINCT order_id) FILTER (WHERE source='amazon')::int amazon_orders, count(DISTINCT order_id) FILTER (WHERE source='fulfil')::int fulfil_orders
+      FROM planner.amz_fee_lines WHERE month=$1::date GROUP BY 1,2 ORDER BY 1,2`, [m0])).rows;
+    const runs = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, status, finished_at::text AS finished_at FROM planner.amz_fee_runs ORDER BY month DESC LIMIT 24`)).rows;
+    const fc = fulfilConfigFor('live');
+    res.set('Cache-Control', 'no-store').json({ ok: true, month, run: run && { ...run, progress: amzfProgress(run.cursor || {}, month), cursor: undefined }, rows, runs, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+// orders behind one marketplace x fee type where Amazon and Fulfil differ (by more than 1p / 1c)
+app.get('/api/accounts/amazon-fees/orders', async (req, res) => { if (!(await dhlAccountsGate(req, res))) return;
+  const month = _amzfMonth(req.query.month); if (!month) return res.status(400).json({ error: 'month must be YYYY-MM' });
+  try { const r = (await pool.query(`WITH o AS (SELECT coalesce(order_id,'(no order id)') ord, round(coalesce(sum(amount) FILTER (WHERE source='amazon'),0),2) a, round(coalesce(sum(amount) FILTER (WHERE source='fulfil'),0),2) f,
+          min(posted) FILTER (WHERE source='amazon') ad, min(posted) FILTER (WHERE source='fulfil') fd
+        FROM planner.amz_fee_lines WHERE month=$1::date AND marketplace=$2 AND fee_type=$3 GROUP BY 1)
+      SELECT ord, a::float amazon, f::float fulfil, (f-a)::float diff, ad::text amazon_date, fd::text fulfil_date,
+        CASE WHEN f = 0 THEN 'missing' WHEN a = 0 THEN 'extra' ELSE 'different' END kind FROM o WHERE abs(f - a) >= 0.01 ORDER BY abs(f - a) DESC LIMIT 1000`,
+      [month + '-01', String(req.query.marketplace || ''), String(req.query.fee_type || '')])).rows;
+    const ids = r.map(x => x.ord).filter(o => /^\d{3}-\d{7}-\d{7}$/.test(o)).slice(0, 200), fc = fulfilConfigFor('live');   // links to the Fulfil sale for the biggest 200
+    if (ids.length) { try { const so = await fulfilFetchCfg(fc, 'PUT', '/model/sale.sale/search_read', [[['reference', 'in', ids]], 0, 400, null, ['id', 'number', 'reference']]);
+      const by = {}; (so || []).forEach(x => { by[x.reference] = x; }); r.forEach(x => { const s0 = by[x.ord]; if (s0) { x.sale_id = s0.id; x.so = s0.number; } }); } catch (_) { /* links are optional */ } }
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows: r, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.get('/api/accounts/dhl/import', async (req, res) => {
   if (!(await dhlAccountsGate(req, res))) return;
   try { res.set('Cache-Control', 'no-store').json({ ok: true, invoices: await dhlImportPlan(String(req.query.fresh || '') === '1'), au_accounts: DHL_AU_ACCOUNTS.map(([code, name]) => ({ code, name })), loan: DHL_LOAN_AU }); }

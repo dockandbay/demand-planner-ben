@@ -15663,11 +15663,75 @@ function _invFullXlsxDownload(mkt,btn){
 }
 var INV_STATUS_SHOWDISC=false;
 var INV_BO_SO={};   // v28.492 (SUG-0040): per market, the open Fulfil sales orders behind the Backorder rows ({key, state, data})   // Inventory Status Report: include already-discontinued SKUs (default hidden)
+// v28.788 (Ben 11-Nov-26): BUY & MOVE > Inventory > AMAZON FEES (layout A: summary then drill). Amazon's own finance events vs the fees Fulfil
+// booked, per marketplace x fee type, in the marketplace currency; a difference opens the orders behind it. Run = read Amazon + Fulfil (read only).
+var AMZF={month:null,data:null,open:{},drill:{},busy:false,msg:''};
+function renderAmzFees(){ var P=document.getElementById('amzf-panel'); if(!P)return; var E=tHesc;
+  if(!AMZF.month){ var d=new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth()-1); AMZF.month=d.toISOString().slice(0,7); }
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml=function(ym){ return MN[+ym.slice(5,7)-1]+'-'+ym.slice(2,4); };
+  var fdt=function(s){ if(!s)return ''; if(/[+-]\d{2}(:?\d{2})?$|Z$/.test(String(s))&&/\d{2}:\d{2}/.test(String(s))){ var t=new Date(String(s).replace(' ','T').replace(/([+-]\d{2})$/,'$1:00')); if(!isNaN(t)){ var p2=function(x){return String(x).padStart(2,'0');}; return p2(t.getDate())+'-'+MN[t.getMonth()]+'-'+String(t.getFullYear()).slice(2)+' '+p2(t.getHours())+':'+p2(t.getMinutes()); } } var m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(s)); return m?(m[3]+'-'+MN[+m[2]-1]+'-'+m[1].slice(2)+(m[4]?' '+m[4]+':'+m[5]:'')):String(s); };
+  var n2=function(v){ return (Number(v)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }, sg=function(v){ v=Math.round((Number(v)||0)*100)/100; return (v>0?'+':'')+n2(v); };
+  var months=[]; for(var i=0;i<13;i++){ var d2=new Date(); d2.setUTCDate(1); d2.setUTCMonth(d2.getUTCMonth()-i); months.push(d2.toISOString().slice(0,7)); }
+  var D=AMZF.data, run=D&&D.run, prog=run&&run.progress;
+  var h='<div style="max-width:1200px;text-align:left"><div style="font-weight:700;font-size:15px;margin-bottom:2px">Amazon fees: Amazon vs Fulfil</div>'
+    +'<div class="mut" style="font-size:12px;margin-bottom:10px;max-width:950px">Fees Amazon charged (its finance events, by posted date) against the fees Fulfil booked on the Amazon cost of sales and fulfilment accounts, in each marketplace&rsquo;s currency. Positive = a cost. A small difference is usually timing (a refund or a later shipment posted in the next month). Reading only: nothing is written to Amazon or Fulfil.</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span class="mut">Month</span><select id="amzf-m" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'
+    +months.map(function(m){ var r=((D&&D.runs)||[]).find(function(x){ return x.month===m; }); return '<option value="'+m+'"'+(m===AMZF.month?' selected':'')+'>'+ml(m)+(r?(r.status==='done'?' ✓':' …'):'')+'</option>'; }).join('')+'</select>'
+    +'<button class="save-btn" id="amzf-run"'+(AMZF.busy?' disabled':'')+'>'+(AMZF.busy?'Reading…':(run?'Re-check Amazon':'Check this month'))+'</button>'
+    +'<span class="mut" id="amzf-st">'+E(AMZF.msg||(run?(run.status==='done'?'read '+fdt(run.finished_at)+(run.started_by?' by '+inv3plUser(run.started_by):''):run.status==='error'?'':'part read ('+(prog?prog.phase+' '+(prog.phase==='amazon'?prog.region+' '+fdt(prog.day):''):'')+'), press to continue'):'not checked yet'))+'</span>'
+    +(run&&run.status==='error'?'<span style="color:var(--neg)">'+E(run.error||'error')+'</span>':'')+'</div>';
+  if(!D){ h+='<div class="mut">Loading…</div>'; }
+  else { var by={}, mk=[]; (D.rows||[]).forEach(function(r){ if(!by[r.marketplace]){ by[r.marketplace]=[]; mk.push(r.marketplace); } by[r.marketplace].push(r); });
+    if(!mk.length) h+='<div class="mut" style="padding:8px 0">'+(run?'No fee lines read yet.':'Press &ldquo;Check this month&rdquo; to read Amazon and Fulfil (a few minutes; the page keeps going on its own).')+'</div>';
+    var ord=['Amazon.co.uk','Amazon.com','Amazon.ca','Amazon.de','Amazon.fr','Amazon.it','Amazon.es','Amazon EU (EUR, account-level)','Amazon.com.au']; mk.sort(function(a,b){ var x=ord.indexOf(a), y=ord.indexOf(b); return (x<0?99:x)-(y<0?99:y)||a.localeCompare(b); });
+    var th='padding:5px 8px;font-size:11px;white-space:nowrap;border-bottom:1px solid var(--line);text-align:left', td='padding:4px 8px;white-space:nowrap;text-align:left';
+    h+='<table style="border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:12.5px;text-align:left;min-width:760px"><thead><tr><th style="'+th+'"></th><th style="'+th+'">Marketplace</th><th style="'+th+';text-align:left">Amazon</th><th style="'+th+';text-align:left">Fulfil</th><th style="'+th+';text-align:left">Diff (Fulfil − Amazon)</th><th style="'+th+';text-align:left">%</th><th style="'+th+'"></th></tr></thead><tbody>';
+    mk.forEach(function(m){ var rs=by[m], a=rs.reduce(function(s,r){return s+r.amazon;},0), f=rs.reduce(function(s,r){return s+r.fulfil;},0), df=f-a, pc=a?Math.abs(df/a*100):(f?100:0), ok=Math.abs(df)<1||pc<=1, open=!!AMZF.open[m], ccy=(rs[0]&&rs[0].currency)||'';
+      h+='<tr class="amzf-mk" data-m="'+E(m)+'" style="cursor:pointer;border-top:1px solid var(--line2);'+(open?'background:var(--hover)':'')+'"><td style="'+td+'">'+(open?'▾':'▸')+'</td><td style="'+td+';font-weight:700">'+E(m)+' <span class="mut" style="font-weight:400">'+E(ccy)+'</span></td><td style="'+td+';text-align:left">'+n2(a)+'</td><td style="'+td+';text-align:left">'+n2(f)+'</td>'
+        +'<td style="'+td+';text-align:left;font-weight:700;color:'+(ok?'var(--muted)':'var(--neg)')+'">'+sg(df)+'</td><td style="'+td+';text-align:left">'+pc.toFixed(1)+'%</td><td style="'+td+'"><span style="font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:9px;background:'+(ok?'var(--pos-bg)':'var(--amber-bg)')+';color:'+(ok?'var(--pos)':'#92400e')+'">'+(ok?'OK':'CHECK')+'</span></td></tr>';
+      if(open){ h+='<tr><td></td><td colspan="6" style="padding:4px 0 12px"><table style="border-collapse:collapse;font-size:12px;text-align:left;width:100%"><thead><tr><th style="'+th+'">Fee type</th><th style="'+th+';text-align:left">Amazon</th><th style="'+th+';text-align:left">Fulfil</th><th style="'+th+';text-align:left">Diff</th><th style="'+th+'">Orders</th></tr></thead><tbody>'
+        +rs.slice().sort(function(x,y){ return Math.abs(y.fulfil-y.amazon)-Math.abs(x.fulfil-x.amazon)||Math.abs(y.amazon)-Math.abs(x.amazon); }).map(function(r){ var d=r.fulfil-r.amazon, key=m+'|'+r.fee_type, dr=AMZF.drill[key];
+          var row='<tr style="border-top:1px solid var(--line2)"><td style="'+td+'">'+E(r.fee_type)+'</td><td style="'+td+';text-align:left">'+n2(r.amazon)+'</td><td style="'+td+';text-align:left">'+n2(r.fulfil)+'</td><td style="'+td+';text-align:left;font-weight:600;color:'+(Math.abs(d)<0.01?'var(--muted)':Math.abs(d)<1?'inherit':'var(--neg)')+'">'+(Math.abs(d)<0.01?'0':sg(d))+'</td>'
+            +'<td style="'+td+'">'+(Math.abs(d)<0.01?'<span class="mut">ok</span>':'<a href="#" class="amzf-dr" data-k="'+E(key)+'" style="color:var(--blue)">'+(dr?'▾ hide':'▸ orders')+'</a>')+' <span class="mut" style="font-size:11px">'+n0z(r.amazon_orders)+' / '+n0z(r.fulfil_orders)+' orders</span></td></tr>';
+          if(dr) row+='<tr><td colspan="5" style="padding:2px 8px 10px 22px">'+amzfDrillHtml(dr,m,E,n2,sg,fdt)+'</td></tr>';
+          return row; }).join('')+'</tbody></table></td></tr>'; } });
+    h+='</tbody></table>'; }
+  h+='</div>'; P.innerHTML=h;
+  P.querySelector('#amzf-m').onchange=function(){ AMZF.month=this.value; AMZF.data=null; AMZF.open={}; AMZF.drill={}; AMZF.msg=''; renderAmzFees(); amzfLoad(); };
+  P.querySelector('#amzf-run').onclick=function(){ amzfRun(!!(run&&run.status==='done')); };
+  P.querySelectorAll('.amzf-mk').forEach(function(tr){ tr.onclick=function(){ var m=tr.dataset.m; AMZF.open[m]=!AMZF.open[m]; renderAmzFees(); }; });
+  P.querySelectorAll('.amzf-dr').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); var k=a.dataset.k; if(AMZF.drill[k]){ delete AMZF.drill[k]; renderAmzFees(); return; }
+    AMZF.drill[k]={loading:true}; renderAmzFees(); var p=k.split('|');
+    fetch('/api/accounts/amazon-fees/orders?month='+AMZF.month+'&marketplace='+encodeURIComponent(p[0])+'&fee_type='+encodeURIComponent(p.slice(1).join('|'))).then(function(r){ return r.json(); })
+      .then(function(j){ AMZF.drill[k]=j.error?{error:j.error}:{rows:j.rows||[],fb:j.fulfil_base}; renderAmzFees(); }).catch(function(e){ AMZF.drill[k]={error:e.message}; renderAmzFees(); }); }; });
+  if(!D)amzfLoad(); }
+function n0z(v){ return Math.round(Number(v)||0).toLocaleString(); }
+function amzfDrillHtml(dr,m,E,n2,sg,fdt){ if(dr.loading)return '<span class="mut">Loading orders…</span>'; if(dr.error)return '<span style="color:var(--neg)">'+E(dr.error)+'</span>';
+  if(!dr.rows.length)return '<span class="mut">No order-level differences (the difference sits on lines with no order id).</span>';
+  var K={missing:'Amazon charged, Fulfil did not book',extra:'Fulfil booked, Amazon did not charge this month',different:'Different amount'}, cnt={}; dr.rows.forEach(function(r){ cnt[r.kind]=(cnt[r.kind]||0)+1; });
+  var SC={'Amazon.co.uk':'sellercentral.amazon.co.uk','Amazon.com':'sellercentral.amazon.com','Amazon.ca':'sellercentral.amazon.ca','Amazon.com.au':'sellercentral.amazon.com.au'}[m]||'sellercentral-europe.amazon.com';
+  var td='padding:2px 10px 2px 0;white-space:nowrap;text-align:left';
+  return '<div class="mut" style="font-size:11.5px;margin-bottom:4px">'+Object.keys(cnt).map(function(k){ return cnt[k]+' '+E(K[k]||k).toLowerCase(); }).join(' · ')+(dr.rows.length>=1000?' (first 1,000)':'')+'</div>'
+    +'<div style="max-height:360px;overflow:auto"><table style="border-collapse:collapse;font-size:11.5px;text-align:left;font-variant-numeric:tabular-nums"><thead><tr><th style="'+td+'">Amazon order</th><th style="'+td+'">Fulfil</th><th style="'+td+'">What</th><th style="'+td+';text-align:left">Amazon</th><th style="'+td+';text-align:left">Fulfil</th><th style="'+td+';text-align:left">Diff</th><th style="'+td+'">Posted (Amazon / Fulfil)</th></tr></thead><tbody>'
+    +dr.rows.map(function(r){ var isOrd=/^\d{3}-\d{7}-\d{7}$/.test(r.ord);
+      return '<tr><td style="'+td+'">'+(isOrd?'<a href="https://'+SC+'/orders-v3/order/'+E(r.ord)+'" target="_blank" rel="noopener" style="color:var(--blue)">'+E(r.ord)+' &#8599;</a>':E(r.ord))+'</td>'
+        +'<td style="'+td+'">'+(r.sale_id&&dr.fb?'<a href="'+dr.fb+'/v2/erp/model/sale.sale/'+r.sale_id+'" target="_blank" rel="noopener" style="color:var(--blue)">'+E(r.so||r.sale_id)+' &#8599;</a>':'<span class="mut">–</span>')+'</td>'
+        +'<td style="'+td+'">'+E(K[r.kind]||r.kind)+'</td><td style="'+td+';text-align:left">'+n2(r.amazon)+'</td><td style="'+td+';text-align:left">'+n2(r.fulfil)+'</td><td style="'+td+';text-align:left;font-weight:600">'+sg(r.diff)+'</td><td style="'+td+'">'+E(fdt(r.amazon_date))+' / '+E(fdt(r.fulfil_date))+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
+function amzfLoad(){ var mo=AMZF.month; fetch('/api/accounts/amazon-fees?month='+mo).then(function(r){ return r.json(); }).then(function(j){ if(mo!==AMZF.month)return; AMZF.data=j.error?{rows:[],runs:[],run:{status:'error',error:j.error}}:j; renderAmzFees(); })
+  .catch(function(e){ AMZF.data={rows:[],runs:[],run:{status:'error',error:e.message}}; renderAmzFees(); }); }
+function amzfRun(restart){ if(AMZF.busy)return; AMZF.busy=true; var mo=AMZF.month, first=true;
+  (function step(){ fetch('/api/accounts/amazon-fees/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:mo,restart:first&&restart})}).then(function(r){ return r.json(); }).then(function(j){ first=false;
+      if(j.error)throw new Error(j.error); var c=j.cursor||{};
+      AMZF.msg=j.more?('Reading '+(c.phase==='fulfil'?'Fulfil':('Amazon '+(c.region||'')+' '+String(c.day||'').slice(5)))+'… Fulfil '+n0z(c.fulfil_rows)+' lines, Amazon '+n0z(c.amazon_rows)+' fees'):'';
+      if(j.more){ if(AMZF.month===mo&&INV_SUB==='amazonfees'){ var st=document.getElementById('amzf-st'); if(st)st.textContent=AMZF.msg; } setTimeout(step,j.wait||200); return; }
+      AMZF.busy=false; AMZF.msg=''; if(AMZF.month===mo)amzfLoad(); })
+    .catch(function(e){ AMZF.busy=false; AMZF.msg='Stopped: '+e.message+' (press again to continue)'; amzfLoad(); }); })();
+  renderAmzFees(); }
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
-  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['adjustments','Adjustments'],['cogs','COGS']];   // v28.235 (Ben): + COGS per unit for Airtable; v28.744: + Adjustments (SUG-0047)
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['adjustments','Adjustments'],['cogs','COGS'],['amazonfees','Amazon fees']];   /* v28.788: + Amazon fees check */   // v28.235 (Ben): + COGS per unit for Airtable; v28.744: + Adjustments (SUG-0047)
   if(INV_FBA==='AWD'&&INV_SUB!=='managefba')INV_FBA='US';   // 'AWD' is a Manage-FBA-only pseudo-market pill; don't leak it to FBA Aged / other tabs
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(it){ var c=Array.isArray(it)?it[0]:it,lbl=Array.isArray(it)?it[1]:it; var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:5px 15px;border-radius:99px;border:1px solid '+(on?'var(--nav)':'var(--line)')+';background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--muted)')+';font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">'+lbl+'</button>'; }).join('')+'</div>'; }   // v27.624 Inventory v2: tokenised pills (were hardcoded hex → broke dark mode)
@@ -15683,6 +15747,7 @@ function renderInventory(){
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='adjustments') body='<div id="sadj-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   /* v28.744 */
   else if(INV_SUB==='cogs') body=pillbar([['unit','Per-unit cost (Airtable)'],['channel','By channel & journals'],['avask','AVASK']],COGS.view||'unit','cogs-view-pill')+'<div id="cogs-panel"></div>';   /* v28.727: + COGS and SALES by channel */
+  else if(INV_SUB==='amazonfees') body='<div id="amzf-panel"></div>';   /* v28.788 */
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -15696,6 +15761,7 @@ function renderInventory(){
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
   else if(INV_SUB==='adjustments')renderStockAdj();
+  else if(INV_SUB==='amazonfees')renderAmzFees();
   else if(INV_SUB==='cogs'){ if(COGS.view==='channel'){ renderCogsCh(); cchLoad(); } else if(COGS.view==='avask')renderCogsAvask(); else renderCogs(); }   /* v28.735: + AVASK */
 }
 // ── v28.744 (Ben 09-Nov-26, SUG-0047): BUY & MOVE ▸ Inventory ▸ Adjustments. Large Fulfil stock adjustments per warehouse location,

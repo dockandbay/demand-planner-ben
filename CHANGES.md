@@ -1,3 +1,7 @@
+## v28.788 (11-Nov-26) BUY & MOVE > Inventory > Amazon fees: Amazon vs Fulfil check
+- Ben: a check that Fulfil books the fees Amazon actually charged. Pick a month, press Check: HORIZON reads Amazon's finance events (read only, via the n8n SP-API finances proxy, EU / NA / AU) and Fulfil's Amazon fee journal lines (read only), then shows per marketplace Amazon vs Fulfil (OK / CHECK), per fee type, and the orders behind any difference (missing in Fulfil / not charged by Amazon / different amount) with Seller Central and Fulfil links. In each marketplace's currency. ACCOUNTS access or admin.
+- **Migration 438** (planner.amz_fee_runs, planner.amz_fee_lines). New optional env var N8N_SPAPI_FINANCES_URL (default https://n8n.dockandbay.com/webhook/horizon-spapi-finances; the n8n flow NfaZOJnBlRTn6Tap is already live). No new cron routes.
+
 ## v28.787 (11-Nov-26) Manage 3PL (UK ILG, US Geneva): 3PL report + Fulfil now columns; diff uses the closer Fulfil figure
 - Ben: column "Report HH:MM" is now "3PL report" (time in the tooltip); new "Fulfil now" column (whole Fulfil warehouse on hand now). Both in the CSV, plus "Diff uses".
 - Ben (US TOWLF-ESS-LG/XL HIBPNK, LKAQUA, PLIM, VLYVIO: report 320, Fulfil now 320, receipt booked in Fulfil after the 23:01 report so "Fulfil at report" 0 and diff +320, set to 320 would have doubled the stock): the diff now compares the report with whichever is closer, Fulfil at report or Fulfil now. The figure used is bold. Applies to the page, Send to Fulfil, and the automated daily rebaseline (all use ilgCompare).
