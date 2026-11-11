@@ -7618,7 +7618,7 @@ const CCH_NAME = { '311.1a': 'COGS - UK - Shopify', '311.1b': 'COGS - UK - Amazo
   '201g': 'Sales - IT - Amazon', '201h': 'Sales - ES - Amazon', '201c': 'Sales - CA - Amazon', '210.7z': 'Sales - International Distributors', '210.7y': 'Sales - International Distributors (Co Brand)',
   '210.6a': 'Sales - UK - Co-Brand/Custom', '210.6b': 'Sales - US - Co-Brand/Custom', '210.6c': 'Sales - CA - Co-Brand/Custom', '210.6d': 'Sales - EU - Co-Brand/Custom', '210.6e': 'Sales - ROTW - Co-Brand/Custom',
   '200e': 'Sales - Shopify - AU', '210e': 'Sales - Wholesale - AU', '212e': 'Sales - Marketplace - AU', '200f': 'Sales - Custom/Co Brand - AU',
-  '9002': 'Fulfil - Revenue Account', '9003': 'Fulfil - Contra Revenue', '9004': 'Fulfil - Shipping Revenue', '9005': 'Fulfil - Sales Discount', '9006': 'Fulfil - Cost of Goods Sold Account' };
+  '9002': 'Fulfil - Revenue Account', '9003': 'Fulfil - Contra Revenue', '9004': 'Fulfil - Shipping Revenue', '9005': 'Fulfil - Sales Discount', '9006': 'Fulfil - Cost of Goods Sold Account', '9011': 'Fulfil - Inventory Shipped Not Invoiced' };
 const cchName = (org, code) => (org === 'AU' && code === '201e') ? 'Sales - Amazon - AU' : (CCH_NAME[code] || code);
 // channel / segment / delivery country -> [COGS account, note]. A mapping saved in HORIZON (app_settings cogs_channel_map, "<channel>|<segment>"
 // or "<channel>|*") wins, so a new channel is added without code. Defaults for Key Accounts / distributors / custom: Ben 05-Nov-26 review.
@@ -7697,6 +7697,14 @@ async function cchBuild(month) {
   const inv = await cchByIds('account.invoice', invNeed, ['sales', 'number', 'type']);
   const so = await cchByIds('sale.sale', Object.values(inv).map(v => (v.sales || [])[0]), ['channel.name', 'channel_segment', 'shipment_address.country.code', 'number', 'reference']);
   const orgOf = co => Number(co) === FULFIL_COMPANY_AU ? 'AU' : 'UK';
+  // v28.778: channels Fulfil exports to Xero invoice by invoice ("detailed" in each Xero connection's customer_invoice_channels); their invoices
+  // are checked against Xero (a discounted invoice on a Wholesale List Price channel may never export: Fulfil ticket 11-Nov-26)
+  let detNames = new Set();
+  try { const ints = await cchFulfil('ir.integration', 'search_read', { filters: [['id', 'in', CCH_XERO_INTEGRATIONS]], fields: ['configuration'] }) || [];
+    const ids = []; ints.forEach(i => ((i.configuration || {}).customer_invoice_channels || []).forEach(c => { if (c.action === 'detailed') ids.push(c.channel_id); }));
+    if (ids.length) (await cchFulfil('sale.channel', 'search_read', { filters: [['id', 'in', ids]], fields: ['name'] }) || []).forEach(c => detNames.add(c.name)); }
+  catch (e) { console.warn('[cogs-ch] Xero channel settings not read: ' + (e && e.message)); }
+  const det = { UK: {}, AU: {} };
   const O = {}; const org = k => O[k] || (O[k] = { org: k, ccy: k === 'AU' ? 'AUD' : 'GBP', gl: {}, acc: {}, landed: {}, ch: {}, notes: {}, orders: {}, unmapped: {}, spread: [], spreadTot: { '9006': 0, sales: 0 } });
   for (const l of lines) {
     const a = cchDec(l.debit) - cchDec(l.credit), o = org(orgOf(l['account.company'])), acc = l['account.code'];
@@ -7706,13 +7714,17 @@ async function cchBuild(month) {
     if (!s) { const v = inv[x ? x.invoice : cchRef(l['move.origin'], 'account.invoice')]; const z = v && so[(v.sales || [])[0]]; if (z) s = { ch: z['channel.name'], seg: z.channel_segment, cc: z['shipment_address.country.code'], no: z.number, ref: z.reference }; }
     if (!s) { o.spread.push({ acc, a, origin: String(l['move.origin'] || l.origin || '').split(',')[0], party: l['party.rec_name'] || '', sku: l['product.code'] || (x && x['product.code']) || '' }); continue; }
     const [ca0, note] = cchCogsAcct(s.ch, s.seg, s.cc, map), ca = ca0 || 'UNMAPPED';
+    if (detNames.has(s.ch)) { const iid = x ? x.invoice : cchRef(l['move.origin'], 'account.invoice'); if (iid) { const dv = det[o.org][iid] || (det[o.org][iid] = { ca, so: s.no, rev: 0, cogs: 0 });
+      if (acc === '9006') dv.cogs += a; else dv.rev -= a; } }
     if (!ca0) { const k = (s.ch || '(none)') + '|' + (s.seg || ''); const u = o.unmapped[k] || (o.unmapped[k] = { channel: s.ch || '', segment: s.seg || '', countries: {}, cogs: 0, sales: 0, orders: {} }); u.countries[s.cc || '?'] = 1; if (acc === '9006') u.cogs += a; else u.sales -= a; if (Object.keys(u.orders).length < 20) u.orders[s.no] = 1; }
     const b = o.acc[ca] || (o.acc[ca] = {}); b[acc] = (b[acc] || 0) + a;
     if (note) (o.notes[ca] || (o.notes[ca] = {}))[note] = 1;
     (o.ch[ca] || (o.ch[ca] = {}))[(s.ch || '(none)') + (s.seg === 'tiktok' || /zalando/i.test(s.seg || '') ? ' / ' + s.seg : '')] = 1;
     (o.orders[ca] || (o.orders[ca] = {}))[s.no] = 1;
   }
-  const out = { month, built_at: new Date().toISOString(), ms: 0, gl_lines: lines.length, orgs: {} };
+  const detIds = Object.keys(det.UK).concat(Object.keys(det.AU)).map(Number);
+  const detInv = detIds.length ? await cchByIds('account.invoice', detIds, ['number', 'invoice_date', 'state']) : {};
+  const out = { month, built_at: new Date().toISOString(), ms: 0, gl_lines: lines.length, orgs: {}, detailed_channels: [...detNames].sort() };
   for (const k of ['UK', 'AU']) {
     const o = org(k), share = {}, sshare = {};
     Object.keys(o.acc).forEach(ca => { if (ca === 'UNMAPPED') return; const b = o.acc[ca]; share[ca] = b['9006'] || 0; sshare[ca] = -(['9002', '9003', '9004', '9005'].reduce((t, x) => t + (b[x] || 0), 0)); });
@@ -7742,7 +7754,9 @@ async function cchBuild(month) {
       balanced: { COGS: bal(J.COGS), SALES: bal(J.SALES) },
       spread: { cogs: cchR2(o.spreadTot['9006']), sales: cchR2(o.spreadTot.sales), by_source: Object.values(byOrigin).map(e => Object.assign(e, { amount: cchR2(e.amount), skus: Object.keys(e.skus) })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).slice(0, 60) },
       unmapped: Object.values(o.unmapped).map(u => ({ channel: u.channel, segment: u.segment, countries: Object.keys(u.countries), cogs: cchR2(u.cogs), sales: cchR2(u.sales), orders: Object.keys(u.orders) })),
-      blocked: hasUnm ? 'A channel has no account: map it below; the journals are held until every line has an account (the clearing accounts must net to zero).' : null };
+      blocked: hasUnm ? 'A channel has no account: map it below; the journals are held until every line has an account (the clearing accounts must net to zero).' : null,
+      det_invoices: Object.keys(det[k]).map(id => { const dv = det[k][id], iv = detInv[id] || {}; return { id: Number(id), number: iv.number || null, date: _olDate(iv.invoice_date), state: iv.state || null, so: dv.so,
+        cogs_acct: dv.ca, sales_acct: CCH_SALES[dv.ca] || null, rev: cchR2(dv.rev), cogs: cchR2(dv.cogs) }; }).filter(x => Math.abs(x.rev) >= 0.005 || Math.abs(x.cogs) >= 0.005) };
   }
   out.ms = Date.now() - t0;
   return out;
@@ -7753,10 +7767,122 @@ async function cchStore(b, by) { b.built_by = by;
 async function cchLoad(month) { const v = await cpSetting('cogs_ch:' + month, ''); return v ? cpJson(v, null) : null; }
 const _cchBusy = {};   // per-instance: a build in flight per month (a second press waits for it)
 async function cchBuildStore(month, by) { if (_cchBusy[month]) return _cchBusy[month];
-  _cchBusy[month] = (async () => { try { return await cchStore(await cchBuild(month), by); } finally { delete _cchBusy[month]; _cchDeadline = 0; } })(); return _cchBusy[month]; }
+  _cchBusy[month] = (async () => { try { const b = await cchBuild(month); await cchXeroCheck(b); return await cchStore(b, by); } finally { delete _cchBusy[month]; _cchDeadline = 0; } })(); return _cchBusy[month]; }
+// v28.778: every build reads the month back from Xero for both orgs (about 6 calls each) and recomputes the journals; if Xero can't be read the
+// org is blocked (journals from Fulfil alone are what left October unbalanced).
+async function cchXeroCheck(b) {
+  if (b.month < CCH_FROM) return b; const adj = cpJson(await cpSetting('cogs_ch_adjust', '{}'), {}) || {};
+  for (const k of ['UK', 'AU']) { const o = b.orgs[k]; if (!o) continue;
+    try { const xp = await cchXeroPeriod(b.month, k);
+      // a one-by-one invoice not among the month's Xero invoices is looked up by number at any date (one call): in Xero but dated another month,
+      // or not in Xero at all (Fulfil export bug, ticket 11-Nov-26). Either way it is not in this month's Xero balance, so it stays out.
+      const xn = new Set(xp.docs.map(d => String(d.number || '').trim().toUpperCase())), cand = (o.det_invoices || []).filter(v => v.number && !xn.has(String(v.number).toUpperCase()) && !xn.has('TEMP-SO' + String(v.number).toUpperCase()));
+      xp.elsewhere = {};
+      if (cand.length) { const nums = []; cand.slice(0, 40).forEach(v => nums.push(v.number, 'TEMP-SO' + v.number));
+        const r = await xeroFetch(k === 'AU' ? 'au' : 'uk', '/api.xro/2.0/Invoices?InvoiceNumbers=' + encodeURIComponent(nums.join(',')) + '&summaryOnly=true');
+        ((r && r.Invoices) || []).filter(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || ''))).forEach(x => { xp.elsewhere[String(x.InvoiceNumber || '').toUpperCase().replace(/^TEMP-SO/, '')] = { date: cchDOf(x.Date), status: x.Status, number: x.InvoiceNumber }; }); }
+      cchApplyXero(o, xp, k, adj); }
+    catch (e) { o.blocked = (o.blocked ? o.blocked + ' ' : '') + 'Xero ' + k + ' could not be read back (' + String(e.message || e).slice(0, 200) + '); the journals need Xero\'s balances. Try again later.'; } }
+  return b; }
 // ---- Xero: one COGS and one SALES manual journal per org and month. Narration "HORIZON <COGS|SALES> by channel YYYY-MM" (the same narration as
 // the October CSV import, so a later refresh finds a hand-imported journal too). Refresh rules (spec): a DRAFT is rebuilt in place; once
 // POSTED it is never edited, a "top-up" journal carries the difference (UK draft, AU posted).
+// v28.778 (Ben 11-Nov-26, docs/specs/BUILD_NOTE_sales_journal_consolidated_only_2026-11-11.md): the journals move what is actually IN XERO on the
+// Fulfil clearing accounts. cchXeroPeriod reads, for one org and month (read only, about 4-6 Xero calls): the clearing accounts (code, class),
+// the month's P&L movement on them, and every POSTED manual journal of the month that touches them, classed HORIZON (our own journals),
+// JES (Fulfil's daily "Journal Entry Summary for <date>") or OTHER (a hand-made journal, e.g. Xero AU e0f94251 Amazon AU GST).
+const CCH_WATCH = ['9002', '9003', '9004', '9005', '9006', '9011'];
+async function cchXeroPeriod(month, orgK) {
+  const region = orgK === 'AU' ? 'au' : 'uk', from = month + '-01', to = cchMonthEnd(month);
+  const accJ = await xeroFetch(region, '/api.xro/2.0/Accounts'), acc = {}, byId = {};
+  ((accJ && accJ.Accounts) || []).forEach(a => { if (a.Code) { acc[a.Code] = { id: a.AccountID, name: a.Name, cls: a.Class, type: a.Type }; byId[a.AccountID] = a.Code; } });
+  const pl = {}, rep = await xeroFetch(region, '/api.xro/2.0/Reports/ProfitAndLoss?fromDate=' + from + '&toDate=' + to);
+  const walk = rows => (rows || []).forEach(r => { if (r.Rows) walk(r.Rows); const c = r.Cells || []; const at = ((c[0] || {}).Attributes || []).find(x => x.Id === 'account');
+    if (at && byId[at.Value]) { const code = byId[at.Value], v = Number(String((c[1] || {}).Value || '0').replace(/,/g, '')) || 0, cl = (acc[code] || {}).cls;
+      pl[code] = cchR2((cl === 'REVENUE' ? -v : v)); } });   // debit - credit for the month (revenue rows show credit as positive)
+  walk(((rep && rep.Reports) || [])[0] && rep.Reports[0].Rows);
+  const [y, m] = month.split('-').map(Number), d = Number(to.slice(8));
+  const mjs = []; for (let page = 1; page <= 5; page++) {
+    const r = await xeroFetch(region, '/api.xro/2.0/ManualJournals?page=' + page + '&where=' + encodeURIComponent('Date>=DateTime(' + y + ',' + m + ',1) AND Date<=DateTime(' + y + ',' + m + ',' + d + ')'));
+    const L = (r && r.ManualJournals) || []; mjs.push(...L); if (L.length < 100) break; }
+  const journals = mjs.filter(x => /^POSTED$/i.test(String(x.Status || ''))).map(x => { const net = {};
+      const inc = /Inclusive/i.test(String(x.LineAmountTypes || ''));   // a tax-inclusive line moves LineAmount - TaxAmount on its account (e0f94251)
+      (x.JournalLines || []).forEach(l => { const c = String(l.AccountCode || ''); if (CCH_WATCH.includes(c)) net[c] = cchR2((net[c] || 0) + (Number(l.LineAmount) || 0) - (inc ? (Number(l.TaxAmount) || 0) : 0)); });
+      const nar = String(x.Narration || ''); return { id: x.ManualJournalID, date: cchDOf(x.Date), narration: nar, kind: /^HORIZON /.test(nar) ? 'HORIZON' : /^Journal Entry Summary/i.test(nar) ? 'JES' : 'OTHER',
+        lines_missing: !Array.isArray(x.JournalLines), net }; })
+    .filter(x => Object.keys(x.net).length || x.lines_missing);
+  // invoices and credit notes of the month (sales side) with their clearing-account lines, ex tax, in base currency (amount / CurrencyRate)
+  const docs = [];
+  for (const kind of ['Invoices', 'CreditNotes']) for (let page = 1; page <= 10; page++) {
+    const r = await xeroFetch(region, '/api.xro/2.0/' + kind + '?page=' + page + '&where=' + encodeURIComponent('Type=="' + (kind === 'Invoices' ? 'ACCREC' : 'ACCRECCREDIT') + '" AND Date>=DateTime(' + y + ',' + m + ',1) AND Date<=DateTime(' + y + ',' + m + ',' + d + ')'));
+    const L = (r && r[kind]) || []; L.forEach(x => { if (/^(VOIDED|DELETED|DRAFT|SUBMITTED)$/i.test(String(x.Status || ''))) return;
+      const rate = Number(x.CurrencyRate) || 1, inc = /Inclusive/i.test(String(x.LineAmountTypes || '')), sg = kind === 'CreditNotes' ? 1 : -1, net = {};
+      (x.LineItems || []).forEach(l => { const c = String(l.AccountCode || ''); if (!CCH_WATCH.includes(c)) return; const ex = (Number(l.LineAmount) || 0) - (inc ? (Number(l.TaxAmount) || 0) : 0);
+        net[c] = cchR2((net[c] || 0) + sg * ex / rate); });   // debit - credit, base currency
+      if (Object.keys(net).length) docs.push({ kind: kind === 'Invoices' ? 'INV' : 'CN', id: x.InvoiceID || x.CreditNoteID, number: x.InvoiceNumber || x.CreditNoteNumber, ref: x.Reference || '', contact: (x.Contact || {}).Name || '',
+        date: cchDOf(x.Date), ccy: x.CurrencyCode, rate, status: x.Status, total: Number(x.Total) || 0, consolidated: /^Consolidated/i.test(String(x.Reference || '')), net }); });
+    if (L.length < 100) break; }
+  return { org: orgK, month, accounts: CCH_WATCH.reduce((o, c) => (o[c] = acc[c] || null, o), {}), pl, journals, docs, mj_count: mjs.length };
+}
+const CCH_XERO_INTEGRATIONS = [35, 96];   // Fulfil ir.integration: Xero UK, Xero AU (the connections in use since 01-Oct-26)
+// v28.778: a hand-made journal on 9002-9005 (not HORIZON's, not Fulfil's Journal Entry Summary) is allocated to one channel's sales account:
+// app_settings cogs_ch_adjust { <ManualJournalID>: '<sales account>' | 'none' }; default: an Amazon journal in AU goes to 201e (Amazon AU).
+const cchAdjDefault = (orgK, j) => (orgK === 'AU' && /amazon/i.test(j.narration)) ? '201e' : null;
+// Recompute both journals from what is in Xero (Ben's rules 11-Nov-26):
+//  SALES: channel lines = Fulfil net revenue by channel, less one-by-one invoices that never reached Xero (flagged), plus hand journals allocated
+//         to a channel; 9005 = Xero's balance; 9003 / 9004 = Fulfil's; 9002 balances the journal. Whatever Xero 9002 still holds after it is the
+//         residual: under 1% goes onto a channel (the allocated hand journal's, else the largest), more is flagged and the journal is HELD (n8n
+//         neither creates nor posts it).
+//  COGS:  channel lines = Fulfil COGS by channel (every sale); Cr 9006 = Xero's balance; Cr 9011 = the rest: consolidated invoices carry no cost
+//         line, so a DTC order's cost stays in 9011 (Inventory Shipped Not Invoiced) in Xero (Ben 11-Nov-26: credit 9006 and 9011).
+function cchApplyXero(o, xp, orgK, adj) {
+  const H = {}; xp.journals.filter(j => j.kind === 'HORIZON').forEach(j => Object.keys(j.net).forEach(c => { H[c] = (H[c] || 0) + j.net[c]; }));
+  const xb = {}; ['9002', '9003', '9004', '9005', '9006'].forEach(c => { xb[c] = cchR2((xp.pl[c] || 0) - (H[c] || 0)); });
+  const src = {}, add = (k, c, v) => { const m = src[k] || (src[k] = {}); m[c] = cchR2((m[c] || 0) + v); };
+  xp.docs.forEach(d => Object.keys(d.net).forEach(c => add(d.consolidated ? 'consolidated' : (d.kind === 'CN' ? 'credit_notes' : 'invoices'), c, d.net[c])));
+  xp.journals.filter(j => j.kind !== 'HORIZON').forEach(j => Object.keys(j.net).forEach(c => add(j.kind === 'JES' ? 'journal_entry_summaries' : 'other_journals', c, j.net[c])));
+  const flags = [], hold = { SALES: null, COGS: null }, gl = a => cchR2(o.gl[a] || 0), num = v => _usd(Math.abs(v)).replace('$', '');
+  // SALES
+  const chan = {}; o.journals.SALES.forEach(l => { if (!CCH_ACC.includes(l.code)) chan[l.code] = cchR2((chan[l.code] || 0) + l.amount); });
+  const xnums = new Set(xp.docs.map(d => String(d.number || '').trim().toUpperCase())), missing = [];
+  (o.det_invoices || []).forEach(v => { const n = String(v.number || '').trim().toUpperCase(); if (!n || xnums.has(n) || xnums.has('TEMP-SO' + n)) return;
+    const el = (xp.elsewhere || {})[n]; missing.push(Object.assign({}, v, { xero: el || null })); if (v.sales_acct && Math.abs(v.rev) >= 0.005) chan[v.sales_acct] = cchR2((chan[v.sales_acct] || 0) + v.rev); });
+  if (missing.length) flags.push({ kind: 'missing_invoice', level: 'warn', text: missing.length + ' Fulfil invoice' + (missing.length > 1 ? 's' : '') + ' sent to Xero one by one ' + (missing.length > 1 ? 'are' : 'is') + ' not in this month in Xero, so left out of the SALES journal: '
+    + missing.map(v => v.number + ' (' + v.so + ', ' + v.sales_acct + ' ' + num(v.rev) + (v.xero ? ', in Xero as ' + v.xero.number + ' dated ' + v.xero.date : ', not in Xero') + ')').join(', ') + '. A Fulfil export (or a TEMP-SO stand-in) dated this month brings it in at the next refresh.', items: missing });
+  const adjs = []; let adjTarget = null;
+  xp.journals.filter(j => j.kind === 'OTHER').forEach(j => { const eff = -['9002', '9003', '9004', '9005'].reduce((t, c) => t + (j.net[c] || 0), 0); if (Math.abs(eff) < 0.005) return;
+    const to = (adj && adj[j.id]) || cchAdjDefault(orgK, j), a = { id: j.id, date: j.date, narration: j.narration, revenue: cchR2(eff), account: to && to !== 'none' ? to : null, set: !!(adj && adj[j.id]) };
+    if (a.account) { chan[a.account] = cchR2((chan[a.account] || 0) - eff); adjTarget = adjTarget || a.account; }
+    else flags.push({ kind: 'unallocated_journal', level: 'warn', text: 'Hand journal ' + (j.narration || j.id).slice(0, 80) + ' (' + j.date + ') moves ' + num(eff) + ' of revenue on 9002-9005 and has no channel: allocate it below.' });
+    adjs.push(a); });
+  const a9003 = -gl('9003'), a9004 = -gl('9004'), a9005 = -xb['9005'];
+  const chanSum = () => Object.values(chan).reduce((t, v) => t + v, 0);
+  let a9002 = cchR2(-(chanSum() + a9003 + a9004 + a9005)), r = cchR2(xb['9002'] + a9002);
+  if (Math.abs(r) >= 0.005) {
+    if (Math.abs(r) <= Math.abs(xb['9002']) * 0.01) { const t = adjTarget || Object.keys(chan).reduce((b, k) => Math.abs(chan[k]) > Math.abs(chan[b] || 0) ? k : b, Object.keys(chan)[0]);
+      chan[t] = cchR2(chan[t] + r); flags.push({ kind: 'rounding', level: 'info', text: 'Rounding ' + num(r) + ' between Xero 9002 and the Fulfil channel split put on ' + t + ' (under 1%).' });
+      a9002 = cchR2(-(chanSum() + a9003 + a9004 + a9005)); r = cchR2(xb['9002'] + a9002); }
+    else { hold.SALES = 'Xero 9002 keeps ' + num(r) + (r < 0 ? ' credit' : ' debit') + ' after the SALES journal (more than 1%). Find where it comes from before the journal changes.';
+      flags.push({ kind: 'residual_9002', level: 'hold', text: hold.SALES }); } }
+  const r9003 = cchR2(xb['9003'] + a9003), r9004 = cchR2(xb['9004'] + a9004);
+  if (Math.abs(r9003) >= 0.005) flags.push({ kind: 'residual_9003', level: 'info', text: 'Xero 9003 keeps ' + num(r9003) + ' (Fulfil ' + num(gl('9003')) + ', Xero ' + num(xb['9003']) + ').' });
+  if (Math.abs(r9004) >= 0.005) flags.push({ kind: 'residual_9004', level: 'info', text: 'Xero 9004 keeps ' + num(r9004) + ' (Fulfil ' + num(gl('9004')) + ', Xero ' + num(xb['9004']) + ').' });
+  const S = []; [['9002', a9002], ['9003', a9003], ['9004', a9004], ['9005', a9005]].forEach(([c, v]) => { if (Math.abs(v) >= 0.005) S.push({ code: c, name: CCH_NAME[c], amount: cchR2(v) }); });
+  Object.keys(chan).sort().forEach(c => { if (Math.abs(chan[c]) >= 0.005) S.push({ code: c, name: cchName(orgK, c), amount: chan[c] }); });
+  // COGS
+  const C = o.journals.COGS.filter(l => l.code !== '9006').map(l => Object.assign({}, l)), T = C.reduce((t, l) => t + l.amount, 0);
+  const a9006 = -xb['9006'], a9011 = cchR2(-(T + a9006));
+  if (Math.abs(a9006) >= 0.005) C.push({ code: '9006', name: CCH_NAME['9006'], amount: cchR2(a9006) });
+  if (Math.abs(a9011) >= 0.005) C.push({ code: '9011', name: CCH_NAME['9011'], amount: a9011 });
+  const x9011 = cchR2(Object.values(src).reduce((t, m) => t + (m['9011'] || 0), 0));   // what this month's invoices and journals left in 9011
+  if (Math.abs(x9011 + a9011) >= 1) flags.push({ kind: 'cogs_9011', level: 'info', text: 'Cr 9011 ' + num(-a9011) + ' (Fulfil COGS ' + num(T) + ' less Xero 9006 ' + num(xb['9006']) + ') against ' + num(x9011) + ' that this month\'s Xero invoices and journals put into 9011.' });
+  const x9006 = cchR2(Object.values(src).reduce((t, m) => t + (m['9006'] || 0), 0));
+  if (Math.abs(xb['9006'] - x9006) >= 1) flags.push({ kind: 'cogs_9006_other', level: 'info', text: num(xb['9006'] - x9006) + ' of Xero 9006 comes from outside sales invoices and manual journals (bills, bank or other).' });
+  const bal = L => cchR2(L.reduce((a, x) => a + x.amount, 0));
+  o.journals = { COGS: C, SALES: S }; o.balanced = { COGS: bal(C), SALES: bal(S) };
+  o.xero = { read_at: new Date().toISOString(), before: xb, after: { '9002': r, '9003': r9003, '9004': r9004, '9005': 0, '9006': 0 }, sources: src, adjustments: adjs, missing, flags, hold,
+    counts: { invoices: xp.docs.filter(d => !d.consolidated).length, consolidated: xp.docs.filter(d => d.consolidated).length, journals: xp.journals.length } };
+  return o; }
 const cchNarr = (j, month) => 'HORIZON ' + j + ' by channel ' + month;
 const cchDOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
 async function cchXeroExisting(region, j, month) {
@@ -7785,7 +7911,7 @@ async function cchXeroRun(month, orgK, opts) {
     const same = (a, h) => Object.keys(a).every(c => Math.abs((a[c] || 0) - (h[c] || 0)) < 0.005) && Object.keys(h).every(c => Math.abs(h[c] || 0) < 0.005 || a[c] != null);
     let action, lines, xid = null, narration = cchNarr(j, month), voids = [];
     if (!ex.length) { action = 'created'; lines = want; }
-    else if (opts.replace && posted.length) {   // v28.728 (Ben 05-Nov-26 "a repost of an existing journal"): void what is in Xero, post the full journal again
+    else if (opts.replace !== false && posted.length) {   // v28.778 (brief rule 6): a corrected posted month is REPLACED by default, never topped up. v28.728 (Ben 05-Nov-26 "a repost of an existing journal"): void what is in Xero, post the full journal again
       action = 'replaced'; lines = want; voids = ex.map(x => ({ id: x.ManualJournalID, status: /^POSTED$/i.test(String(x.Status || '')) ? 'VOIDED' : 'DELETED' })); }
     else if (!posted.length && draft && ex.length === 1) { action = same(want, have) ? 'no_change' : 'rebuilt'; lines = want; xid = draft.ManualJournalID; }
     else if (!posted.length) throw Object.assign(new Error(orgK + ' ' + j + ': ' + ex.length + ' unposted journals named "' + cchNarr(j, month) + '" in Xero. Delete the extra one(s) in Xero, then run again.'), { status: 409 });
@@ -7799,9 +7925,12 @@ async function cchXeroRun(month, orgK, opts) {
     }
     const L = Object.keys(lines).filter(c => Math.abs(lines[c]) >= 0.005).sort().map(c => ({ code: c, name: cchName(orgK, c), amount: lines[c] }));
     const r = { journal: j, action, narration, date, status, total, prev_total: prev, lines: L, will_void: voids, existing: ex.map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, date: cchDOf(x.Date), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })) };
-    if (opts.push && (action === 'created' || action === 'rebuilt' || action === 'top_up' || action === 'replaced')) {
-      const body = { Narration: narration, Date: date, Status: status, LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false,
-        JournalLines: L.map(l => ({ LineAmount: l.amount, AccountCode: l.code, Description: l.name + ' (' + month + ', Fulfil ' + (j === 'COGS' ? '9006' : '9002-9005') + ' by channel)', TaxType: tax })) };
+    // v28.778: a journal HELD by the Xero check (o.xero.hold, e.g. Xero 9002 keeps more than 1% after it) is never changed by n8n; by hand only as a DRAFT
+    const held = o.xero && o.xero.hold && o.xero.hold[j];
+    if (held && action !== 'no_change') { r.held = held; if (opts.status === 'POSTED' || posted.length) { r.action = 'held'; r.skipped = true; r.will_void = []; } else r.status = 'DRAFT'; }   // a held posted journal is never voided
+    if (opts.push && !r.skipped && (action === 'created' || action === 'rebuilt' || action === 'top_up' || action === 'replaced')) {
+      const body = { Narration: narration, Date: date, Status: r.status, LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false,
+        JournalLines: L.map(l => ({ LineAmount: l.amount, AccountCode: l.code, Description: l.name + ' (' + month + ', Fulfil ' + (j === 'COGS' ? '9006 / 9011' : '9002-9005') + ' by channel)', TaxType: tax })) };
       if (xid) body.ManualJournalID = xid;
       const w = await xeroFetch(region, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: [body] } });
       const m = ((w && w.ManualJournals) || [])[0] || {};
@@ -7811,7 +7940,7 @@ async function cchXeroRun(month, orgK, opts) {
       r.xero = { id: m.ManualJournalID, status: m.Status, url: m.ManualJournalID ? 'https://go.xero.com/Journal/View.aspx?invoiceID=' + m.ManualJournalID : null };
     }
     if (opts.push) { try { await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, total, prev_total, xero_id, xero_status, lines, flags)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [month, orgK, j, opts.kind || 'manual', action, opts.by || 'HORIZON', total, prev, (r.xero && r.xero.id) || (draft && draft.ManualJournalID) || null, (r.xero && r.xero.status) || null, JSON.stringify(L), JSON.stringify({ spread: o.spread.cogs, unmapped: o.unmapped.length })]); }
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [month, orgK, j, opts.kind || 'manual', r.action, opts.by || 'HORIZON', total, prev, (r.xero && r.xero.id) || (draft && draft.ManualJournalID) || null, (r.xero && r.xero.status) || null, JSON.stringify(L), JSON.stringify({ spread: o.spread.cogs, unmapped: o.unmapped.length })]); }
       catch (e) { console.warn('[cogs-ch] log not written: ' + (e && e.message)); } }
     res.push(r);
   }
@@ -7835,8 +7964,9 @@ async function cchEmail(month, orgK, b, runs, by) {
     + L.map(l => '<tr><td>' + l.code + '</td><td>' + l.name + '</td><td align="right">' + (l.amount > 0 ? f(l.amount) : '') + '</td><td align="right">' + (l.amount < 0 ? f(-l.amount) : '') + '</td></tr>').join('') + '</table>';
   const posted = runs.every(r => /^POSTED$/i.test(String((r.xero && r.xero.status) || r.status || ''))), topUp = runs.some(r => r.action === 'top_up');
   const html = '<p>' + (orgK === 'AU' ? 'Hi Alex,' : 'Hi Pooja and Harry,') + '</p><p>' + (topUp ? 'A top-up to the ' : 'The ') + ddMonYy(cchMonthEnd(month)) + ' journals that move Fulfil\'s generic clearing accounts to the sales channel accounts '
-    + (topUp ? 'is' : 'are') + (posted ? ' <b>posted</b> in Xero ' + orgK + '.' : ' created in Xero ' + orgK + ' as <b>drafts</b>; Dock &amp; Bay reviews them and posts them from HORIZON.') + ' Each moves exactly the month\'s balance, so 9006, 9002, 9003 and 9005 end the month at zero.</p>'
+    + (topUp ? 'is' : 'are') + (posted ? ' <b>posted</b> in Xero ' + orgK + '.' : ' created in Xero ' + orgK + ' as <b>drafts</b>; Dock &amp; Bay reviews them and posts them from HORIZON.') + ' Each moves what is in Xero on Fulfil\'s clearing accounts for the month (read back from Xero), split by channel from Fulfil: SALES clears 9002 and 9005, COGS clears 9006 and moves the consolidated orders\' cost out of 9011.</p>'
     + runs.map(r => '<p><b>' + r.narration + '</b> (' + o.ccy + ' ' + f(r.total) + (r.xero && r.xero.url ? ', <a href="' + r.xero.url + '">open in Xero</a>' : '') + ')</p>' + tab(r.lines)).join('')
+    + (o.xero && o.xero.flags && o.xero.flags.length ? '<p><b>Checks against Xero</b></p><ul>' + o.xero.flags.map(x => '<li>' + String(x.text).replace(/</g, '&lt;') + '</li>').join('') + '</ul>' : '')
     + (o.spread.cogs ? '<p>Note: ' + o.ccy + ' ' + f(o.spread.cogs) + ' of 9006 has no sale order (landed costs and supplier-bill price variances on stock already sold); it is spread over the channels pro rata to their product COGS.</p>' : '')
     + '<p>Sent by HORIZON (' + by + ').</p>';
   return sendResendEmail({ to, subject: 'COGS and SALES by channel ' + month + (topUp ? ' top-up' : '') + ' (Xero ' + orgK + ', ' + (posted ? 'posted' : 'drafts') + ')', html, kind: 'cogs-channel', ref: month + ' ' + orgK, by });
@@ -7849,9 +7979,9 @@ async function cchXeroState(month, orgK) {
       total: cchR2((x.JournalLines || []).reduce((a, l) => a + Math.max(0, Number(l.LineAmount) || 0), 0)), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID })); }
   return out; }
 // v28.736 step 3: post every DRAFT "HORIZON COGS|SALES by channel <month>" journal (incl. a draft top-up) in Xero, lines unchanged. Logged as 'posted'.
-async function cchXeroPost(month, orgK, by, kind) {
+async function cchXeroPost(month, orgK, by, kind, skip) {
   const region = orgK === 'AU' ? 'au' : 'uk', res = [];
-  for (const j of ['COGS', 'SALES']) {
+  for (const j of ['COGS', 'SALES']) { if ((skip || []).includes(j)) continue;
     for (const x of (await cchXeroExisting(region, j, month)).filter(x => /^DRAFT$/i.test(String(x.Status || '')))) {
       const body = { ManualJournalID: x.ManualJournalID, Narration: x.Narration, Date: cchDOf(x.Date), Status: 'POSTED', LineAmountTypes: x.LineAmountTypes || 'NoTax', ShowOnCashBasisReports: false,
         JournalLines: (x.JournalLines || []).map(l => ({ LineAmount: l.LineAmount, AccountCode: l.AccountCode, Description: l.Description, TaxType: l.TaxType })) };
@@ -7894,6 +8024,16 @@ app.post('/api/supply/cogs-channel/build', async (req, res) => {   // reads LIVE
   try { const b = await cchBuildStore(month, (me && me.email) || authUser(req) || 'admin'); res.json({ ok: true, build: b }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
 });
+app.post('/api/supply/cogs-channel/adjust', async (req, res) => {   // v28.778: allocate a hand journal on 9002-9005 to a channel's sales account ('none' = leave it on 9002)
+  const me = await cchAccessOk(req, res); if (!me) return;
+  try { const b = req.body || {}, id = String(b.id || '').trim(), acct = String(b.account || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Xero manual journal id required' });
+    if (acct && acct !== 'none' && !CCH_NAME[acct]) return res.status(400).json({ error: 'Unknown sales account ' + acct });
+    const m = cpJson(await cpSetting('cogs_ch_adjust', '{}'), {}) || {}; if (acct) m[id] = acct; else delete m[id];
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cogs_ch_adjust',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(m), (me && me.email) || 'admin']);
+    res.json({ ok: true, adjust: m }); }
+  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+});
 app.post('/api/supply/cogs-channel/map', async (req, res) => {   // assign an account to a channel (/segment) that has none
   const me = await cchAccessOk(req, res); if (!me) return;
   try { const b = req.body || {}, ch = String(b.channel || '').trim(), seg = b.segment == null || b.segment === '*' ? '*' : String(b.segment), code = String(b.cogs || '').trim();
@@ -7909,7 +8049,7 @@ app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, or
   const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK';
   if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
   if (b.push && b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
-  try { const by = (me && me.email) || authUser(req) || 'admin', runs = await cchXeroRun(month, orgK, { push: !!b.push, replace: b.replace === true, kind: 'manual', by });
+  try { const by = (me && me.email) || authUser(req) || 'admin', runs = await cchXeroRun(month, orgK, { push: !!b.push, replace: b.replace !== false, kind: 'manual', by });
     const emailed = b.push ? await cchEmailIfNew(month, orgK, await cchLoad(month), runs, by) : false;
     res.json({ ok: true, org: orgK, month, push: !!b.push, runs, emailed }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
@@ -7924,6 +8064,11 @@ app.post('/api/supply/cogs-channel/create', async (req, res) => {
   try { const runs = await cchXeroRun(month, orgK, { push: true, kind: 'manual', by, build }); const emailed = await cchEmailIfNew(month, orgK, build, runs, by);
     res.json({ ok: true, org: orgK, month, runs, emailed }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/cogs-channel/xero-period', async (req, res) => {   // v28.778: the month's Xero read-back on the clearing accounts (read only)
+  if (!(await cchAccessOk(req, res))) return;
+  const month = String(req.query.month || ''), orgK = req.query.org === 'AU' ? 'AU' : 'UK'; if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  try { res.set('Cache-Control', 'no-store').json(await cchXeroPeriod(month, orgK)); } catch (e) { log500(e); res.status(502).json({ error: 'Xero read failed: ' + String(e.message || e) }); }
 });
 app.get('/api/supply/cogs-channel/state', async (req, res) => {   // v28.736: Xero now, for the step bar (reads Xero: 2 calls, more if a journal's lines are missing)
   if (!(await cchAccessOk(req, res))) return;
@@ -7955,10 +8100,11 @@ app.post('/api/cron/cogs-channel', async (req, res) => {
     if (month < CCH_FROM) return res.json(Object.assign(out, { skipped: 'before ' + CCH_FROM }));
     const b = await cchBuildStore(month, by);
     for (const orgK of ['UK', 'AU']) {
-      try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b, status: 'POSTED' });
+      try { const runs = await cchXeroRun(month, orgK, { push: true, kind, by, build: b, status: 'POSTED', replace: true });   // v28.778: a corrected posted month is replaced, never topped up
         out.orgs[orgK] = { journals: runs.map(r => ({ journal: r.journal, action: r.action, total: r.total })) };   // an object: properties on an array are lost in JSON
         out.orgs[orgK].emailed = await cchEmailIfNew(month, orgK, b, runs, by);
-        const pd = await cchXeroPost(month, orgK, by, kind); out.orgs[orgK].posted_drafts = pd.length;   // an unchanged draft made by hand is posted too
+        const hd = ((b.orgs[orgK] || {}).xero || {}).hold || {}; out.orgs[orgK].held = Object.keys(hd).filter(k => hd[k]);
+        const pd = await cchXeroPost(month, orgK, by, kind, out.orgs[orgK].held); out.orgs[orgK].posted_drafts = pd.length;   // an unchanged draft made by hand is posted too (not a held journal)
         if (await cchEmailPosted(month, orgK, b, pd, by)) out.orgs[orgK].emailed = true; }   // v28.749: and emailed if it never was
       catch (e) { out.ok = false; out.orgs[orgK] = { error: String(e.message || e) };
         await pool.query(`INSERT INTO planner.cogs_channel_runs (month, org, journal, run_kind, action, run_by, error) VALUES ($1,$2,'COGS',$3,'error',$4,$5)`, [month, orgK, kind, by, String(e.message || e).slice(0, 500)]).catch(() => {}); }
