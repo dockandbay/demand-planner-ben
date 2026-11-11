@@ -1,3 +1,7 @@
+## v28.787 (11-Nov-26) Manage 3PL (UK ILG, US Geneva): 3PL report + Fulfil now columns; diff uses the closer Fulfil figure
+- Ben: column "Report HH:MM" is now "3PL report" (time in the tooltip); new "Fulfil now" column (whole Fulfil warehouse on hand now). Both in the CSV, plus "Diff uses".
+- Ben (US TOWLF-ESS-LG/XL HIBPNK, LKAQUA, PLIM, VLYVIO: report 320, Fulfil now 320, receipt booked in Fulfil after the 23:01 report so "Fulfil at report" 0 and diff +320, set to 320 would have doubled the stock): the diff now compares the report with whichever is closer, Fulfil at report or Fulfil now. The figure used is bold. Applies to the page, Send to Fulfil, and the automated daily rebaseline (all use ilgCompare).
+
 ## v28.786 (11-Nov-26) Order exclusions: threshold saves at once, 3PL and FBA orders only
 - Ben: changing "Big line over N units" stuck on "Saving...". The route waited for the full weekly-actuals rebuild; it now replies straight away and rebuilds in the background (as exclude / dismiss already do). The box saves half a second after typing stops and the list reloads.
 - Ben: the list shows only orders shipped from UK ILG (UKILG, ILG-VENDOR), US Geneva (USGENEVA*), EU iFul, AU Coghlans or Amazon FBA. China Port (CHP, e.g. SO56447), AU_Embroidery and Zalando_DE orders are no longer listed. Counts follow. Sales actuals unchanged.
