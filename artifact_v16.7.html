@@ -18448,9 +18448,10 @@ function renderOrderExclusionsView(body){
     L.querySelectorAll('.ox-note').forEach(function(inp){ inp.onchange=function(){ var r=find(inp.dataset.s); post('/api/demand/order-exclusions/'+inp.dataset.s,{excluded:!!(r&&r.excluded), note:inp.value}); }; });
     L.querySelectorAll('.ox-more').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); st.open[a.dataset.s]=!st.open[a.dataset.s]; draw(); }; });
   }
-  function load(){ fetch('/api/demand/order-exclusions?show='+st.show+'&q='+encodeURIComponent(st.q)).then(function(r){return r.json();}).then(function(j){ data=j; if(T&&document.activeElement!==T)T.value=j.threshold||40; draw(); }).catch(function(e){ data={error:'Could not load: '+e.message}; draw(); }); }
+  function load(){ fetch('/api/demand/order-exclusions?show='+st.show+'&q='+encodeURIComponent(st.q)).then(function(r){return r.json();}).then(function(j){ data=j; if(T&&document.activeElement!==T){ T.value=j.threshold||40; tLast=Math.round(Number(T.value)); } draw(); }).catch(function(e){ data={error:'Could not load: '+e.message}; draw(); }); }
   var qt=null; $('ox-q').oninput=function(){ var v=this.value; clearTimeout(qt); qt=setTimeout(function(){ st.q=v.trim(); load(); },300); };
-  T.onchange=function(){ var v=Math.round(Number(T.value)); if(!(v>=1))return; post('/api/demand/order-exclusions-threshold',{value:v},load); };
+  var tt=null, tLast=null; function tSave(){ var v=Math.round(Number(T.value)); if(!(v>=1)||v===tLast)return; tLast=v; post('/api/demand/order-exclusions-threshold',{value:v},load); }   // v28.786 (Ben 11-Nov-26): saves while typing, list reloads at once
+  T.oninput=function(){ clearTimeout(tt); tt=setTimeout(tSave,500); }; T.onchange=function(){ clearTimeout(tt); tSave(); };
   tabs(); load();
 }
 // v28.416 (Ben 20-Oct-26): DEMAND ▸ Inputs ▸ WEEKLY SWITCH-OVER. Phase 1 review page: Fulfil order-lines read, the forecast migration

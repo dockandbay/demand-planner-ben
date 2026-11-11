@@ -23253,7 +23253,8 @@ app.get('/api/demand/order-exclusions', async (req, res) => {
   try {
     const thr = await _olThreshold(), q = String(req.query.q || '').trim().slice(0, 80), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%', show = String(req.query.show || 'review');
     const LIVE = `l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND NOT EXISTS (SELECT 1 FROM planner.demand_excluded_skus z WHERE l.sku ILIKE z.pattern)
-      AND upper(coalesce(l.product_category,'')) NOT IN ('SHIPPING','PERSONALISATION_HIDDEN_PRODUCT') AND upper(l.sku) <> 'SHIPPING'`;
+      AND upper(coalesce(l.product_category,'')) NOT IN ('SHIPPING','PERSONALISATION_HIDDEN_PRODUCT') AND upper(l.sku) <> 'SHIPPING'
+      AND (l.warehouse_code IN ('UKILG','ILG-VENDOR','EUIFUL','AUCOGHLANS') OR l.warehouse_code LIKE 'USGENEVA%' OR l.warehouse_code LIKE 'AMZ\\_FBA\\_%')`;   // v28.786 (Ben 11-Nov-26): only orders shipped from our 3PLs (UK ILG, US Geneva, EU iFul, AU Coghlans) or FBA; China Port, embroidery, Zalando never listed
     const rows = (await pool.query(`WITH cand AS (SELECT sale_id FROM planner.order_anomalies UNION SELECT DISTINCT l.sale_id FROM planner.order_lines l WHERE l.qty > $1 AND ${LIVE}),
       o AS (SELECT l.sale_id, max(l.so_number) so, max(l.reference) reference, max(l.customer) customer, max(l.fulfil_channel) fulfil_channel, max(l.country) country, max(l.channel) channel,
           max(l.order_date)::text order_date, max(l.ship_date)::text ship_date, bool_or(l.is_key_account) key_account, bool_or(l.is_custom) custom, sum(l.qty) order_units, max(l.qty) max_qty,
@@ -23270,7 +23271,7 @@ app.get('/api/demand/order-exclusions', async (req, res) => {
                     WHEN 'all' THEN true
                     ELSE NOT coalesce(x.dismissed, false) AND NOT coalesce(x.excluded, false) AND o.excluded_lines = 0 END
       ORDER BY o.order_date DESC NULLS LAST LIMIT 500`, [thr, q, like, show])).rows;
-    const counts = (await pool.query(`WITH c AS (SELECT sale_id FROM planner.order_anomalies UNION SELECT DISTINCT l.sale_id FROM planner.order_lines l WHERE l.qty > $1 AND ${LIVE})
+    const counts = (await pool.query(`WITH c AS (SELECT a.sale_id FROM planner.order_anomalies a WHERE EXISTS (SELECT 1 FROM planner.order_lines l WHERE l.sale_id = a.sale_id AND ${LIVE}) UNION SELECT DISTINCT l.sale_id FROM planner.order_lines l WHERE l.qty > $1 AND ${LIVE})
       SELECT count(*) FILTER (WHERE NOT coalesce(x.dismissed,false) AND NOT coalesce(x.excluded,false) AND NOT EXISTS (SELECT 1 FROM planner.order_line_exclusions e WHERE e.sale_id = c.sale_id AND e.excluded))::int review,
         count(*) FILTER (WHERE coalesce(x.excluded,false) OR EXISTS (SELECT 1 FROM planner.order_line_exclusions e WHERE e.sale_id = c.sale_id AND e.excluded))::int excluded,
         count(*) FILTER (WHERE coalesce(x.dismissed,false))::int dismissed, count(*)::int all
@@ -23313,8 +23314,8 @@ app.post('/api/demand/order-exclusions-threshold', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const v = Math.round(Number((req.body || {}).value)); if (!(v >= 1 && v <= 100000)) return res.status(400).json({ error: 'threshold must be a whole number of units' });
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('order_exclusion_threshold', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]);
-    salesFulfilBuildSoon('threshold ' + v);
-    res.json({ ok: true, threshold: v, weekly: await weeklyActualsBuild() });
+    salesFulfilBuildSoon('threshold ' + v); weeklyActualsBuildSoon('threshold ' + v);   // v28.786 (Ben 11-Nov-26): reply at once, rebuild in the background (it hung on 'Saving...')
+    res.json({ ok: true, threshold: v });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.416: FORECAST MIGRATION monthly -> weekly (decision (a), Ben 20-Oct-26: each financial year's total per SKU x market x channel is kept,

@@ -1,3 +1,7 @@
+## v28.786 (11-Nov-26) Order exclusions: threshold saves at once, 3PL and FBA orders only
+- Ben: changing "Big line over N units" stuck on "Saving...". The route waited for the full weekly-actuals rebuild; it now replies straight away and rebuilds in the background (as exclude / dismiss already do). The box saves half a second after typing stops and the list reloads.
+- Ben: the list shows only orders shipped from UK ILG (UKILG, ILG-VENDOR), US Geneva (USGENEVA*), EU iFul, AU Coghlans or Amazon FBA. China Port (CHP, e.g. SO56447), AU_Embroidery and Zalando_DE orders are no longer listed. Counts follow. Sales actuals unchanged.
+
 ## v28.785 (11-Nov-26) Fulfil sets: revenue counted once
 - A Fulfil bundle line holds the whole set price in its company-currency cache (amount 0); v28.781 added it to its children's amounts, so set revenue counted twice (found tracing UK DTC Oct revenue +13% vs the sheet). The set's revenue is now its children's only. Units unchanged. Needs a re-import of Sep-Nov.
 
