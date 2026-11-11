@@ -11648,18 +11648,46 @@ async function _computeXeroExceptions() {
 // and every supplier credit-note allocation since 01-Jul-25 (paged, about 10-20 Xero calls per org per hour at most). HORIZON's dated payments
 // on a PO (start deposit, completion, balance 1 / 2, balance 3+) are matched to the bill's Xero payments / allocations by amount (within 1.00),
 // closest date first, each Xero entry used once. Feeds the Payments Report ticks and the Exceptions "not recorded in Xero" recommendation.
-async function xeroBillPaysMap() {
-  return swrGet('xero:billpays', 60 * 60 * 1000, async () => {
-    const out = {};   // invoice_id -> [{ date, amount, kind }]
-    const add = (id, e) => { if (!id) return; (out[id] || (out[id] = [])).push(e); };
+// v28.790 (Ben 11-Nov-26: "Xero UK only has 8 calls left today"): the map was rebuilt in full (every supplier payment + credit note since
+// Jul-25, 100 a page, ~30 UK calls) by every server instance whose in-memory copy was cold: ~600 UK calls in half an hour of Payments Report use.
+// Now ONE shared copy in app_settings (xero_billpays_v2): read from the DB when under 15 min old, else an INCREMENTAL Xero read (If-Modified-Since
+// the last watermark, 1,000 a page: usually 1 call per list per org), merged by PaymentID / CreditNoteID (deleted / voided ones dropped).
+// A full read only when there is no copy or it is over 7 days old.
+const XBP_KEY = 'xero_billpays_v2', XBP_FRESH = 15 * 60 * 1000, XBP_FULL = 7 * 864e5;
+let _xbpRefresh = null;
+async function xeroBillPaysState(force) {
+  let st = null; try { st = JSON.parse((await cpSetting(XBP_KEY, '')) || 'null'); } catch (_) { st = null; }
+  if (!st || st.v !== 2) st = { v: 2, at: null, orgs: {} };
+  if (!force && st.at && Date.now() - Date.parse(st.at) < XBP_FRESH) return st;
+  if (_xbpRefresh) return _xbpRefresh;   // one refresh per instance at a time
+  _xbpRefresh = (async () => {
     for (const org of ['uk', 'au']) {
-      const pays = await upfxPaged('/api.xro/2.0/Payments?where=' + encodeURIComponent('PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(2025,7,1)'), 'Payments', org);
-      pays.forEach(p => { if (/^DELETED$/i.test(String(p.Status || ''))) return; add(p.Invoice && p.Invoice.InvoiceID, { date: _xd(p.Date), amount: Number(p.Amount) || 0, kind: 'payment' }); });
-      const cns = await upfxPaged('/api.xro/2.0/CreditNotes?where=' + encodeURIComponent('Type=="ACCPAYCREDIT" AND Date>=DateTime(2025,7,1)'), 'CreditNotes', org);
-      cns.forEach(c => (c.Allocations || []).forEach(a => add(a.Invoice && a.Invoice.InvoiceID, { date: _xd(a.Date), amount: Number(a.Amount) || 0, kind: 'credit note' })));
+      const o = st.orgs[org] || (st.orgs[org] = { wm: null, full_at: null, pays: {}, cns: {} });
+      const full = !o.wm || !o.full_at || Date.now() - Date.parse(o.full_at) > XBP_FULL, t0 = new Date().toISOString();
+      const since = full ? null : new Date(Date.parse(o.wm) - 10 * 60000);   // 10 min overlap
+      if (full) { o.pays = {}; o.cns = {}; }
+      const pays = await accXeroList(org, 'Payments', 'PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(2025,7,1)', since ? { since } : {});
+      pays.forEach(p => { if (!p.PaymentID) return; if (/^DELETED$/i.test(String(p.Status || ''))) { delete o.pays[p.PaymentID]; return; }
+        o.pays[p.PaymentID] = [p.Invoice && p.Invoice.InvoiceID, _xd(p.Date), Number(p.Amount) || 0]; });
+      const cns = await accXeroList(org, 'CreditNotes', 'Type=="ACCPAYCREDIT" AND Date>=DateTime(2025,7,1)', since ? { since } : {});
+      cns.forEach(c => { if (!c.CreditNoteID) return; if (/^(DELETED|VOIDED)$/i.test(String(c.Status || ''))) { delete o.cns[c.CreditNoteID]; return; }
+        o.cns[c.CreditNoteID] = (c.Allocations || []).map(x => [x.Invoice && x.Invoice.InvoiceID, _xd(x.Date), Number(x.Amount) || 0]); });
+      o.wm = t0; if (full) o.full_at = t0; o.last_calls = { full, payments: pays.length, credit_notes: cns.length };
     }
-    return { at: new Date().toISOString(), by_bill: out };
-  });
+    st.at = new Date().toISOString();
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, [XBP_KEY, JSON.stringify(st)]);
+    return st;
+  })().finally(() => { _xbpRefresh = null; });
+  return _xbpRefresh;
+}
+async function xeroBillPaysMap(force) {
+  const build = async () => { const st = await xeroBillPaysState(force), out = {};   // invoice_id -> [{ date, amount, kind }]
+    const add = (id, e) => { if (!id) return; (out[id] || (out[id] = [])).push(e); };
+    Object.values(st.orgs || {}).forEach(o => { Object.values(o.pays || {}).forEach(p => add(p[0], { date: p[1], amount: p[2], kind: 'payment' }));
+      Object.values(o.cns || {}).forEach(list => (list || []).forEach(x => add(x[0], { date: x[1], amount: x[2], kind: 'credit note' }))); });
+    return { at: st.at, by_bill: out }; };
+  if (force) { swrDrop('xero:billpays'); return build(); }
+  return swrGet('xero:billpays', 5 * 60 * 1000, build);
 }
 // HORIZON's dated payments per PO, matched to its linked Xero bill: { po: { bill_id, bill_ref, payments: [{ type, date, amount, in_xero, xero_date, xero_kind }] } }
 async function poXeroPayCheck(poList) {

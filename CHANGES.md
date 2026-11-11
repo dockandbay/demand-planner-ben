@@ -1,3 +1,7 @@
+## v28.790 (11-Nov-26) Xero calls: Payments Report / Xero exceptions payment map shared and incremental
+- Ben: "Xero UK only has 8 calls left today". HORIZON's own log: about 600 UK calls between 04:16 and 04:47 UTC came from the Payments Report Xero ticks (v28.782 / 784) and the Xero exceptions page: each cold server instance re-read every supplier payment and credit note since Jul-25 (100 a page, ~30 UK calls each time).
+- Now one shared copy in app_settings (xero_billpays_v2) for all instances: read from the database when under 15 minutes old, otherwise only the payments / credit notes changed since the last read (If-Modified-Since, 1,000 a page: usually 1 call per list per org), merged by id; deleted / voided ones are dropped. A full read only on the first run or when the copy is over 7 days old (about 2 to 4 calls per org at 1,000 a page). No migration.
+
 ## v28.789 (11-Nov-26) Manage 3PL: built-on-the-fly sets never compared
 - Ben: sets such as TOWLB-DES-LG-4SET-MEDMOMT showed "not in report" at US Geneva with Fulfil -5 (also UK ILG -24, iFul -1, Coghlans -1): the set SKU shipped from stock before go-live, and the negative is frozen in Fulfil's closed July period. Since go-live a set ships as its components. Products with a built-on-the-fly BOM in Fulfil (built_on_the_fly_bom) are made when they ship, so they are not physical 3PL stock: they are left out of the 3PL report compare, rebaseline and the daily automation. Prepacks (no built-on-the-fly BOM, e.g. GIFT-BOX-HOME-BOHMDRM) are still compared.
 
