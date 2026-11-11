@@ -22843,18 +22843,24 @@ async function orderLinesSync(by, full) {
     const FIELDS = OL_FIELDS;
     const rows = [], saleDate = {}; let more = false;
     const get = (path, body) => _olGet(cfg, path, body);
-    for (;;) { const dom = [['type', '=', 'line'], ['product', '!=', null], ['id', '>', cursor]].concat(since ? [['write_date', '>=', since]] : []);
+    // v28.782 (11-Nov-26): the daily sync skips the HISTORICAL channels (history only comes in through the dated re-import, Ben's hold until
+    // Diviyaj is done; on 11-Nov an incremental run read 222k historical lines his ship-date / VAT rewrite had touched) and reads set bundles.
+    const histOk = (await S('sales_history_in_sync')) === '1';
+    for (;;) { const dom = [['type', 'in', ['line', 'bundle']], ['product', '!=', null], ['id', '>', cursor]].concat(since ? [['write_date', '>=', since]] : []).concat(histOk ? [] : [['sale.channel.name', 'not ilike', 'HISTORICAL %']]);
       const page = await get('/model/sale.line/search_read', [dom, 0, 500, [['id', 'ASC']], FIELDS]);
       if (!Array.isArray(page) || !page.length) break;
       // the order date lives on the ORDER: one read of the page's orders (dotted sale.sale_date per line is too slow)
       const sids = [...new Set(page.map(l => l.sale).filter(Boolean))].filter(id => !(id in saleDate));
       if (sids.length) (await get('/model/sale.sale/search_read', [[['id', 'in', sids]], 0, sids.length, null, ['id', 'sale_date']]) || []).forEach(x => { saleDate[x.id] = _olDate(x.sale_date); });
       page.forEach(l => { l._sale_date = saleDate[l.sale] || null; });
-      rows.push(...page); cursor = page[page.length - 1].id;
+      // v28.782: a set order (a bundle line or a component child) is re-read whole through _olLinesOf, which counts the bundle and drops its children
+      const kitSales = [...new Set(page.filter(l => l.type === 'bundle' || l.parent).map(l => l.sale))];
+      rows.push(...page.filter(l => !(l.type === 'bundle' || l.parent))); cursor = page[page.length - 1].id;
+      if (kitSales.length) (await _olLinesOf(cfg, kitSales)).forEach(l => { l._sale_date = saleDate[l.sale] || null; rows.push(l); });
       if (page.length < 500) break; if (Date.now() - t0 > 45000) { more = true; break; } }
     // v28.757: header changes (e.g. an order moved to cancel) re-read that order's lines even when the lines themselves did not change.
     if (since && !more) { try { const seen = new Set(rows.map(l => l.sale)); let hc = 0;
-      for (;;) { const hs = await get('/model/sale.sale/search_read', [[['write_date', '>=', since], ['id', '>', hc]], 0, 500, [['id', 'ASC']], ['id', 'sale_date']]);
+      for (;;) { const hs = await get('/model/sale.sale/search_read', [[['write_date', '>=', since], ['id', '>', hc]].concat(histOk ? [] : [['channel.name', 'not ilike', 'HISTORICAL %']]), 0, 500, [['id', 'ASC']], ['id', 'sale_date']]);
         if (!Array.isArray(hs) || !hs.length) break; hc = hs[hs.length - 1].id;
         const ids = hs.filter(h => !seen.has(h.id)).map(h => h.id); hs.forEach(h => { saleDate[h.id] = _olDate(h.sale_date); });
         if (ids.length) (await _olLinesOf(cfg, ids)).forEach(l => { l._sale_date = saleDate[l.sale] || null; rows.push(l); });
