@@ -13478,7 +13478,7 @@ function hzPortalHelp(el){
   // ---- PAYMENTS ▸ Xero payments — manual push queue (bills / payments / credit notes) ----
   var XPQ_KIND={bill:{label:'Bill',ico:'🧾'},payment:{label:'Payment',ico:'💸'},credit_note:{label:'Credit note',ico:'↩'}};
   var XPQ_ST={pending:'bg-amber',pushed:'bg-green',error:'bg-red',cancelled:'bg-neutral'};
-  var _xpqTab='bill';   // active inner tab (Bills / Payments / Credit notes / Exceptions)
+  var _xpqTab='exceptions';   // active inner tab; v28.781 (Ben 11-Nov-26): Exceptions first and the default
   var _xpqExc=null;     // last-loaded exceptions payload
   var _xpqQueue=null, _xpqExcPending=false;   // v28.088: the push queue + a flag while the (slow, live-Xero) exceptions sweep is still loading
   // v28.776 (Ben 11-Nov-26: "finding this page quite hard to understand the mismatch ... show me an improved way", mockup approved): amount
@@ -13587,8 +13587,8 @@ function hzPortalHelp(el){
           +'<td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(it.amount)+' '+esc(it.currency||'USD')+'</td>'
           +'<td class="l"><span class="tool-badge '+(XPQ_ST[it.status]||'bg-neutral')+'">'+esc(it.status)+'</span> <span class="mut tiny">'+esc((it.region||'').toUpperCase())+'</span></td>'
           +'<td class="l">'+act+'</td></tr>'; }
-      var KINDS=['bill','payment','credit_note','exceptions'];
-      if(KINDS.indexOf(_xpqTab)<0)_xpqTab='bill';
+      var KINDS=['exceptions','bill','payment','credit_note'];   // v28.781: Exceptions first
+      if(KINDS.indexOf(_xpqTab)<0)_xpqTab='exceptions';
       function pend(kind){ return items.filter(function(x){return x.kind===kind&&x.status==='pending';}).length; }
       var TABLBL={bill:{ico:'🧾',label:'Bills'},payment:{ico:'💸',label:'Payments'},credit_note:{ico:'↩',label:'Credit notes'},exceptions:{ico:'⚠',label:'Exceptions'}};
       var tabbar=KINDS.map(function(kind){ var k=TABLBL[kind]; var isExc=(kind==='exceptions'); var n=isExc?excN:items.filter(function(x){return x.kind===kind;}).length; var p=isExc?excN:pend(kind); var on=(kind===_xpqTab);

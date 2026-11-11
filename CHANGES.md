@@ -1,4 +1,4 @@
-## v28.781 (11-Nov-26) Fulfil sales import counts sets as sets
+## v28.781 (11-Nov-26) Fulfil sales import counts sets as sets; Xero payments opens on Exceptions
 - Brief docs/specs/BUILD_NOTE_set_sales_matching_2026-11-11.md (Kathryn 10-Nov-26). Fulfil stores a set order as a 'bundle' line on the kit code (often market-prefixed, AU-TOWLB-CAB-LG-4SETG) with amount 0, plus a child line per component (parent = the bundle) carrying the split revenue. The import read only 'line' lines, so sets vanished and their components counted as singles.
 - Now: bundle lines are read too; each bundle is the set sale (quantity = sets, revenue = its children's amounts) and its child lines are dropped. The market prefix is stripped to the HORIZON set SKU as before (OL_SKU). A child whose bundle is missing is kept and flagged (class_rule kit_child_orphan).
 - Sandbox AU Sep / Oct re-import matches the brief: 4SETG 9 / 6, 4SETM 9 / 7, TOWLB-CAB-LG-NAVY-R Oct singles 70 (45 DTC + 25 Amazon; the 61 component units no longer count), Until (International Distributor AU) 240 present.
