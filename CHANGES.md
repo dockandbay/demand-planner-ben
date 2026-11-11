@@ -1,3 +1,17 @@
+## v28.779 (11-Nov-26) Security review fixes (Diviyaj's review of 10-Nov-26, the findings in Ben's code)
+- Finding 3: GET /api/app-settings never returns the Xero OAuth stores; the export token only to admins. Cache-Control private, no-store.
+- Finding 5: the planner page's esc() is now the HTML escaper (hzEscH); the old JS-string escaper is escJs(), kept for the 7 CSS attribute selectors that match row keys.
+- Finding 6: sample-bill push and landed-cost posting (live Xero / Fulfil) need ACCOUNTS or admin (dry runs unchanged).
+- Finding 14: Xero connect and Gmail connect (every slot) are admin only, like disconnect.
+- Finding 15: /api/ai needs a signed-in @dockandbay.com user (no externals, no header-key callers) and has a per-person daily cap (AI_DAILY_CAP, default 400, per instance).
+- Finding 16: the MCP SQL block list adds external_access_tokens and invoice_links; the connector comment says what is true (reads for all staff, writes as the person). mcp_access stays off as the gate (Ben 26-Oct-26).
+- Finding 17: scenario, Zalando, Klaviyo BIS, quality-doc upload and EDI projects stay open to staff with read-only rights, but need a signed-in @dockandbay.com user (new cap 'staff').
+- Finding 20: .xlsx unzip caps (2,000 entries, 64 MB per entry, 200 MB in all).
+- Finding 26: x-powered-by off. Finding 27: the raw legacy token match is retired (hashed only). Finding 28: admin only for @dockandbay.com accounts.
+- Finding 30: every server CSV export prefixes a cell that would run as a spreadsheet formula (= + - @ tab CR) with an apostrophe; plain numbers, incl. negatives, are untouched.
+- Finding 31: escHtml escapes the single quote. Finding 32: API JSON defaults to Cache-Control private, no-store.
+- Migration 437 (finding 24): revoke planner_ro on portal_sessions and portal_magic_tokens (conditional on the role).
+- No new cron routes. New optional env var AI_DAILY_CAP.
 ## v28.778 (11-Nov-26) COGS and SALES by channel journals follow what is in Xero
 - Brief: docs/specs/BUILD_NOTE_sales_journal_consolidated_only_2026-11-11.md. Every build reads the month back from Xero (P&L on 9002-9006, the month's manual journals, sales invoices and credit notes; about 6 calls per org) and recomputes both journals.
 - SALES: Fulfil channel split (net), less one-by-one invoices not in Xero (flagged with the reason), plus hand journals on 9002-9005 allocated to a channel (picker on the page; AU Amazon defaults to 201e); 9005 = Xero; 9002 balances; a residual over 1% holds the journal.

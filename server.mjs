@@ -888,6 +888,9 @@ async function buildFBADIMS() {
 }
 
 const app = express();
+app.disable('x-powered-by');   // v28.779 (security review finding 26)
+// v28.779 (security review finding 32): API JSON is private and never cached unless a route says otherwise (res.json only; files and images keep theirs)
+app.use('/api', (req, res, next) => { const j = res.json.bind(res); res.json = body => { if (!res.get('Cache-Control')) res.set('Cache-Control', 'private, no-store'); return j(body); }; next(); });
 // v28.255 (deep dive P0 #1): Express matched /API/x to /api/x while the permission gate compared exact lower-case paths, so a mixed-case
 // path reached a handler ungated. Routing is case sensitive now (an odd-case path is a 404) and the gate normalises the path as well.
 app.set('case sensitive routing', true);
@@ -909,7 +912,7 @@ function tokHash(raw) { raw = String(raw || ''); return (raw.startsWith('cppv_')
 // tokMatchSql(col, i) -> `${col}=$${i}` and tokArgs(raw) -> [tokHash(raw)].
 const TOK_LEGACY_RE = /^(cppv_)?[0-9a-f]{32,128}$/;
 const tokMatchSql = (col, i) => `${col} IN ($${i},$${i + 1})`;
-const tokArgs = (raw) => { const h = tokHash(raw); return [h, TOK_LEGACY_RE.test(String(raw || '')) ? String(raw) : h]; };
+const tokArgs = (raw) => { const h = tokHash(raw); return [h, h]; };   // v28.779 (security review finding 27): the raw legacy match is retired (v28.210 + 14 days long past); hashed only
 // v28.210 (Ben): expired login-token purge, at most once an hour per instance, piggybacked on request handling (Vercel has no timer; the
 // long-lived local server also has an unref'd hourly tick). LIMIT-batched DELETE / UPDATE statements (500 rows, autocommit, no long
 // transaction, max 20 a table a run). Magic links: deleted once expired. Admin preview sessions (cppv_): deleted once expired.
@@ -1442,7 +1445,7 @@ function requiredCap(method, p) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
   if (p === '/api/supply/action-metrics/snapshot' || p === '/api/forecast/snapshot') return null;   // v28.261: hzSecretOrCap inside the handler (n8n secret or an editor); must come before the supply / demand prefix rules
   if (p.startsWith('/api/portal/')) return null;             // supplier portal — separate magic-link auth
-  if (p.startsWith('/api/scenario/')) return null;           // SCENARIO open to all
+  if (p.startsWith('/api/scenario/')) return 'staff';        // SCENARIO open to all staff (v28.779: a signed-in @dockandbay.com user, not externals / header-key callers; security review finding 17)
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
   if (p.startsWith('/api/config/channel') || p.startsWith('/api/config/countr')) return null;  // channel registry — reads open; writes self-check admin
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
@@ -1467,14 +1470,14 @@ function requiredCap(method, p) {
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
   if (p === '/api/product/reports/catalogue/pdf') return null; // v28.154 (Ben): catalogue PDF export is a read (POST only carries the visible rows)
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
-  if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
+  if (p.startsWith('/api/supply/zalando/')) return 'staff';   // Zalando stock upload / send-file — any staff, no edit rights needed (v28.779: staff only)
   if (p.startsWith('/api/supply/received-pos/')) return null; // n8n system trigger — processes the received-POs feed (acts only on rows n8n wrote)
   if (p.startsWith('/api/tracking/')) return null;            // DHL tracking: poller (secret-gated in handler), read-only status, and admin-checked test/config
   if (p === '/api/supply/fulfil/import-pos') return null;     // n8n Fulfil-PO import (webhook-secret gated in the handler)
 
-  if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
+  if (p.startsWith('/api/klaviyo-bis/')) return 'staff';      // Klaviyo BIS upload — allowed with read-only permission (Ben); v28.779: staff only
   if (method === 'POST' && /^\/api\/supply\/portal-staff\/[^/]+$/.test(p)) return null;   // v28.575: staff "Open portal": any signed-in staff may VIEW; edit rights are decided in the handler (permsFor)
-  if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
+  if (method === 'POST' && p === '/api/supply/quality-doc') return 'staff';   // v28.779: staff only. Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/demand/cache/invalidate') return null;   // in-app "refresh" button — rebuild-only, harmless, no data write (ungated sibling of the secret-gated /api/data-cache/invalidate)
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
@@ -1483,7 +1486,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/inventory/backorder-orders') return null;   // v28.492 (SUG-0040): live Fulfil READ of the orders behind backorders (POST only to carry the SKU list), no DB write   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
-  if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
+  if (p.startsWith('/api/supply/edi-projects')) return 'staff';   // v28.779: staff only. EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (method === 'POST' && /^\/api\/supply\/tpl\/xero-bill\/\d+$/.test(p)) return null;   // v28.301 (Ben): 3PL Xero bill = ACCOUNTS grant (or SUPPLY edit for the preview), checked in the handler
   if (method === 'POST' && (p === '/api/supply/payment-fx' || p === '/api/supply/payments/pay' || p === '/api/supply/payments/xero-post')) return null;   // v28.305 (Ben): marking a payment run paid and submitting it to Xero = ACCOUNTS grant or admin, checked in the handler
@@ -1518,8 +1521,10 @@ app.use(async (req, res, next) => {
              : cap === 'product' ? (me.product_edit || me.is_admin)
              : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin)   // admins always have edit rights (was missing for demand/supply/config → false "Read-only" on auto-smooth etc.)
              : cap === 'edit' ? (me.supply_edit || me.demand_edit || me.product_edit || me.is_admin)
-             : cap === 'admin' ? !!me.is_admin : true;
+             : cap === 'admin' ? !!me.is_admin
+             : cap === 'staff' ? /@dockandbay\.com$/i.test(String(me.email || authUser(req) || '')) : true;   // v28.779: any signed-in staff member, whatever their edit rights
     if (ok) return next();
+    if (cap === 'staff') return res.status(403).json({ error: 'Only signed-in Dock & Bay staff can do this.', code: 'staff_only', cap });
     if (cap === 'admin') return res.status(403).json({ error: 'Admin only', code: 'admin_only', cap });
     const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : cap === 'edit' ? 'any' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
@@ -3978,7 +3983,7 @@ app.get('/api/accounts/gmail/status', async (req, res) => {
 const GMAIL_BACK = '#/config/admin/gmail-connectors';   // v28.552: connect / disconnect live on CONFIG ▸ Admin ▸ Gmail connectors
 app.get('/api/accounts/gmail/connect', (req, res) => {
   const slot = gmailSlot(req.query.slot);
-  if (slot !== 'accounts' && !(req.me && (req.me.is_admin || req.me.live === false))) return res.redirect('/?gmail=' + encodeURIComponent('Only an admin can connect a mailbox') + GMAIL_BACK);
+  if (!(req.me && (req.me.is_admin || req.me.live === false))) return res.redirect('/?gmail=' + encodeURIComponent('Only an admin can connect a mailbox') + GMAIL_BACK);   // v28.779 (security review finding 14): every slot, as disconnect
   const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + GMAIL_BACK);
   const nonce = crypto.randomBytes(16).toString('base64url'), ts = Date.now().toString(36);
   const state = ts + '.' + slot + '.' + nonce + '.' + crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + slot + '.' + nonce).digest('base64url');   // the slot is signed too
@@ -7440,7 +7445,7 @@ async function cogsRecipient() {
   return String(process.env.COGS_AIRTABLE_EMAIL || '').trim();
 }
 function cogsCsv(b) {
-  const q = s => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+  const q = s0 => { const s = csvSafe(s0); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   return '﻿' + ['SKU'].concat(COGS_COLS.map(c => c.col)).join(',') + '\n' + b.rows.map(r => [q(r.sku)].concat(COGS_COLS.map(c => { const x = r.cells[c.col]; return x ? x.v.toFixed(2) : ''; })).join(',')).join('\n') + '\n';
 }
 async function cogsAdminOk(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return null; } return me; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
@@ -8471,7 +8476,7 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
         manifest: manifestRows, pack: packRows });
     }
     const JSZip = (await import('jszip')).default; const zip = new JSZip();
-    const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const q = v => { v = csvSafe(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     fileEntries.forEach(f => zip.file(f.path, f.buf));
     zip.file('manifest.csv', [['sscc', 'po', 'preorder_ref', 'store', 'client_sku', 'ean', 'our_sku', 'supplier', 'matched', 'path']].concat(manifestRows).map(r => r.map(q).join(',')).join('\n') + '\n');
     const packBy = {}; packRows.forEach(r => { (packBy[r[0]] = packBy[r[0]] || []).push(r); });
@@ -8534,7 +8539,7 @@ app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
       agg[key].qty += r.qty; });
     const items = Object.values(agg).filter(x => x.qty > 0)   // qty 0 → don't add the SKU (Ben)
       .sort((a, b) => a.po.localeCompare(b.po) || String(a.store).localeCompare(String(b.store)) || a.sku.localeCompare(b.sku));
-    const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const q = v => { v = csvSafe(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     // Store-file item price: PREPACK UnitPrice (matched on UPC) when supplied, else us_rt/2 fallback.
     const price = it => { const pp = prepackByUpc[it.ean];
       if (pp != null && pp > 0) return pp.toFixed(2);
@@ -9327,7 +9332,7 @@ const _xeroStateKey = region => crypto.createHash('sha256').update('hz-xero-stat
 app.get('/api/supply/xero/connect', async (req, res) => {
   const region = xeroRegion(req.query.region); const cfg = xeroConfig(region);
   if (!cfg.present) return res.status(503).send('Set XERO_CLIENT_ID / XERO_CLIENT_SECRET (or XERO_' + region.toUpperCase() + '_*) first.');
-  try { const me = await permsFor(req); if (me.live && !(me.is_admin || me.supply_edit)) return res.status(403).send('SUPPLY edit or admin required to connect Xero.'); } catch (e) { if (GATE) return res.status(503).send('permission check failed, try again'); }
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).send('An admin is needed to connect Xero.'); } catch (e) { if (GATE) return res.status(503).send('permission check failed, try again'); }   // v28.779 (security review finding 14): admin only, as disconnect
   const ts = Date.now().toString(36), nonce = crypto.randomBytes(16).toString('base64url');
   const state = region + '.' + ts + '.' + nonce + '.' + crypto.createHmac('sha256', _xeroStateKey(region)).update(region + '.' + ts + '.' + nonce).digest('base64url');
   res.append('Set-Cookie', 'hz_xstate=' + nonce + '; Path=/api/supply/xero; Max-Age=600; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : ''));
@@ -9522,7 +9527,7 @@ async function buildUpfxStatement(opts) {
 }
 // Xero precoded statement import layout (UK org: dd/mm/yyyy, signed amount, 2 dp, no currency symbol)
 function upfxCsv(lines) {
-  const q = v => { const s = String(v == null ? '' : v).replace(/\r?\n/g, ' '); return /[",]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const q = v => { const s = csvSafe(v).replace(/\r?\n/g, ' '); return /[",]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const dmy = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; };
   return ['*Date,*Amount,Payee,Description,Reference,Check Number'].concat((lines || []).map(l => [dmy(l.date), Number(l.amount).toFixed(2), l.payee, l.description, l.reference, ''].map(q).join(','))).join('\r\n') + '\r\n';
 }
@@ -15402,8 +15407,13 @@ app.post('/api/supply/portal-remind', async (req, res) => {
 });
 
 // ── General settings (CONFIG ▸ General Settings) — key/value store ──────────────────────────────
+// v28.779 (security review 10-Nov-26, finding 3): the settings GET never returns the Xero OAuth stores (refresh tokens), and the export token
+// (the only credential of the gate-exempt /api/export/csv/*) only to admins. Writes are unchanged.
+const APP_SETTINGS_SECRET = /^(xero_oauth_|gmail_oauth|mcp_|connect_secret)/i;
 app.get('/api/app-settings', async (req, res) => {
-  try { const o = {}; (await pool.query(`SELECT key, value FROM planner.app_settings`)).rows.forEach(r => { o[r.key] = r.value; }); res.json(o); }
+  try { let admin = false; try { const me = await permsFor(req); admin = !me.live || !!me.is_admin; } catch (_) {}
+    const o = {}; (await pool.query(`SELECT key, value FROM planner.app_settings`)).rows.forEach(r => { if (APP_SETTINGS_SECRET.test(r.key) || (r.key === 'export_token' && !admin)) return; o[r.key] = r.value; });
+    res.set('Cache-Control', 'private, no-store').json(o); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/app-settings', async (req, res) => {
@@ -15694,7 +15704,7 @@ async function emailDocSubmit(po, filename, by) {
 // ── Payment-confirmed notification ── a payment "run" (date + supplier) is confirmed once its bank amount +
 // currency are applied in the Payments Report. paymentRunDetail rebuilds that run's line detail (same source
 // tables + ordering as the report) so the email mirrors the on-screen "copy for email" summary exactly.
-function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }   // v28.779: + single quote (security review finding 31)
 function fmtMoney2(n){ return Number(n||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 // v28.133: UK and AU supplier payments are SEPARATE payments (own bank amount, remittance, Xero bill) from this date on.
 // Earlier payments stay grouped date+supplier exactly as recorded: 24 historic runs were ONE bank payment covering UK + AU
@@ -18985,7 +18995,8 @@ app.post('/api/config/country', async (req, res) => {
 });
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
-  if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'valid email required' });
+  if (b.is_admin && !/@dockandbay\.com$/.test(email)) return res.status(400).json({ error: 'Admin can only be given to an @dockandbay.com account' });   // v28.779 (security review finding 28)
   permsMemoDrop(email);   // v27.894: a permissions change must apply on the user's very next request
   // inbox_types (v28.070): array of allowed Inbox item types; omit/undefined = leave unchanged, null = clear (→ all), array = set
   let inboxJson; if (b.inbox_types === undefined) inboxJson = undefined;
@@ -19555,7 +19566,9 @@ function unzipXlsx(buf) {
   for (let i = buf.length - 22; i >= 0; i--) { if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; } }
   if (eocd < 0) throw new Error('not a valid .xlsx (no zip directory)');
   const cdOff = buf.readUInt32LE(eocd + 16), cdCount = buf.readUInt16LE(eocd + 10);
-  let p = cdOff;
+  // v28.779 (security review finding 20): a zip bomb cannot exhaust the function: at most 2,000 entries, 64 MB per entry and 200 MB in all
+  if (cdCount > 2000) throw new Error('not a valid .xlsx (too many entries)');
+  let p = cdOff, outTotal = 0;
   for (let n = 0; n < cdCount && p + 46 <= buf.length; n++) {
     if (buf.readUInt32LE(p) !== 0x02014b50) break;
     const method = buf.readUInt16LE(p + 10), compSize = buf.readUInt32LE(p + 20);
@@ -19563,7 +19576,9 @@ function unzipXlsx(buf) {
     const lho = buf.readUInt32LE(p + 42), name = buf.toString('utf8', p + 46, p + 46 + nameLen);
     const lNameLen = buf.readUInt16LE(lho + 26), lExtraLen = buf.readUInt16LE(lho + 28);
     const dataStart = lho + 30 + lNameLen + lExtraLen, raw = buf.subarray(dataStart, dataStart + compSize);
-    try { files[name] = method === 0 ? raw : zlib.inflateRawSync(raw); } catch (e) { /* skip unreadable entry */ }
+    try { const f = method === 0 ? raw : zlib.inflateRawSync(raw, { maxOutputLength: 64 * 1024 * 1024 }); outTotal += f.length;
+      if (outTotal > 200 * 1024 * 1024) throw Object.assign(new Error('file too large once unzipped'), { bomb: true }); files[name] = f; }
+    catch (e) { if (e.bomb || e.code === 'ERR_BUFFER_TOO_LARGE' || /maxOutputLength|too large/i.test(e.message || '')) throw new Error('not a valid .xlsx (too large once unzipped)'); /* skip unreadable entry */ }
     p += 46 + nameLen + extraLen + commentLen;
   }
   return files;
@@ -21420,6 +21435,9 @@ function parseCsvLine(line) { const out = []; let cur = '', q = false;
     if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
     else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; } }
   out.push(cur); return out.map(s => s.trim()); }
+// v28.779 (security review finding 30): a CSV cell that a spreadsheet would run as a formula (= + - @ tab CR) gets a leading apostrophe;
+// plain numbers (incl. negatives such as journal credits) are left as they are.
+function csvSafe(v) { const t = String(v == null ? '' : v); return /^[=+\-@\t\r]/.test(t) && !/^[-+]?\d[\d,]*(\.\d+)?$/.test(t.trim()) ? "'" + t : t; }
 function csvNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
 // Compare a parsed report (sku -> {oh,av}) against live products: ERP on-hand (inventory_<mkt>_3pl_onhand) + ERP available (inventory_<mkt>_3pl).
 // Open POs for a market completing within ±1 week of today — candidates for stock received in the warehouse but not
@@ -23812,7 +23830,7 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       } catch (e) { return res.status(502).json({ error: 'Xero refused the journal: ' + e.message }); }
     }
     const HDR = '*Narration,*Date,Description,*AccountCode,*TaxRate,*Amount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2';
-    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
+    const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="journal-' + (REG || tpl0) + '-' + period + '.csv"'); res.send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -24014,7 +24032,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     }
 
     const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
-    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
+    const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const rows = blines.map(l => [meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, money(total), '', l.desc, '1', money(l.amount), l.code, l.taxType, (l.taxAmount == null ? '' : money(l.taxAmount)), '', '', '', '', l.currency, money(l.amount)].map(esc).join(','));   // v28.004: Total column = bill total (Xero checks the lines add up to it in the chosen tax mode)
     const csv = HDR + '\n' + rows.join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
@@ -30846,10 +30864,12 @@ async function sbLandedCost(opId, opts) { opts = opts || {};
   return { ok: true, landed_cost_id: lcId, landed_cost_url: cfg.subdomain ? 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/account.landed_cost/' + lcId : null };
 }
 app.post('/api/supply/sample-bills/landed-cost/:id', async (req, res) => {
+  if (!(req.body && req.body.dry) && !(await cchAccessOk(req, res))) return;   // v28.779 (security review finding 6): posting needs ACCOUNTS or admin
   try { res.json(Object.assign({ ok: true }, await sbLandedCost(Number(req.params.id), { dry: !!(req.body && req.body.dry) }))); }
   catch (e) { if (!e.status || e.status >= 500) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample-bills/push/:id', async (req, res) => {
+  if (!(req.body && req.body.dry) && !(await cchAccessOk(req, res))) return;   // v28.779 (security review finding 6): posts to live Xero / Fulfil, ACCOUNTS or admin
   try { const r = await sbPushDoc(Number(req.params.id), { dry: !!(req.body && req.body.dry), who: shortUser(authUser(req)) || null }); res.json(Object.assign({ ok: true }, r)); }
   catch (e) { if (!e.status || e.status >= 500) log500(e);
     try { await pool.query(`UPDATE planner.deposits SET doc_error=$2 WHERE id=$1`, [Number(req.params.id), String(e.message).slice(0, 400)]); } catch (_) {}
@@ -30867,8 +30887,16 @@ app.post('/api/supply/sample-bills/push/:id', async (req, res) => {
 const AI_ALLOWED_MODELS = new Set(['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5']);   // v28.151 (review F6): retired claude-sonnet-4-20250514 removed (unknown ids fall back to the default)
 const AI_DEFAULT_MODEL = 'claude-sonnet-4-6';
 const AI_MAX_TOKENS_CAP = 8192;
+// v28.779 (security review finding 15): the AI proxy needs a named HORIZON user (not a header key or an anonymous gate pass) and has a daily cap
+// per person (AI_DAILY_CAP, default 400 calls). The count is per server instance, so it is a brake, not an exact quota.
+const _aiDay = new Map(), AI_DAILY_CAP = Number(process.env.AI_DAILY_CAP) || 400;
 app.post('/api/ai', async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: { message: 'AI not configured (no API key set)' } });
+  const who = String(authUser(req) || '').toLowerCase();
+  if (GATE && !/@dockandbay\.com$/.test(who)) return res.status(403).json({ error: { message: 'AI in HORIZON is for signed-in Dock & Bay staff.' } });   // externals and header-key callers: no AI
+  { const day = new Date().toISOString().slice(0, 10), k = day + '|' + who, n = (_aiDay.get(k) || 0) + 1;
+    if (_aiDay.size > 5000) _aiDay.clear(); _aiDay.set(k, n);
+    if (who && n > AI_DAILY_CAP) return res.status(429).json({ error: { message: 'Daily AI limit reached for ' + who + ' (' + AI_DAILY_CAP + ' calls). It resets at midnight UTC.' } }); }
   try {
     const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? { ...req.body } : {};
     delete body.mcp_servers;
@@ -31179,7 +31207,7 @@ async function aiSkuAvailability(skus, market) {
   return { as_of: new Date().toISOString().slice(0, 10), forecast_source: 'HORIZON latest forecast run', skus: out };
 }
 // v28.480: + app_settings (holds the Xero OAuth tokens), accounts_gmail, MCP clients/tokens, and other people's Ask Claude chats
-const AI_BLOCK_REL = /\b(client_magic_tokens|portal_magic_tokens|client_sessions|portal_sessions|app_settings|accounts_gmail|mcp_tokens|mcp_clients|ai_conversations|ai_messages|ai_files)\b/i;
+const AI_BLOCK_REL = /\b(client_magic_tokens|portal_magic_tokens|client_sessions|portal_sessions|app_settings|accounts_gmail|mcp_tokens|mcp_clients|ai_conversations|ai_messages|ai_files|external_access_tokens|invoice_links)\b/i;   // v28.779 (security review finding 16): + external tokens, invoice links
 function aiCleanRow(row) { const o = {}; for (const k in row) { let v = row[k]; if (Buffer.isBuffer(v)) v = '[binary ' + v.length + 'B]'; else if (typeof v === 'string' && v.length > 1500) v = v.slice(0, 1500) + '\u2026'; o[k] = v; } return o; }
 async function aiDescribeData(table) {
   try {
@@ -31270,7 +31298,8 @@ async function mcpAccess(email) {
   let row = null; try { row = (await pool.query(`SELECT coalesce(mcp_access,false) mcp_access, coalesce(is_admin,false) is_admin, coalesce(commissions,false) commissions, ${await accColExpr()} accounts_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0]; }
   catch (err) { if (!/mcp_access/.test(err.message)) throw err; }
   // v28.489 (Ben 26-Oct-26): "everyone can have access by default ... even people not in permissions can have read only access".
-  // Any @dockandbay.com account may connect (read only); app_permissions.mcp_access is no longer checked. ACCOUNTS and COMMISSIONS
+  // Any @dockandbay.com account may connect; app_permissions.mcp_access is no longer checked. Reads for all; the write tools (MCP_WRITE_TOOLS, v28.525)
+  // run as the person through the same capability check as the app, so they need that person's HORIZON edit grants. ACCOUNTS and COMMISSIONS
   // data still need those grants (a person with no permissions row gets neither).
   if (!row) return { ok: true, email: e, accounts: false, commissions: false };
   return { ok: true, email: e, accounts: !!(row.accounts_access || row.is_admin), commissions: !!(row.commissions || row.is_admin) };
@@ -32050,7 +32079,7 @@ app.get('/api/assistant/feedback', async (req, res) => {
       ORDER BY created_at DESC LIMIT 5000`, [String(days)])).rows;
     const up = rows.filter(r => r.rating === 'up').length;
     if (String(req.query.format || '').toLowerCase() === 'csv') {
-      const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const cell = v => '"' + csvSafe(v).replace(/"/g, '""') + '"';
       const cols = ['created_at', 'user_email', 'rating', 'reason', 'comment', 'question', 'answer', 'model', 'message_id', 'conversation_id'];
       res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="ask-claude-feedback.csv"');
       return res.send([cols.join(',')].concat(rows.map(r => cols.map(c => cell(r[c])).join(','))).join('\n'));
@@ -33699,7 +33728,7 @@ async function forecastCountryCsv(country) {
   const map = {}, skus = [];
   rows.forEach(r => { if (!map[r.sku]) { map[r.sku] = {}; skus.push(r.sku); } const c = (map[r.sku][r.ym] = map[r.sku][r.ym] || { DTC: 0, FBA: 0, B2B: 0 }); c[r.channel] = Number(r.u) || 0; });
   skus.sort();
-  const esc = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const esc = v => { v = csvSafe(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const span = pfx => ymList.map((_, i) => pfx + '-M' + (i + 1));   // FC-M1..FC-M12
   const codeRow = ['SKU', 'Country Category', 'MonthsStock'].concat(span('FC'), span('P'), span('G'), span('FBA'), span('B2B'));
   const dates = months.map(dateLbl);
@@ -37070,7 +37099,7 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
     const rows = (await pool.query(`SELECT order_ref, customer, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [req.params.id])).rows;
     const [y, m] = run.month.split('-').map(Number); const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); const dd = end.slice(8, 10) + '/' + end.slice(5, 7) + '/' + end.slice(0, 4);
-    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }; const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+    const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }; const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
     const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const inv = 'COMMISSION-' + run.month + '-' + cpSlug(run.group_name).toUpperCase(); const total = money(run.total);
     const lines = [HDR, [run.xero_contact || run.group_name, '', '', '', '', '', '', '', '', '', inv, dd, dd, total, '', 'Commission ' + run.month + ' — ' + rows.length + ' orders (see statement)', '1', total, run.xero_account_code || '', 'No VAT', '', '', '', '', '', '', total].map(esc).join(',')];
@@ -37122,7 +37151,7 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
     const rows = (await pool.query(`SELECT order_ref, invoice_ref, client_po, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;   // v28.430: + client PO, note (deferred rows show as status deferred)
-    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+    const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
     const csv = ['Month,Rep group,Order,Invoice,Client PO,Customer,Paid date,Commissionable,Rate %,Commission,Credit note,Credit adj,Net,Payment code,Status,Note'].concat(rows.map(r => [run.month, run.group_name, r.order_ref, r.invoice_ref, r.client_po, r.customer, r.paid, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, r.net, r.payment_code, r.status, r.note].map(esc).join(','))).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="commission-' + run.month + '-' + cpSlug(run.group_name) + '.csv"'); res.send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -38608,7 +38637,7 @@ function _exTxRows(lines, fx) { return (lines || []).map(x => { const usd = Numb
   'Direct to Client?': (_exDtc(x.branch) ? 'TRUE' : 'FALSE'), Month: _exMonthShort(x.month), 'Amount GBP': _exUsdToGbp(fx, usd, x.date || x.month).toFixed(2), 'UK Deposit Ref': x.uk_deposit_ref || '' }; }); }
 function _exRowsToCsv(rows) {
   if (!rows || !rows.length) return '';
-  const cols = Object.keys(rows[0]); const e1 = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const cols = Object.keys(rows[0]); const e1 = v => { v = csvSafe(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   return [cols.map(e1).join(',')].concat(rows.map(r => cols.map(c => e1(r[c])).join(','))).join('\n');
 }
 async function buildExportRows(report) {

@@ -1367,7 +1367,10 @@ function applyTierW(){
   if(typeof render==='function')render();
 }
 function resetTierW(){TIER_W.A=3;TIER_W.B=2;TIER_W.C=1;syncTierW();if(typeof reset3plCache==='function')reset3plCache();if(typeof render==='function')render();}
-function esc(s){return s.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/'/g,"\\'");}
+// v28.779 (security review 10-Nov-26, finding 5): esc() is now the HTML escaper (it was a JS-string escaper used at ~600 HTML sites). The old
+// function is escJs(), kept for the CSS attribute selectors that match a row key (querySelector('[data-x="'+escJs(k)+'"]')).
+function escJs(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/'/g,"\\'");}
+function esc(s){return hzEscH(s);}
 // v28.151 (review F6): global HTML escaper (the global esc above is a JS-string escaper, not HTML-safe).
 // v28.151 (review F4): visible, non-blocking warning bar (top of page) with an optional Retry action. One bar per id;
 // calling again updates it; Retry/close remove it. Replaces silent console.error on data-load / cold-build failures.
@@ -5958,7 +5961,7 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
   const rk=s+'|'+co+'|'+ch;
   // Current-month forecast cell (Jun FC) — driven by its input box, refreshed separately from the actual cell.
-  try{var _ce=document.querySelector('[data-curfc="'+esc(rk)+'"]');if(_ce){ var _cx=expFc(s,co,ch,CUR_MONTH,curMonthForecast(s,co,ch),_a); _ce.textContent=fn(_cx.E); if(_cx.setBoxes>0)_msTipAttrs(_ce,_cx,'This-year forecast'); }}catch(e){}
+  try{var _ce=document.querySelector('[data-curfc="'+escJs(rk)+'"]');if(_ce){ var _cx=expFc(s,co,ch,CUR_MONTH,curMonthForecast(s,co,ch),_a); _ce.textContent=fn(_cx.E); if(_cx.setBoxes>0)_msTipAttrs(_ce,_cx,'This-year forecast'); }}catch(e){}
   DISP_MONTHS.forEach(function(fym){
     if(isActualMonth(fym))return; // read-only actual cells never change
     const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -5971,14 +5974,14 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   });
   // Fiscal-year total cells — recompute in place on edit (Mar–Feb basis)
   var _a=ga(co,ch,s);
-  document.querySelectorAll('[data-fytot="'+esc(rk)+'"]').forEach(function(e){
+  document.querySelectorAll('[data-fytot="'+escJs(rk)+'"]').forEach(function(e){
     var Y=+e.dataset.fyy;
     var cur=fyTot(_a,fu,Y,s,co,ch),prev=fyTot(_a,fu,Y-1,s,co,ch);
     var _cx=fyTotX(_a,fu,Y,s,co,ch),_px=fyTotX(_a,fu,Y-1,s,co,ch),_mx=periodMtdX(_a,fyMonths(Y),s,co,ch);
     e.innerHTML=periodStackHTML({ly:_px.E,lyX:_px,cur:_cx.E,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:cur*sp,lyRev:periodLyRev(_a,fyMonths(Y))});
   });
   // Quarter/half total cells (#5) — recompute in place on edit, same as the FY total above
-  document.querySelectorAll('[data-ptot="'+esc(rk)+'"]').forEach(function(e){
+  document.querySelectorAll('[data-ptot="'+escJs(rk)+'"]').forEach(function(e){
     var months=(e.dataset.pmonths||'').split(',').filter(Boolean);
     var cur=periodTot(_a,fu,months,s,co,ch),prev=periodTot(_a,fu,prevYearMonths(months),s,co,ch);
     var _cx=periodTotX(_a,fu,months,s,co,ch),_px=periodTotX(_a,fu,prevYearMonths(months),s,co,ch),_mx=periodMtdX(_a,months,s,co,ch);
@@ -5988,8 +5991,8 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   // recomputes against the updated subcategory forecast (otherwise the gap goes stale).
   try{
     if(typeof EXPANDED!=='undefined'&&EXPANDED.has(rk)){
-      var _pTr=document.querySelector('tr[data-rowkey="'+esc(rk)+'"]');
-      if(_pTr){document.querySelectorAll('tr.sku-inline[data-parentkey="'+esc(rk)+'"]').forEach(function(r){r.remove();});insertInlineSkuRows(s,co,ch,_pTr);}
+      var _pTr=document.querySelector('tr[data-rowkey="'+escJs(rk)+'"]');
+      if(_pTr){document.querySelectorAll('tr.sku-inline[data-parentkey="'+escJs(rk)+'"]').forEach(function(r){r.remove();});insertInlineSkuRows(s,co,ch,_pTr);}
     }
   }catch(e){}
   // Refresh the SKU-vs-subcat variance pill on each forecast cell of this row.
@@ -6001,7 +6004,7 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   try{
     var _se=subcatSkuEffTotals(s,co,ch);
     var _vw=(function(){var s2=new Set(),d=new Date(),m=d.getMonth()+1,y=d.getFullYear();for(var i=0;i<12;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}s2.add(yy+'_'+(mm<10?'0':'')+mm);}return s2;})();
-    document.querySelectorAll('input.fci[data-s="'+esc(s)+'"][data-co="'+esc(co)+'"][data-ch="'+esc(ch)+'"]').forEach(function(inp){
+    document.querySelectorAll('input.fci[data-s="'+escJs(s)+'"][data-co="'+escJs(co)+'"][data-ch="'+escJs(ch)+'"]').forEach(function(inp){
       var ik2=inp.dataset.k||'';
       var pts2=ik2.split('|');var fym2=pts2[pts2.length-1];
       var dParent=inp.parentElement;if(!dParent)return;
@@ -6026,7 +6029,7 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   try{ if(_makeGrandTotRow){ var _oldGt=document.querySelector('tr.grand-tot'); if(_oldGt){ var _newGt=_makeGrandTotRow(); if(_newGt)_oldGt.parentNode.replaceChild(_newGt,_oldGt); } } }catch(e){}
   // category subtotal row for this row's category (only rendered when "show category totals" is on) → rebuild in place too
   try{ if(SHOW_CAT_TOT && typeof _makeCatTotRow==='function'){ var _rrow=DATA.find(function(r){return r.s===s&&r.co===co&&r.ch===ch;}); var _cat=_rrow?parentCat(_rrow.c):null;
-    if(_cat){ var _oldCt=document.querySelector('tr.cat-tot[data-cat="'+esc(_cat)+'"]'); if(_oldCt){ var _newCt=_makeCatTotRow(_cat); if(_newCt)_oldCt.parentNode.replaceChild(_newCt,_oldCt); } } } }catch(e){}
+    if(_cat){ var _oldCt=document.querySelector('tr.cat-tot[data-cat="'+escJs(_cat)+'"]'); if(_oldCt){ var _newCt=_makeCatTotRow(_cat); if(_newCt)_oldCt.parentNode.replaceChild(_newCt,_oldCt); } } } }catch(e){}
   // v28.165 (Ben): keep the read-only "Shown SKUs" lines (sub-category + category) in step with the edit
   try{ if(document.querySelector('tr.hz-shown-row')){ var _srow=DATA.find(function(r){return r.s===s&&r.co===co&&r.ch===ch;}); hzShownRefresh(s,co,ch,_srow?parentCat(_srow.c):null); } }catch(e){}
 }
