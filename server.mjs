@@ -9340,11 +9340,14 @@ function xeroMarketRegion(mkt) { return String(mkt || '').toUpperCase() === 'AU'
 function _poXeroRegion(cc, branch) { const m = String(cc || '').toUpperCase() || (/coghlan/i.test(branch || '') ? 'AU' : ''); return xeroMarketRegion(m); }
 function xeroConfig(region) {
   region = xeroRegion(region); const pref = region === 'au' ? 'XERO_AU_' : 'XERO_UK_';
-  const id = (process.env[pref + 'CLIENT_ID'] || process.env.XERO_CLIENT_ID || '').trim();
-  const secret = (process.env[pref + 'CLIENT_SECRET'] || process.env.XERO_CLIENT_SECRET || '').trim();
+  // v28.793 (Ben 12-Nov-26): the sandbox can use its own Xero app (XERO_<UK|AU>_SANDBOX_CLIENT_ID / _SECRET) so it gets its own daily
+  // budget instead of sharing live's. Live never reads these (IS_SANDBOX is false there); with them unset the sandbox uses the live app.
+  const sbx = IS_SANDBOX && !!((process.env[pref + 'SANDBOX_CLIENT_ID'] || '').trim() && (process.env[pref + 'SANDBOX_CLIENT_SECRET'] || '').trim());
+  const id = ((sbx ? process.env[pref + 'SANDBOX_CLIENT_ID'] : null) || process.env[pref + 'CLIENT_ID'] || process.env.XERO_CLIENT_ID || '').trim();
+  const secret = ((sbx ? process.env[pref + 'SANDBOX_CLIENT_SECRET'] : null) || process.env[pref + 'CLIENT_SECRET'] || process.env.XERO_CLIENT_SECRET || '').trim();
   const redirect = (process.env.XERO_REDIRECT_URI || 'http://localhost:8124/api/supply/xero/callback').trim();
   const scopes = (process.env.XERO_SCOPES || 'offline_access accounting.transactions accounting.contacts accounting.settings.read').trim();
-  return { region, id, secret, redirect, scopes, present: !!(id && secret) };
+  return { region, id, secret, redirect, scopes, present: !!(id && secret), own_app: sbx };
 }
 const _xeroHe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // v28.780 (security review 10-Nov-26, finding 3b): the Xero OAuth store (refresh token) is sealed at rest with AES-256-GCM like the Gmail tokens,
@@ -9475,6 +9478,7 @@ function xeroLiveReserve(region, opts) {
   e.code = 429; e.xero_reserve = true; throw e; }
 function xeroSandboxGuard(region) {   // throws before a sandbox call that would break the budget; counts the call otherwise
   if (!IS_SANDBOX) return;
+  if (xeroConfig(region).own_app) return;   // v28.793: own sandbox app = own budget, nothing shared with live to protect
   const used = xeroSandboxUse(region), q = _xeroQuota[region];
   const why = used >= XERO_SBX_DAILY ? 'the sandbox has used its ' + XERO_SBX_DAILY + ' Xero ' + region.toUpperCase() + ' calls for today'
     : (q && q.day != null && q.day < XERO_SBX_MIN_LEFT) ? 'Xero ' + region.toUpperCase() + ' has only ' + q.day + ' calls left today (sandbox stops below ' + XERO_SBX_MIN_LEFT + ', live keeps the rest)' : null;
