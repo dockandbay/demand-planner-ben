@@ -1333,6 +1333,7 @@ app.use((req, res, next) => {
       || req.path === '/api/cron/cogs-airtable' || req.path === '/api/cron/cogs-channel' || req.path === '/api/cron/ilg-stock-import' || req.path === '/api/cron/geneva-stock-import' || req.path === '/api/cron/ilg-auto-rebaseline' || req.path === '/api/cron/ilg-rebaseline/claim' || req.path === '/api/cron/ilg-rebaseline/result'   // v28.682: + geneva-stock-import, ilg-auto-rebaseline. v28.553 (Ben): n8n ILG report import + stocktake (x-webhook-secret checked in the handlers, fails closed)
       || req.path.startsWith('/invoice/') || req.path === '/api/invoice-links/ensure'   // v28.730 (Ben): PUBLIC wholesale invoice pages (unguessable token, rate limited) + n8n ensure (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
+      || req.path === '/api/cron/prepayments'   // v28.792 (Ben): n8n hourly prepayment allocation (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/b2b-forecast' || req.path === '/api/feed/chief/b2b-forecast' || req.path === '/api/feed/b2b-forecast.csv'   // v28.603 (Ben): B2B forecast nightly Fulfil refresh (x-webhook-secret) + Chief feed (Bearer CHIEF_FEED_TOKEN) + workbook CSV (?token=B2B_CSV_TOKEN); all checked in the handlers with safeEq, fail closed
@@ -3504,11 +3505,147 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note|ka-receipts\/check|ka-receipts\/post)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note|ka-receipts\/check|ka-receipts\/post|prepayments\/[^/]+\/(link|unlink)|prepayments\/(sync|run))\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
 app.use('/api/accounts', accountsGate);
+// v28.792 (Ben 11-Nov-26): ACCOUNTS > PREPAYMENTS. Customer prepayments are recorded in Xero by hand as overpayments (RECEIVE-OVERPAYMENT).
+// HORIZON reads them (incremental, If-Modified-Since), ACCOUNTS users link each one to Fulfil sales orders, and the hourly run (n8n ->
+// /api/cron/prepayments) looks for linked orders whose invoice is posted in Fulfil and exported to Xero (same InvoiceNumber, or the TEMP-SO<n>
+// stand-in): it allocates the overpayment to that invoice (oldest first, up to the invoice's amount due; contact and currency must match, else
+// flagged) and emails madison@ and rita@ (PREPAY_NOTIFY_TO). Fulfil is only read. The sandbox never writes to Xero (logs a dry run).
+const PP_COMPANY = { uk: 1, au: 3 }, PP_SC = { uk: '!BHF-X', au: '!Ld61y' };
+const PP_TO = () => String(process.env.PREPAY_NOTIFY_TO || 'madison@dockandbay.com,rita@dockandbay.com').split(',').map(s => s.trim()).filter(Boolean);
+const ppXeroUrl = (org, p) => 'https://go.xero.com/organisationlogin/default.aspx?shortcode=' + encodeURIComponent(PP_SC[org] || '') + '&redirecturl=' + encodeURIComponent(p);
+const ppInvUrl = (org, id) => ppXeroUrl(org, '/AccountsReceivable/View.aspx?InvoiceID=' + id);
+const ppContactUrl = (org, id) => ppXeroUrl(org, '/Contacts/View/' + id);
+const ppFulfilBase = () => { const fc = fulfilConfigFor('live'); return fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null; };
+let _ppSyncP = null;
+async function ppSyncXero(force) {
+  if (_ppSyncP) return _ppSyncP;
+  _ppSyncP = (async () => { const out = {};
+    for (const org of ['uk', 'au']) {
+      const key = 'prepay_xero_wm_' + org, wm = await cpSetting(key, ''), age = wm ? Date.now() - Date.parse(wm) : Infinity;
+      if (!force && age < 15 * 60000) { out[org] = { skipped: true }; continue; }
+      const t0 = new Date().toISOString(), since = wm ? new Date(Date.parse(wm) - 10 * 60000) : null;
+      try {
+        const ops = await accXeroList(org, 'Overpayments', 'Type=="RECEIVE-OVERPAYMENT"', since ? { since } : {});
+        for (const o of ops) { if (!o.OverpaymentID) continue;
+          const ref = String(o.Reference || ((o.LineItems || [])[0] || {}).Description || '').slice(0, 200);
+          await pool.query(`INSERT INTO planner.prepayments (overpayment_id, org, contact_id, contact_name, pay_date, reference, currency, total, remaining, status, allocations, synced_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,now()) ON CONFLICT (overpayment_id) DO UPDATE SET contact_id=excluded.contact_id, contact_name=excluded.contact_name, pay_date=excluded.pay_date,
+            reference=excluded.reference, currency=excluded.currency, total=excluded.total, remaining=excluded.remaining, status=excluded.status, allocations=excluded.allocations, synced_at=now()`,
+            [o.OverpaymentID, org, o.Contact && o.Contact.ContactID, o.Contact && o.Contact.Name, _xd(o.Date), ref, o.CurrencyCode || null, Number(o.Total) || 0, Number(o.RemainingCredit) || 0, o.Status || null,
+             JSON.stringify((o.Allocations || []).map(a => ({ invoice_id: a.Invoice && a.Invoice.InvoiceID, invoice_number: a.Invoice && a.Invoice.InvoiceNumber, amount: Number(a.Amount) || 0, date: _xd(a.Date) })))]); }
+        await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [key, t0]);
+        out[org] = { read: ops.length, full: !since };
+      } catch (e) { out[org] = { error: e.message }; }
+    }
+    return out; })().finally(() => { _ppSyncP = null; });
+  return _ppSyncP;
+}
+async function ppEmail(subject, html) {
+  const to = PP_TO(); if (!to.length) return false;
+  if (!process.env.RESEND_API_KEY) { console.log('[prepayments] no RESEND_API_KEY, would email ' + to.join(', ') + ': ' + subject); return false; }
+  try { const r = await _fetchT('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...emailSender('internal'), to, subject, html }) });
+    logEmail({ recipients: to.join(', '), subject, kind: 'prepayment', by: 'HORIZON', status: r.ok ? 'sent' : 'error', error: r.ok ? null : 'resend ' + r.status }); return r.ok;
+  } catch (e) { return false; } }
+// One pass: linked orders -> posted Fulfil invoices -> the Xero invoice -> allocate (or flag). opts.by = who / 'auto'.
+async function ppRun(opts) {
+  opts = opts || {}; const by = opts.by || 'auto', res = { checked: 0, allocated: [], flagged: [], waiting: [], errors: [] }, E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const links = (await pool.query(`SELECT l.*, p.contact_id, p.contact_name, p.currency, p.remaining, p.status, p.pay_date FROM planner.prepayment_links l JOIN planner.prepayments p ON p.overpayment_id = l.overpayment_id
+      WHERE upper(coalesce(p.status,'')) = 'AUTHORISED' AND coalesce(p.remaining,0) > 0 ORDER BY p.pay_date, l.linked_at`)).rows;
+  if (!links.length) return res;
+  const cfg = fulfilConfigFor('live'), fb = ppFulfilBase();
+  const done = new Set((await pool.query(`SELECT overpayment_id || '|' || invoice_number k FROM planner.prepayment_allocations WHERE status IN ('allocated','flagged')`)).rows.map(r => r.k));
+  for (const org of ['uk', 'au']) {
+    const L = links.filter(l => l.org === org); if (!L.length) continue;
+    const ctx = '?context=' + encodeURIComponent(JSON.stringify({ company: PP_COMPANY[org] }));
+    const sales = await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read' + ctx, [[['id', 'in', [...new Set(L.map(l => l.sale_id))]]], 0, 500, null, ['id', 'number', 'invoices']]);
+    const invIds = [...new Set((sales || []).flatMap(s => s.invoices || []))]; if (!invIds.length) { L.forEach(l => res.waiting.push(l.so_number + ': no invoice yet')); continue; }
+    const invs = await fulfilFetchCfg(cfg, 'PUT', '/model/account.invoice/search_read' + ctx, [[['id', 'in', invIds], ['state', 'in', ['posted', 'paid']]], 0, 500, null, ['id', 'number', 'invoice_date', 'total_amount', 'currency.code']]);
+    const invBy = {}; (invs || []).forEach(i => { invBy[i.id] = i; });
+    const cand = [];   // { link, finv }
+    L.forEach(l => { const s = (sales || []).find(x => x.id === l.sale_id); const fi = s ? (s.invoices || []).map(id => invBy[id]).filter(Boolean) : [];
+      if (!fi.length) res.waiting.push(l.so_number + ': invoice not posted yet');
+      fi.forEach(f => { if (!done.has(l.overpayment_id + '|' + f.number)) cand.push({ l, f }); }); });
+    res.checked += cand.length; if (!cand.length) continue;
+    const nums = [...new Set(cand.flatMap(c => [String(c.f.number), 'TEMP-SO' + c.f.number]))];
+    let xinv = []; try { for (let i = 0; i < nums.length; i += 40) { const j = await xeroFetch(org, '/api.xro/2.0/Invoices?InvoiceNumbers=' + encodeURIComponent(nums.slice(i, i + 40).join(',')) + '&Statuses=AUTHORISED,PAID&summaryOnly=false'); xinv = xinv.concat((j && j.Invoices) || []); } }
+    catch (e) { res.errors.push(org.toUpperCase() + ' Xero invoice read: ' + e.message); continue; }
+    const remaining = {}; L.forEach(l => { remaining[l.overpayment_id] = Number(l.remaining) || 0; });
+    cand.sort((a, b) => String(a.l.pay_date).localeCompare(String(b.l.pay_date)) || String(a.f.invoice_date && a.f.invoice_date.iso_string).localeCompare(String(b.f.invoice_date && b.f.invoice_date.iso_string)));
+    for (const { l, f } of cand) {
+      const xi = xinv.find(x => x.InvoiceNumber === String(f.number) && x.Type === 'ACCREC') || xinv.find(x => x.InvoiceNumber === 'TEMP-SO' + f.number && x.Type === 'ACCREC');
+      const tag = l.so_number + ' / invoice ' + f.number;
+      if (!xi) { res.waiting.push(tag + ': not in Xero yet'); continue; }
+      const rest = remaining[l.overpayment_id] || 0, due = Number(xi.AmountDue) || 0, amt = Math.round(Math.min(rest, due) * 100) / 100;
+      const flag = async (msg) => { await pool.query(`INSERT INTO planner.prepayment_allocations (overpayment_id, org, sale_id, so_number, invoice_id, invoice_number, currency, status, message, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,'flagged',$8,$9)`,
+          [l.overpayment_id, org, l.sale_id, l.so_number, xi.InvoiceID, String(f.number), xi.CurrencyCode, msg, by]); res.flagged.push(tag + ': ' + msg); done.add(l.overpayment_id + '|' + f.number);
+        await ppEmail('Prepayment NOT allocated: ' + (l.contact_name || l.customer || '') + ' ' + l.so_number + ' (' + msg + ')',
+          '<p><b>Prepayment needs a look</b></p><p>' + E(l.contact_name || l.customer) + ' prepayment (' + E(l.currency) + ' ' + rest.toFixed(2) + ' left) is linked to ' + (fb ? '<a href="' + fb + '/v2/erp/model/sale.sale/' + l.sale_id + '">' + E(l.so_number) + '</a>' : E(l.so_number)) + '. Its invoice <a href="' + ppInvUrl(org, xi.InvoiceID) + '">' + E(xi.InvoiceNumber) + '</a> is in Xero, but HORIZON did not allocate: ' + E(msg) + '.</p><p>Allocate it by hand in Xero, or fix the link in HORIZON > ACCOUNTS > Prepayments.</p>'); };
+      if (xi.Contact && l.contact_id && xi.Contact.ContactID !== l.contact_id) { await flag('the invoice is for ' + (xi.Contact.Name || 'another contact') + ', the prepayment for ' + (l.contact_name || 'another contact')); continue; }
+      if (xi.CurrencyCode && l.currency && xi.CurrencyCode !== l.currency) { await flag('invoice in ' + xi.CurrencyCode + ', prepayment in ' + l.currency); continue; }
+      if (!(due > 0)) { done.add(l.overpayment_id + '|' + f.number); res.waiting.push(tag + ': already paid in Xero'); continue; }
+      if (!(amt > 0)) continue;
+      if (IS_SANDBOX) { await pool.query(`INSERT INTO planner.prepayment_allocations (overpayment_id, org, sale_id, so_number, invoice_id, invoice_number, amount, currency, status, message, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'dry_run','sandbox: would allocate',$9)`,
+          [l.overpayment_id, org, l.sale_id, l.so_number, xi.InvoiceID, xi.InvoiceNumber, amt, xi.CurrencyCode, by]); res.allocated.push(tag + ': ' + amt + ' (sandbox dry run)'); continue; }
+      try {
+        await xeroFetch(org, '/api.xro/2.0/Overpayments/' + l.overpayment_id + '/Allocations', { method: 'PUT', body: { Allocations: [{ Amount: amt, Invoice: { InvoiceID: xi.InvoiceID }, Date: new Date().toISOString().slice(0, 10) }] } });
+        remaining[l.overpayment_id] = Math.round((rest - amt) * 100) / 100; done.add(l.overpayment_id + '|' + f.number);
+        await pool.query(`UPDATE planner.prepayments SET remaining=$2 WHERE overpayment_id=$1`, [l.overpayment_id, remaining[l.overpayment_id]]);
+        const row = (await pool.query(`INSERT INTO planner.prepayment_allocations (overpayment_id, org, sale_id, so_number, invoice_id, invoice_number, amount, currency, status, message, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'allocated',$9,$10) RETURNING id`,
+          [l.overpayment_id, org, l.sale_id, l.so_number, xi.InvoiceID, xi.InvoiceNumber, amt, xi.CurrencyCode, amt < due ? 'part of the invoice (prepayment used up)' : null, by])).rows[0];
+        res.allocated.push(tag + ': ' + xi.CurrencyCode + ' ' + amt);
+        const sent = await ppEmail('Prepayment allocated: ' + (l.contact_name || l.customer || '') + ' ' + xi.CurrencyCode + ' ' + amt.toFixed(2) + ' to invoice ' + xi.InvoiceNumber,
+          '<p><b>Prepayment allocated in Xero</b></p><p>' + E(l.contact_name || l.customer) + ': ' + E(xi.CurrencyCode) + ' ' + amt.toFixed(2) + ' of the prepayment allocated to invoice <a href="' + ppInvUrl(org, xi.InvoiceID) + '">' + E(xi.InvoiceNumber) + '</a> (' + E(org.toUpperCase()) + ')'
+          + ' for ' + (fb ? '<a href="' + fb + '/v2/erp/model/sale.sale/' + l.sale_id + '">' + E(l.so_number) + '</a>' : E(l.so_number)) + ' (' + E(by === 'auto' ? 'automatic' : by) + ').</p>'
+          + '<p><b>Left on the invoice:</b> ' + (due - amt).toFixed(2) + ' &middot; <b>Left on the prepayment:</b> ' + remaining[l.overpayment_id].toFixed(2) + ' (<a href="' + ppContactUrl(org, l.contact_id) + '">customer in Xero</a>)</p>');
+        if (sent) await pool.query(`UPDATE planner.prepayment_allocations SET emailed_at=now() WHERE id=$1`, [row.id]);
+      } catch (e) { res.errors.push(tag + ': ' + e.message); await pool.query(`INSERT INTO planner.prepayment_allocations (overpayment_id, org, sale_id, so_number, invoice_id, invoice_number, amount, currency, status, message, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'error',$9,$10)`,
+          [l.overpayment_id, org, l.sale_id, l.so_number, xi.InvoiceID, xi.InvoiceNumber, amt, xi.CurrencyCode, String(e.message).slice(0, 500), by]); }
+    }
+  }
+  return res;
+}
+app.get('/api/accounts/prepayments', async (req, res) => {
+  try { let sync = null; try { sync = await ppSyncXero(false); } catch (e) { sync = { error: e.message }; }
+    const rows = (await pool.query(`SELECT p.*, p.pay_date::text pay_date,
+        coalesce((SELECT json_agg(json_build_object('sale_id', l.sale_id, 'so', l.so_number, 'customer', l.customer, 'by', l.linked_by, 'at', l.linked_at) ORDER BY l.linked_at) FROM planner.prepayment_links l WHERE l.overpayment_id = p.overpayment_id), '[]') links,
+        coalesce((SELECT json_agg(json_build_object('so', a.so_number, 'sale_id', a.sale_id, 'invoice_id', a.invoice_id, 'invoice', a.invoice_number, 'amount', a.amount, 'currency', a.currency, 'status', a.status, 'message', a.message, 'by', a.created_by, 'at', a.created_at, 'emailed', a.emailed_at) ORDER BY a.created_at DESC) FROM planner.prepayment_allocations a WHERE a.overpayment_id = p.overpayment_id), '[]') log
+      FROM planner.prepayments p WHERE upper(coalesce(p.status,'')) NOT IN ('VOIDED','DELETED') AND ($1 = '' OR p.org = $1) ORDER BY (coalesce(p.remaining,0) > 0) DESC, p.pay_date DESC LIMIT 500`, [String(req.query.org || '').toLowerCase().replace(/[^a-z]/g, '')])).rows;
+    rows.forEach(r => { r.xero_contact_url = r.contact_id ? ppContactUrl(r.org, r.contact_id) : null; (r.log || []).forEach(a => { if (a.invoice_id) a.url = ppInvUrl(r.org, a.invoice_id); }); });
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows, sync, fulfil_base: ppFulfilBase(), notify: PP_TO(), sandbox: !!IS_SANDBOX });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.get('/api/accounts/prepayments/so-search', async (req, res) => {   // Fulfil sales orders by number / reference / customer (read only)
+  try { const org = req.query.org === 'au' ? 'au' : 'uk', q = String(req.query.q || '').trim().slice(0, 60); if (q.length < 2) return res.json({ ok: true, rows: [] });
+    const ctx = '?context=' + encodeURIComponent(JSON.stringify({ company: PP_COMPANY[org] }));
+    const dom = /^\d+$/.test(q) ? ['OR', ['number', '=', 'SO' + q], ['number', 'ilike', '%' + q + '%'], ['reference', 'ilike', '%' + q + '%']] : ['OR', ['number', 'ilike', '%' + q + '%'], ['reference', 'ilike', '%' + q + '%'], ['party.name', 'ilike', '%' + q + '%']];
+    const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/sale.sale/search_read' + ctx, [[dom, ['state', 'not in', ['cancel', 'cancelled', 'draft', 'ignored']]], 0, 25, [['sale_date', 'DESC']], ['id', 'number', 'reference', 'party.name', 'total_amount', 'currency.code', 'state', 'shipment_state', 'invoice_state', 'sale_date']]);
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows: (rows || []).filter(s => s.number && s.state !== 'ignored').map(s => ({ id: s.id, so: s.number, reference: s.reference, customer: s['party.name'], total: Number((s.total_amount && s.total_amount.decimal) || s.total_amount || 0), currency: s['currency.code'], state: s.state, shipment: s.shipment_state, invoice: s.invoice_state, date: s.sale_date && (s.sale_date.iso_string || s.sale_date) })) });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/accounts/prepayments/:id/link', async (req, res) => {
+  try { const id = String(req.params.id), b = req.body || {}, p = (await pool.query(`SELECT org FROM planner.prepayments WHERE overpayment_id=$1`, [id])).rows[0]; if (!p) return res.status(404).json({ error: 'prepayment not found' });
+    const sid = Number(b.sale_id); if (!(sid > 0)) return res.status(400).json({ error: 'sale_id required' });
+    await pool.query(`INSERT INTO planner.prepayment_links (overpayment_id, org, sale_id, so_number, customer, linked_by) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (overpayment_id, sale_id) DO NOTHING`,
+      [id, p.org, sid, String(b.so || '').slice(0, 40), String(b.customer || '').slice(0, 200), authUser(req) || null]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/accounts/prepayments/:id/unlink', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.prepayment_links WHERE overpayment_id=$1 AND sale_id=$2`, [String(req.params.id), Number((req.body || {}).sale_id)]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/accounts/prepayments/sync', async (req, res) => { try { res.json({ ok: true, sync: await ppSyncXero(true) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.post('/api/accounts/prepayments/run', async (req, res) => { try { res.json({ ok: true, ...(await ppRun({ by: authUser(req) || 'user' })) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.post('/api/cron/prepayments', async (req, res) => {   // n8n hourly: Xero overpayments (changes only, at most every 15 min), then the allocation pass
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const sync = await ppSyncXero(false); res.json({ ok: true, sync, ...(await ppRun({ by: 'auto' })) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
 // Aged payables: open Xero bills (approved or awaiting approval, amount due > 0) from the planner.xero_bills cache that the
 // hourly Xero bills sync keeps fresh (UK + AU). Supplier = linked to a HORIZON PO, or a Xero contact named "<name> - <supplier code>".
 app.get('/api/accounts/payables', async (req, res) => {

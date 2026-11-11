@@ -18,6 +18,8 @@ sources:
   - server.mjs :: custProxy (supplier portal Custom orders, Customiser batches)
   - server.mjs :: amzfStep, amzfFfClass, amzfAmzRows, /api/accounts/amazon-fees (BUY & MOVE > Inventory > Amazon fees)
   - artifact_v16.7.html :: renderAmzFees, amzfDrillHtml, amzfRun
+  - server.mjs :: ppSyncXero, ppRun, /api/accounts/prepayments, /api/cron/prepayments (ACCOUNTS > Prepayments)
+  - supply/inject.html :: acRenderPrepay, acPpStatus
   - supply/portal-custom.js :: render
   - server.mjs :: /api/cp/sku-lists
   - server.mjs :: /api/cp/catalogue/images
@@ -919,4 +921,9 @@ Where: HORIZON SUPPLY > CONFIG > Portal preview > HELP (admins only). Ben 06-Nov
 - Stored per month in planner.amz_fee_lines (one row per fee line, source amazon / fulfil); planner.amz_fee_runs holds the run cursor. A run is restartable: each call works about 20 s, the page keeps calling; Fulfil pages of 500 with a pause (the live Fulfil API is shared with live HORIZON). Re-check deletes the month and reads again.
 - Compare: marketplace totals (OK when the difference is under 1% or under 1 unit, else CHECK), then fee types, then the orders behind a difference: "Amazon charged, Fulfil did not book", "Fulfil booked, Amazon did not charge this month", "Different amount", with links to Seller Central and the Fulfil sale (sale.sale.reference = Amazon order id, the biggest 200).
 - Timing: both sides use Amazon's posted date, so differences near month end are usually a refund or later shipment posted in the next month; read the order list before treating a difference as a booking error.
+
+## Prepayments: customer overpayments allocated when the order's invoice posts (v28.792, Ben 11-Nov-26)
+- Prepayments are recorded in Xero by hand as customer overpayments (RECEIVE-OVERPAYMENT). HORIZON reads them per org (UK + AU) into planner.prepayments, incrementally (If-Modified-Since), at most every 15 minutes (page open / hourly cron) or on Refresh from Xero.
+- ACCOUNTS users link each prepayment to one or more Fulfil sales orders (planner.prepayment_links). Status: Not linked, Waiting to ship, Part allocated, Check (last attempt flagged / failed), Fully allocated (no credit left).
+- Allocation (hourly n8n -> /api/cron/prepayments, or Allocate now): for each linked SO with credit left, its Fulfil invoices in state posted / paid are looked up in the prepayment's Xero org by InvoiceNumber (the Fulfil invoice number, or TEMP-SO<number> stand-ins), ACCREC only. Oldest prepayment first; amount = min(credit left, invoice amount due); Xero PUT Overpayments/{id}/Allocations dated today. The invoice's contact and currency must equal the prepayment's, otherwise it is flagged (not allocated). Each allocation or flag is logged (planner.prepayment_allocations) and emailed to PREPAY_NOTIFY_TO (default madison@, rita@) with Xero (org shortcode) and Fulfil links. An invoice is handled once per prepayment. The sandbox only logs a dry run (it shares the live Xero orgs).
 
