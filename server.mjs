@@ -11256,6 +11256,7 @@ async function _computeXeroExceptions() {
       WHERE coalesce(p.master_po,'')='' AND ${PROD_OK} LIMIT 800`)).rows;
   const TOL = 1.0;
   const DUE_TOL = 5;   // days
+  const byBill = new Map();   // v28.776: bill_id -> { x, rows } for the per-bill amount check
   linked.forEach(r => {
     r._reg = _poXeroRegion(r.cc, r.branch);
     if (r.b_status == null && r.b_total == null) return;   // bill not in the local cache yet (unsynced) → skip
@@ -11275,22 +11276,46 @@ async function _computeXeroExceptions() {
     // FX rate, so skip the amount reconciliation (the due-date check above is currency-independent and still applies).
     // This removes the biggest class of false positives (GBP/AUD/CAD/EUR bills that always "mismatched").
     if (x.ccy && x.ccy !== 'USD') return;
-    const dueH = (Number(r.total_h) || 0) - (Number(r.paid_h) || 0);
-    const paidDiff = x.paid - (Number(r.paid_h) || 0);
-    const dueDiff = x.due - dueH;
-    const totalDiff = x.total - (Number(r.total_h) || 0);
-    if (Math.abs(paidDiff) <= TOL && Math.abs(dueDiff) <= TOL && Math.abs(totalDiff) <= TOL) return;   // reconciled
-    const bits = [];
-    bits.push('Xero: due ' + _usd(x.due) + ', paid ' + _usd(x.paid) + ', total ' + _usd(x.total) + (x.ccy ? ' ' + x.ccy : '') + ' [' + (x.status || '') + ']');
-    bits.push('Horizon: due ' + _usd(dueH) + ', paid ' + _usd(r.paid_h) + ', total ' + _usd(r.total_h));
-    if (Math.abs(totalDiff) > TOL) bits.push('Bill total differs by ' + _usd(Math.abs(totalDiff)) + (totalDiff > 0 ? ' (Xero higher — invoice raised above Horizon’s value)' : ' (Horizon higher — final invoice may exceed the Xero bill)'));
-    if (Math.abs(paidDiff) > TOL) bits.push(paidDiff > 0 ? 'Xero shows ' + _usd(paidDiff) + ' more paid — Horizon may be missing this payment' : 'Horizon shows ' + _usd(-paidDiff) + ' more paid — a payment / credit note is not in Xero yet');
-    out.push({ type: 'amount_mismatch', po: r.po, supplier: r.supplier, region: r._reg, bill_ref: x.number || r.bill_ref,
-      bill_id: r.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id,
-      xero: { due: x.due, paid: x.paid, total: x.total }, horizon: { due: dueH, paid: Number(r.paid_h) || 0, total: Number(r.total_h) || 0 },
-      diff: { due: dueDiff, paid: paidDiff, total: totalDiff },
-      message: r.po + ' — amounts don’t reconcile with Xero', insight: bits.join('. '), action: 'review_po' });
+    const g = byBill.get(r.bill_id) || { x, rows: [], region: r._reg, bill_id: r.bill_id, bill_ref: x.number || r.bill_ref }; g.rows.push(r); byBill.set(r.bill_id, g);
   });
+  // v28.776 (Ben 11-Nov-26: "finding this page quite hard to understand the mismatch ... can you improve"): the amount check runs per Xero BILL, not
+  // per PO. Several POs can share one bill (Lixin's Dillard's bill: 13 POs; Ballast 1723: 9); each PO was compared with the whole bill on its own,
+  // so a $0 child PO showed the full bill as a mismatch (21 of 37 live exceptions on 11-Nov). HORIZON's figures are now added up across the bill's
+  // POs first; a shared bill that matches goes to groups_ok ("Matches when added up"). Xero settled = paid + credited, credited = total - paid - due
+  // (a credit note allocated to the bill), so a bill closed by a credit note is not a "missing payment". Each exception carries a cause, a plain
+  // reason and both sides' figures for the card view:
+  //   link  = the linked bill is under a quarter of HORIZON's value (probably a different document: freight, another PO)
+  //   total = the bill total differs from HORIZON's final invoice
+  //   pay   = totals agree, HORIZON records more (or less) paid than Xero
+  const groupsOk = [];
+  for (const g of byBill.values()) {
+    const x = g.x, rows = g.rows;
+    const hT = rows.reduce((a, r) => a + (Number(r.total_h) || 0), 0), hP = rows.reduce((a, r) => a + (Number(r.paid_h) || 0), 0);
+    const credited = Math.max(0, Math.round((x.total - x.paid - x.due) * 100) / 100), xS = x.paid + (credited > TOL ? credited : 0);
+    const totalDiff = x.total - hT, paidDiff = xS - hP, dueDiff = x.due - (hT - hP);
+    const pos = rows.map(r => ({ po: r.po, total: Number(r.total_h) || 0, paid: Number(r.paid_h) || 0 })).sort((a, b) => b.total - a.total || a.po.localeCompare(b.po));
+    if (Math.abs(paidDiff) <= TOL && Math.abs(dueDiff) <= TOL && Math.abs(totalDiff) <= TOL) {
+      if (rows.length > 1) groupsOk.push({ bill_id: g.bill_id, bill_ref: g.bill_ref, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + g.bill_id, supplier: rows[0].supplier, region: g.region,
+        status: x.status, xero: { total: x.total, paid: x.paid, credited }, horizon: { total: hT, paid: hP }, pos });
+      continue;
+    }
+    const n = v => _usd(Math.abs(v)).replace('$', '');
+    let cause, reason;
+    if (x.total > TOL && hT > TOL && x.total < hT * 0.25) { cause = 'link'; reason = 'The linked Xero bill (' + (g.bill_ref || '') + ', ' + n(x.total) + ') is far smaller than the PO (' + n(hT) + '). It is probably a different document, such as a freight invoice or another PO. Re-find the bill link.'; }
+    else if (Math.abs(totalDiff) > TOL) { cause = 'total';
+      reason = hT <= TOL ? 'No final invoice amount in HORIZON yet; the Xero bill is ' + n(x.total) + '.'
+        : 'The Xero bill is ' + n(totalDiff) + (totalDiff > 0 ? ' above' : ' below') + ' HORIZON\u2019s final invoice.'
+          + (Math.abs(paidDiff) <= TOL ? ' Payments agree (' + n(hP) + '), so only the invoice amount is out.' : x.due > TOL && hT - hP <= TOL ? ' Xero still shows ' + n(x.due) + ' owed; HORIZON thinks it is settled.' : (hP <= TOL && x.paid <= TOL ? ' Nothing is paid yet, so fix whichever is wrong before paying.' : ''));
+    } else { cause = 'pay';
+      reason = paidDiff < 0 ? 'HORIZON records ' + n(paidDiff) + ' more paid than Xero' + (credited > TOL ? ' (Xero has ' + n(x.paid) + ' paid and ' + n(credited) + ' credited)' : '') + '. A payment or a deposit credit note has not reached Xero yet.'
+        : 'Xero shows ' + n(paidDiff) + ' more paid than HORIZON. Record the payment in HORIZON.'; }
+    if (rows.length > 1) reason = rows.length + ' POs share this bill; their HORIZON figures are added up. ' + reason;
+    out.push({ type: 'amount_mismatch', cause, reason, po: pos[0].po, pos: rows.length > 1 ? pos : null, supplier: rows[0].supplier, region: g.region, bill_ref: g.bill_ref, bill_status: x.status,
+      bill_id: g.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + g.bill_id,
+      xero: { total: x.total, paid: x.paid, credited, due: x.due }, horizon: { total: hT, paid: hP, due: hT - hP },
+      diff: { due: dueDiff, paid: paidDiff, total: totalDiff },
+      message: (rows.length > 1 ? 'Bill ' + g.bill_ref : pos[0].po) + ' \u00b7 amounts don\u2019t reconcile with Xero', insight: reason, action: cause === 'link' ? 'find_links' : 'review_po' });
+  }
   // uncreated credit notes (a common cause of a paid mismatch): starting deposit + linked bill, none queued
   const cn = (await pool.query(
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.pay_start_deposit_assigned,0) amt,
@@ -11310,7 +11335,7 @@ async function _computeXeroExceptions() {
     message: r.po + ' — ' + _usd(r.amt) + ' starting deposit not yet drawn down',
     insight: 'Create a credit note coded to Stock Deposits (602)' + (r.prod_no ? ', tagged P' + String(r.prod_no).replace(/^P/i, '') : '') + ', allocated to bill ' + (r.bill_ref || 'the PO bill') + ' — until then Xero shows more owed than Horizon.', action: 'create_credit_note' }));
   const byType = {}; out.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
-  return { count: out.length, by_type: byType, exceptions: out, computed_at: new Date().toISOString() };
+  return { count: out.length, by_type: byType, exceptions: out, groups_ok: groupsOk, computed_at: new Date().toISOString() };
 }
 // v28.720 (Ben 05-Nov-26: "can we add a DISMISS section which remembers the dismissed items and can be hidden from view (and toggled to view
 // again)"): each exception has a key (type | PO | bill); dismissals live in app_settings xero_exc_dismissed { key: { by, at, note } }, applied on
@@ -11362,6 +11387,29 @@ app.post('/api/supply/xero/exceptions/dismiss', async (req, res) => {   // { key
     if (b.dismiss === false) delete dis[key]; else dis[key] = { by: (req.me && req.me.email) || null, at: new Date().toISOString(), note: String(b.note || '').slice(0, 300) };
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('xero_exc_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), (req.me && req.me.email) || null]);
     res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.776 (Ben 11-Nov-26): "Use Xero amount" on a Bill total differs card: HORIZON's final invoice amount = the linked Xero bill's total (HORIZON only,
+// never Xero). Single-PO USD bills only: a shared bill cannot say which PO the difference belongs to. { po, bill_id, confirm: true }.
+app.post('/api/supply/xero/exceptions/use-xero-total', async (req, res) => {
+  const b = req.body || {}, po = String(b.po || ''), billId = String(b.bill_id || '');
+  if (!po || !billId) return res.status(400).json({ error: 'po and bill_id required' });
+  if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required' });
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    if (me.live && !(me.is_admin || me.accounts_access || me.supply_edit)) return res.status(403).json({ error: 'SUPPLY edit access needed' }); }
+  catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
+  try {
+    const n = (await pool.query(`SELECT count(*)::int n FROM planner.po_links WHERE system='xero' AND status='linked' AND external_id=$1`, [billId])).rows[0].n;
+    if (n !== 1) return res.status(400).json({ error: 'this Xero bill is linked to ' + n + ' POs; set the final invoice on the right PO by hand' });
+    const r = (await pool.query(`SELECT round(p.supplier_invoice_total,2)::text old, round(b.total,2)::text total, b.currency_code ccy FROM planner.purchase_orders p
+        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id=$2 JOIN planner.xero_bills b ON b.invoice_id=l.external_id WHERE p.po=$1`, [po, billId])).rows[0];
+    if (!r) return res.status(404).json({ error: 'PO / bill link not found' });
+    if (r.ccy && r.ccy !== 'USD') return res.status(400).json({ error: 'the Xero bill is in ' + r.ccy + '; HORIZON holds USD' });
+    await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [r.total, po]);
+    const by = (req.me && req.me.email) || null;
+    logPoChange(po, 'Final invoice amount', (r.old != null ? '$' + r.old : '(none)') + ' \u2192 $' + r.total + ' (from the Xero bill, Xero payments page)', by);
+    try { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); invalidateSupplyCaches(); } catch (_) {}
+    res.json({ ok: true, po, from: r.old, set: r.total });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/xero/exceptions', async (req, res) => {
   try {
     const fresh = String(req.query.refresh || '') === '1';

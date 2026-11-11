@@ -13515,6 +13515,55 @@ function hzPortalHelp(el){
   var _xpqTab='bill';   // active inner tab (Bills / Payments / Credit notes / Exceptions)
   var _xpqExc=null;     // last-loaded exceptions payload
   var _xpqQueue=null, _xpqExcPending=false;   // v28.088: the push queue + a flag while the (slow, live-Xero) exceptions sweep is still loading
+  // v28.776 (Ben 11-Nov-26: "finding this page quite hard to understand the mismatch ... show me an improved way", mockup approved): amount
+  // mismatches as one card per Xero BILL, HORIZON and Xero side by side (bill total / paid / still owed + gap, the off row in red), grouped by
+  // cause (server: pay / total / link) with a plain reason and the matching action. Shared bills that match once their POs are added up sit in a
+  // folded "Matches when added up" section (server groups_ok). Due-date and credit-note exceptions keep the table below.
+  var XR_CAUSE=[{k:'pay',dot:'var(--neg)',t:'Paid amounts differ',b:'HORIZON and Xero agree on the bill total, but not on what is paid. Each card says which side is ahead.'},
+    {k:'total',dot:'var(--amber)',t:'Bill total differs',b:'The Xero bill and HORIZON’s final invoice are different amounts.'},
+    {k:'link',dot:'var(--blue)',t:'Probably the wrong bill',b:'The linked Xero bill looks like a different document.'}];
+  function xrNum(v){ v=Math.round((Number(v)||0)*100)/100; return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function xrCards(amt,groupsOk){
+    var f=window._xpqCause||'all', cnt={}; amt.forEach(function(e){ var c=e.cause||'pay'; cnt[c]=(cnt[c]||0)+1; });
+    var falseAlarms=(groupsOk||[]).reduce(function(a,g){ return a+((g.pos||[]).length); },0);
+    var css='<style id="xr-css">.xr-chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px}.xr-chip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:6px 11px;cursor:pointer;font:inherit;font-size:12px;color:var(--muted)}'
+      +'.xr-chip b{font-size:15px;color:var(--text,inherit);font-variant-numeric:tabular-nums}.xr-chip.on{border-color:var(--blue);background:var(--blue-soft)}.xr-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}'
+      +'.xr-sec{margin:4px 0 14px}.xr-sec h4{margin:0 0 2px;font-size:13px;display:flex;align-items:center;gap:8px}.xr-sec>p{margin:0 0 8px;font-size:12px;color:var(--muted)}'
+      +'.xr-card{border:1px solid var(--line);background:var(--card);border-radius:8px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.45fr) minmax(0,1.1fr);gap:10px 18px;padding:10px 12px;margin-bottom:8px;align-items:start}'
+      +'@media (max-width:900px){.xr-card{grid-template-columns:1fr}}.xr-card.dis{opacity:.5}.xr-po{font-family:ui-monospace,Menlo,monospace;font-weight:600;font-size:12.5px;word-break:break-word}.xr-meta{font-size:11.5px;color:var(--muted);word-break:break-word}'
+      +'.xr-led{border-collapse:collapse;width:100%;font-size:12px}.xr-led th{font-weight:500;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;text-align:left;padding:0 6px 3px 0}'
+      +'.xr-led td{text-align:left;padding:3px 6px 3px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}.xr-led td:first-child{color:var(--muted)}.xr-led tr.off td:not(:first-child){background:var(--neg-bg)}.xr-led tr.off td.g{color:var(--neg);font-weight:600}'
+      +'.xr-fix{font-size:12px;display:flex;flex-direction:column;gap:6px}.xr-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}'
+      +'.xr-grp{border:1px solid var(--line);background:var(--card);border-radius:8px;margin-bottom:6px}.xr-grp summary{cursor:pointer;padding:8px 12px;font-size:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}'
+      +'.xr-ok{color:var(--pos);font-weight:600;font-size:11.5px}.xr-grp table{border-collapse:collapse;font-size:12px;margin:0 12px 10px}.xr-grp td,.xr-grp th{text-align:left;padding:3px 16px 3px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}.xr-grp th{border-top:none;color:var(--faint);font-weight:500;font-size:10.5px;text-transform:uppercase}</style>';
+    var chips=[['all','',amt.length,'to fix']].concat(XR_CAUSE.map(function(c){ return [c.k,c.dot,cnt[c.k]||0,c.t]; }));
+    if((groupsOk||[]).length) chips.push(['grp','var(--pos)',groupsOk.length+' bill'+(groupsOk.length===1?'':'s'),'match when added up ('+falseAlarms+' POs)']);
+    var h=css+'<div class="xr-chips">'+chips.map(function(c){ return '<button type="button" class="xr-chip xpq-chip'+(f===c[0]?' on':'')+'" data-k="'+c[0]+'">'+(c[1]?'<i class="xr-dot" style="background:'+c[1]+'"></i>':'')+'<b>'+c[2]+'</b>'+esc(c[3])+'</button>'; }).join('')+'</div>';
+    var _xl='color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font:inherit;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap';
+    function card(e){ var X=e.xero||{}, H=e.horizon||{}, cr=Number(X.credited)||0;
+      var rows=[['Bill total',H.total,X.total],['Paid'+(cr>1?' <span class="mut tiny">(Xero: '+xrNum(X.paid)+' paid + '+xrNum(cr)+' credited)</span>':''),H.paid,(Number(X.paid)||0)+(cr>1?cr:0)],['Still owed',H.due,X.due]];
+      var led='<table class="xr-led"><thead><tr><th></th><th>HORIZON</th><th>Xero</th><th>Gap</th></tr></thead><tbody>'+rows.map(function(r){ var g=(Number(r[2])||0)-(Number(r[1])||0), off=Math.abs(g)>1;
+        return '<tr class="'+(off?'off':'')+'"><td>'+r[0]+'</td><td>'+xrNum(r[1])+'</td><td>'+xrNum(r[2])+'</td><td class="g">'+(off?(g>0?'+':'−')+xrNum(Math.abs(g)):'·')+'</td></tr>'; }).join('')+'</tbody></table>';
+      var single=!(e.pos&&e.pos.length>1);
+      var b=[];
+      if(e.cause==='total'&&single&&Number(X.total)>0&&!e.dismissed) b.push('<button type="button" class="save-btn xpq-usex" data-po="'+esc(e.po)+'" data-bill="'+esc(e.bill_id||'')+'" data-amt="'+esc(X.total)+'" style="background:var(--blue);color:#fff;border-color:var(--blue);padding:3px 10px;font-size:12px">Use Xero amount</button>');
+      if(e.cause==='link'&&!e.dismissed) b.push('<button type="button" class="save-btn xpq-find" data-po="'+esc(e.po)+'" style="background:var(--blue);color:#fff;border-color:var(--blue);padding:3px 10px;font-size:12px">Re-find bill link</button>');
+      b.push('<button class="lnk-btn xpq-openpo" data-po="'+esc(e.po)+'" style="'+_xl+'">'+(e.cause==='pay'?'check PO payments':'open PO')+' ↗</button>');
+      if(e.bill_url) b.push('<a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="'+_xl+'">open in Xero ↗</a>');
+      b.push('<button class="lnk-btn xpq-dis" data-key="'+esc(e.key||'')+'" data-on="'+(e.dismissed?'0':'1')+'" style="'+_xl+';color:var(--muted)">'+(e.dismissed?'reopen':'dismiss')+'</button>');
+      var posList=single?'':'<div class="xr-meta" style="margin-top:3px">'+e.pos.map(function(p){ return esc(p.po)+' '+xrNum(p.total); }).join(' · ')+'</div>';
+      return '<div class="xr-card'+(e.dismissed?' dis':'')+'"><div><div class="xr-po">'+esc(single?e.po:'Bill '+(e.bill_ref||''))+'</div><div class="xr-meta">'+esc(e.supplier||'')+' · Xero '+esc(e.region||'')+'</div>'
+        +'<div class="xr-meta">'+(single?'Bill '+esc(e.bill_ref||''):e.pos.length+' POs on this bill')+' · '+esc(e.bill_status||'')+'</div>'+posList+(e.dismissed?'<div class="xr-meta">dismissed</div>':'')+'</div>'
+        +'<div style="min-width:0">'+led+'</div><div class="xr-fix"><div>'+esc(e.reason||e.insight||'')+'</div><div class="xr-btns">'+b.join('')+'</div><div class="xpq-usex-cfm"></div></div></div>'; }
+    XR_CAUSE.forEach(function(c){ if(f!=='all'&&f!==c.k)return; var L=amt.filter(function(e){ return (e.cause||'pay')===c.k; }); if(!L.length)return;
+      L.sort(function(a,b){ return Math.max(Math.abs((b.diff||{}).total||0),Math.abs((b.diff||{}).paid||0))-Math.max(Math.abs((a.diff||{}).total||0),Math.abs((a.diff||{}).paid||0)); });
+      h+='<div class="xr-sec"><h4><i class="xr-dot" style="background:'+c.dot+'"></i>'+esc(c.t)+' <span class="mut tiny">('+L.length+')</span></h4><p>'+esc(c.b)+'</p>'+L.map(card).join('')+'</div>'; });
+    if(!amt.length&&f!=='grp') h+='<div class="mut" style="padding:6px 0 12px">✓ Every Xero bill amount matches HORIZON.</div>';
+    if((groupsOk||[]).length&&(f==='all'||f==='grp')) h+='<div class="xr-sec"><h4><i class="xr-dot" style="background:var(--pos)"></i>Matches when added up</h4><p>Several POs share one Xero bill. Added up, HORIZON matches the bill, so nothing to do.</p>'
+      +groupsOk.map(function(g){ var X=g.xero||{}, H=g.horizon||{}; return '<details class="xr-grp"><summary><b class="xr-po">'+esc(g.bill_ref||'')+'</b><span class="xr-meta">'+esc(g.supplier||'')+' · '+(g.pos||[]).length+' POs · '+esc(g.status||'')+'</span><span class="xr-ok">✓ '+xrNum(H.total)+' billed, '+xrNum(H.paid)+' paid</span>'+(g.bill_url?'<a href="'+esc(g.bill_url)+'" target="_blank" rel="noopener" style="'+_xl+'">open in Xero ↗</a>':'')+'</summary>'
+        +'<table><thead><tr><th>PO</th><th>HORIZON total</th><th>HORIZON paid</th></tr></thead><tbody>'+(g.pos||[]).map(function(p){ return '<tr><td>'+esc(p.po)+'</td><td>'+xrNum(p.total)+'</td><td>'+xrNum(p.paid)+'</td></tr>'; }).join('')
+        +'<tr><td><b>Added up</b></td><td><b>'+xrNum(H.total)+'</b></td><td><b>'+xrNum(H.paid)+'</b></td></tr><tr><td>Xero bill</td><td>'+xrNum(X.total)+'</td><td>'+xrNum((Number(X.paid)||0)+(Number(X.credited)||0))+'</td></tr></tbody></table></details>'; }).join('')+'</div>';
+    return h; }
   function renderXeroPayments(b){ b.innerHTML='<div class="count">Loading…</div>';
     // v28.088 (Ben): the Xero-exceptions reconciliation is a LIVE Xero bill-by-bill sweep (~23s cold, once per 15-min
     // memo window). It used to be awaited together with the push queue, so the WHOLE page hung on "Loading…" for ~23s
@@ -13534,6 +13583,7 @@ function hzPortalHelp(el){
         +'<div class="count" style="opacity:.7;padding:14px">⏳ Checking Xero… the live reconciliation reads every linked bill and can take ~20s on first load. The rest of the page is ready.</div>'; }
       var exAll=(_xpqExc&&_xpqExc.exceptions)||[], nDis=exAll.filter(function(e){ return e.dismissed; }).length;   /* v28.720: dismissed items hidden unless toggled */
       var ex=window._xpqShowDis?exAll:exAll.filter(function(e){ return !e.dismissed; });
+      var exAmt=ex.filter(function(e){ return e.type==='amount_mismatch'; }); ex=ex.filter(function(e){ return e.type!=='amount_mismatch'; });   /* v28.776: amounts render as bill cards (xrCards) */
       var body=ex.length?ex.map(function(e){
         // v28.092 (Ben): every row gets Open PO (opens the PO drawer on the Payments tab) + Open in Xero (the bill),
         // plus the type-specific action (Credit note / Find links) where relevant.
@@ -13553,10 +13603,11 @@ function hzPortalHelp(el){
           +'<td class="l" style="font-family:ui-monospace,Menlo,monospace;width:150px;max-width:150px;white-space:normal;word-break:break-word">'+esc(e.po||'')+(e.bill_ref?'<div class="mut tiny">'+esc(e.bill_ref)+'</div>':'')+'</td><td class="l">'+esc(e.supplier||'')+'</td>'
           +'<td class="l" style="white-space:normal;word-break:break-word;min-width:320px;width:100%"><span style="font-size:12px;line-height:1.45">'+esc(e.insight||e.message||'')+'</span></td>'
           +'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
-        :'<tr><td colspan="5" class="l mut" style="padding:10px">'+(nDis&&!window._xpqShowDis?'✓ No open exceptions ('+nDis+' dismissed).':'✓ No exceptions — Xero and Horizon reconcile.')+'</td></tr>';
+        :'<tr><td colspan="5" class="l mut" style="padding:10px">'+(nDis&&!window._xpqShowDis?'✓ No open exceptions ('+nDis+' dismissed).':'✓ No due-date or credit-note exceptions.')+'</td></tr>';
       return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s. '+(_xpqExc&&_xpqExc.computed_at?'Checked '+esc(String(_xpqExc.computed_at).slice(11,16))+' UTC. ':'')
         +(nDis?'<label style="margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="xpq-showdis"'+(window._xpqShowDis?' checked':'')+'> Show dismissed ('+nDis+')</label>':'')
         +(function(){ var D=exAll.filter(function(e){ return e.type==='due_date_mismatch'&&!e.dismissed; }); return D.length?'<div style="margin:6px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="tiny"><b>'+D.length+'</b> due-date mismatches:</span><button class="save-btn light xpq-dueall" data-to="xero" style="padding:2px 10px;font-size:11px">All: HORIZON → Xero</button><button class="save-btn light xpq-dueall" data-to="horizon" style="padding:2px 10px;font-size:11px">All: Xero → HORIZON</button><span id="xpq-due-msg" class="tiny"></span></div><div id="xpq-due-cfm"></div>':''; })()+'<button class="lnk-btn" id="xpq-exc-refresh" style="color:var(--blue)">↻ re-check live</button> · <button class="lnk-btn" id="xpq-resolve-all" style="color:var(--blue)" title="Sweep every PO’s links from Xero / Fulfil / Flexport / DHL so exceptions cover the whole book">⟳ resolve all links</button></div>'
+        +xrCards(exAmt,(_xpqExc&&_xpqExc.groups_ok)||[])+'<div style="font-weight:600;font-size:13px;margin:6px 0 6px">Due dates and credit notes</div>'
         +'<div class="tw" style="width:100%"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l" style="min-width:140px;width:140px">Type</th><th class="l" style="width:150px;max-width:150px">PO</th><th class="l" style="width:150px">Supplier</th><th class="l">Insight</th><th class="l" style="width:140px"></th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
     function draw(j){ var items=(j&&j.items)||[], counts=(j&&j.counts)||{}; var excN=(_xpqExc&&_xpqExc.count)||0;
       function row(it){
@@ -13612,6 +13663,14 @@ function hzPortalHelp(el){
           (_xpqExc.exceptions||[]).forEach(function(e){ if(e.key===btn.dataset.key)e.dismissed=on?{by:(ME&&ME.email)||'',at:new Date().toISOString()}:null; });
           _xpqExc.count=(_xpqExc.exceptions||[]).filter(function(e){ return !e.dismissed; }).length; try{ _navCounts.xeropayments=_xpqExc.count; updateNavBadges(); }catch(_){} draw(_xpqQueue); })
           .catch(function(e){ btn.disabled=false; btn.textContent=e.message; }); }; });
+      b.querySelectorAll('.xpq-chip').forEach(function(c){ c.onclick=function(){ var k=c.dataset.k; window._xpqCause=(window._xpqCause===k&&k!=='all')?'all':k; draw(_xpqQueue); }; });   /* v28.776 */
+      b.querySelectorAll('.xpq-usex').forEach(function(btn){ btn.onclick=function(){ var box=btn.closest('.xr-fix').querySelector('.xpq-usex-cfm'); if(!box)return;   /* v28.776: confirmed in the page */
+        box.innerHTML='<div style="border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--blue-soft)">Set '+esc(btn.dataset.po)+'\u2019s final invoice amount to <b>'+xrNum(btn.dataset.amt)+'</b> (the Xero bill)? HORIZON only; Xero is not changed. <button type="button" class="save-btn xpq-usex-go" style="padding:2px 10px;font-size:11px">Confirm</button> <button type="button" class="lnk-btn xpq-usex-x" style="color:var(--muted)">cancel</button> <span class="xpq-usex-msg tiny"></span></div>';
+        box.querySelector('.xpq-usex-x').onclick=function(){ box.innerHTML=''; };
+        box.querySelector('.xpq-usex-go').onclick=function(){ var go=this, msg=box.querySelector('.xpq-usex-msg'); go.disabled=true; go.textContent='Saving\u2026';
+          fetch('/api/supply/xero/exceptions/use-xero-total',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:btn.dataset.po,bill_id:btn.dataset.bill,confirm:true})}).then(function(r){ return r.json(); }).then(function(j){ if(j.error)throw new Error(j.error);
+            box.innerHTML='<span class="tiny" style="color:var(--pos)">\u2713 Final invoice set to '+xrNum(j.set)+'. Re-checking\u2026</span>'; try{ invalidateDerived(); }catch(_){} loadExceptions(true); })
+            .catch(function(e){ go.disabled=false; go.textContent='Confirm'; msg.style.color='var(--neg)'; msg.textContent=e.message; }); }; }; });
       b.querySelectorAll('.xpq-openpo').forEach(function(btn){ btn.onclick=function(){ try{ openPODrawer(btn.dataset.po,'pay'); }catch(e){ try{ gotoPO(btn.dataset.po,'pay'); }catch(_){} } }; });   // v28.092: open the PO drawer (Payments tab) in place, not navigate to the grid
       b.querySelectorAll('.xpq-find').forEach(function(btn){ btn.onclick=function(){ btn.textContent='finding…'; fetch('/api/supply/po/'+encodeURIComponent(btn.dataset.po)+'/links?refresh=1').then(function(r){return r.json();}).then(function(){ exrf&&exrf.click&&exrf.click(); btn.textContent='done'; }).catch(function(){ btn.textContent='failed'; }); }; });
       b.querySelectorAll('.xpq-mkcn').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Create a Xero credit note for '+btn.dataset.po+' ('+money(btn.dataset.amt)+') — coded to Stock Deposits (602), allocated to the PO bill?\n\nThis writes to live Xero.'))return; btn.disabled=true; btn.textContent='Creating…';
