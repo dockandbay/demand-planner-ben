@@ -22674,7 +22674,7 @@ const _olDate = v => v == null ? null : typeof v === 'object' ? (v.iso_string ||
 // Zero-price lines are free: units count for demand, revenue 0, left out of ASP.
 const OL_LOCAL_CCY = { UK: 'GBP', US: 'USD', EU: 'EUR', AU: 'AUD', CA: 'CAD' };
 const OL_NON_MERCH = new Set(['SHIPPING', 'PERSONALISATION_HIDDEN_PRODUCT']);
-const OL_FIELDS = ['id', 'sale', 'product.code', 'quantity', 'quantity_canceled', 'unit_price', 'amount', 'untaxed_amount_cpny_ccy_cache', 'sale_date', 'shipping_date', 'is_return', 'write_date',
+const OL_FIELDS = ['id', 'sale', 'type', 'parent', 'product.code', 'quantity', 'quantity_canceled', 'unit_price', 'amount', 'untaxed_amount_cpny_ccy_cache', 'sale_date', 'shipping_date', 'is_return', 'write_date',
   'warehouse.code', 'product.account_category.name', 'sale.number', 'sale.reference', 'sale.state', 'sale.channel.name', 'sale.channel_segment', 'sale.party.name', 'sale.currency.code', 'sale.company.code'];
 const OL_COLS = ['line_id', 'sale_id', 'so_number', 'reference', 'fulfil_channel', 'channel_segment', 'customer', 'country', 'channel', 'is_wholesale', 'is_key_account', 'is_custom', 'sku', 'qty', 'unit_price', 'currency', 'order_date', 'ship_date', 'sale_state', 'basis', 'demand_date', 'iso_week',
   'company', 'warehouse_code', 'is_historical', 'line_amount', 'amount_company', 'local_ccy', 'revenue_local', 'revenue_gbp', 'is_free', 'class_rule', 'product_category', 'fulfil_write_at'];
@@ -22726,7 +22726,7 @@ function olRow(ctx, l) {
   return [l.id, l.sale, l['sale.number'] || null, ref, l['sale.channel.name'] || null, l['sale.channel_segment'] || null, cust, mp.country, mp.channel,
     !!mp.wholesale, !!key, !!mp.custom, sku, qty, _fulfilNum(l.unit_price), l['sale.currency.code'] || null, od, sd, l['sale.state'] || null,
     shipBasis ? 'ship' : 'order', dd, _olIsoMonday(dd),
-    co, l['warehouse.code'] || null, !!mp.hist, _olR2(amt), _olR2(amtC), lc, _olR2(loc), _olR2(gbp), free, mp.rule || null, cat, wd ? wd.replace('T', ' ').slice(0, 26) + '+00' : null];
+    co, l['warehouse.code'] || null, !!mp.hist, _olR2(amt), _olR2(amtC), lc, _olR2(loc), _olR2(gbp), free, mp.rule || (l._orphan ? 'kit_child_orphan' : null), cat, wd ? wd.replace('T', ' ').slice(0, 26) + '+00' : null];
 }
 async function olUpsert(out) {   // batched multi-row upsert (one statement per 1,000 lines)
   for (let i = 0; i < out.length; i += 1000) { const b = out.slice(i, i + 1000);
@@ -22735,9 +22735,22 @@ async function olUpsert(out) {   // batched multi-row upsert (one statement per 
 }
 // all product lines of the given orders (keyset by line id, 500 a page: Fulfil's page cap)
 async function _olLinesOf(cfg, saleIds) { const all = []; let c = 0;
-  for (;;) { const ls = await _olGet(cfg, '/model/sale.line/search_read', [[['sale', 'in', saleIds], ['type', '=', 'line'], ['product', '!=', null], ['id', '>', c]], 0, 500, [['id', 'ASC']], OL_FIELDS]);
+  for (;;) { const ls = await _olGet(cfg, '/model/sale.line/search_read', [[['sale', 'in', saleIds], ['type', 'in', ['line', 'bundle']], ['product', '!=', null], ['id', '>', c]], 0, 500, [['id', 'ASC']], OL_FIELDS]);
     if (!Array.isArray(ls) || !ls.length) break; all.push(...ls); c = ls[ls.length - 1].id; if (ls.length < 500) break; }
-  return all; }
+  return olFoldKits(all); }
+// v28.781 (Kathryn 10-Nov / brief BUILD_NOTE_set_sales_matching_2026-11-11.md): Fulfil stores a set order as a 'bundle' line on the kit code
+// (often market-prefixed, e.g. AU-TOWLB-CAB-LG-4SETG; quantity = sets, amount 0) plus one child line per component (parent = the bundle line)
+// that carries the split revenue. The set sale is the BUNDLE: it takes its children's amounts as its revenue, and the child lines are dropped,
+// so components are no longer counted as single sales. OL_SKU strips the market prefix to the HORIZON set SKU (Getaway Glow -SET kits keep
+// their own -SET SKU). A child whose bundle is not in the batch is kept as a single and flagged (class_rule 'kit_child_orphan').
+function olFoldKits(lines) {
+  const byId = new Map(lines.map(l => [l.id, l])), num = v => Number(_fulfilNum(v)) || 0, out = [];
+  lines.forEach(l => { if (l.type === 'bundle') { l._kit = { amt: 0, amtC: 0, n: 0 }; } });
+  lines.forEach(l => { const p = l.parent ? byId.get(Number(l.parent)) : null;
+    if (l.parent && p && p._kit) { p._kit.amt += num(l.amount); p._kit.amtC += num(l.untaxed_amount_cpny_ccy_cache); p._kit.n++; return; }
+    if (l.parent) l._orphan = true; out.push(l); });
+  out.forEach(l => { if (l._kit) { l.amount = { decimal: String(Math.round((num(l.amount) + l._kit.amt) * 100) / 100) }; l.untaxed_amount_cpny_ccy_cache = { decimal: String(Math.round((num(l.untaxed_amount_cpny_ccy_cache) + l._kit.amtC) * 100) / 100) }; } });
+  return out; }
 // v28.761: lines the incremental sync brought in for a month that is already rolled up would count twice: they are taken out again and
 // that Fulfil channel x month is queued (app_settings sales_refresh_queue) for a re-import, which replaces the month whole.
 async function _olStaleCheck(out) {

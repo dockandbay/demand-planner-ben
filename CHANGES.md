@@ -1,3 +1,9 @@
+## v28.781 (11-Nov-26) Fulfil sales import counts sets as sets
+- Brief docs/specs/BUILD_NOTE_set_sales_matching_2026-11-11.md (Kathryn 10-Nov-26). Fulfil stores a set order as a 'bundle' line on the kit code (often market-prefixed, AU-TOWLB-CAB-LG-4SETG) with amount 0, plus a child line per component (parent = the bundle) carrying the split revenue. The import read only 'line' lines, so sets vanished and their components counted as singles.
+- Now: bundle lines are read too; each bundle is the set sale (quantity = sets, revenue = its children's amounts) and its child lines are dropped. The market prefix is stripped to the HORIZON set SKU as before (OL_SKU). A child whose bundle is missing is kept and flagged (class_rule kit_child_orphan).
+- Sandbox AU Sep / Oct re-import matches the brief: 4SETG 9 / 6, 4SETM 9 / 7, TOWLB-CAB-LG-NAVY-R Oct singles 70 (45 DTC + 25 Amazon; the 61 component units no longer count), Until (International Distributor AU) 240 present.
+- The sheet feed (n8n 0cnelOi4FWiG3NLF, Google Sheet "ACTUALS AIRTABLE - EXCLUDE B2B ORDERS") is not HORIZON code and is unchanged; post-go-live months are fixed by moving them to the Fulfil source.
+- No migration, no new env vars, no new cron routes.
 ## v28.780 (11-Nov-26) Coghlans SFTP removed; more security review fixes
 - Finding 21 (Ben: "fully remove this feature, not required"): CONFIG > Coghlans SFTP is gone: page, GET /api/config/coghlans-sftp/list, lib/coghlans_sftp.mjs, the ssh2-sftp-client dependency (package.json + lock) and the COGHLANS_SFTP_* / WEBSHARE_PROXY_* entries in .env.example. Those env vars can be deleted from Vercel.
 - Finding 19: a 500 no longer sends a database / driver error to a non-admin: they get "Something went wrong on the server (ref xxxxxx)" and the full message is in the log under that ref. Our own messages (first line, 200 characters) still show. Admins and the sandbox see everything. clientErr(e) on 916 routes.
