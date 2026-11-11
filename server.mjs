@@ -9325,6 +9325,17 @@ async function xeroDayUse() {   // v28.703 (Xero calls plan item 5): calls used 
     out[g] = left == null || !fresh ? { left: null, used: null, at: at || null } : { left, used: Math.max(0, 1000 - left), at }; }
   return out;
 }
+// v28.791 (Ben 11-Nov-26: Xero UK ran out at 09:29 UTC, so payment runs could not post): below XERO_LIVE_RESERVE calls left (default 150) a live
+// Xero READ is refused when it comes from a cron, background work or a page read (GET route); reads inside a user action (POST: payment-run
+// preflight / preview / post, bill creation) and every write still go through. Uses the instance's last reading of Xero's remaining count.
+const XERO_LIVE_RESERVE = Math.max(0, Number(process.env.XERO_LIVE_RESERVE) || 150);
+function xeroLiveReserve(region, opts) {
+  if (IS_SANDBOX || (opts.method || 'GET') !== 'GET') return;
+  const q = _xeroQuota[region]; if (!q || q.day == null || q.day >= XERO_LIVE_RESERVE || !q.at || xeroDayKey() !== new Date(Date.parse(q.at) + 30 * 60000).toISOString().slice(0, 10)) return;
+  let cl = 'background'; try { const st = _reqStore.getStore(), r = st && st.req; if (r) cl = r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]; } catch (_) {}
+  if (/^POST \/api\/(?!cron\/)/.test(cl)) return;   // a user action: allowed into the reserve
+  const e = new Error('Xero ' + region.toUpperCase() + ' has ' + q.day + ' calls left today: reads from ' + cl + ' are paused to keep ' + XERO_LIVE_RESERVE + ' for posting (resets 00:00 UTC)');
+  e.code = 429; e.xero_reserve = true; throw e; }
 function xeroSandboxGuard(region) {   // throws before a sandbox call that would break the budget; counts the call otherwise
   if (!IS_SANDBOX) return;
   const used = xeroSandboxUse(region), q = _xeroQuota[region];
@@ -9337,8 +9348,8 @@ function xeroSandboxGuard(region) {   // throws before a sandbox call that would
 const _xeroAccMemo = new Map();   // v28.260: region|path -> { at, j } for GET /Accounts (chart of accounts, 66 rows, read on every bill push / payment plan); 10 min, opts.fresh bypasses
 async function xeroFetch(region, path, opts) {
   region = xeroRegion(region); opts = opts || {};
-  const _memoK = ((opts.method || 'GET') === 'GET' && /^\/api\.xro\/2\.0\/Accounts(\?|$)/.test(path) && !opts.fresh) ? region + '|' + path : null;
-  if (_memoK) { const m = _xeroAccMemo.get(_memoK); if (m && Date.now() - m.at < 600000) return m.j; }
+  const _memoK = ((opts.method || 'GET') === 'GET' && /^\/api\.xro\/2\.0\/(Accounts|TrackingCategories)(\?|$)/.test(path) && !opts.fresh) ? region + '|' + path : null;   // v28.791: + tracking categories, 30 min (payment-run preflight read both every time)
+  if (_memoK) { const m = _xeroAccMemo.get(_memoK); if (m && Date.now() - m.at < 1800000) return m.j; }
   const _j = await _xeroFetch0(region, path, opts); if (_memoK) _xeroAccMemo.set(_memoK, { at: Date.now(), j: _j }); return _j;
 }
 async function _xeroFetch0(region, path, opts) { const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Xero)'); e.code = 503; throw e; }
@@ -9348,6 +9359,7 @@ async function _xeroFetch0(region, path, opts) { const token = await xeroToken(r
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
     xeroSandboxGuard(region);   // v28.703: sandbox only, see above
+    xeroLiveReserve(region, opts);   // v28.791: live keeps a reserve for posting
     { const _rs = region + ' ' + (opts.method || 'GET') + ' ' + ((String(path).match(/^\/api\.xro\/2\.0\/([A-Za-z]+)/) || [, 'other'])[1]); const _bt = _xeroCallN.by || (_xeroCallN.by = {}); _bt[_rs] = (_bt[_rs] || 0) + 1; }   // v28.703: calls by org + method + resource (bills-sync status), to aim the caching (plan item 4)
     _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;
     // v28.743 (Ben, health review 09-Nov-26: Xero UK fell to 133 calls left on 04-Nov and nothing said who used them): every call is counted
@@ -11665,19 +11677,20 @@ async function xeroBillPaysState(force) {
       const o = st.orgs[org] || (st.orgs[org] = { wm: null, full_at: null, pays: {}, cns: {} });
       const full = !o.wm || !o.full_at || Date.now() - Date.parse(o.full_at) > XBP_FULL, t0 = new Date().toISOString();
       const since = full ? null : new Date(Date.parse(o.wm) - 10 * 60000);   // 10 min overlap
-      if (full) { o.pays = {}; o.cns = {}; }
+      const P = full ? {} : Object.assign({}, o.pays), C = full ? {} : Object.assign({}, o.cns);   // swapped in only when both lists are read
       const pays = await accXeroList(org, 'Payments', 'PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(2025,7,1)', since ? { since } : {});
-      pays.forEach(p => { if (!p.PaymentID) return; if (/^DELETED$/i.test(String(p.Status || ''))) { delete o.pays[p.PaymentID]; return; }
-        o.pays[p.PaymentID] = [p.Invoice && p.Invoice.InvoiceID, _xd(p.Date), Number(p.Amount) || 0]; });
+      pays.forEach(p => { if (!p.PaymentID) return; if (/^DELETED$/i.test(String(p.Status || ''))) { delete P[p.PaymentID]; return; }
+        P[p.PaymentID] = [p.Invoice && p.Invoice.InvoiceID, _xd(p.Date), Number(p.Amount) || 0]; });
       const cns = await accXeroList(org, 'CreditNotes', 'Type=="ACCPAYCREDIT" AND Date>=DateTime(2025,7,1)', since ? { since } : {});
-      cns.forEach(c => { if (!c.CreditNoteID) return; if (/^(DELETED|VOIDED)$/i.test(String(c.Status || ''))) { delete o.cns[c.CreditNoteID]; return; }
-        o.cns[c.CreditNoteID] = (c.Allocations || []).map(x => [x.Invoice && x.Invoice.InvoiceID, _xd(x.Date), Number(x.Amount) || 0]); });
-      o.wm = t0; if (full) o.full_at = t0; o.last_calls = { full, payments: pays.length, credit_notes: cns.length };
+      cns.forEach(c => { if (!c.CreditNoteID) return; if (/^(DELETED|VOIDED)$/i.test(String(c.Status || ''))) { delete C[c.CreditNoteID]; return; }
+        C[c.CreditNoteID] = (c.Allocations || []).map(x => [x.Invoice && x.Invoice.InvoiceID, _xd(x.Date), Number(x.Amount) || 0]); });
+      o.pays = P; o.cns = C; o.wm = t0; if (full) o.full_at = t0; o.last_calls = { full, payments: pays.length, credit_notes: cns.length };
     }
     st.at = new Date().toISOString();
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, [XBP_KEY, JSON.stringify(st)]);
     return st;
-  })().finally(() => { _xbpRefresh = null; });
+  })().catch(e => { if ((e.xero_reserve || e.xero_daily) && st.at) { st.stale = e.message; return st; } throw e; })   // v28.791: Xero short on calls: the last copy
+    .finally(() => { _xbpRefresh = null; });
   return _xbpRefresh;
 }
 async function xeroBillPaysMap(force) {
@@ -11685,7 +11698,7 @@ async function xeroBillPaysMap(force) {
     const add = (id, e) => { if (!id) return; (out[id] || (out[id] = [])).push(e); };
     Object.values(st.orgs || {}).forEach(o => { Object.values(o.pays || {}).forEach(p => add(p[0], { date: p[1], amount: p[2], kind: 'payment' }));
       Object.values(o.cns || {}).forEach(list => (list || []).forEach(x => add(x[0], { date: x[1], amount: x[2], kind: 'credit note' }))); });
-    return { at: st.at, by_bill: out }; };
+    return { at: st.at, stale: st.stale || null, by_bill: out }; };
   if (force) { swrDrop('xero:billpays'); return build(); }
   return swrGet('xero:billpays', 5 * 60 * 1000, build);
 }
