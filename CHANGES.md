@@ -1,3 +1,7 @@
+## v28.794 (12-Nov-26) Health: runaway Xero caller red alert
+- Ben: the 11-Nov UK exhaustion (Xero exceptions page 565 calls from 04:20 UTC) was only noticed at 8 calls left. Now any one caller (route, cron or background job) that passes 100 Xero calls for one org since 00:00 UTC raises a red alert email (caller, resources, calls left), re-alerting only when the count doubles. Checked against 11-Nov's live log: it would have fired at 04:27 UTC (exceptions) and 04:37 (Payments Report check).
+- Optional env var XERO_CALLER_ALERT (default 100). No migration, no new cron route.
+
 ## v28.793 (12-Nov-26) Xero: sandbox can use its own Xero app
 - New optional env vars, sandbox only: XERO_UK_SANDBOX_CLIENT_ID / XERO_UK_SANDBOX_CLIENT_SECRET (and AU). When set on a sandbox (non-production DB), HORIZON signs in to Xero with that app, so the sandbox gets its own daily call budget and stops using live's; the sandbox budget guard is skipped for that org. Live ignores them. No migration, nothing to set on Vercel.
 

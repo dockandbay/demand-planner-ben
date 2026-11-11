@@ -35451,6 +35451,7 @@ const HZ_RA = {
   sales_job: 'n8n_sync_sales_sheets', sales_max_h: 36,   // (c) the sales sync's last success older than 36h
   fulfil_auth: 5,                                 // (d) >= 5 Fulfil 401/403 in 10 min (plus reconfirm_failed + Xero disconnect, immediate)
   client_users: 3,                                // (e) the same browser error message from >= 3 distinct users in 10 min
+  xero_caller: Number(process.env.XERO_CALLER_ALERT) || 100,   // (f) v28.794: one route / cron / background job using >= 100 Xero calls for one org since 00:00 UTC
   realert_h: 24, throttle_min: 60, eval_every_ms: 60000,
 };
 const HZ_EMAIL_KEY = 'health_email_last_sent_at', HZ_WEEKLY_PENDING_KEY = 'health_weekly_pending';
@@ -35596,6 +35597,17 @@ async function hzAlertCollect() {
   // v28.260: Xero daily allowance low (latest metric per org in the last 2 h, kept by hzHealthEvt as the row's ms)
   try { const xq = (await pool.query(`SELECT DISTINCT ON (meta->>'org') meta->>'org' org, ms AS day_left, ts FROM planner.app_health_events WHERE kind = 'metric' AND path LIKE 'xero quota %' AND ts >= now() - interval '2 hours' ORDER BY meta->>'org', ts DESC`)).rows;
     xq.filter(r => r.day_left != null && Number(r.day_left) < XERO_DAY_ALERT).forEach(r => out.push({ key: 'xero:quota:' + r.org, trigger: 'integration', title: `Xero ${String(r.org).toUpperCase()} daily API allowance low: ${r.day_left} calls left (live bill sync and payments stop at 0; resets 23:35 UTC)`, n: Number(r.day_left), first: r.ts, last: r.ts, examples: ['sandbox and live share this allowance; stop any sandbox Xero job'], file: 'server.mjs (xeroQuotaNote)' })); } catch (_) {}
+  // v28.794 (Ben 12-Nov-26): runaway Xero caller. On 11-Nov the Xero exceptions page used 565 UK calls from 04:20 UTC and nobody knew until 8 were
+  // left. Any one caller (route, cron or 'background') past HZ_RA.xero_caller calls for one org today (UTC, Xero's day) raises a red alert with the
+  // org's calls left. Re-alerts only if the count doubles (hzRedAlert), so 100 / 200 / 400. Sandbox rows never reach the live DB anyway.
+  try { const xc = (await pool.query(`SELECT meta->>'org' org, meta->>'caller' caller, sum(count)::int n, min(ts) first, max(ts) last, (array_agg(DISTINCT meta->>'resource'))[1:4] res
+      FROM planner.app_health_events WHERE kind = 'metric' AND path LIKE 'xero calls %' AND ts >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+        AND coalesce(meta->>'sandbox', 'false') <> 'true' GROUP BY 1, 2 HAVING sum(count) >= $1 ORDER BY 3 DESC LIMIT 5`, [HZ_RA.xero_caller])).rows;
+    for (const r of xc) { const q = xeroQuota(r.org), left = q && q.day != null ? q.day : null;
+      out.push({ key: 'xero:caller:' + r.org + ':' + crypto.createHash('sha1').update(String(r.caller)).digest('hex').slice(0, 12), trigger: 'integration',
+        title: `Xero ${String(r.org).toUpperCase()}: ${r.caller} has used ${r.n} calls today` + (left != null ? ` (${left} of 1,000 left)` : '') + ', check it is not looping',
+        n: r.n, first: r.first, last: r.last, examples: ['Xero resources: ' + (r.res || []).join(', '), 'Threshold ' + HZ_RA.xero_caller + ' calls per caller per org per day (XERO_CALLER_ALERT); the day resets 00:00 UTC'],
+        file: 'server.mjs (_xeroFetch0 caller log)' }); } } catch (_) {}
   const c4 = d.c4 || {}; if (Number(c4.n) >= 1) out.push({ key: 'cron:401', trigger: 'cron', title: `${c4.n} scheduled job call(s) rejected (401): n8n is sending the wrong x-webhook-secret, those jobs are not running`, n: Number(c4.n), first: c4.first, last: c4.last, examples: (c4.ex || []).filter(Boolean).slice(0, 5), file: 'server.mjs (N8N_WEBHOOK_SECRET)' });   // v28.256 (deep dive gap): a wrong secret silently stopped preorders / accounts / health crons
   const fa = d.fa || {}; if (Number(fa.n) >= HZ_RA.fulfil_auth) out.push({ key: 'integ:fulfil_auth', trigger: 'integration', title: `Fulfil rejecting our API key: ${fa.n} 401/403 in ${HZ_RA.win_min} min`, n: Number(fa.n), first: fa.first, last: fa.last, examples: (fa.ex || []).slice(0, 3), file: 'server.mjs fulfilFetch / fulfilConfigFor (FULFIL_*_API_KEY)' });
   for (const c of d.cu || []) out.push({ key: 'client:' + crypto.createHash('sha1').update(String(c.message)).digest('hex').slice(0, 16), trigger: 'client', title: `Browser error hitting ${c.users} users: ${String(c.message).slice(0, 80)}`, n: c.n, first: c.first, last: c.last, examples: [String(c.message).slice(0, 200)].concat((c.views || []).filter(Boolean).map(v => 'view ' + v)), file: hzLikelyFile((c.views || [])[0], 'staff') });
