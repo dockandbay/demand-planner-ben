@@ -1300,8 +1300,10 @@
   #scenario-root .tw,#scenario-root .exec-tw{max-height:calc(100dvh - 140px);-webkit-overflow-scrolling:touch}
 }
 </style>
-<script src="/portal-view.js?v=__APP_VERSION__"></script><script src="/portal-custom.js?v=__APP_VERSION__"></script>
+<script src="/portal-view.js?v=__APP_VERSION__">
+</script><script src="/portal-custom.js?v=__APP_VERSION__"></script>
 <script>
+function csvSafe(v){ var t=String(v==null?'':v); return (/^[=+\-@\t\r]/.test(t) && !/^[-+]?\d[\d,]*(\.\d+)?$/.test(t.trim())) ? "'"+t : t; }   /* v28.780 (security review finding 30): a cell a spreadsheet would run as a formula gets a leading apostrophe; numbers untouched */
 // v28.738 (Ben 06-Nov-26): supplier portal HELP page (testing, admin preview only); v28.739 admins upload the video file here. GET /api/supply/portal-help lists the videos; each plays
 // from a short-lived signed Storage link. Sections are the planned short clips: until a clip exists, a section plays the full video from its
 // start and stops at its end. Rendered inside the portal view (PP_EXTRA tab), so it looks as suppliers will see it.
@@ -4489,7 +4491,7 @@ function hzPortalHelp(el){
         cb(((d&&d.lines)||[]).filter(function(l){return Number(l.qty)>0;}).map(function(l){return {code:l.sku, qty:Math.round(Number(l.qty))};}));
       }).catch(function(){ cb(null); }); }
     var _dlBtn=bg.querySelector('#erp-dl'); if(_dlBtn)_dlBtn.onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
-      var csv='Code,Qty\n'+rows.map(function(r){var c=String(r.code); if(/[",\n]/.test(c))c='"'+c.replace(/"/g,'""')+'"'; return c+','+r.qty;}).join('\n')+'\n';
+      var csv='Code,Qty\n'+rows.map(function(r){var c=csvSafe(r.code); if(/[",\n]/.test(c))c='"'+c.replace(/"/g,'""')+'"'; return c+','+r.qty;}).join('\n')+'\n';
       var bl=new Blob([csv],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='ERP_'+po.replace(/[^A-Za-z0-9]+/g,'_')+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
       msg.textContent=rows.length+' line(s) downloaded.'; }); };
     var _cpBtn=bg.querySelector('#erp-cp'); if(_cpBtn)_cpBtn.onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
@@ -5477,7 +5479,7 @@ function hzPortalHelp(el){
         +'<span class="op-bc-menu" style="display:none;position:absolute;left:0;top:100%;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:220px;text-align:left">'
         +[['all','All barcodes'],['product','Product barcodes'],['carton','Carton + Inner barcodes']].map(function(o,ix){ return '<div class="op-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px;white-space:nowrap'+(ix?';border-top:1px solid var(--line)':'')+'">'+o[1]+'</div>'; }).join('')
         +'</span></span>';   // v27.697 Download barcodes ▾ (Ben) — reuses bcDownloadAll / label-data?po= (batch stamped from this PO)
-    var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+String(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
+    var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+csvSafe(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
     return '<div class="op-dupwarn" data-po="'+esc(po)+'"></div>'   // v27.707 pending "duplicate SKU lines on invoice" banner (filled async)
       +'<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
@@ -6977,7 +6979,7 @@ function hzPortalHelp(el){
     el.querySelector('#cp-risk').onclick=function(){ st.risk=!st.risk; redraw(); };
     el.querySelector('#cp-sup').onchange=function(){ st.sup=this.value; redraw(); };
     el.querySelector('#cp-drafts').onchange=function(){ st.drafts=this.checked; el.innerHTML='<div class="count">Loading…</div>'; campPriLoad(true,st.drafts).then(function(d2){ d=d2; redraw(); }).catch(function(e){ el.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>'; }); };
-    el.querySelector('#cp-csv').onclick=function(){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+    el.querySelector('#cp-csv').onclick=function(){ var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
       downloadCsvStr(['Supplier,PO / ref,Qty,SKU,Product,Campaign,Status,Tier,Market,Channel,Launch,Intake,ETA,Days late,At risk,RAG,Why'].concat(rows.map(function(r){ return [r.supplier,r.ref||'No PO',r.qty,r.sku,r.name,r.campaign,r.status,r.tier,r.market,r.channel==='FBA'?'Amazon':'DTC',fd(r.launch),fd(r.intake),r.eta?fd(r.eta):'',r.late_days,r.at_risk,(CP_RAG[r.rag]||[''])[0],r.why].map(q).join(','); })).join('\n'),'campaign_priority.csv'); };
     el.querySelectorAll('.cp-chase').forEach(function(b){ b.onclick=function(){ var r=rows[+b.dataset.i], tr=el.querySelector('.cp-chase-row[data-i="'+b.dataset.i+'"]'), td=tr.firstChild;
       if(tr.style.display!=='none'){ tr.style.display='none'; return; } tr.style.display='';
@@ -9342,7 +9344,7 @@ function hzPortalHelp(el){
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portalopen','Open portal'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
-    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); else L2.unshift(['data-health','Data health'],['workflows','Workflows']); }   // v28.600: non-admins view Workflows read-only   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
+    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); else L2.unshift(['data-health','Data health'],['workflows','Workflows']); }   // v28.600: non-admins view Workflows read-only   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
@@ -9649,42 +9651,6 @@ function hzPortalHelp(el){
     function showSub(){ var b=document.getElementById('config-body');
       // CONFIG sub-tabs: a dispatch map (one handler per sub) instead of a 16-branch if/else chain.
       var SUBS={};
-      // Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP proxy.
-      SUBS['coghlans-sftp']=function(){
-        var CUR=(SUBS._sftpPath||'/');
-        b.innerHTML='<div class="annot"><b>CONFIG ▸ Coghlans SFTP.</b> Browse the Coghlans SFTP server (read-only) via the Webshare static IP. Click a folder to open it, or type a path and press Go.</div>'
-          +'<div class="bar" style="gap:6px;flex-wrap:wrap"><button class="save-btn light" id="sftp-up" title="up one level">↑ Up</button><input class="fci" id="sftp-path" value="'+esc(CUR)+'" style="flex:1;min-width:220px;text-align:left" placeholder="/"><button class="save-btn" id="sftp-go">Go</button><button class="save-btn light" id="sftp-refresh" title="reload">↻</button><span class="count" id="sftp-count" style="margin-left:8px"></span></div>'
-          +'<div id="sftp-crumbs" style="margin:2px 0 8px;font-size:12px;color:var(--muted)"></div>'
-          +'<div id="sftp-list"><div class="count">Loading…</div></div>';
-        function fmtSize(n){ n=Number(n)||0; if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(2)+' GB'; }
-        function crumbHtml(p){ var parts=String(p||'/').split('/').filter(Boolean), acc='', out='<span class="lnk-btn sftp-crumb" data-p="/" style="color:var(--blue);cursor:pointer">/</span>';
-          parts.forEach(function(seg){ acc+='/'+seg; out+=' <span style="color:var(--faint)">/</span> <span class="lnk-btn sftp-crumb" data-p="'+esc(acc)+'" style="color:var(--blue);cursor:pointer">'+esc(seg)+'</span>'; }); return out; }
-        function bindCrumbs(){ document.querySelectorAll('#sftp-crumbs .sftp-crumb').forEach(function(el){ el.onclick=function(){ load(el.dataset.p); }; }); }
-        function load(p){ p=p||'/'; CUR=p; SUBS._sftpPath=p; var pin=document.getElementById('sftp-path'); if(pin)pin.value=p;
-          var cb=document.getElementById('sftp-crumbs'); if(cb){ cb.innerHTML=crumbHtml(p); bindCrumbs(); }
-          var L=document.getElementById('sftp-list'); if(!L)return; L.innerHTML='<div class="count">Loading '+esc(p)+' …</div>';
-          fetch('/api/config/coghlans-sftp/list?path='+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(j){
-            var cc=document.getElementById('sftp-count');
-            if(!j||j.ready===false){ L.innerHTML='<div class="annot" style="border-left:3px solid var(--amber);background:var(--amber-bg)">'+esc((j&&j.error)||'Coghlans SFTP is not configured yet.')+'</div>'; if(cc)cc.textContent=''; return; }
-            if(j.error){ L.innerHTML='<div style="color:var(--neg);padding:8px 2px">'+esc(j.error)+'</div>'; if(cc)cc.textContent=''; return; }
-            var e=(j.entries||[]); if(cc)cc.textContent=e.length+' item'+(e.length===1?'':'s');
-            L.innerHTML='<div class="tw" style="max-height:64vh;overflow:auto"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Name</th><th class="l">Size</th><th class="l">Modified</th></tr></thead><tbody>'
-              +(e.length?e.map(function(x){ var isDir=(x.type==='d'), isLink=(x.type==='l');
-                var icon=isDir?'📁':isLink?'🔗':'📄';
-                var nm=isDir?('<button class="lnk-btn sftp-dir" data-n="'+esc(x.name)+'" style="color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font-weight:600">'+icon+' '+esc(x.name)+'</button>'):(icon+' '+esc(x.name));
-                var when=''; try{ if(x.modifyTime)when=fd(new Date(x.modifyTime).toISOString().slice(0,10)); }catch(_){}
-                return '<tr><td class="l">'+nm+'</td><td class="l">'+(isDir?'—':fmtSize(x.size))+'</td><td class="l">'+esc(when)+'</td></tr>'; }).join('')
-                :'<tr><td colspan="3" class="l mut" style="padding:8px">empty folder</td></tr>')
-              +'</tbody></table></div>';
-            L.querySelectorAll('.sftp-dir').forEach(function(btn){ btn.onclick=function(){ var base=CUR.replace(/\/+$/,''); load(base+'/'+btn.dataset.n); }; });
-          }).catch(function(err){ L.innerHTML='<div style="color:var(--neg);padding:8px 2px">Failed to reach the SFTP server: '+esc(err&&err.message||err)+'</div>'; });
-        }
-        var goB=document.getElementById('sftp-go'); if(goB)goB.onclick=function(){ load((document.getElementById('sftp-path').value||'/').trim()); };
-        var rfB=document.getElementById('sftp-refresh'); if(rfB)rfB.onclick=function(){ load(CUR); };
-        var upB=document.getElementById('sftp-up'); if(upB)upB.onclick=function(){ var q=CUR.replace(/\/+$/,''); load(q.substring(0,q.lastIndexOf('/'))||'/'); };
-        var pin=document.getElementById('sftp-path'); if(pin)pin.onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); load((this.value||'/').trim()); } };
-        load(CUR);
-      };
       SUBS['general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         hzqGet('/api/app-settings').then(function(s){ s=s||{};
           var FIELDS=[['escalation_supply_chain','Supply chain','Default recipients for escalations (any PO/shipment that isn’t Direct-to-Client).'],
@@ -11613,7 +11579,7 @@ function hzPortalHelp(el){
                 ((j&&j.pack)||[]).forEach(function(pr){ if(packSeen[pr[5]])return; packSeen[pr[5]]=1; allPack.push(pr); }); return run(i+1); }); }
           return run(0).then(function(){
             gs.textContent='Building ZIP…';
-            var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+            var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
             var files=allEntries.map(function(e){ return {path:e.path, bytes:_b64ToBytes(e.b64)}; });
             var manCsv=[['sscc','po','preorder_ref','store','client_sku','ean','our_sku','supplier','matched','path']].concat(allManifest).map(function(r){ return r.map(q).join(','); }).join('\n')+'\n';
             files.push({path:'manifest.csv', bytes:_strBytes(manCsv)});
@@ -11845,7 +11811,7 @@ function hzPortalHelp(el){
     'Direct to Client?':(cfDtc(a.branch)?'Direct':''), 'Amount (GBP)':cfUsdToGbp(usd,a.delivery).toFixed(2) }; }); }
   // rows (array of objects) → CSV string (headers = keys).
   function rowsToCsvStr(rows,labels){ if(!rows||!rows.length)return ''; var cols=Object.keys(rows[0]);
-    var e1=function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+    var e1=function(v){v=csvSafe(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
     return [cols.map(function(c){return e1((labels&&labels[c])||c);}).join(',')].concat(rows.map(function(r){return cols.map(function(c){return e1(r[c]);}).join(',');})).join('\n'); }
   // Download a ready-built CSV string as a file (single Blob-download impl, with cleanup).
   function downloadCsvStr(csvStr,name){ var blob=new Blob([csvStr],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
@@ -12595,7 +12561,7 @@ function hzPortalHelp(el){
         var t=_cur.reduce(function(a,r){ a[0]+=Number(r.invoice_total)||0;a[1]+=Number(r.starting)||0;a[2]+=Number(r.completion)||0;a[3]+=Number(r.balance)||0; var du=dueOf(r); if(du!=null)a[4]+=du; return a; },[0,0,0,0,0]);
         body.push(['TOTAL ('+_cur.length+')','','','', n2(t[0]), n2(t[1]), n2(t[2]), n2(t[3]), n2(t[4])]);
         return [hdr].concat(body); }
-      function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+      function csvCell(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
       function fname(ext){ return 'payments_by_supplier'+(st.sup?'_'+st.sup.replace(/[^A-Za-z0-9]+/g,'_'):'')+(st.prod?'_P'+st.prod:'')+(st.batch?'_'+st.batch:'')+'.'+ext; }
       function draw(){ var f=rows.filter(function(r){ return (!st.sup||r.supplier===st.sup)&&(!st.prod||String(r.prod_no)===String(st.prod))&&(!st.batch||r.batch_id===st.batch); }); _cur=f;
         var t={iv:0,st:0,co:0,ba:0,du:0};
@@ -13682,7 +13648,7 @@ function hzPortalHelp(el){
     load(); }
   // ---- Xero bill export (Payments Report) ----
   function xbDmy(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?(m[3]+'/'+m[2]+'/'+m[1]):(iso||''); }   // YYYY-MM-DD → DD/MM/YYYY
-  function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function xbCell(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
   function fmtAmt(v){ if(v==null||v==='')return ''; var n=Number(String(v).replace(/,/g,'')); return isNaN(n)?String(v):n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   var XB_HEAD='*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
   // One Xero bill per payment run. The download EXCLUDES "other" payments but INCLUDES them in the total used
@@ -15519,7 +15485,7 @@ function hzPortalHelp(el){
   // PRODUCTION SUMMARY (SUG-0009) — qty in production per category (expand → per SKU), filtered by prod#/batch/supplier
   var _psProd='', _psBatch='', _psSupplier='', _psOpts={prods:[],batches:[],suppliers:[]}, _psRows=[], _psExp={};
   function psDescSort(arr){ return (arr||[]).slice().sort(function(x,y){ var nx=parseFloat(x),ny=parseFloat(y); if(!isNaN(nx)&&!isNaN(ny)&&nx!==ny)return ny-nx; return String(y).localeCompare(String(x),undefined,{numeric:true}); }); }
-  function psCsvC(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function psCsvC(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
   function psGroupCats(){ var m={}; _psRows.forEach(function(r){ var c=r.category||'Uncategorised'; var g=m[c]||(m[c]={category:c,total:0,skus:[]}); g.total+=Number(r.qty)||0; g.skus.push(r); });
     return Object.keys(m).map(function(k){return m[k];}).sort(function(a,b){return b.total-a.total||a.category.localeCompare(b.category);}); }
   function renderProductionSummary(d){ var b=biBody();
@@ -16861,7 +16827,7 @@ function hzPortalHelp(el){
     c.querySelectorAll('.pill[data-sort]').forEach(function(p){p.onclick=function(){POSTOCK_STATE.sort=p.dataset.sort;c.querySelectorAll('.pill[data-sort]').forEach(function(x){x.classList.toggle('active',x===p);});if(data)draw();};});
     document.getElementById('ps-csv').onclick=function(){ if(!data||!data.rows.length){alert('Analyse a PO first.');return;}
       var head=['SKU','Ordered','On hand','Forecast demand','Other inbound','Required from PO','Removable','Priority','Recommendation'];
-      var esc2=function(v){v=String(v==null?'':v).replace(/[‒-―]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"'); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+      var esc2=function(v){v=csvSafe(v).replace(/[‒-―]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"'); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
       var csv='﻿'+head.join(',')+'\n'+visible().map(function(r){return [r.sku,r.qty,r.on_hand,r.demand,r.other_inbound,r.required,r.removable,r.priority,r.recommendation].map(esc2).join(',');}).join('\n')+'\n';
       var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='PO_STOCK_PRIORITY_'+(data.po||'').replace(/[^A-Za-z0-9]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
     if(POSTOCK_STATE.po)load(); }
@@ -16943,7 +16909,7 @@ function hzPortalHelp(el){
       var rows=SP_STATE.group==='disc'?sortRows(base.filter(function(r){return !r.discontinued;})).concat(sortRows(base.filter(function(r){return r.discontinued;}))):sortRows(base);
       var lines=[head]; rows.forEach(function(r){ var line=[r.sku,r.name]; if(fba){ line.push(r.oh_fba); if(us)line.push(r.oh_awd); line.push(r.oh_3pl); } else line.push(r.oh_3pl);
         line.push(r.projected, r.weeks==null?'':r.weeks, r.discontinued?'Yes':'No', r.slow_moving?'Yes':'No', r.rec_clearance?'Yes':'No'); lines.push(line); });
-      var csv=lines.map(function(row){return row.map(function(v){var s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\r\n');
+      var csv=lines.map(function(row){return row.map(function(v){var s=csvSafe(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\r\n');
       var now=new Date(); var pad=function(n){return (n<10?'0':'')+n;}; var stamp=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes());
       var fname='sales-planning_'+SP_STATE.co+'_'+SP_STATE.ch.toUpperCase()+'_'+stamp+'.csv';
       var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},100); }
@@ -19624,7 +19590,7 @@ function hzPortalHelp(el){
         +'<div class="sc-note">Hit rate = approved samples ÷ samples submitted. Unapproved SKUs show samples so far, so they still get a traffic light.'
         +'<div class="tiny" style="margin-top:4px">From PRODUCT development samples. Days to approve run from the first sample date to the approval; moving to bulk = approved and on a purchase order; reasons are the reject reasons logged on the samples.</div></div>'; }
     c.querySelector('#as-dl').onclick=function(){ var g=_asRows(); if(!g.length){ alert('Nothing to download for these filters.'); return; }
-      var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      var cell=function(v){ v=csvSafe(v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
       var filt=_SC_F.map(function(x){ return x[1]+' '+_asLabel(x[0]); }).join(' · ');
       var csv='﻿'+cell('Approval stats · '+filt)+'\n'+['SKU','Development ref','Supplier','Season','Category','Sample versions','Approved samples','Approved','Samples to approve (or so far)','Days to approve','Approved on','Hit rate %','Moving to bulk','Reasons for resampling'].join(',')+'\n'
         +g.map(function(r){ return [cell(r.sku),cell(r.item_ref),cell(r.supplier),cell(r.season),cell(r.category),r.versions,r.approved_samples,r.approved?'Yes':'No',r.to_approve,r.days==null?'':r.days,r.approved_on?fd(r.approved_on):'',r.versions?Math.round(r.approved_samples/r.versions*100):'',r.bulk?'Yes':'No',cell(Object.keys(r.reasons||{}).map(function(n){return n+' ('+r.reasons[n]+')';}).join('; '))].join(','); }).join('\n')+'\n';
@@ -19678,7 +19644,7 @@ function hzPortalHelp(el){
         +'<div class="sc-note">Each row: samples × cost per sample + freight = total cost. Bundled freight is split by weight (kg typed on the sample line, else the product weight, else the line&rsquo;s size type from PRODUCT ▸ Config ▸ Size weights).'
         +'<div class="tiny" style="margin-top:4px">From SUPPLY sample requests (cancelled left out) and their charges (rejected left out) plus courier bills on the request; supplier currency converted to £ at the CONFIG rates.</div></div>'; }
     c.querySelector('#sc-dl').onclick=function(){ var g=_scAgg(); if(!g.length){ alert('Nothing to download for these filters.'); return; }
-      var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      var cell=function(v){ v=csvSafe(v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
       var r2=function(v){ return (Math.round(v*100)/100).toFixed(2); };
       var filt=_SC_F.map(function(x){ return x[1]+' '+_scLabel(x[0]); }).join(' · ');
       var csv='﻿'+cell('Sample costs · '+filt)+'\n'+['SKU','Samples','Cost per sample (GBP)','Sample cost (GBP)','Freight (GBP)','Total cost (GBP)'].join(',')+'\n'
@@ -19701,7 +19667,7 @@ function hzPortalHelp(el){
     var s=_pcat.sort; if(s.col){ rows.sort(function(a,b){ var x=String(a[s.col]==null?'':a[s.col]), y=String(b[s.col]==null?'':b[s.col]); var c=x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'}); return (c||String(a.ref).localeCompare(String(b.ref))||((a.size_id||0)-(b.size_id||0)))*s.dir; }); }
     return rows; }
   function _pcatFname(ext){ var sea=((_pcat.season||'all')+(_pcat.cat?'_'+_pcat.cat:'')).replace(/[^A-Za-z0-9]+/g,'_').toLowerCase(); return 'catalogue_'+sea+'_'+fd(new Date().toISOString().slice(0,10))+'.'+ext; }
-  function _pcatCsv(rows){ var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };   // apostrophe-prefix formula triggers (= + - @)
+  function _pcatCsv(rows){ var cell=function(v){ v=csvSafe(v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };   // apostrophe-prefix formula triggers (= + - @)
     return '﻿'+_PCAT_COLS.map(function(c){return cell(c[1]);}).join(',')+'\n'+rows.map(function(r){ return _PCAT_COLS.map(function(c){return cell(r[c[0]]);}).join(','); }).join('\n')+'\n'; }
   function renderProductCatalogue(c){
     // v28.157 (Ben): Season + Category dropdowns kept short and on the same row as the search box (flex:0 0 auto so .fci can't stretch them)
@@ -24451,7 +24417,7 @@ function hzPortalHelp(el){
     Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
     var DML={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     Object.keys(DML).forEach(function(k){ add('Config ▸ Demand ▸ '+DML[k],'#/config/demand/'+k); });
-    [['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']].forEach(function(t){ add('Config ▸ '+t[1],'#/config/'+t[0]); });
+    [['export-uploads','Exports & uploads'],['suggestions','Suggestions']].forEach(function(t){ add('Config ▸ '+t[1],'#/config/'+t[0]); });
     [['products','Products'],['sampling','Sampling'],['specs','Specifications'],['reports','Reports'],['config','Config']].forEach(function(t){ add('Product ▸ '+t[1],'#/product/'+t[0]); });
     [['clients','Clients & agents'],['orders','Orders'],['commission','Commissions'],['messages','Messages'],['notices','Notices'],['config','Config']].forEach(function(t){ if(t[0]==='messages'&&CP_MSG_OFF)return; add('Client ▸ '+t[1],'#/client/'+t[0]); });
     try{ if(typeof accountsCan==='function'&&accountsCan())ACCOUNTS_TABS.forEach(function(t){ add('Accounts ▸ '+t[1],'#/accounts/'+t[0]); }); }catch(e){}

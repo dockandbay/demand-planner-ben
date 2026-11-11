@@ -1057,6 +1057,8 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
 <div class="tw" id="tw"><table id="t"></table></div>
 </div>
 <script>
+function csvSafe(v){ var t=String(v==null?'':v); return (/^[=+\-@\t\r]/.test(t) && !/^[-+]?\d[\d,]*(\.\d+)?$/.test(t.trim())) ? "'"+t : t; }   /* v28.780 (security review finding 30): a cell a spreadsheet would run as a formula gets a leading apostrophe; numbers untouched */
+
 const VERSION='v16.7';
 const EXTRACT_TS='2026-06-02T03:40:00Z';
 const TODAY=new Date().toISOString().slice(0,10);
@@ -1274,7 +1276,7 @@ function _showAutoSmoothResult(applied,keyCount,skipped){
   ov.onclick=function(e){ if(e.target===ov)close(); };
   document.getElementById('as-close').onclick=close;
   var csvHead='Country,Channel,Sub-category,Month,SKU sum,Subcat target,Gap %';
-  function csvBody(){ return skipped.map(function(x){ function q(v){v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;} return [x.co,x.ch,q(x.subcat),mlab(x.month),x.sum,x.target,x.gapPct].join(','); }).join('\n'); }
+  function csvBody(){ return skipped.map(function(x){ function q(v){v=csvSafe(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;} return [x.co,x.ch,q(x.subcat),mlab(x.month),x.sum,x.target,x.gapPct].join(','); }).join('\n'); }
   var cbtn=document.getElementById('as-copy'); if(cbtn)cbtn.onclick=function(){ var txt=csvHead+'\n'+csvBody(); try{ navigator.clipboard.writeText(txt).then(function(){ cbtn.textContent='Copied ✓'; setTimeout(function(){cbtn.textContent='Copy to clipboard';},1500); }); }catch(e){ alert('Copy failed — use Download CSV instead.'); } };
   var dbtn=document.getElementById('as-csv'); if(dbtn)dbtn.onclick=function(){ var bl=new Blob([csvHead+'\n'+csvBody()],{type:'text/csv'}), u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download='autosmooth_unsmoothed.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
 }
@@ -3664,7 +3666,7 @@ function downloadReport(type){ var m=document.getElementById('dl-menu'); if(m)m.
 // CSV — actually download a .csv file of the same data.
 function downloadReportCSV(type){ var m=document.getElementById('dl-menu'); if(m)m.classList.remove('open');
   var r=buildReport(type); if(!r)return;
-  const csv=r.rows.map(rw=>rw.map(v=>{v=String(v==null?'':v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const csv=r.rows.map(rw=>rw.map(v=>{v=csvSafe(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
   const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=(r.title||'report').replace(/[^a-z0-9]+/gi,'_').replace(/^_|_$/g,'')+'.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
@@ -3730,7 +3732,7 @@ function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=M
       var cls=[cl.urgent?'Urgent':'',cl.rebalance?'Rebalance':''].filter(Boolean).join(' + ');
       var row=[s.s,s.ti||'',ms.st||'ACTIVE',s.cs||'',s.rw||'',dateDMY(ms.launch)||'',dateDMY(ms.disc)||''].concat(MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];return mm?(mm.i3||0):'';})).concat([md['if_']||0,md.oo||0,cls]);
       oth.forEach(function(m){row.push(_trfAmt(s.s,co,m));}); oth.forEach(function(m){row.push(_trfAmt(s.s,m,co));}); rows.push(row); }); }
-  var csv=rows.map(function(r){return r.map(function(c){var v=String(c==null?'':c); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
+  var csv=rows.map(function(r){return r.map(function(c){var v=csvSafe(c); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
   var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=(BP_VIEW==='fba'?'fba_transfer':'transfer')+'_'+co+'_view.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
 
@@ -8252,7 +8254,7 @@ function _pdxBuild(){
         emit([sku,p.n||'',s,subs[s]],co,ch,v,function(k,i,u){ var m=months[i]; return u*aspOf(co,ch,s,k==='ly'?lyMonth(m):m); }); }); }); });
   return {grid:grid,rows:n}; }
 function _pdxSave(grid){ var stamp=_planMonLabel(_pdxRange()[0])+'_to_'+_planMonLabel(_pdxRange().slice(-1)[0]), name='demand_plan_'+(PDX.level==='sku'?'sku':'subcategory')+'_'+stamp, blob;
-  if(PDX.fmt==='csv'){ var csv=grid.map(function(r){ return r.map(function(v){ var s=v==null?'':String(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(','); }).join('\r\n');
+  if(PDX.fmt==='csv'){ var csv=grid.map(function(r){ return r.map(function(v){ var s=csvSafe(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(','); }).join('\r\n');
     blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}); name+='.csv'; }
   else { blob=new Blob([buildXlsx('Demand plan',grid)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); name+='.xlsx'; }
   var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); }
@@ -11289,7 +11291,7 @@ function _trendsPlanSanity(host){
 }
 function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
   var hdr=['Category','Market','Plan','Actual2026','BandLow','BandHigh','PlanVsLatestPct','Rules','Status'];
-  var esc2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var esc2=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
   var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':(Math.round((r.planVsLatest-1)*100)+'%')),r.rules.join(' '),r.status].map(esc2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
@@ -11344,7 +11346,7 @@ function _trendsMultiYear(host){
 }
 function _trendsMyCsv(){ var rows=_trMyRows(); if(!rows.length)return;
   var hdr=['Category','Market','2024','2025','2026','YoY','PeakYear','GapToPeak','PlanNext','PlanVsPeak','Class','SuspectMonths'];
-  var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var e2=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
   var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.a2024),Math.round(r.a2025),Math.round(r.a2026),(r.yoy==null?'':Math.round(r.yoy*100)+'%'),r.peakYear,(r.gapToPeak==null?'':Math.round(r.gapToPeak*100)+'%'),(r.planNext==null?'':Math.round(r.planNext)),(r.planVsPeak==null?'':Math.round(r.planVsPeak*100)+'%'),r.cls,r.suspectCount].map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_multi_year.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
@@ -11385,7 +11387,7 @@ function _trendsChannelMix(host){
 }
 function _trendsCmCsv(){ var P=_trCmPivot(); if(!P.labels.length)return;
   var hdr=['Category'].concat(P.CM.map(function(m){return m+' FBA%';}),P.CM.map(function(m){return m+' gap pp';}),['Headroom('+TRENDS_MKT+')','Read('+TRENDS_MKT+')']);
-  var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var e2=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
   var lines=[hdr.join(',')].concat(P.labels.map(function(k){ var row=P.by[k], sel=row.mk[TRENDS_MKT];
     return [row.label].concat(P.CM.map(function(m){var r=row.mk[m];return r?(Math.round(r.fbaShare*1000)/10)+'%':'';}),P.CM.map(function(m){var r=row.mk[m];return r?(Math.round(r.gapPp*1000)/10)+'pp':'';}),[sel?Math.round(sel.headroom):'',sel?sel.read:'']).map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_channel_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
@@ -11425,7 +11427,7 @@ function _trendsTypeMix(host){
 }
 function _trendsTmCsv(){ var P=_trTmPivot(); if(!P.labels.length)return;
   var hdr=['Category'].concat(P.CM.map(function(m){return m+' DTC set%';}),P.CM.map(function(m){return m+' FBA set%';}));
-  var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var e2=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
   var pc=function(v){ return v==null?'':Math.round(v*100)+'%'; };
   var lines=[hdr.join(',')].concat(P.labels.map(function(k){ var row=P.by[k]; return [row.label].concat(P.CM.map(function(m){var r=row.mk[m];return r?pc(r.dtcSetPct):'';}),P.CM.map(function(m){var r=row.mk[m];return r?pc(r.fbaSetPct):'';})).map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_type_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
@@ -11736,7 +11738,7 @@ function renderSummaryView(body){
           +'</div></span>'
         +'<span style="font-size:10px;color:var(--faint)">'+_subsV.length+' / '+subs.length+' subcategories</span></div>';
       function _tgtCols(){ var out=[]; DISP_FY_STARTS.forEach(function(Y){ bucketize(fyMs(Y),SUMM_GROUP).forEach(function(bk){ out.push({fy:Y,level:bk.single?'month':bk.level,idx:bk.idx,label:fyLabel(Y)+' '+bk.label}); }); }); return out; }
-      function _csvCell(x){ x=String(x==null?'':x); return /[",\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x; }
+      function _csvCell(x){ x=csvSafe(x); return /[",\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x; }
       function _parseCsvLine(l){ var o=[],cur='',q=false; for(var i=0;i<l.length;i++){ var ch=l[i]; if(q){ if(ch==='"'){ if(l[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; } else { if(ch==='"')q=true; else if(ch===','){o.push(cur);cur='';} else cur+=ch; } } o.push(cur); return o; }
       function tgtTemplate(){ var cols=_tgtCols(); var hdr=['Subcategory'].concat(cols.map(function(c){return c.label;}));
         var mk=function(sub,label){ return [label].concat(cols.map(function(c){ var v=SUMM_TGT[tgKey(c.fy,sub,c.level,c.idx)]; return (v==null||v==='')?'':(''+Number(v)); })); };
@@ -12024,11 +12026,11 @@ function renderPreordersView(body){
   $('preo-st').onchange=function(){ PREO.st=this.value; draw(); };
   $('preo-csv').onclick=function(){ if(PREO.tab==='impact'){ var R=[['SKU','Product','Market','Month','Preorder','B2B forecast','% of forecast','In demand','Units added','Orders']];
       impVisible().forEach(function(r){ R.push([r.sku,r.name,r.co,ymLbl(r.ym),r.q,r.base==null?'':Math.round(r.base),(r.base>0)?Math.round(r.q/r.base*100)+'%':'',STL[r.st],r.st==='add'?r.q:0,r.ords.map(function(o){return o.so+' '+(o.cust||'')+' ('+o.q+')';}).join('; ')]); });
-      var c2=R.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+      var c2=R.map(function(r){return r.map(function(x){x=csvSafe(x); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
       var a2=document.createElement('a'); a2.href=URL.createObjectURL(new Blob(['\ufeff'+c2],{type:'text/csv'})); a2.download='preorder-demand-impact.csv'; document.body.appendChild(a2); a2.click(); a2.remove(); return; }
     var V=visible(), rows=[['Order','Reference','Customer','Channel','Order state','SKU','Product','Fulfil warehouse','3PL','Ship date','Quantity','Move state','In buy plan','Left out because']];
     V.forEach(function(l){ rows.push([l.sale_number,l.sale_reference,l.customer,l.channel,l.sale_state,l.sku,l.product_name,l.fulfil_warehouse,CL[l.warehouse]||'',dmy(l.ship_date),l.quantity,l.move_state,l.included?'yes':'no',l.exclude_reason||'']); });
-    var c=rows.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+    var c=rows.map(function(r){return r.map(function(x){x=csvSafe(x); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
     var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+c],{type:'text/csv'})); a.download='preorders.csv'; document.body.appendChild(a); a.click(); a.remove(); };
   $('preo-sync').onclick=function(){ if(PREO.busy)return; PREO.busy=true; var b=$('preo-sync'); b.disabled=true; b.textContent='Syncing…'; msg('');
     fetch('/api/demand/preorders/sync',{method:'POST'}).then(function(r){return r.json();}).then(function(r){ if(!r||!r.ok)throw new Error((r&&r.error)||'Sync failed');
@@ -12097,7 +12099,7 @@ function renderKeyAccountsView(body){
   function skuName(s){ return (s&&SKUM[s])?(SKUM[s].n||''):''; }
   function resolveSku(raw){ var s=String(raw||'').trim(); if(!s)return null; if(SKUM[s])return s;
     var up=s.toUpperCase(); if(SKUM[up])return up; var hit=SKUS.filter(function(x){return x.toUpperCase()===up;})[0]; return hit||null; }
-  function dlCsv(name,rows){ var c=rows.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+  function dlCsv(name,rows){ var c=rows.map(function(r){return r.map(function(x){x=csvSafe(x); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
     var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); }
   body.innerHTML='<div style="padding:6px 2px 12px">'
     +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:15px">Key Accounts Forecast</div>'
@@ -12556,7 +12558,7 @@ function renderKpisView(body,hashBase){
       var matrix=[cfg.cols.map(function(c){return c.h;})].concat(j.rows.map(function(r){return cfg.cols.map(function(c){return r[c.k]==null?'':r[c.k];});}));
       var fname=cfg.file(j)+'.csv';
       var cbn=document.getElementById('kpi-csv'), cpn=document.getElementById('kpi-copy');
-      if(cbn)cbn.onclick=function(){ var c=matrix.map(function(rr){return rr.map(function(x){x=String(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+      if(cbn)cbn.onclick=function(){ var c=matrix.map(function(rr){return rr.map(function(x){x=csvSafe(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
         var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=fname;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
       if(cpn)cpn.onclick=function(){ var tsv=matrix.map(function(rr){return rr.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){var o=cpn.textContent;cpn.textContent='✓ Copied';setTimeout(function(){cpn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
     }); }
@@ -12566,7 +12568,7 @@ function renderKpisView(body,hashBase){
 // DEMAND ▸ KPIs ▸ Forecast accuracy — TRUE accuracy from SKU snapshots (accrues), with country/channel→category→SKU
 // drill-down, Bias/WMAPE/Attainment, CSV, a manual "take snapshot" button, and a plan-vs-run-rate panel for today.
 function renderAccuracyView(kb,body){
-  function dl(name,matrix){ var c=matrix.map(function(rr){return rr.map(function(x){x=(x==null?'':String(x));return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+  function dl(name,matrix){ var c=matrix.map(function(rr){return rr.map(function(x){x=csvSafe(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
     var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); }
   function pctCol(v,goodLow){ if(v==null)return 'var(--muted)'; var a=Math.abs(v); return goodLow?(a<=10?'var(--pos)':a<=25?'var(--amber)':'var(--neg)'):(v>=90&&v<=110?'var(--pos)':(v>=75&&v<=125?'var(--amber)':'var(--neg)')); }
   kb.innerHTML='<div style="color:var(--faint);font-size:12px">Loading…</div>';
@@ -15636,7 +15638,7 @@ var INV_EXPORT={};   // Inventory Status Report: per status-block export payload
 // Export one status block (ck) to CSV download or clipboard (TSV). Called from the per-sub-header combo button.
 function _invClipFallback(txt){ var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
 function _invExport(ck,mode,el){ var d=INV_EXPORT[ck]; if(!d)return;
-  var q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   if(mode==='csv'){ var csv=[d.h].concat(d.rows).map(function(r){return r.map(q).join(',');}).join('\n')+'\n';
     var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='inventory_'+d.name+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800);
   } else { var tsv=[d.h].concat(d.rows).map(function(r){return r.join('\t');}).join('\n');
@@ -15811,7 +15813,7 @@ function ksBindMulti(root,state,rerender){ root.querySelectorAll('.ks-ms').forEa
   var q=d.querySelector('.ks-ms-q'); if(q)q.oninput=function(){ var t=q.value.toLowerCase(); d.querySelectorAll('label').forEach(function(l){ l.style.display=l.dataset.v.indexOf(t)>=0?'':'none'; }); };
   d.querySelectorAll('input[type=checkbox]').forEach(function(c){ c.onchange=function(){ var a=state.f[k]||(state.f[k]=[]), i=a.indexOf(c.value); if(c.checked&&i<0)a.push(c.value); if(!c.checked&&i>=0)a.splice(i,1); rerender(); }; }); }); }
 function ksUniq(rows,fn){ var m={}; rows.forEach(function(r){ m[fn(r)==null?'':fn(r)]=1; }); return Object.keys(m).sort(); }
-function ksCsv(name,head,rows){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+function ksCsv(name,head,rows){ var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   var txt=[head.map(q).join(',')].concat(rows.map(function(r){ return r.map(q).join(','); })).join('\n');
   var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/csv'})); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },500); }
 function ksFetch(url,cb){ fetch(url,{cache:'no-store'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }).then(function(j){ cb(null,j); }).catch(function(e){ cb(e); }); }
@@ -16077,7 +16079,7 @@ function renderCogsAvask(){ var p=document.getElementById('cogs-panel'); if(!p)r
   var copy=function(head){ var t=avkTsv(ok,head); (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(function(){ AVK.msg='Copied '+ok.length+' rows. Paste into the AVASK template, then Import.'; AVK.err=false; renderCogsAvask(); },function(){ AVK.msg='Copy failed: use ⤓ CSV instead.'; AVK.err=true; renderCogsAvask(); }); };
   if(g('avk-copy'))g('avk-copy').onclick=function(){ copy(false); };
   if(g('avk-copyh'))g('avk-copyh').onclick=function(){ copy(true); };
-  if(g('avk-csv'))g('avk-csv').onclick=function(){ var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  if(g('avk-csv'))g('avk-csv').onclick=function(){ var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
     var csv=['ASIN/Product Id,SKU,Description,Cost,Currency,Month,Year'].concat(ok.map(function(r){ return [r.asin,r.sku,r.desc,r.cost.toFixed(2),r.ccy,r.month,r.year].map(q).join(','); })).join('\r\n');
     var u=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv'})),a=document.createElement('a'); a.href=u; a.download='avask-cogs-import.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800); };
   if(g('avk-clear'))g('avk-clear').onclick=function(){ AVK.d=null; AVK.text=''; AVK.msg=''; renderCogsAvask(); };
@@ -16936,7 +16938,7 @@ function ilgWire(panel){ var $=function(id){ return panel.querySelector('#'+id);
   panel.querySelectorAll('.ilg-ck').forEach(function(c){ c.onchange=function(){ if(c.checked)ILG.sel[c.dataset.s]=1; else delete ILG.sel[c.dataset.s]; ILG.review=false; ilgRender(); }; });
   if($('ilg-rb'))$('ilg-rb').onclick=function(){ ILG.review=true; ilgRender(); };
   // v28.618 (Ben 02-Nov-26): download the rows shown (same filters as the table, no 1,500 cap) as CSV
-  if($('ilg-csv'))$('ilg-csv').onclick=function(){ var d=ILG.d||{}, rep=d.report||{}, P=d.pools||{}, rows=ilgRows(), q=function(x){ x=(x==null?'':String(x)); return /[",\n\r]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x; };
+  if($('ilg-csv'))$('ilg-csv').onclick=function(){ var d=ILG.d||{}, rep=d.report||{}, P=d.pools||{}, rows=ilgRows(), q=function(x){ x=csvSafe(x); return /[",\n\r]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x; };
     var out=[['SKU','Description','Report qty','Fulfil at report','Moved since','Diff','Storage now','Set to','Other statuses','In Fulfil','In report']].concat(rows.map(function(r){
       return [r.sku,r.description||'',r.report,r.fulfil_at_report,r.moved_since||0,r.diff,r.storage_now,r.diff?Math.max(0,r.set_to):'',Object.keys(r.statuses||{}).filter(function(s){ return s!=='Good'; }).map(function(s){ return s+' '+r.statuses[s]; }).join('; '),r.in_fulfil?'Y':'N',r.in_report?'Y':'N']; }));
     var stamp=rep.report_at?inv3plAge(rep.report_at).stamp.slice(0,9):'', name=(ILG_SITE_DEF[ILG.site].name+' '+((P[ILG.pool]&&P[ILG.pool].label)||ILG.pool)+' '+stamp).trim().replace(/[^a-z0-9-]+/gi,'_')+'.csv';
@@ -18311,7 +18313,7 @@ function renderDemandActionsView(body,opts){
   load();
 }
 // ─── DEMAND ▸ CALENDAR: editable trading calendar with CSV up/down ─────────
-function calCsvCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function calCsvCell(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 function calSplitCsv(l){ var out=[],cur='',q=false; for(var i=0;i<l.length;i++){ var c=l.charAt(i);
   if(q){ if(c==='"'){ if(l.charAt(i+1)==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
   else { if(c==='"')q=true; else if(c===','){out.push(cur);cur='';} else cur+=c; } } out.push(cur); return out; }
@@ -18767,7 +18769,7 @@ function renderKlaviyoBisView(body){
     var hc=summary.querySelector('#kb-hideclosed'); if(hc)hc.onchange=function(){ BIS_HIDE_CLOSED=this.checked; try{ localStorage.setItem('hz_bis_hide_closed',this.checked?'1':'0'); }catch(e){} draw(_kbLast); };
     var dl=summary.querySelector('#kb-dl'); if(dl)dl.onclick=function(){ var out=[['SKU','UK subs','UK status','US subs','US status','EU subs','EU status','AU subs','AU status','Total']];
       DROWS.forEach(function(r){ var st=function(m){ return (r[m]>0)?(BIS_STLBL[bisStatus(r.sku,m)]||''):''; }; out.push([r.sku, r.UK||0, st('UK'), r.US||0, st('US'), r.EU||0, st('EU'), r.AU||0, st('AU'), r.total||0]); });
-      var csv=out.map(function(row){return row.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
+      var csv=out.map(function(row){return row.map(function(v){v=csvSafe(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
       var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='Klaviyo_BIS_summary_'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); };
   }
   function load(){ fetch('/api/klaviyo-bis/status').then(function(r){return r.json();}).then(function(j){ draw(j||{}); }).catch(function(){ draw({}); }); }
@@ -18927,7 +18929,7 @@ function campRdBody(d,f,esc){ var ps=campRdPanels(d,f), cnt={g:0,a:0,r:0}, tot=0
         +campRdTable(p,esc)+'</section>'; }).join('')
       :'<div style="padding:14px;color:var(--faint)">No campaign SKUs launch this month'+(f.id||f.tier?' for this filter':'')+'.</div>')
     +'<div style="font-size:11.5px;color:var(--faint);max-width:120ch">At launch = on hand at the location (negative counted as 0) + inbound landing there by the intake date (a passed ETA still counts) − forecast from today to the day before launch (latest forecast run). Cover = at launch ÷ the launch month\'s weekly forecast. Red: not sold there (PRODUCT availability), nothing left at launch, or under '+(d.red_weeks||2)+' weeks. Amber: below target (campaign target, else the SKU\'s target cover there) or no launch-month forecast. Uplift is not applied yet. Data as of '+esc(saDate(d.as_of))+'.</div>'; }
-function campRdCsv(d,f){ var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+function campRdCsv(d,f){ var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   var L=[['Campaign','Status','Launch','Intake','Market','Channel','SKU','Product','Tier','On hand','Other pool','In by intake','In after','POs','Sales to launch','At launch','Launch month fcst','Cover wks','Target wks','RAG','Why'].join(',')];
   campRdPanels(d,f).forEach(function(p){ p.rows.forEach(function(r){ L.push([p.c.title,p.c.status,saDate(p.c.launch),saDate(r.intake||p.c.intake),p.g.market,campChLbl(p.g.channel),r.sku,r.name,r.tier,r.on_hand,r.other_pool,r.in_by,r.in_after,
     r.legs.map(function(x){ return x.ref+' '+x.qty+' '+(x.eta?saDate(x.eta):'no ETA'); }).join('; '),r.sales_to_launch,r.at_launch,r.launch_fc,r.cover,r.target,(CAMP_RAG[r.rag]||[''])[0],r.why].map(q).join(',')); }); });
@@ -20247,7 +20249,7 @@ function renderSlowMovingReport(body){
     // CSV download — exports the full filtered set (not just the 400 shown)
     var csvBtn=body.querySelector('.sm-csv'); if(csvBtn) csvBtn.onclick=function(){
       var cols=['SKU','Category','Release','Warehouse','On hand','AWD','Vel/wk','Cover wk','No sale (days)','Cost £ tied up'];
-      var q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      var q=function(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
       var lines=[cols.join(',')];
       f.forEach(function(r){ var c=bc(r); lines.push([r.sku,(r.subcat||r.category||''),(r.release_window||''),r.wh,r.on_hand,(r.awd||0),bv(r),(c==null?noDem:c),(r.days_since==null?'':r.days_since),(r.value||0)].map(q).join(',')); });
       var blob=new Blob([lines.join('\n')],{type:'text/csv'}); var a=document.createElement('a');
@@ -20429,7 +20431,7 @@ function renderAutoForecastReport(body){
       (d.transactions||[]).forEach(function(t){ var usd=Math.round((+t.amount_usd||0)*100)/100;
         rows.push([t.reference,t.type,usd.toFixed(2),t.date,t.country,t.supplier,afMonMY(t.month),(Math.round(usd/AF_GBP*100)/100).toFixed(2)]); });
       return rows; };
-    var afToCsv=function(rows){ return rows.map(function(r){return r.map(function(c){var s=String(c==null?'':c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n'); };
+    var afToCsv=function(rows){ return rows.map(function(r){return r.map(function(c){var s=csvSafe(c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n'); };
     var afDl=function(csv,fn){ var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
     var afFlash=function(btn){ var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200); };
     var ddBtn=function(id,label,bg,fg,br){ return '<span class="af-dd" style="position:relative;display:inline-block">'

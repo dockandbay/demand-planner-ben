@@ -1,3 +1,10 @@
+## v28.780 (11-Nov-26) Coghlans SFTP removed; more security review fixes
+- Finding 21 (Ben: "fully remove this feature, not required"): CONFIG > Coghlans SFTP is gone: page, GET /api/config/coghlans-sftp/list, lib/coghlans_sftp.mjs, the ssh2-sftp-client dependency (package.json + lock) and the COGHLANS_SFTP_* / WEBSHARE_PROXY_* entries in .env.example. Those env vars can be deleted from Vercel.
+- Finding 19: a 500 no longer sends a database / driver error to a non-admin: they get "Something went wrong on the server (ref xxxxxx)" and the full message is in the log under that ref. Our own messages (first line, 200 characters) still show. Admins and the sandbox see everything. clientErr(e) on 916 routes.
+- Finding 22: magic-link, invoice-link and AI limits are counted in KV across instances (fixed window per key), falling back to the per-instance count when KV is off.
+- Finding 30 (client side): every browser-built CSV export (planner, SUPPLY, supplier portal, client portal) uses the same formula guard as the server (numbers untouched).
+- Finding 3b: the Xero connection store is sealed at rest (AES-256-GCM, key from GMAIL_SEAL_KEY, 'x1:' prefix) on its next write; plain rows still read. Today both stores hold only the tenant id / name (the client-credentials connection keeps no refresh token). A rollback below v28.780 after a sealed write would need a Xero reconnect.
+- No migration, no new cron routes, no new env vars (two removed: COGHLANS_SFTP_*, WEBSHARE_PROXY_*).
 ## v28.779 (11-Nov-26) Security review fixes (Diviyaj's review of 10-Nov-26, the findings in Ben's code)
 - Finding 3: GET /api/app-settings never returns the Xero OAuth stores; the export token only to admins. Cache-Control private, no-store.
 - Finding 5: the planner page's esc() is now the HTML escaper (hzEscH); the old JS-string escaper is escJs(), kept for the 7 CSS attribute selectors that match row keys.

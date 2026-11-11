@@ -11,7 +11,6 @@ import { readFileSync, readdirSync, appendFile, writeFileSync } from 'fs';
 import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
-import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
 import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory, wssiEff } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
 import { B2B_TYPES, B2B_CURRENCIES, B2B_STATUSES, B2B_COGS_DEFAULT, b2bRate, b2bCalc, b2bChecks, b2bSummary, b2bParseSheet, b2bSplitText, b2bParseDate, b2bDateSuspect, b2bNum, b2bPct, b2bFy, b2bCsv } from './lib/b2b_forecast.mjs';   // v28.603 CLIENT > B2B forecast
@@ -946,6 +945,17 @@ function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
   if (s) s.err = String((e && e.message) || e || '').split('\n')[0].slice(0, 500);   // v28.159 (Ben): the health log records this message with the 500
   // v28.210 (Ben, H2): the URL is logged with any ?token= value redacted (a 500 on /portal?token= or /client?token= must not print a magic link)
   console.error('[500] ' + ((r && r.method) || '?') + ' ' + String((r && (r.originalUrl || r.url)) || '?').replace(/([?&]token=)[^&#]*/gi, '$1[redacted]') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
+// v28.780 (security review 10-Nov-26, finding 19): what a 500 tells the browser. A database / driver error (Postgres severity or SQLSTATE) names
+// tables, columns and constraints, so a non-admin gets a generic message with a reference that is also in the server log; our own messages
+// (thrown on purpose, e.g. "Build the month first") stay, first line, at most 200 characters. Admins and the sandbox see the full message.
+function clientErr(e) { const msg = String((e && e.message) || e || 'error');
+  try { const st = _reqStore.getStore(), r = st && st.req;
+    let admin = !GATE; if (!admin && r) { const em = String(authUser(r) || '').toLowerCase(), m = em && _permsMemo.get(em); admin = !!(m && m.row && m.row.is_admin) || SUPER_ADMINS.has(em); }
+    if (admin) return msg;
+    const db = !!(e && (e.severity || (typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code)) || /\b(relation|column|constraint|syntax error at|duplicate key|violates)\b/i.test(msg)));
+    if (db) { const ref = crypto.randomBytes(3).toString('hex'); console.error('[500 ref ' + ref + '] ' + msg); return 'Something went wrong on the server (ref ' + ref + '). Ask an admin to check the log.'; }
+    return msg.split('\n')[0].slice(0, 200); }
+  catch (_) { return 'Something went wrong on the server.'; } }
 // v27.886 (Ben, perf phase 4 — measurement): every request carries a start time + a DB-query counter (pool.query is
 // wrapped below to bump it). On finish, anything slower than HZ_SLOW_MS (default 750ms) is logged as
 // "[slow 1234ms 7q] GET /api/... 200" and the last 300 requests (all, not just slow) sit in a ring buffer behind
@@ -1195,7 +1205,7 @@ async function signUploadHandler(req, res) {
     const path = storageKey(b.category, b.filename);
     const { uploadUrl } = await storageSignUpload(path);
     res.json({ ok: true, upload_url: uploadUrl, storage_path: path, storage_sig: storageSig(path) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 // Supplier-entered money fields can arrive with thousands separators / currency symbols (e.g. "3,262.35" or
 // "$1,200"). Strip everything but digits/dot/minus, then validate — returns a clean numeric string, or null if
@@ -1993,7 +2003,7 @@ app.get('/api/demand/trends/plan-sanity', async (req, res) => {
     return { cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, cfg: C, rows };
     });
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // DEMAND ▸ Trends ▸ Panel 2 (Multi-year trend). Per category × market, Jan-to-cutoff for 2024/25/26. Headline =
 // gap-to-peak (not YoY). Trend class + plan_next (2027). Suspect-month heuristic (units <40% trailing-3mo avg AND
@@ -2046,7 +2056,7 @@ app.get('/api/demand/trends/multi-year', async (req, res) => {
     return { cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // DEMAND ▸ Trends ▸ Panel 1 (Channel mix). House benchmark per market = total FBA / (DTC+FBA), rolling 12 months to
 // cutoff (B2B excluded). Per category: FBA share, gap vs benchmark, headroom units. Stockout confound computed at
@@ -2083,7 +2093,7 @@ app.get('/api/demand/trends/channel-mix', async (req, res) => {
     return { benchmark: bench, grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // DEMAND ▸ Trends ▸ Type mix. Share of DTC+FBA sales that are SETS vs MASTER (products.variant_type), per category ×
 // market, rolling 12 months — compared across markets. setPct = SET / (SET + MASTER). Read-only.
@@ -2113,7 +2123,7 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
       return { grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Cin7 branch → warehouse-code map (branches mapping to null are unmanaged and excluded). The in-app snapshot
 // uploader was removed (Ben 17-Aug-26); this map is kept as the single source of truth for the n8n inventory-snapshot
@@ -2135,7 +2145,7 @@ const _INV_BRANCH_MAP = {
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {
   try { const v = await getDataVals(); sendJsonMemo(req, res, v, () => ({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} })); }   // v28.163: serialised + gzipped once per data build
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover per warehouse per month from the monthly inventory snapshots ──
 // SOH value (cost-weighted, end-of-month = latest snapshot in the month) ÷ weekly demand value (trailing-3-mo actual
@@ -2164,13 +2174,13 @@ app.get('/api/demand/stock-cover', async (_req, res) => {
       GROUP BY 1, 2, 3`)).rows;
     let target = 12; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_cover_target_wks'`)).rows[0]; if (r && Number(r.value) > 0) target = Number(r.value); } catch (e) {}
     res.json({ soh, dem, target });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/stock-cover/target', async (req, res) => {
   const v = Number((req.body || {}).target); if (!(v > 0)) return res.status(400).json({ error: 'target must be > 0' });
   try { await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES('stock_cover_target_wks',$1)
     ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]); res.json({ ok: true, target: v }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── DEMAND ▸ Inputs ▸ Backtest — upload a Cin7 stock-valuation export as a dated inventory snapshot ──
 // Body: { snapshot_date:'YYYY-MM-DD', filename, data_base64 }. Parses Branch/Category/Code/SOH, maps branch→warehouse
@@ -2219,7 +2229,7 @@ app.post('/api/demand/inventory-upload', async (req, res) => {
     const whs = [...new Set(keys.map(k => k.split('\t')[0]))].sort();
     const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d, count(*)::int n, sum(available)::int u FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows;
     res.json({ ok: true, date, rows: keys.length, units, warehouses: whs, skipped, dates });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Inverse normal CDF (Acklam) — service level fraction → Z. Lets any service level be used (not just a fixed set).
 function _normInv(p) { if (!(p > 0)) return -100; if (p >= 1) return 100;
@@ -2301,7 +2311,7 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
         weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, riskOptions, suggestedSl: Math.round(suggestedSl * 10) / 10, recSl: Math.round(suggestedSl * 10) / 10, recCoverWks: recOpt.coverWks, targetSl: target, targetCoverWks: tgtOpt.coverWks, flag }); });
     const dates = (await _qDates).rows.map(r => r.d);
     res.json({ ok: true, rows: out, snapshotDates: dates, cfg, window: { from, to }, target });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── DEMAND ▸ Analysis ▸ Forecast Anomalies — SUSTAINED (2+ complete months) actual-vs-forecast divergence, per SKU × country × channel.
 // Catches a volume trend the human missed: recent actuals consistently above (hot) or below (cold) the forecast, same
@@ -2363,13 +2373,13 @@ app.get('/api/demand/forecast-anomalies', async (req, res) => {
     });
     out.sort((a, b) => b.impactGbp - a.impactGbp || Math.abs(b.avgPct) - Math.abs(a.avgPct));
     res.json({ ok: true, rows: out, completeMonths: lastComplete, forwardMonths: fwd, cfg: { pct, minU, minMo } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
 app.get('/api/demand/snapshots', async (_req, res) => {
   try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count
     FROM planner.forecast_snapshots ORDER BY taken_at DESC`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/snapshots', async (req, res) => {
   const name = String((req.body && req.body.name) || '').trim() || ('Snapshot ' + new Date().toISOString().slice(0, 16).replace('T', ' '));
@@ -2382,11 +2392,11 @@ app.post('/api/demand/snapshots', async (req, res) => {
         AND month < date_trunc('month', current_date) + interval '18 months'`, [id]);   // forward 18 months only (Ben) — keeps snapshots lean; still captures near-forward months that later become past (for #4)
     await pool.query(`UPDATE planner.forecast_snapshots SET row_count=$2 WHERE id=$1`, [id, r.rowCount]);
     res.json({ ok: true, id: id, name: name, rows: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/snapshots/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.forecast_snapshots WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Snapshot data as an FC_OUTPUTS-shaped map { "sku|wh|ch": { "YYYY_MM": units } } — client diffs vs live (or another snapshot).
 app.get('/api/demand/snapshots/:id/data', async (req, res) => {
@@ -2394,7 +2404,7 @@ app.get('/api/demand/snapshots/:id/data', async (req, res) => {
       FROM planner.forecast_snapshot_rows WHERE snapshot_id=$1`, [req.params.id])).rows;
     const out = {}; rows.forEach(r => { const k = r.sku + '|' + r.wh + '|' + r.ch; (out[k] || (out[k] = {}))[r.ym] = r.units; });
     res.json({ id: Number(req.params.id), fc: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Un-allocated "China Stock" holding stock per SKU = qty on open China Stock branch POs (the MOQ top-ups). The buy
 // plan flags this as available to allocate. Display-only (does NOT alter buy quantities — allocation is a later step).
@@ -2779,7 +2789,7 @@ app.post('/api/save-forecasts', async (req, res) => {
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
     await _rollback(client);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: clientErr(e) });
   } finally {
     client.release();
   }
@@ -2828,7 +2838,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
     res.json({ saved: n });
   } catch (e) {
     await _rollback(client);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: clientErr(e) });
   } finally {
     client.release();
   }
@@ -3342,7 +3352,7 @@ app.get('/api/weather', async (_req, res) => {
       forecast_json, history_json, to_char(last_fetched,'YYYY-MM-DD"T"HH24:MI:SS"Z"') last_fetched
       FROM planner.weather_cache ORDER BY city`)).rows;
     res.set('Cache-Control', 'no-store').json({ cities: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Preorders + key-account order forecasts (moved off Airtable → Supabase). The BUY plan reads this instead
 // of calling Airtable via the MCP. key_account_forecasts is edited in DEMAND > Inputs > Key accounts; preorders come from the Fulfil sync (v28.241).
@@ -3355,7 +3365,7 @@ app.get('/api/preorders-ka', async (_req, res) => {
     // v28.243: order + customer detail behind each preorder SKU x 3PL x ship date (buy popup tooltip); empty before migration 346
     let det = []; try { if (await preordersFilter()) det = (await pool.query(`SELECT sku, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date, sale_number so, customer cust, sum(quantity)::float8 qty FROM planner.preorder_lines WHERE included GROUP BY 1,2,3,4,5`)).rows; } catch (_) {}
     res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows, preorder_lines: det });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.241 (Ben 09-Oct-26): PREORDERS FROM FULFIL. The planner.preorders table was last loaded 10-Jun-26 by the old
 // Airtable/n8n sync. Now: open sales order lines (sale confirmed or processing) with a future shipping date, fulfilment
@@ -3460,7 +3470,7 @@ app.get('/api/demand/preorders', async (_req, res) => {
       pool.query(`SELECT created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, orders, lines, units::float8 units, skus, stats FROM planner.preorder_syncs ORDER BY id DESC LIMIT 1`)]);
     const fc = cogsFulfilCfg() || fulfilConfigFor(await activeFulfilEnv());   // v28.242: order click-through to Fulfil (same instance the sync reads)
     res.set('Cache-Control', 'no-store').json({ lines: l.rows, last: s.rows[0] || null, fulfil_order_url: fc && fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io/v2/erp/model/sales_order/' : null });
-  } catch (e) { if (e.code === '42P01') return res.json({ lines: [], last: null, needs_migration: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.json({ lines: [], last: null, needs_migration: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/preorders/sync', async (req, res) => {
   try { const r = await preordersSyncOnce(authUser(req) || 'user');
@@ -3481,7 +3491,7 @@ async function runPreordersCron({ dry = false } = {}) {
 }
 app.post('/api/cron/preorders-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}; const r = await runPreordersCron({ dry: b.dry_run === true || b.dry_run === 'true' || req.query.dry === '1' }); res.status(r.ok ? 200 : 500).json(r); }   /* 500 on failure so the n8n error workflow fires */ catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const b = req.body || {}; const r = await runPreordersCron({ dry: b.dry_run === true || b.dry_run === 'true' || req.query.dry === '1' }); res.status(r.ok ? 200 : 500).json(r); }   /* 500 on failure so the n8n error workflow fires */ catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 if (HZ_BG && process.env.HZ_PREORDERS_CRON !== '0') {
   const _pc = () => runPreordersCron().then(r => console.log('[preorders] ' + (r.ok ? ('synced ' + r.lines + ' line(s)') : ('not synced: ' + r.error))), e => console.warn('[preorders] failed: ' + (e && e.message)));
@@ -3538,7 +3548,7 @@ app.get('/api/accounts/payables', async (req, res) => {
     const cn = new Map(); try { (await pool.query(`SELECT invoice_id, credit_note_id, credit_note_number, status, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD') at, run_by FROM planner.accounts_credit_log WHERE status IN ('created','creating')`)).rows.forEach(r => cn.set(r.invoice_id, r)); } catch (_) {}
     bills.forEach(b => { const c = cn.get(b.invoice_id); if (c) { b.credit_note = { number: c.credit_note_number, at: c.at, by: c.run_by, status: c.status, url: c.credit_note_id ? 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + c.credit_note_id : null }; b.writeoff = false; } });
     res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10), writeoff_max: ACC_WRITEOFF_MAX });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.283 (Ben 12-Oct-26): Payables "Create supplier credit note". A part-paid supplier bill whose amount still due is under ACC_WRITEOFF_MAX
 // (200, Ben, in the bill's currency) is written off: an ACCPAYCREDIT (Awaiting payment) for the amount due, coded like the bill's main line
@@ -3805,7 +3815,7 @@ app.get('/api/accounts/bank-ageing', async (req, res) => {
     items.forEach(x => { x.url = x.kind === 'payment' && x.link_id ? (x.link_type === 'ACCPAY' ? xbUrl(x.link_id) : 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + x.link_id)
       : x.kind === 'transfer' ? 'https://go.xero.com/Bank/BankTransactions.aspx?accountID=' + x.bank_account_id : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id; });
     res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, xero_quota: _xeroQuota, stmt, uploads, can_upload: !!(req.me && (req.me.is_admin || req.me.accounts_access || req.me.live === false)), today: new Date().toISOString().slice(0, 10) });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true, today: new Date().toISOString().slice(0, 10) }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true, today: new Date().toISOString().slice(0, 10) }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.265 (Ben 12-Oct-26): bank STATEMENT lines from Xero's Bank Reconciliation report export (Excel pack), uploaded by admins and ACCOUNTS users
 // (Xero's API cannot return statement lines). Body { name, content_base64 }. The Summary tab lists EVERY unreconciled line as at the report
@@ -3859,7 +3869,7 @@ async function accStmtUploadUncoded(req, res, name, text) {
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
     accAutoBillAfterUpload();   // v28.316
     res.json({ ok: true, format: 'uncoded', org: fileOrg, as_at: asAt, accounts: p.accounts.length, accounts_with_lines: p.accounts.filter(a => a.lines.length).length, unreconciled: lines, cleared, unmatched });
-  } catch (e) { if (/Not a Xero/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/Not a Xero/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
   try {
@@ -3895,21 +3905,21 @@ app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
     const open = (await pool.query(`SELECT count(*)::int n FROM planner.accounts_stmt_lines WHERE org=$1 AND account_name=$2 AND NOT reconciled`, [p.org, p.account])).rows[0].n;
     accAutoBillAfterUpload();   // v28.316
     res.json({ ok: true, org: p.org, account: p.account, matched_account: !!acct, as_at: asAt, period: p.period, unreconciled: unrec.size, lines: p.lines.length, cleared, open });
-  } catch (e) { if (/Not a Xero|No statement lines/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/Not a Xero|No statement lines/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Refresh now: 202 at once, the run continues on this instance (hzWaitUntil keeps a Vercel function alive) and the page polls GET. ?full=1 rescans.
 app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {
   try { if (await accJobLocked('accounts_bank_ageing')) return res.status(409).json({ ok: false, running: true, error: 'A bank ageing run is already in progress' });
     hzWaitUntil(accountsBankSync((req.me && req.me.email) || 'refresh', { full: req.query.full === '1' }).catch(e => console.warn('[accounts-bank] ' + (e && e.message))));
     res.status(202).json({ ok: true, started: true, running: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PROD SCHEDULE: n8n Qlxcr84MXQA1AfGc daily 05:15 (03-Nov-26), POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {} ({ "full": true } rescans).
 // 200 ok (or busy: another instance is running it) / 401 secret / 500 failed. Logs etl_runs 'accounts_bank_ageing'. Local server hourly only with HZ_ACCOUNTS_CRON=1 (the sandbox shares live's Xero allowance).
 app.post('/api/cron/accounts-bank-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {}, deep = b.deep === true || b.deep === 'true', r = await accountsBankSync('cron', { full: b.full === true || b.full === 'true', deep });   /* v28.703: { "deep": true } = nightly spare-capacity pass */
-    if (deep && r && !r.busy) { try { r.bills_rescan = await xbWeeklyRescan(); } catch (e) { r.bills_rescan = { error: e.message }; } } res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    if (deep && r && !r.busy) { try { r.bills_rescan = await xbWeeklyRescan(); } catch (e) { r.bills_rescan = { error: e.message }; } } res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
   const _ab = () => accountsBankSync('timer').then(r => console.log('[accounts-bank] ' + (r.busy ? 'busy' : r.items + ' item(s)' + (r.errors.length ? ' errors: ' + r.errors.join('; ') : ''))), e => console.warn('[accounts-bank] failed: ' + (e && e.message)));
@@ -3971,13 +3981,13 @@ app.get('/api/admin/gmail-connectors', async (req, res) => {   // v28.552: CONFI
     if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); req.me = me;
     const out = []; for (const k of Object.keys(GMAIL_SLOTS)) { try { out.push(await gmailSlotStatus(req, k)); } catch (e) { out.push({ slot: k, mailbox: GMAIL_SLOTS[k].mailbox, use: GMAIL_SLOTS[k].use, error: e.message }); } }
     res.set('Cache-Control', 'no-store').json({ connectors: out, configured: !!gmailCfg(), redirect_uri: gmailRedirectUri(req) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/accounts/gmail/status', async (req, res) => {
   try { const row = await gmailRow();
     res.set('Cache-Control', 'no-store').json({ can_write: !!(req.me && (req.me.is_admin || req.me.live === false)), configured: !!gmailCfg(), migrated: !(row && row.missing), connected: !!(row && !row.missing), mailbox_hint: GMAIL_MAILBOX_HINT, redirect_uri: gmailRedirectUri(req),
       email: row && row.email || null, connected_by: row && row.connected_by || null, connected_at: row && row.connected_at || null, last_ok_at: row && row.last_ok_at || null, last_error: row && row.last_error || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Connect: signed state (HMAC, 10 minutes) bound to a short-lived cookie in this browser, so a forged callback cannot plant a mailbox.
 const GMAIL_BACK = '#/config/admin/gmail-connectors';   // v28.552: connect / disconnect live on CONFIG ▸ Admin ▸ Gmail connectors
@@ -4024,7 +4034,7 @@ app.post('/api/accounts/gmail/disconnect', async (req, res) => {
     const row = await gmailRow(slot); if (!row || row.missing) return res.json({ ok: true });
     try { await fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: gmailUnseal(row.refresh_token_enc) }) }); } catch (_) {}
     await pool.query('DELETE FROM planner.accounts_gmail WHERE id = $1', [GMAIL_SLOTS[slot].id]); delete _gmailToks[slot]; res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Recent mail (read-only): subject, from, date, attachments, Stripe receipt link present. ?q= is a Gmail search (default last 30 days).
 function gmailParts(p, out) { if (!p) return out; if (p.filename) out.push({ name: p.filename, type: p.mimeType, size: (p.body && p.body.size) || 0 }); (p.parts || []).forEach(x => gmailParts(x, out)); return out; }
@@ -4278,7 +4288,7 @@ app.get('/api/accounts/backdate', async (req, res) => {
       if (x.email_id) x.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + x.email_id; });
     const stt = await accSettingGet('job_state:accounts_learn');
     res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, resume: !!(stt && stt.stage && stt.stage !== 'done'), days: ACC_LEARN_DAYS });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Refresh now: 202 at once; the run continues on this instance for one budget (hzWaitUntil keeps a Vercel function alive) and the page polls GET.
 // A run that did not finish in one budget is continued by the next Refresh or the next cron call (state is kept).
@@ -4288,14 +4298,14 @@ app.post('/api/accounts/backdate/refresh', async (req, res) => {
     const by = (req.me && req.me.email) || 'refresh';
     hzWaitUntil((process.env.VERCEL ? accountsLearn(by) : accLearnLoopLocal(by)).catch(e => console.warn('[accounts-learn] ' + (e && e.message))));
     res.status(202).json({ ok: true, started: true, running: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PROD SCHEDULE: n8n weekly (Mon 05:00 Europe/London), POST /api/cron/accounts-learn, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {}.
 // Each call runs for at most ACC_LEARN_BUDGET_MS (240 s): the reply carries { done }. n8n loops until done:true (a first run is 3 to 5 calls;
 // later runs are 1). 200 ok or busy / 401 secret / 500 failed. Logs etl_runs 'accounts_learn' once per completed run. Local server weekly only with HZ_ACCOUNTS_CRON=1.
 app.post('/api/cron/accounts-learn', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await accountsLearn('cron'); res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const r = await accountsLearn('cron'); res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
   const _al = () => gmailRow().then(g => g && !g.missing ? accLearnLoopLocal('timer').then(r => console.log('[accounts-learn] ' + (r.ok ? (r.busy ? 'busy' : r.receipts + ' receipt / ' + r.tax + ' tax') : 'failed: ' + r.error))) : null).catch(e => console.warn('[accounts-learn] ' + e.message));
@@ -4410,7 +4420,7 @@ app.get('/api/accounts/inbox/proposals', async (req, res) => {
   try { const rows = await accInboxProposals(); const cnt = {}; rows.forEach(r => { cnt[r.status] = (cnt[r.status] || 0) + 1; });
     const lastMail = (await pool.query(`SELECT to_char(max(parsed_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_gmail_msgs`).catch(() => ({ rows: [{}] }))).rows[0].at || null;
     res.set('Cache-Control', 'no-store').json({ rows, counts: cnt, mail_read_at: lastMail });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], counts: {}, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], counts: {}, missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Remember a payee's treatment (admins and ACCOUNTS users, Ben 12-Oct).
 app.post('/api/accounts/payee-rule', async (req, res) => {
@@ -4425,7 +4435,7 @@ app.post('/api/accounts/payee-rule', async (req, res) => {
       attach_auto=CASE WHEN EXCLUDED.treatment='autobill' THEN false ELSE planner.accounts_payee_rules.attach_auto END`,   // the bill carries the receipt: no attaching as well
       [org, key, t, (req.me && req.me.email) || null, from]);
     res.json({ ok: true, bill_from: from });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.271 (Ben 12-Oct-26): ACCOUNTS > Config. Every rule in one place: per-payee treatments (saved overrides + the payees seen on open statement
 // lines with HORIZON's suggestion), the built-in defaults, the UK / AU tax rules and the alert settings.
@@ -4455,11 +4465,11 @@ app.get('/api/accounts/config', async (req, res) => {
         { org: 'AU', rule: 'Mixed GST invoices (applied from v28.315): when the receipt shows GST below total / 11 and a GST-free part (e.g. superannuation), two tax-exclusive lines on the payee\'s account: "(GST component)" = GST x 10 at GST on Expenses and "(GST free component)" = the rest at GST Free Expenses. Auto bill leaves these for review' }],
       alerts: { stale_days: ACC_STMT_MAX_DAYS, recipients: ACC_STMT_ALERT_TO, xero_day_alert: XERO_DAY_ALERT, coghlans_scan_hours: COG_SCAN_EVERY_MS / 3600000 },
       can_edit: !!(req.me && (req.me.is_admin || req.me.accounts_access || req.me.live === false)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/payee-rule/delete', async (req, res) => {   // back to HORIZON's suggestion for this payee
   try { const b = req.body || {}; await pool.query(`DELETE FROM planner.accounts_payee_rules WHERE org=$1 AND payee_key=$2`, [String(b.org || '').toLowerCase(), String(b.payee_key || '').toUpperCase()]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.272 (Ben 12-Oct-26): yearly repeat counts of bank-account spend (Spend Money) per Xero contact from 1-Jan-2024. GET only, monthly windows,
 // a full build needs ACC_XERO_DAY_MIN calls of headroom; later runs (with the weekly learn) rebuild only the current year.
@@ -4495,7 +4505,7 @@ async function accSpendHistory(by, opts) {
 }
 app.post('/api/accounts/forwarding/history', async (req, res) => {   // admin: build or refresh the yearly history (202 + background)
   try { if (_accHistRun) return res.status(409).json({ running: true }); hzWaitUntil(accSpendHistory((req.me && req.me.email) || 'button', { full: req.query.full === '1' })); res.status(202).json({ ok: true, started: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.272 (Ben 12-Oct-26): regular payees whose receipts do not reach accounts@ (2+ reconciled items in the learn window, receipt found for under
 // half of them), excluding payees whose treatment is bank rule or ignore and 3PLs / product suppliers, so someone can set up auto-forwarding at
@@ -4520,7 +4530,7 @@ app.get('/api/accounts/forwarding', async (req, res) => {
       .sort((a, b) => b.recent - a.recent || a.contact.localeCompare(b.contact));
     const last = (await pool.query(`SELECT to_char(max(updated_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_spend_history`)).rows[0].at;
     res.set('Cache-Control', 'no-store').json({ rows, years: yrs, history_at: last, building: !!_accHistRun, days: ACC_LEARN_DAYS });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/forwarding/action', async (req, res) => {
   try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), contact = String(b.contact || '').slice(0, 200);
@@ -4533,7 +4543,7 @@ app.post('/api/accounts/forwarding/action', async (req, res) => {
     else if (st === 'actioned' || st === 'ignored') await pool.query(`INSERT INTO planner.accounts_forward_actions (org, contact, status, actioned_by, actioned_at, note) VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (org, contact) DO UPDATE SET status=EXCLUDED.status, actioned_by=EXCLUDED.actioned_by, actioned_at=now(), note=EXCLUDED.note`, [org, contact, st, (req.me && req.me.email) || null, b.note ? String(b.note).slice(0, 300) : null]);
     else return res.status(400).json({ error: 'status must be actioned, ignored or open' });
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.275 (Ben 12-Oct-26): automatic receipt attachment (approved: automatic once a payee is switched on as an automatic rule).
 // For each payee with attach_auto: RECONCILED Spend Money in Xero dated on or after attach_from, with no file yet, whose receipt is certain
@@ -4624,7 +4634,7 @@ app.post('/api/accounts/dhl/ignore', async (req, res) => {
   try { const n = String((req.body && req.body.invoice_number) || '').trim(), on = (req.body && req.body.ignored) !== false; if (!/^[A-Z]{3}IR\d+$/i.test(n)) return res.status(400).json({ error: 'invoice_number required' });
     if (on) await pool.query(`INSERT INTO planner.dhl_invoice_docs (invoice_number, part, status, created_by) VALUES ($1,'ignore','ignored',$2) ON CONFLICT DO NOTHING`, [n, authUser(req) || 'system']);
     else await pool.query(`UPDATE planner.dhl_invoice_docs SET status='unignored' WHERE invoice_number=$1 AND part='ignore' AND status='ignored'`, [n]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create the Xero AU bill for one DHL invoice. Body: { invoice_number, accounts: { <awb>: '<code>' } (AU-bound shipments only), confirm:true }.
 app.post('/api/accounts/dhl/au-bill', async (req, res) => {
@@ -4992,7 +5002,7 @@ app.get('/api/accounts/receipts/search', async (req, res) => {
         else rows.unshift({ sale_id: 'shopify:' + h.id, source: 'shopify', not_in_fulfil: true, store: st.toUpperCase(), reference: h.name, number: '', customer: h.customer, sale_date: h.created, currency: h.currency, total: h.total, paid: cr2(h.total - h.outstanding), due: h.outstanding, paid_up: !(h.outstanding > 0.005), shop: h, why: ['not in Fulfil'] });
       } catch (e) { rows.unshift({ sale_id: 'shopify-err:' + nm, source: 'shopify', not_in_fulfil: true, store: st.toUpperCase(), reference: nm, paid_up: true, total: 0, paid: 0, due: 0, why: ['Shopify lookup failed: ' + String(e.message).slice(0, 120)] }); } }
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/receipts/preview', async (req, res) => {
   try { const p = await crPlan(req.body || {}, null); res.json(p); }
@@ -5169,7 +5179,7 @@ app.get('/api/accounts/ka-receipts', async (req, res) => {
     const clearing = cfgs.map(c => { const rs = runs.filter(r => r.ka_key === c.ka_key && r.status === 'created');
       return { ka_key: c.ka_key, code: c.clearing_code, name: c.clearing_name, unexplained: ka2(rs.reduce((s, r) => s + r.unexplained, 0)), items: rs.filter(r => Math.abs(r.unexplained) > 0.004) }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, migrated: true, sandbox: IS_SANDBOX, accounts: cfgs.map(kaPublic), runs, clearing });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/ka-receipts/check', async (req, res) => {
   try { res.json(kaStrip(await kaPlan(req.body || {}))); }
@@ -5239,7 +5249,7 @@ app.post('/api/accounts/ka-receipts/config', async (req, res) => {
     const r = await pool.query(`UPDATE planner.accounts_ka_config SET help=coalesce($2,help), match_re=coalesce($3,match_re), updated_at=now(), updated_by=$4 WHERE ka_key=$1 RETURNING ka_key`,
       [String(b.ka || '').toUpperCase(), b.help == null ? null : String(b.help).slice(0, 4000), b.match_re == null ? null : String(b.match_re).slice(0, 200), authUser(req) || 'admin']);
     if (!r.rows[0]) return res.status(404).json({ error: 'Unknown key account' }); _kaCfg.at = 0; res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 async function accEmailPdf(msgId) {
   const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
@@ -5373,26 +5383,26 @@ app.post('/api/accounts/payee-rule/attach', async (req, res) => {   // switch au
       ON CONFLICT (org, payee_key) DO UPDATE SET attach_auto=EXCLUDED.attach_auto, attach_from=CASE WHEN EXCLUDED.attach_auto THEN EXCLUDED.attach_from ELSE planner.accounts_payee_rules.attach_from END, updated_by=EXCLUDED.updated_by, updated_at=now()`,
       [org, key, (cur && cur.treatment) || String(b.treatment || 'rule'), (req.me && req.me.email) || null, on, from]);
     res.json({ ok: true, on, from });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/attach/run', async (req, res) => {   // ?dry=1 lists what would be attached without writing (admins and ACCOUNTS users)
   try { if (_accAttachRun) return res.status(409).json({ running: true }); const r = await accAttachRun((req.me && req.me.email) || 'button', { dry: req.query.dry === '1' }); res.json(r); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/accounts/attach/preview', async (req, res) => {   // the PDF that would be attached for an accounts@ email (read only)
   try { const id = String(req.query.email_id || ''); if (!/^[0-9a-f]{8,32}$/i.test(id)) return res.status(400).json({ error: 'email_id required' });
     const p = await accEmailPdf(id); res.set('Content-Type', 'application/pdf').set('Content-Disposition', 'inline; filename="' + p.filename.replace(/"/g, '') + '"').set('Cache-Control', 'no-store').send(p.buf);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/accounts/attach/log', async (req, res) => {
   try { const rows = (await pool.query(`SELECT id, org, payee_key, xero_id, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, currency, email_id, filename, status, error, run_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_attach_log ORDER BY created_at DESC LIMIT 200`)).rows;
     rows.forEach(r => { r.xero_url = 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + r.xero_id; if (r.email_id) r.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + r.email_id; });
     res.set('Cache-Control', 'no-store').json({ rows });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [] }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [] }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person removed a wrong attachment in Xero: record it (it will not be re-attached)
   try { await pool.query(`UPDATE planner.accounts_attach_log SET status='removed', error=coalesce(error,'') || $2 WHERE id=$1 AND status='attached'`, [req.params.id, 'removed by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.276 (Ben 12-Oct-26): BILL ROUTE for every payee whose receipt reaches accounts@ (Snapchat included). "1 process, we start to remove
 // bank rules when the receipt can be added from accounts@". HORIZON creates the Xero bill (status Awaiting payment, Ben: not Draft) with the
@@ -5664,7 +5674,7 @@ async function accAutoBillMaybe() {   // every 6 hours with the health checks, c
 }
 app.post('/api/accounts/bills/run', async (req, res) => {   // ?dry=1 = preview (no writes). Admins and ACCOUNTS users.
   try { if (_accBillRun) return res.status(409).json({ running: true }); res.json(await accAutoBillRun((req.me && req.me.email) || 'button', { dry: req.query.dry === '1' })); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bill (review): the person ticked these Inbox matcher lines and confirmed. items: [{org, payee_key, email_id}]; ?dry=1 checks them only.
 app.post('/api/accounts/bills/create', async (req, res) => {
@@ -5679,7 +5689,7 @@ app.post('/api/accounts/bills/create', async (req, res) => {
       catch (e) { c.result = 'error: ' + e.message; out.errors.push(c.payee_key + ': ' + e.message); if (e && e.xero_daily) break; }
     }
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Log + watchdog: Xero status from the hourly bill cache (PAID = matched), duplicates = a reconciled Spend Money for the same payee and amount.
 app.get('/api/accounts/bills/log', async (req, res) => {
@@ -5696,7 +5706,7 @@ app.get('/api/accounts/bills/log', async (req, res) => {
         : r.state === 'open' && r.old ? 'Not matched after ' + ACC_BILL_STALE_DAYS + ' days: check the statement line in Xero' : null; });
     const flags = rows.filter(r => r.flag).length;
     res.set('Cache-Control', 'no-store').json({ rows, flags, stale_days: ACC_BILL_STALE_DAYS });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.282 (Ben 12-Oct-26): Rules > Metrics. Bills HORIZON created in Xero, correct (matched, or awaiting payment) vs incorrect (deleted or
 // voided in Xero, or marked Voided in HORIZON), plus failed attempts; by month, payee, organisation and route (automatic / reviewed); and the
@@ -5711,11 +5721,11 @@ app.get('/api/accounts/bills/metrics', async (req, res) => {
     const att = (await pool.query(`SELECT status, count(*)::int n FROM planner.accounts_attach_log GROUP BY 1`).catch(() => ({ rows: [] }))).rows.reduce((a, r) => (a[r.status] = r.n, a), {});
     const credits = (await pool.query(`SELECT status, count(*)::int n, sum(amount)::float8 amt FROM planner.accounts_credit_log GROUP BY 1`).catch(() => ({ rows: [] }))).rows.reduce((a, r) => (a[r.status] = { n: r.n, amount: r.amt }, a), {});   // v28.283
     res.set('Cache-Control', 'no-store').json({ total: tot.all || { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }, by_month: byMon, by_payee: byPayee, by_mode: byMode, attachments: att, credits });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ total: {}, by_month: {}, by_payee: {}, by_mode: {}, attachments: {} }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ total: {}, by_month: {}, by_payee: {}, by_mode: {}, attachments: {} }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/bills/:id/voided', async (req, res) => {   // a person voided a wrong bill in Xero: keep the receipt from being billed again
   try { await pool.query(`UPDATE planner.accounts_bill_log SET status='voided', error=coalesce(error,'') || $2 WHERE id=$1 AND status IN ('created','creating')`, [req.params.id, ' voided by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/payee-rule/coding', async (req, res) => {   // the Xero contact, account code and tax type for a payee's bills (blank = from history)
   try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase().slice(0, 80);
@@ -5725,13 +5735,13 @@ app.post('/api/accounts/payee-rule/coding', async (req, res) => {   // the Xero 
       ON CONFLICT (org, payee_key) DO UPDATE SET contact=EXCLUDED.contact, contact_id=CASE WHEN EXCLUDED.contact IS DISTINCT FROM planner.accounts_payee_rules.contact THEN NULL ELSE planner.accounts_payee_rules.contact_id END,
         account_code=EXCLUDED.account_code, tax_type=EXCLUDED.tax_type, updated_by=EXCLUDED.updated_by, updated_at=now()`, [org, key, (req.me && req.me.email) || null, v('contact'), v('account_code'), v('tax_type')]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/payee-rule/bank-rule-done', async (req, res) => {   // the person deleted (or never had) the Xero bank rule for an Auto bill payee
   try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase();
     await pool.query(`UPDATE planner.accounts_payee_rules SET bank_rule_done_at=CASE WHEN $3 THEN now() ELSE NULL END, bank_rule_done_by=CASE WHEN $3 THEN $4 ELSE NULL END WHERE org=$1 AND payee_key=$2`, [org, key, b.done !== false, (req.me && req.me.email) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's bills would be coded as (history), for the Config row
   try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase();
@@ -5742,7 +5752,7 @@ app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's 
     const em = toks.length ? (await pool.query(`SELECT subject, from_addr FROM planner.accounts_gmail_msgs WHERE msg_date >= current_date - 120 AND (` + toks.map((_, i) => `lower(subject || ' ' || from_addr) LIKE $${i + 1}`).join(' OR ') + `) ORDER BY msg_date DESC LIMIT 5`, toks.map(t => '%' + t + '%')).catch(() => ({ rows: [] }))).rows : [];
     const hint = ln.map(l => l.reference + ' ' + (l.description || '')).concat(em.map(e => e.subject + ' ' + e.from_addr)).join(' ');
     res.json({ coding: await accPayeeCoding(org, key, hint), hint_used: !!hint }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.280 (Ben 12-Oct-26): view a receipt email inside HORIZON (Reconcile drawer) instead of opening Gmail. Read only. The HTML is shown in a
 // sandboxed iframe with a CSP that blocks scripts and remote content (no tracking pixels); attachments are listed, the PDF is served by attach/preview.
@@ -5758,13 +5768,13 @@ app.get('/api/accounts/email/:id', async (req, res) => {
     html = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
     res.set('Cache-Control', 'no-store').json({ id, from: H('from'), to: H('to'), date: new Date(Number(m.internalDate)).toISOString(), subject: H('subject'), html, text: html ? '' : text, attachments: atts,
       gmail_url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
 app.post('/api/accounts/inbox/read-mail', async (req, res) => {
   try { if (!(await gmailRow().then(g => g && !g.missing).catch(() => false))) return res.status(409).json({ error: 'accounts@ Gmail is not connected' });
     const r = await accGmailCache(ACC_LEARN_DAYS + 15, new AccBudget(Math.min(ACC_LEARN_BUDGET_MS, 240000))); res.json(Object.assign({ ok: true }, r));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/health', async (req, res) => {
   try {
@@ -5782,7 +5792,7 @@ app.get('/api/health', async (req, res) => {
       cats: Object.keys(CATS).length, subs: Object.keys(SUBS).length, bi_rules: BI.length,
       prod_const: Object.keys(PC).length, sample_pc: PC[Object.keys(PC)[0]],
     });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Same-origin image proxy — lets the barcode-label PNG export embed a remote swatch without tainting the
@@ -5905,7 +5915,7 @@ app.get('/api/supply/label-data', async (req, res) => {
       rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
     }
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // SUG-0012 — PO-grid SKU filter: return the PO refs whose order-plan lines contain ANY of the given SKUs
@@ -5917,7 +5927,7 @@ app.get('/api/supply/pos-by-sku', async (req, res) => {
     const conds = toks.map((_, i) => `l.sku ILIKE '%'||$${i + 1}||'%'`).join(' OR ');
     const pos = (await pool.query(`SELECT DISTINCT l.po FROM planner.purchase_order_lines l WHERE ${conds}`, toks)).rows.map(r => r.po);
     res.json({ pos });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── ERP integration (Cin7 ▸ Fulfil migration) ──────────────────────────────────────────────────────────
 // Which ERP the app targets + (for Fulfil) which environment, both from CONFIG ▸ General settings (app_settings).
@@ -5963,7 +5973,7 @@ const archivedSql = (alias, param) =>
 app.get('/api/supply/erp-status', async (req, res) => {
   try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(), sandbox: IS_SANDBOX,
     fulfil: { sandbox: fulfilConfigFor('sandbox').configured, live: fulfilConfigFor('live').configured } }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ===================== Fulfil ERP client (v2 REST / Tryton model API) =====================
 // Targets Fulfil when Active ERP = Fulfil, mirroring the Cin7 push process (dates + line items, create-if-absent).
@@ -6730,7 +6740,7 @@ app.post('/api/supply/fulfil/mirror/:po/relink', async (req, res) => {
     await client.query(`UPDATE planner.fulfil_purchase_orders SET po=$2, updated_at=now() WHERE po=$1`, [from, to]);
     await client.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Linked records',$2,$3)`, [to, 'Fulfil PO linked: ' + ref + ' (id ' + fid + '), moved from leftover copy ' + from, by]);
     await client.query('COMMIT');
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); return res.status(500).json({ error: e.message }); } finally { client.release(); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); return res.status(500).json({ error: clientErr(e) }); } finally { client.release(); }
   let erp = null; try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; }
   res.json({ ok: true, from, to, erp_qty: erp });
 });
@@ -6749,7 +6759,7 @@ app.get('/api/supply/fulfil/drift', async (req, res) => {
       else if (r.horizon_lines !== r.fulfil_lines) issues.push('line count ' + r.horizon_lines + ' (Horizon) vs ' + r.fulfil_lines + ' (Fulfil)');
       return { ...r, issues }; }).filter(r => r.issues.length);
     res.json({ ok: true, total: rows.length, in_fulfil: rows.filter(r => r.in_fulfil).length, missing: rows.filter(r => !r.in_fulfil).length, drift });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.740: per-PO ERP status for the grid — in Fulfil (mirror) + line match + the cin7_not_required flag. Client merges by po.
 app.get('/api/supply/fulfil/grid-status', async (req, res) => {
@@ -6791,7 +6801,7 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
       erp_drift_stale: !!(r.erp_drift_approved_at && r.erp_drift_approved_sig && r.erp_drift_approved_sig !== r.drift_sig),
       erp_drift_approved_by: r.erp_drift_approved_by || null, erp_drift_approved_at: r.erp_drift_approved_at || null }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.007 (Ben): tick / untick "ERP drift approved" on a PO. Approving stores WHO + WHEN + the signature of the lines as they
 // stand now (Horizon + Fulfil mirror); grid-status only honours it while that signature still matches. Untick clears it.
@@ -6810,7 +6820,7 @@ app.post('/api/supply/po/:po/erp-drift-approve', async (req, res) => {
     if (!r.rowCount) return res.status(404).json({ error: 'PO not found' });
     logPoChange(po, 'ERP drift approval removed', '', by);
     res.json({ ok: true, approved: false });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.751: seed suppliers.fulfil_id / branches.fulfil_id from the Fulfil tenant, so the PO push uses the stored id
 // (authoritative + skips the name lookup + handles name mismatches). Resolves supplier name → party.party and branch
@@ -6844,7 +6854,7 @@ app.post('/api/supply/fulfil/seed-ids', async (req, res) => {
       unmatched: { suppliers: suppliers.filter(x => x.fulfil_id == null).map(x => x.name), branches: branches.filter(x => x.fulfil_id == null).map(x => x.name) },
       note: apply ? 'Applied (only matched rows written; unmatched kept their existing value).' : 'Dry run — nothing written. POST {apply:true} (or ?apply=true) to write.'
     });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v27.882 (Ben): Horizon shipment ⇄ Fulfil INTERNAL shipment (IS…) link + two ERP recommendations ──────────────
 //  Fulfil creates an internal transfer (stock.shipment.internal, e.g. IS134) whose `reference` carries the master PO
@@ -6941,7 +6951,7 @@ async function fulfilDateSyncPreview() {
 app.get('/api/supply/fulfil/date-sync-preview', async (_req, res) => {
   try { const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     res.set('Cache-Control', 'no-store').json({ ok: true, env: cfg.env, live_writes: cfg.env !== 'live' || String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() === 'true', items: await fulfilDateSyncPreview() });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.599: one Fulfil date write (IS planned receiving, else the PO's requested delivery), shared by the Sync Fulfil Dates dialog and
 // Workflows. Caller has checked the env / FULFIL_LIVE_WRITES gate. Returns {ref, ok, error?}.
@@ -6979,7 +6989,7 @@ app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
     for (const it of items) results.push(await fulfilDateWrite(it, by));
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, updated: results.filter(r => r.ok).length, results });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/fulfil/internal-shipments', async (req, res) => {   // batch read for the grid / shipment record / master data
   try {
@@ -7005,14 +7015,14 @@ app.post('/api/supply/fulfil/shipment-planned-date', async (req, res) => {
     await fulfilFetch('PUT', '/model/stock.shipment.internal/' + hit.id, { planned_date: date });
     try { await pool.query(`UPDATE planner.fulfil_internal_shipments SET planned_date=$2::date, source='write', updated_at=now() WHERE fulfil_id=$1`, [hit.id, date]); } catch (_) {}   // v27.901: mirror in step
     res.json({ ok: true, is_number: hit.number, is_id: hit.id, planned_date: date });
-  } catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.740: toggle "not required in Cin7" for one PO (order-plan tickbox). Suppresses Cin7 drift/actions; Fulfil unaffected.
 app.post('/api/supply/po/:po/cin7-not-required', async (req, res) => {
   const b = req.body || {};
   try { await pool.query(`UPDATE planner.purchase_orders SET cin7_not_required=$2, updated_at=now() WHERE po=$1`, [req.params.po, !!b.value]);
     res.json({ ok: true, cin7_not_required: !!b.value }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.192 (Ben): VALIDATE SALES ORDER (SUPPLY ▸ Purchase Orders ▸ Direct to Client) ──────────────────────────────────
 // Reads one Fulfil sales order (sale.sale) + its lines (sale.line) and, for every DROP-SHIP line, the suppliers set up on
@@ -7466,7 +7476,7 @@ app.get('/api/supply/cogs/last', async (req, res) => {   // v28.238: the saved l
     // v28.439: recipient checked now (it is a setting), and columns no longer sent (CA Propack) are dropped from an older saved result
     const cols = new Set(COGS_COLS.map(c => c.col)); if (Array.isArray(r.payload.columns)) r.payload.columns = r.payload.columns.filter(c => cols.has(c.col));
     res.set('Cache-Control', 'no-store').json({ ok: true, last: Object.assign(r.payload, { analysed_at: r.at, analysed_by: r.created_by, recipient_set: !!(await cogsRecipient()) }) }); }
-  catch (e) { if (e.code === '42P01') return res.json({ ok: true, last: null }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, last: null }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/cogs/csv', async (req, res) => {
   if (!(await cogsAdminOk(req, res))) return;
@@ -7528,7 +7538,7 @@ app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: 
       ON CONFLICT (sku, col) DO ` + (replace ? `UPDATE SET value=EXCLUDED.value, ccy=EXCLUDED.ccy, source='airtable_csv', qty=NULL, unit_cost_company=NULL, fx=NULL, updated_at=now(), updated_by=EXCLUDED.updated_by` : 'NOTHING'), [s, c, v, k, by]);
     try { await pool.query(`INSERT INTO planner.cogs_uploads (kind, created_by, rows, note) VALUES ('baseline',$1,$2,$3)`, [by, r.rowCount, 'imported ' + s.length + ' values, ' + r.rowCount + ' written' + (replace ? ' (replace)' : ' (missing only)')]); } catch (e) {}
     res.json({ ok: true, values: s.length, written: r.rowCount, skus: new Set(s).size, missing_cols: COGS_COLS.filter(x => idx[x.col] < 0).map(x => x.col) });
-  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied.' }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied.' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/cogs/history', async (req, res) => {
   try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
@@ -7592,7 +7602,7 @@ app.post('/api/supply/cogs/avask', async (req, res) => {
       return Object.assign(r, { our_sku: hit.ours, via: hit.via, cost: Math.round(c.v * 100) / 100, from: c.col, src: c.source });
     });
     res.set('Cache-Control', 'no-store').json({ ok: true, rows: out, as_of: asOf });
-  } catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.727 (Ben 04/05-Nov-26, docs/specs/cogs-channel-allocation.md): COGS and SALES by channel. Fulfil books every sale to generic clearing
 // accounts (9006 COGS; 9002 Revenue, 9003 Contra Revenue, 9004 Shipping, 9005 Sales Discount) and Xero sees them as single lines. Each month
@@ -8021,7 +8031,7 @@ app.get('/api/supply/cogs-channel', async (req, res) => {
     try { log = (await pool.query(`SELECT id, month, org, journal, run_kind, action, to_char(run_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, run_by, total, prev_total, xero_id, xero_status, lines, emailed, error
       FROM planner.cogs_channel_runs ORDER BY month DESC, id DESC LIMIT 300`)).rows; } catch (e) { if (e.code !== '42P01') throw e; }
     res.set('Cache-Control', 'no-store').json({ ok: true, month, build: b, building: !!_cchBusy[month], log, map: cpJson(await cpSetting('cogs_channel_map', '{}'), {}), from: CCH_FROM }); }
-  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/cogs-channel/build', async (req, res) => {   // reads LIVE Fulfil (about a minute); writes only HORIZON's saved build
   const me = await cchAccessOk(req, res); if (!me) return;
@@ -8037,7 +8047,7 @@ app.post('/api/supply/cogs-channel/adjust', async (req, res) => {   // v28.778: 
     const m = cpJson(await cpSetting('cogs_ch_adjust', '{}'), {}) || {}; if (acct) m[id] = acct; else delete m[id];
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cogs_ch_adjust',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(m), (me && me.email) || 'admin']);
     res.json({ ok: true, adjust: m }); }
-  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/cogs-channel/map', async (req, res) => {   // assign an account to a channel (/segment) that has none
   const me = await cchAccessOk(req, res); if (!me) return;
@@ -8047,7 +8057,7 @@ app.post('/api/supply/cogs-channel/map', async (req, res) => {   // assign an ac
     const m = cpJson(await cpSetting('cogs_channel_map', '{}'), {}) || {}; const k = ch + '|' + seg; if (code) m[k] = code; else delete m[k];
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cogs_channel_map',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(m), (me && me.email) || 'admin']);
     res.json({ ok: true, map: m }); }
-  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, org: 'UK'|'AU', push, confirm, replace }: no push = the plan (reads Xero only)
   const me = await cchAccessOk(req, res); if (!me) return;
@@ -8123,12 +8133,12 @@ app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
     (actual_cost IS NOT NULL OR amended_qty IS NOT NULL OR is_added=true) AND (confirmed_at IS NULL OR confirmed_at < submitted_at) unconfirmed
     FROM planner.portal_line_costs`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Crossdock shipped quantities (supplier-entered, per PO × crossdock SKU). Reflects on the PO + master shipment.
 app.get('/api/supply/crossdock-shipments', async (req, res) => {
   try { res.json((await pool.query('SELECT po, sku, qty FROM planner.crossdock_shipments')).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/crossdock-qty', async (req, res) => {
   const b = req.body || {};
@@ -8139,12 +8149,12 @@ app.post('/api/supply/crossdock-qty', async (req, res) => {
       VALUES ($1,$2,$3,$4, now()) ON CONFLICT (po, sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, qty, b.submitted_by || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier-entered additional cost lines (description / qty / price) per PO — sum into the total invoice cost.
 app.get('/api/supply/additional-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs ORDER BY id`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/additional-cost', async (req, res) => {
   const b = req.body || {};
@@ -8161,24 +8171,24 @@ app.post('/api/supply/additional-cost', async (req, res) => {
         [b.po, b.description || '', num(b.qty), num(b.price), b.submitted_by || null]);
       res.json({ ok: true, id: r.rows[0].id });
     }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/additional-cost-remove', async (req, res) => {
   if (!req.body || !req.body.id) return res.status(400).json({ error: 'id required' });
   try { await pool.query('DELETE FROM planner.portal_additional_costs WHERE id=$1', [req.body.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // D&B approves (or un-approves) a supplier's additional cost line on the admin PO ▸ Payments tab.
 app.post('/api/supply/additional-cost-approve', async (req, res) => {
   const b = req.body || {};
   if (!b.id) return res.status(400).json({ error: 'id required' });
   try { await pool.query('UPDATE planner.portal_additional_costs SET approved=$2 WHERE id=$1', [b.id, b.approved !== false]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // One PO's fully-computed grid row (same SQL as the grid) — for in-place row refresh after an edit.
 app.get('/api/supply/po-row/:po', async (req, res) => {
   try { res.json((await poRowsQ(' WHERE calc4.po = $1', [req.params.po])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Lean PO picker for one supplier — just po/prod_no/country for the "assign a PO to a production" popover
 // (was fetching all ~1,376 POs via the heavy grid SQL to build one supplier's short list).
@@ -8191,13 +8201,13 @@ app.get('/api/supply/po-picker/:supplier', async (req, res) => {
       LEFT JOIN planner.branches b ON b.name=p.branch
       WHERE coalesce(p.supplier_name,'')=$1
       ORDER BY p.po`, [req.params.supplier])).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Tiny global po→supplier map (2 fields, all POs) — the admin portal-preview needs it to resolve "ships with
 // <other supplier>" without pulling the full 2.7MB PO grid.
 app.get('/api/supply/po-suppliers', async (_req, res) => {
   try { res.json((await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name FROM planner.purchase_orders`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── PRICE LISTS (SUPPLY ▸ Purchase Orders ▸ Price Lists) ─────────────────────────────────────────────
@@ -8259,7 +8269,7 @@ async function plAdminData() {
     return { entries, suppliers, priceTypes, manualSkus, excluded, productions: [...new Set(prods)], currentProduction, pending };
 }
 app.get('/api/supply/price-list', async (_req, res) => {
-  try { res.json(await plAdminData()); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await plAdminData()); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Build a 2-sheet XLSX (Price types · SKUs) from a price-list data object (shared by admin + portal export).
 async function plXlsxBuffer(data) {
@@ -8433,7 +8443,7 @@ app.post('/api/supply/edi-labels/parse', async (req, res) => {
     if (!csvText.trim()) return res.status(400).json({ error: 'No CSV supplied' });
     if (!pdfs.length) return res.status(400).json({ error: 'No PDF files supplied' });
     res.json(_ediPreview(await _ediParse(csvText, pdfs)));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/edi-labels/generate', async (req, res) => {
   try {
@@ -8487,7 +8497,7 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     });
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     res.set('Content-Type', 'application/zip').set('Content-Disposition', 'attachment; filename="edi-labels.zip"').set('Cache-Control', 'no-store').send(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // EDI ▸ Step 7b — build the Cin7 sales-order upload CSV from the ASN alone (no PDFs). level 'po' = one order per PO
@@ -8557,7 +8567,7 @@ app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
     const nPre = (level === 'store' && havePrepack) ? items.filter(it => prepackByUpc[it.ean] > 0).length : 0;
     res.set('Content-Type', 'text/csv;charset=utf-8').set('Content-Disposition', 'attachment; filename="cin7-sales-orders-' + level + '.csv"')
       .set('X-Prepack-Priced', String(nPre) + '/' + items.length).set('Cache-Control', 'no-store').send(csv);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── EDI projects — persist a named upload (ASN CSV + label PDFs as bytea) so users can return to it (mig 244) ──
@@ -8568,13 +8578,13 @@ app.get('/api/supply/edi-projects', async (_req, res) => {
       FROM planner.edi_projects p LEFT JOIN planner.edi_project_files f ON f.project_id=p.id
       GROUP BY p.id ORDER BY p.updated_at DESC`);
     res.set('Cache-Control', 'no-store').json({ ok: true, projects: r.rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/edi-projects', async (req, res) => {
   try { const name = String((req.body && req.body.name) || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query(`INSERT INTO planner.edi_projects (name, created_by) VALUES ($1,$2) RETURNING id, name`, [name, authUser(req) || null]);
     res.json({ ok: true, id: r.rows[0].id, name: r.rows[0].name });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/edi-projects/:id', async (req, res) => {
   try {
@@ -8583,7 +8593,7 @@ app.get('/api/supply/edi-projects/:id', async (req, res) => {
     const files = (await pool.query(`SELECT id, kind, filename, byte_size, uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at
       FROM planner.edi_project_files WHERE project_id=$1 ORDER BY uploaded_at, id`, [req.params.id])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, project: p, files });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/edi-projects/:id/files', async (req, res) => {
   try {
@@ -8605,7 +8615,7 @@ app.post('/api/supply/edi-projects/:id/files', async (req, res) => {
     }
     await pool.query(`UPDATE planner.edi_projects SET updated_at=now() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, files: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
   try {
@@ -8613,17 +8623,17 @@ app.get('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
     if (!r) return res.status(404).json({ error: 'not found' });
     const url = r.storage_path ? await storageSignDownload(r.storage_path, { filename: r.filename }) : null;   // large files: client follows the signed URL
     res.set('Cache-Control', 'no-store').json({ ok: true, kind: r.kind, filename: r.filename, b64: r.b64, url });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.delete('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.edi_project_files WHERE id=$1 AND project_id=$2`, [req.params.fid, req.params.id]);
     await pool.query(`UPDATE planner.edi_projects SET updated_at=now() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, deleted: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.delete('/api/supply/edi-projects/:id', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.edi_projects WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
 app.post('/api/supply/price-list', async (req, res) => {
@@ -8650,12 +8660,12 @@ app.post('/api/supply/price-list', async (req, res) => {
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3) ON CONFLICT (entry_id,min_qty) DO UPDATE SET unit_cost=excluded.unit_cost', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT');
     res.json({ ok: true, id });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/price-list/:id/delete', async (req, res) => {
   try { await pool.query('DELETE FROM planner.price_list_entries WHERE id=$1', [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // SEED FROM COST (Ben): create a REAL price-list entry for every (price_type × supplier) that planner.products says
 // supplies the type but has no active type-scope price yet — seeded from the generic product cost (source='seed',
@@ -8687,7 +8697,7 @@ app.post('/api/supply/price-list/seed-missing', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, created: todo.length });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Per-price_type size override (blank = clear → fall back to the common SKU size)
@@ -8699,7 +8709,7 @@ app.post('/api/supply/price-type-meta', async (req, res) => {
     else await pool.query(`INSERT INTO planner.price_type_meta (price_type,size,updated_at) VALUES ($1,$2,now())
       ON CONFLICT (price_type) DO UPDATE SET size=excluded.size, updated_at=now()`, [b.price_type, size]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Phase 2 approval workflow: approve a pending (supplier-submitted) price → active, superseding the prior active
 // price for the same supplier / scope / key / effective-from. Reject → status='rejected'.
@@ -8738,17 +8748,17 @@ app.get('/api/supply/price-list/log', async (req, res) => {
     } else { where = `e.source='supplier' AND e.status IN ('active','rejected','superseded')`; params = []; }
     res.json((await pool.query(`SELECT ${PL_LOG_COLS} FROM planner.price_list_entries e WHERE ${where}
       ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 500`, params)).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Cheap count of unapproved (pending) price changes — for the Price Lists sub-tab nav badge.
 app.get('/api/supply/price-list/pending-count', async (_req, res) => {
   try { res.json({ count: (await pool.query(`SELECT count(*)::int n FROM planner.price_list_entries WHERE status='pending'`)).rows[0].n }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/price-list/:id/reject', async (req, res) => {
   const me = (await permsFor(req)).email || '';
   try { await pool.query(`UPDATE planner.price_list_entries SET status='rejected', approved_by=$2, approved_at=now(), note=coalesce(nullif($3,''),note), updated_at=now() WHERE id=$1`, [parseInt(req.params.id, 10), me, (req.body && req.body.note) || '']); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Manage the Price Lists exclude list. body.skus = the FULL list (replaces). Accepts comma/space/newline-separated.
 app.post('/api/supply/price-list/exclude', async (req, res) => {
@@ -8761,7 +8771,7 @@ app.post('/api/supply/price-list/exclude', async (req, res) => {
     for (const s of [...new Set(skus)]) await client.query('INSERT INTO planner.price_list_excluded_skus (sku) VALUES ($1) ON CONFLICT (sku) DO NOTHING', [s]);
     await client.query('COMMIT');
     res.json({ ok: true, count: skus.length });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
@@ -8774,7 +8784,7 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
     CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''), ',')) AS s(sku)
     LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
     WHERE po.shipment_ref=$1 AND trim(s.sku)<>'' ORDER BY po.po, sku`, [req.params.ref])); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── CONSOLIDATION analysis (assign-shipment ▸ "Analyse consolidation") — for an anchor PO, find other POs
@@ -8794,7 +8804,7 @@ app.get('/api/supply/po/:po/pallets', async (req, res) => {
     if (!r) return res.status(404).json({ error: 'PO not found' });
     res.json({ po: req.params.po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0,
       pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Plan Shipments drawer — READY-TO-SHIP POs (sea only, not FOB/manufacturing, standard destinations) with their
 // effective pallets (override or estimate) and current shipment/container assignment. Client groups: unassigned
@@ -8835,7 +8845,7 @@ app.get('/api/supply/ship-plan', async (req, res) => {
         ${cfilter}
       ORDER BY container NULLS FIRST, prod_end NULLS LAST, p.po`, params)).rows;
     res.json({ ok: true, country: country || null, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, status: r.status, ready: !!r.ready, confirmed: !!r.confirmed, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Plan Shipments "Confirmed — do not change" lock toggle (mig 223), keyed by container/master ref.
 app.post('/api/supply/ship-plan/lock', async (req, res) => {
@@ -8846,7 +8856,7 @@ app.post('/api/supply/ship-plan/lock', async (req, res) => {
       ON CONFLICT (ref) DO UPDATE SET confirmed=true, updated_by=$2, updated_at=now()`, [ref, authUser(req) || 'admin']);
     else await pool.query(`DELETE FROM planner.ship_plan_locks WHERE ref=$1`, [ref]);
     res.json({ ok: true, ref, confirmed: !!b.confirmed });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/consolidation', async (req, res) => {
   const po = String(req.query.po || '').trim();
@@ -8895,7 +8905,7 @@ app.get('/api/supply/consolidation', async (req, res) => {
     const pfx = (a.prod_no ? 'P' + a.prod_no + '-' : '') + a.country + '-CONSOL-';
     const n = (await pool.query(`SELECT count(*)::int c FROM planner.shipments WHERE shipment_ref ILIKE $1`, [pfx + '%'])).rows[0].c;
     res.json({ anchor: { ...a, pallets: Number(a.pallets) || 0 }, candidates, suggested_ref: pfx + (n + 1), truncated, window_days: 21 });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Clean up orphan self-shipments: clear the shipment_ref on every PO whose shipment_ref has no planner.shipments row
 // (dangling refs — the shipment record was never created or was deleted). The POs become unassigned again.
@@ -8920,7 +8930,7 @@ app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches('shipment');   // v28.167: scoped
     res.json({ ok: true, deleted: del.rowCount });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
@@ -8959,7 +8969,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
     for (const pr of priors) { await pruneEmptySelfShipment(client, pr); }   // clean up orphaned self-shipments
     await client.query('COMMIT');
     res.json({ ok: true, ref, assigned: upd.rowCount });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 
@@ -9017,13 +9027,13 @@ app.get('/api/supply/crossdock-report', async (req, res) => {
     const expected = poR.rows.filter(r => !r.has_inbound).map(r => ({ sku: r.sku, po: r.po, client: r.client, so: r.so, country: r.country, shipped: r.shipped }));
     rows.sort((a, b) => a.wh.localeCompare(b.wh) || a.sku.localeCompare(b.sku));
     res.json({ warehouses: XD_WH, rows, expected });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.693 (Ben 04-Nov-26: "on urgent buy, would like to add a snooze feature 30 days or indefinite"): BUY grid urgent snoozes per SKU x market.
 // GET lists the live ones (until NULL = indefinite, or today or later); POST {sku, market, days: 30|null} snoozes, {clear:true} wakes it.
 app.get('/api/supply/urgent-snoozes', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json((await pool.query(`SELECT sku, market, to_char(until,'YYYY-MM-DD') until, urgent_qty, snoozed_by, snoozed_at FROM planner.buy_urgent_snoozes WHERE until IS NULL OR until >= current_date`)).rows); }
-  catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.json([]); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.json([]); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/urgent-snooze', async (req, res) => {
   const b = req.body || {}, sku = String(b.sku || '').trim(), mkt = String(b.market || '').trim().toUpperCase();
@@ -9035,7 +9045,7 @@ app.post('/api/supply/urgent-snooze', async (req, res) => {
         ON CONFLICT (sku, market) DO UPDATE SET until=excluded.until, urgent_qty=excluded.urgent_qty, snoozed_by=excluded.snoozed_by, snoozed_at=now() RETURNING to_char(until,'YYYY-MM-DD') until`,
       [sku, mkt, days, Number.isFinite(Number(b.urgent_qty)) ? Math.round(Number(b.urgent_qty)) : null, who || null]);
     res.json({ ok: true, until: r.rows[0].until });
-  } catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.status(503).json({ error: 'Snoozing needs migration 416' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/buy_urgent_snoozes/.test(String(e.message))) return res.status(503).json({ error: 'Snoozing needs migration 416' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/crossdock-note', async (req, res) => {
   const b = req.body || {}, wh = (b.warehouse || '').trim(), sku = (b.sku || '').trim();
@@ -9046,7 +9056,7 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
     await pool.query(`INSERT INTO planner.crossdock_notes (warehouse,sku,note,updated_by,updated_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (warehouse,sku) DO UPDATE SET note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`, [wh, sku, b.note, who || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -9072,8 +9082,17 @@ function xeroConfig(region) {
   return { region, id, secret, redirect, scopes, present: !!(id && secret) };
 }
 const _xeroHe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-async function xeroGetStore(region) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + xeroRegion(region)])).rows[0]; return (r && r.value) ? JSON.parse(r.value) : null; } catch (e) { return null; } }
-async function xeroPutStore(region, store) { await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_oauth_' + xeroRegion(region), JSON.stringify(store)]); _xeroTok[xeroRegion(region)] = { token: null, exp: 0 }; }
+// v28.780 (security review 10-Nov-26, finding 3b): the Xero OAuth store (refresh token) is sealed at rest with AES-256-GCM like the Gmail tokens,
+// keyed from GMAIL_SEAL_KEY ('x1:' prefix). A plain JSON row (written before) still reads, and is sealed on its next write (the next refresh,
+// within 30 minutes). Without GMAIL_SEAL_KEY the store stays plain JSON. NOTE: a build older than v28.780 cannot read a sealed row (it would
+// show Xero as not connected until reconnected), so a rollback past v28.780 needs a Xero reconnect.
+function xeroSealKey() { return process.env.GMAIL_SEAL_KEY ? crypto.createHash('sha256').update('hz-xero|seal|' + process.env.GMAIL_SEAL_KEY).digest() : null; }
+function xeroSeal(obj) { const k = xeroSealKey(), txt = JSON.stringify(obj); if (!k) return txt; const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', k, iv);
+  const ct = Buffer.concat([c.update(txt, 'utf8'), c.final()]); return 'x1:' + Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64'); }
+function xeroUnseal(v) { v = String(v || ''); if (!v.startsWith('x1:')) return JSON.parse(v); const k = xeroSealKey(); if (!k) throw new Error('Xero store is sealed but GMAIL_SEAL_KEY is not set');
+  const b = Buffer.from(v.slice(3), 'base64'), d = crypto.createDecipheriv('aes-256-gcm', k, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return JSON.parse(Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8')); }
+async function xeroGetStore(region) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + xeroRegion(region)])).rows[0]; return (r && r.value) ? xeroUnseal(r.value) : null; } catch (e) { console.warn('[xero] store not readable: ' + (e && e.message)); return null; } }
+async function xeroPutStore(region, store) { await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_oauth_' + xeroRegion(region), xeroSeal(store)]); _xeroTok[xeroRegion(region)] = { token: null, exp: 0 }; }
 const _xeroTok = { uk: { token: null, exp: 0 }, au: { token: null, exp: 0 } };
 async function xeroExchange(region, params) {
   const cfg = xeroConfig(region);
@@ -9103,7 +9122,7 @@ async function _xeroRefresh(region, store) {
     }
     console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
     hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Xero)', { region });   // v28.163 (Ben): health log + red alert
-    await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
+    try { const cur = await xeroGetStore(region); if (cur && cur.refresh_token === store.refresh_token) await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); } catch (_) {}   // v28.780: compared after unsealing (the row may be sealed)
     _xeroTok[region] = { token: null, exp: 0 };
     return null;
   }
@@ -9386,7 +9405,7 @@ app.get('/api/supply/xero/status', async (req, res) => {
 app.post('/api/supply/xero/disconnect', async (req, res) => {
   xeroStatusBust();
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to disconnect Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S15)
-  try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: clientErr(e) }); } });
 // Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
 app.get('/api/supply/xero/bills', async (req, res) => {
   try {
@@ -9594,7 +9613,7 @@ app.post('/api/cron/up-fx-statement', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   const b = req.body || {}, dry = String(req.query.dry || '') === '1' || b.dry_run === true || b.dry_run === 'true';
   try { res.json(await runUpfxStatementCron({ dry })); }
-  catch (e) { log500(e); if (!dry) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('up_fx_statement','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} } res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); if (!dry) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('up_fx_statement','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} } res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -9726,7 +9745,7 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
     const fulfil_extra = await poFulfilExtras(po).catch(() => []);   // v28.522
     res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions, fulfil_extra,
       healed: heal && heal.healed.length ? heal.healed : undefined, voided_link: xVoid || undefined });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Manual override — paste/clear a link the resolver can't find. { system, external_id?, external_ref?, url? }
 app.post('/api/supply/po/:po/links', async (req, res) => {
@@ -9769,7 +9788,7 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
        ON CONFLICT (po, system) DO UPDATE SET external_id=$3, external_ref=$4, url=$5, status='linked', note='manual link', found_by='manual', updated_at=now()`,
       [po, sys, eid, eref, url]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.522 (Ben 28-Oct-26: "i want to be able to add multiple fulfil po links not just change", PO-57UKBL1 = Fulfil PO226 + PO474): EXTRA Fulfil
@@ -9802,7 +9821,7 @@ async function poFulfilExtras(po) {
 }
 app.get('/api/supply/po/:po/fulfil-extra', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ po: req.params.po, rows: await poFulfilExtras(String(req.params.po || '')) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po/:po/fulfil-extra', async (req, res) => {
   try {
@@ -9832,7 +9851,7 @@ app.post('/api/supply/po/:po/fulfil-extra', async (req, res) => {
     try { await ffxSyncLines([fp.id]); await fulfilErpQtyFromMirror(po); } catch (e) { console.error('[fulfil extra] lines ' + po + ':', e && e.message); }   // v28.537: ERP qty counts it at once
     logPoChange(po, 'Linked records', 'Extra Fulfil PO linked: ' + (fp.number || fp.id) + (fp.reference ? ' (' + fp.reference + ')' : '') + (held.length ? ', moved from ' + held.join(', ') : ''), authUser(req));
     res.json({ ok: true, fulfil_id: fp.id, number: fp.number || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po/:po/fulfil-extra/remove', async (req, res) => {
   try {
@@ -9842,7 +9861,7 @@ app.post('/api/supply/po/:po/fulfil-extra/remove', async (req, res) => {
     if (r.rowCount) logPoChange(po, 'Linked records', 'Extra Fulfil PO unlinked: ' + (r.rows[0].number || eid), authUser(req));
     if (r.rowCount) { try { await fulfilErpQtyFromMirror(po); } catch (_) {} }   // v28.537
     res.json({ ok: true, removed: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.199 (Ben): "Link Fulfil PO" picker. READ ONLY against Fulfil (search_read only). With ?po= it first lists the
@@ -9920,7 +9939,7 @@ app.get('/api/supply/po/:po/xero-bills', async (req, res) => {
     const live = bills.filter(b => b.state !== 'void'), sum = k => Math.round(live.reduce((a, b) => a + (Number(b[k]) || 0), 0) * 100) / 100;
     res.set('Cache-Control', 'no-store').json({ ok: true, po, group: grp.length, bills, totals: { bills: live.length, total: sum('total'), paid: sum('settled'), due: sum('due'), hz_paid: sum('hz_paid'), other_paid: sum('other_paid') },
       synced_at: rows.reduce((m, r) => (r.synced_at && (!m || r.synced_at > m) ? r.synced_at : m), null) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.374 (Ben 15-Oct-26, Dillard's): CLIENT PO GROUP. One HORIZON client PO (same set as the v28.199 push guard: Direct to Client /
 // B2B JLEW / B2B NEXT / key account) can stand for MANY Fulfil client POs (Fulfil makes one PO per client order). PO drawer > Master & Docs >
@@ -9967,7 +9986,7 @@ async function _fgCurrent(po) {
 app.get('/api/supply/po/:po/fulfil-group', async (req, res) => {
   try { const po = String(req.params.po); const cp = await _fgIsClientPo(po); if (cp === null) return res.status(404).json({ error: 'PO not found' });
     res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true, client_po: cp }, await _fgCurrent(po))); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po/:po/fulfil-group/check', async (req, res) => {
   try { const po = String(req.params.po); const cp = await _fgIsClientPo(po); if (cp === null) return res.status(404).json({ error: 'PO not found' });
@@ -10013,7 +10032,7 @@ app.post('/api/supply/po/:po/fulfil-group/unlink', async (req, res) => {
     const r = await pool.query(`DELETE FROM planner.po_fulfil_group WHERE po=$1 AND fulfil_id = ANY($2::bigint[])`, [po, ids]);
     await _fgMirrorRow(po).catch(() => {}); try { invalidateSupplyCaches('po'); } catch (_) {}
     res.json(Object.assign({ ok: true, removed: r.rowCount }, await _fgCurrent(po)));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // The HORIZON PO's row in the Fulfil mirror = the SUM of its group (so ERP qty / drift compare the plan with all its client POs together).
 async function _fgMirrorRow(po) {
@@ -10263,12 +10282,12 @@ app.get('/api/supply/po/:po/group-shares', async (req, res) => {
   try { const po = String(req.params.po); const rows = (await pool.query(`SELECT s.id, s.kind, s.source_label, s.number, s.share_pct::float8 share_pct, s.amount::float8 amount, s.currency, s.paying_org, s.status, s.error, s.invoice_id, b.invoice_number bill_number,
         to_char(s.created_at,'YYYY-MM-DD') created, to_char(s.applied_at,'YYYY-MM-DD') applied FROM planner.po_group_shares s LEFT JOIN planner.xero_bills b ON b.invoice_id = s.invoice_id WHERE s.po=$1 ORDER BY s.id`, [po]).catch(() => ({ rows: [] }))).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, po, shares: await _fgShares(po), rows }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po/:po/group-shares/apply', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero' });
-  try { res.json(await fgApplyPending(String(req.params.po), authUser(req) || 'unknown', null)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await fgApplyPending(String(req.params.po), authUser(req) || 'unknown', null)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.172 (Ben): search Xero bills to (re)link a PO (PO drawer ▸ MASTER DATA & DOCS ▸ Linked records ▸ change). Reads the
 // LOCAL planner.xero_bills cache (kept fresh by syncXeroBills). Matches bill number / reference / supplier;
@@ -10293,7 +10312,7 @@ app.get('/api/supply/xero/bills/search', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, bills: rows.map(r => ({ id: r.invoice_id, region: String(r.region || '').toUpperCase(), number: r.invoice_number, reference: r.reference,
       contact: r.contact_name, total: Number(r.total) || 0, due: Number(r.amount_due) || 0, currency: r.currency_code, status: r.status, dead: xbDead(r.status), date: r.invoice_date,
       url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.invoice_id, linked_pos: (r.linked_pos || []).filter(x => x !== po), this_po: (r.linked_pos || []).includes(po) })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -10338,7 +10357,7 @@ app.get('/api/supply/xero/finance-config', async (req, res) => {
     const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XERO_CFG_KEY])).rows[0];
     let cfg = {}; try { cfg = (r && r.value) ? JSON.parse(r.value) : {}; } catch (_) { cfg = {}; }
     res.set('Cache-Control', 'no-store').json({ config: cfg, expected_banks: XERO_EXPECTED_BANKS, expected_accounts: XERO_EXPECTED_ACCOUNTS, regions: XERO_REGIONS });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/finance-config', async (req, res) => {
   try {
@@ -10347,7 +10366,7 @@ app.post('/api/supply/xero/finance-config', async (req, res) => {
     if (typeof cfg !== 'object' || Array.isArray(cfg)) return res.status(400).json({ error: 'config must be an object' });
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [XERO_CFG_KEY, JSON.stringify(cfg)]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Suggested tracking options = HORIZON production numbers (P-prefixed to match Xero's existing 620.xx P-naming),
@@ -10358,7 +10377,7 @@ app.get('/api/supply/xero/tracking/suggested', async (req, res) => {
     const r = await pool.query(`SELECT DISTINCT nullif(trim(prod_no),'') pn FROM planner.purchase_orders WHERE nullif(trim(prod_no),'') IS NOT NULL`);
     const nums = r.rows.map(x => x.pn).filter(pn => /^\d+$/.test(pn)).map(Number).filter(n => isFinite(n) && (isNaN(min) || n >= min)).sort((a, b) => a - b);
     res.set('Cache-Control', 'no-store').json({ min: isNaN(min) ? null : min, options: nums.map(n => 'P' + n) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Xero TRACKING CATEGORIES (v28.031, Ben) — needed to tag Stock Deposits by production number. Read is open;
 // the ensure (create category + add options) is a LIVE XERO WRITE, gated admin + explicit confirm. Needs the
@@ -10680,7 +10699,7 @@ app.post('/api/supply/payments/xero-preview', async (req, res) => {
       plan.existing_bill = (await pool.query(`SELECT bill_id, bill_number, bill_url, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') ORDER BY created_at DESC LIMIT 1`, [rk])).rows[0] || null;
       plan.po_paid = (await pool.query(`SELECT invoice_id, invoice_number, amount, to_char(payment_date,'YYYY-MM-DD') payment_date, status FROM planner.xero_run_payments WHERE run_key=$1 AND status IN ('created','creating')`, [rk])).rows; } catch (_) {}
     res.json(plan); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 function _xeroRunKey(rr) { return rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : '')); }
 // v28.173 (Ben): XERO PREFLIGHT for the Payments Report badges. Same plan + checks as the preview, for a batch of unposted
@@ -10758,7 +10777,7 @@ app.post('/api/supply/payments/xero-followup', async (req, res) => {
         if (failed && !p.some(x => x.status === 'created')) items.push({ po, issue: 'PO bill payment failed in Xero' + (failed.error ? ': ' + String(failed.error).slice(0, 120) : ''), fix: 'Open Paid > Xero and retry', link: null }); });
       out[k] = { items }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, results: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/payments/xero-preflight', async (req, res) => {
   const runs = (Array.isArray(req.body && req.body.runs) ? req.body.runs : []).slice(0, 10);
@@ -10796,7 +10815,7 @@ app.post('/api/supply/payments/xero-preflight', async (req, res) => {
     return { ok: true, connected, results: out };
   };
   try { const p = _xpfChain.then(job, job); _xpfChain = p.catch(() => {}); res.set('Cache-Control', 'no-store').json(await p); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create the supplier-payment BILL and post the PAYMENTS against the linked PO bills in ONE action (from the Payments
 // Report XERO popup). Admin + confirm. Refuses if a payment would exceed the linked bill's amount due.
@@ -10832,7 +10851,7 @@ async function sweepSupplierPaymentBills() {
 app.post('/api/supply/payments/xero-bill-sweep', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const r = await sweepSupplierPaymentBills(); try { invalidateSupplyCaches('payment'); } catch (_) {} res.json(Object.assign({ ok: true }, r)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (Ben 13-Oct-26): ACCOUNTS or admin (was admin only)
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to create the payment bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
@@ -11192,7 +11211,7 @@ app.get('/api/supply/xero/deposit-credit-note/status', async (req, res) => {
     if (out.can_create) { try { const hit = await _depCnSettledInXero(region, r.bill.id, amount); if (hit) { out.can_create = false; out.settled = hit; } } catch (e) { /* Xero unreadable → button as before */ } }
     out.reason = out.settled ? null : !route ? (region === 'au' ? 'Drawn down before 01-Oct-26 (settled in Xero UK, before the AU deposits moved to Xero AU)' : 'Draws down the old way (UK before P58)') : !(amount > 0.009) ? 'No starting deposit assigned' : r.cn ? null : r.queued ? 'Queued in Xero payments' : !r.bill ? 'Link the Xero bill first (Linked records)' : null;
     res.set('Cache-Control', 'no-store').json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
@@ -11272,7 +11291,7 @@ app.get('/api/supply/xero/au-bill-candidates', async (req, res) => {
         WHERE (upper(coalesce(p.country_code,''))='AU' OR p.branch ILIKE '%coghlan%') AND upper(coalesce(p.status,''))<>'COMPLETE' AND l.external_id IS NULL`)).rows;
       noBill = rows.filter(r => _poXeroRegion(r.cc, r.branch) === 'au').length; } catch (e) {}
     res.set('Cache-Control', 'no-store').json({ candidates, no_bill_count: noBill });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
   const dry = !!(req.body && req.body.dry_run);
@@ -11324,7 +11343,7 @@ app.get('/api/supply/xero/push-queue', async (req, res) => {
     const rows = (await pool.query(`SELECT id, kind, region, status, supplier, po, reference, amount, currency, account_code, tracking_option, bank_account_id, linked_invoice_id, fx_rate, source, source_key, xero_id, xero_ref, error, created_at, pushed_at FROM planner.xero_push_queue WHERE ${where.join(' AND ')} ORDER BY (status='pending') DESC, created_at DESC LIMIT 500`, args)).rows;
     const counts = {}; (await pool.query(`SELECT status, count(*) n FROM planner.xero_push_queue GROUP BY status`)).rows.forEach(r => { counts[r.status] = Number(r.n); });
     res.set('Cache-Control', 'no-store').json({ items: rows, counts });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/push-queue/enqueue-run', async (req, res) => {
   try {
@@ -11354,7 +11373,7 @@ app.post('/api/supply/xero/push-queue/enqueue-run', async (req, res) => {
       ins.push({ kind: 'payment', id: p.id });
     }
     res.json({ ok: true, enqueued: ins.length, items: ins, region: plan.region });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
   try {
@@ -11374,7 +11393,7 @@ app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
       [region, poRow.supplier, po, (b.deposit_ref || ('DEPOSIT-' + po)), amount, (acct && acct.code) || '602', prod ? ('P' + prod) : null, (link && link.external_id) || null, (b.deposit_ref || po), by,
        JSON.stringify({ note: 'Starting-deposit draw-down for ' + po, deposit_ref: b.deposit_ref || null })])).rows[0];
     res.json({ ok: true, id: cn.id, region, allocates_to: (link && link.external_ref) || null, account: (acct && acct.code) || '602' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Xero EXCEPTIONS (replaces the Xero Compare upload). An exception = a PO whose Xero bill amount-due / payments do NOT
 // match HORIZON's, plus an insight into the likely cause. Also surfaces uncreated credit notes (a common cause) and
@@ -11537,7 +11556,7 @@ app.post('/api/supply/xero/exceptions/dismiss', async (req, res) => {   // { key
   try { const dis = cpJson(await cpSetting('xero_exc_dismissed', ''), {}) || {};
     if (b.dismiss === false) delete dis[key]; else dis[key] = { by: (req.me && req.me.email) || null, at: new Date().toISOString(), note: String(b.note || '').slice(0, 300) };
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('xero_exc_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), (req.me && req.me.email) || null]);
-    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.776 (Ben 11-Nov-26): "Use Xero amount" on a Bill total differs card: HORIZON's final invoice amount = the linked Xero bill's total (HORIZON only,
 // never Xero). Single-PO USD bills only: a shared bill cannot say which PO the difference belongs to. { po, bill_id, confirm: true }.
 app.post('/api/supply/xero/exceptions/use-xero-total', async (req, res) => {
@@ -11559,7 +11578,7 @@ app.post('/api/supply/xero/exceptions/use-xero-total', async (req, res) => {
     logPoChange(po, 'Final invoice amount', (r.old != null ? '$' + r.old : '(none)') + ' \u2192 $' + r.total + ' (from the Xero bill, Xero payments page)', by);
     try { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, po, from: r.old, set: r.total });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/xero/exceptions', async (req, res) => {
   try {
@@ -11572,7 +11591,7 @@ app.get('/api/supply/xero/exceptions', async (req, res) => {
     if (_seed) { const e = { v: _seed.data, at: _seed.at, inflight: null }; if (!_swr.has('xero:exc')) _swr.set('xero:exc', e); }
     const data = await swrGet('xero:exc', 15 * 60 * 1000, _computeXeroExceptions);
     res.set('Cache-Control', 'no-store').json(await xeroExcDismissed(Object.assign({ cached: true }, data)));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.094 (Ben): local Xero-bills cache + incremental sync ────────────────────────────────────────────────────────
 // Store ACCPAY bills in planner.xero_bills and pull only bills MODIFIED since the last watermark (Xero If-Modified-Since),
@@ -11711,7 +11730,7 @@ async function xbLastSync() {
 app.post('/api/supply/xero/bills-sync', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const r = await syncXeroBills({ full: String(req.query.full || '') === '1' }); res.json(Object.assign({ ok: true, last: await xbLastSync() }, r)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.183 (Ben): SYNC ON VISIT. The Payments Report and Xero payments pages call this when they open: an incremental sync
 // runs only when the last completed sync is older than 12 hours (the hourly cron normally keeps it fresher), never twice at
@@ -11726,11 +11745,11 @@ app.post('/api/supply/xero/bills-sync-visit', async (req, res) => {
     const joined = !!_xbSyncP;
     const r = await syncXeroBills({});
     res.set('Cache-Control', 'no-store').json({ ok: true, ran: true, joined, changed: r.changed || 0, healed: r.healed || 0, flagged: r.flagged || 0, errors: XERO_REGIONS.filter(g => r[g] && r[g].error).map(g => g.toUpperCase() + ': ' + r[g].error), last: await xbLastSync() });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/xero/bills-sync/status', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, running: !!_xbSyncP, last: await xbLastSync(), xero_calls: _xeroCallN, xero_day: await xeroDayUse(), last_result: _xbLast ? { at: _xbLast.at, changed: _xbLast.changed || 0, healed: _xbLast.healed || 0, flagged: _xbLast.flagged || 0 } : null }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.183 (Ben): FULL RESYNC (CONFIG ▸ Xero ▸ Xero bills cache ▸ Resync all bills) ───────────────────────────────────
@@ -11794,7 +11813,7 @@ app.post('/api/supply/xero/bills-resync-all', async (req, res) => {
     }
     // The request stays open until the run ends (Vercel has no background time); the page does not wait on it, it polls status.
     res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true }, await _xbResyncP));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/xero/bills-resync-all/status', async (req, res) => {
   try {
@@ -11802,7 +11821,7 @@ app.get('/api/supply/xero/bills-resync-all/status', async (req, res) => {
     if (st && st.status === 'running' && !_xbResyncP && Date.now() - Date.parse(st.heartbeat || 0) > 3 * 60 * 1000) st.status = 'stalled';
     const cnt = (await pool.query(`SELECT region, count(*)::int n, count(*) FILTER (WHERE upper(coalesce(status,'')) IN ('VOIDED','DELETED'))::int voided, max(synced_at) synced FROM planner.xero_bills GROUP BY region`)).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, state: st, running: !!_xbResyncP || !!(st && st.status === 'running'), cache: cnt, last: await xbLastSync(), sync_running: !!_xbSyncP });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.183 (Ben): LIVE BILL CHECK + VOIDED-LINK AUTO-HEAL ──────────────────────────────────────────────────────────────
@@ -11999,12 +12018,12 @@ app.post('/api/supply/xero/bills/verify', async (req, res) => {
     const bills = {}; rows.forEach(r => { bills[r.invoice_id] = { status: r.status, dead: xbDead(r.status), region: String(r.region || '').toUpperCase(), total: Number(r.total) || 0, due: Number(r.amount_due) || 0, paid: Number(r.amount_paid) || 0, currency: r.currency_code, synced_at: r.synced_at }; });
     const c = cur && cur.external_id ? Object.assign({ id: cur.external_id, link_status: cur.status }, bills[cur.external_id] || { status: null, dead: false }) : null;
     res.set('Cache-Control', 'no-store').json({ ok: !error, error, checked_at: new Date().toISOString(), calls, added, bills, current: c, missing: live ? live.missing : [] });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/xero-bills-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const r = await syncXeroBills({}); res.json(Object.assign({ ok: true }, r)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bulk RESOLVE ALL po_links — matches every PO against the LOCAL xero_bills cache (v28.094; was a full live Xero sweep)
 // + local Fulfil/Flexport/DHL joins. Runs an incremental bill sync first so it always matches fresh data. Keeps manual links.
@@ -12059,12 +12078,12 @@ async function _resolveAllPoLinks(opts = {}) {   // v28.120 (Diviyaj prod fix): 
 app.post('/api/supply/po/links/resolve-all', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/resolve-po-links', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
   try {
@@ -12072,7 +12091,7 @@ app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
     if (row.status === 'pushed') return res.status(409).json({ error: 'already pushed to Xero — cannot cancel' });
     await pool.query(`UPDATE planner.xero_push_queue SET status='cancelled', updated_at=now() WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 });
 // Ensure a Production tracking option exists (auto-create per Ben's standing permission — used at push time).
 async function _ensureProductionOption(region, option) {
@@ -12603,7 +12622,7 @@ app.get('/api/hz-search', async (req, res) => {
     const seen = new Set([raw]);
     for (const [t, near] of tries.slice(0, 12)) { if (seen.has(t)) continue; seen.add(t); const x = await hzSearchCore(t); if (_hzsHits(x)) return res.json(Object.assign(x, { q: orig, fuzzy: { like: t, near } })); }
     res.json(Object.assign(r, { q: orig }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 
@@ -12652,7 +12671,7 @@ app.post('/api/supply/xero-parse', async (req, res) => {
         invoice_date: g(col.invdate).trim(), planned_date: g(col.planned).trim() });
     }
     res.json({ rows, period_start, period_end });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Xero Compare shared snapshot (migration 183) — whoever uploads, everyone sees the same last upload
@@ -12664,7 +12683,7 @@ app.get('/api/supply/xero-compare/latest', async (req, res) => {
         (nullif(file_b64,'') IS NOT NULL OR storage_path IS NOT NULL) has_file
       FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
     res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at, has_file: !!r.has_file } : { ok: true, rows: null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero-compare/save', async (req, res) => {
   try {
@@ -12680,11 +12699,11 @@ app.post('/api/supply/xero-compare/save', async (req, res) => {
       ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), file_b64=EXCLUDED.file_b64, storage_path=EXCLUDED.storage_path`,
       [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '', fileB64Val, filePathVal]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/xero-compare/clear', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.xero_compare_snapshot WHERE id=1`); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Download the ORIGINAL uploaded XLSX for the current Xero Compare snapshot (stored as base64 on upload).
 app.get('/api/supply/xero-compare/file', async (req, res) => {
@@ -12740,7 +12759,7 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
     });
     cartons.forEach((c, i) => { c.ctn = i + 1; c.total = cartons.length; });
     res.set('Cache-Control', 'no-store').json({ ok: true, client: 'The Paper Store', po_ref: poRef, dc_addr1: addr[0] || '', dc_addr2: addr.slice(1).join(', ') || '', cartons });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Barcode-customise project LIST — single-segment path, so it must be registered BEFORE the /api/supply/:section
@@ -12755,14 +12774,14 @@ app.get('/api/supply/po-search', async (req, res) => {
       FROM planner.purchase_orders
       WHERE $1 = '' OR po ILIKE '%'||$1||'%' OR supplier_name ILIKE '%'||$1||'%' OR coalesce(prod_no,'') ILIKE '%'||$1||'%' OR coalesce(batch_id,'') ILIKE '%'||$1||'%' OR coalesce(client,'') ILIKE '%'||$1||'%'
       ORDER BY created_at DESC NULLS LAST, po DESC LIMIT 40`, [q])).rows;
-    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/barcode-projects', async (_req, res) => {
   try { const rows = (await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(pos,'{}'::text[]) pos,
       (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n_overrides,
       coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
     FROM planner.barcode_projects ORDER BY updated_at DESC, id DESC`)).rows;
-    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
 app.get('/api/supply/sample-detail/:id', async (req, res) => {
@@ -12808,7 +12827,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
     const change_log = (await pool.query(`SELECT event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by,
       to_char(changed_at,'YYYY-MM-DD HH24:MI') changed_at FROM planner.sample_change_log WHERE sample_id=$1::bigint ORDER BY changed_at DESC LIMIT 200`, [id]).catch(() => ({ rows: [] }))).rows;
     res.json({ sample: s, lines, notes, charges, attachments, change_log });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/sample-addresses', async (req, res) => {
   const ql = '%' + String(req.query.q || '').toLowerCase() + '%';
@@ -12824,20 +12843,20 @@ app.get('/api/supply/sample-addresses', async (req, res) => {
         OR lower(coalesce(first_name,'')||' '||coalesce(last_name,'')) LIKE $1)
       ORDER BY lower(btrim(coalesce(recipient_company,''))), lower(btrim(coalesce(first_name,''))), lower(btrim(coalesce(last_name,''))), lower(btrim(coalesce(address_line1,''))), lower(btrim(coalesce(postcode,''))), created_at DESC
     ) d ORDER BY recipient_company LIMIT 20`, [ql])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/sample-notes', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime
     FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [req.query.id || '0'])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Charges for a shipment (admin) — list + status; create/accept/reject reuse /api/supply/charge-*.
 app.get('/api/supply/shipment-charges/:ref', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
     coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
     FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a shipment charge (admin / "preview as supplier" — mirrors /api/portal/shipment-charge without scoping)
 app.post('/api/supply/shipment-charge', async (req, res) => {
@@ -12845,7 +12864,7 @@ app.post('/api/supply/shipment-charge', async (req, res) => {
   try { const sup = (await pool.query(`SELECT string_agg(DISTINCT supplier_name,', ') s FROM planner.purchase_orders WHERE shipment_ref=$1`, [b.shipment_ref])).rows[0].s || null;
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, b.supplier_name||sup, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']);
-    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // The DtC-details fields a supplier approves — snapshotted at approval so we can later show WHAT changed.
 const DTC_SNAPSHOT_SQL = `jsonb_build_object(
@@ -12861,7 +12880,7 @@ const DTC_SNAPSHOT_SQL = `jsonb_build_object(
 app.post('/api/supply/dtc-accept', async (req, res) => {
   const po = req.body && req.body.po; if(!po) return res.status(400).json({ error: 'po required' });
   try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.body.by||'D&B (preview)']);
-    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
@@ -13695,7 +13714,7 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
       const at = columns.findIndex(c => !c.isAu); columns.splice(at < 0 ? columns.length : at, 0, t); }
     const notes = { AU: { '2026-09': 'Transferred to Xero AU' } };   // v28.289 (Ben): AU balance moved from Xero UK 620.00 AU to Xero AU 602 by journals dated 30-Sep-26
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, notes, transactions: tx, gbpRate: rUSD });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.561 Barcode scanner: resolve a scanned / typed code to a SKU card. Digits-only compare (EAN exports carry a leading apostrophe).
 // Order: product barcode → carton → inner → any saved Customise project override (custom number → SKU).
@@ -13726,12 +13745,12 @@ app.get('/api/supply/barcode-lookup', async (req, res) => {
       swatch: r.swatch, image: r.image, barcodes: { product: r.sku_barcode || r.product_ean || '', carton: r.carton_barcode || '', inner: r.inner_barcode || '', carton_qty: r.carton_qty || '' },
       prices: { UK: { ccy: 'GBP', retail: n(r.uk_rt) }, US: { ccy: 'USD', retail: n(r.us_rt) }, EU: { ccy: 'EUR', retail: n(r.eu_rt) }, AU: { ccy: 'AUD', retail: n(r.au_rt) }, CA: { ccy: 'CAD', retail: n(r.ca_rt) } }, cost_usd: n(r.cost),
       inventory: { UK: { '3pl': n(r.inventory_uk_3pl), fba: n(r.inventory_uk_fba), nongrs: n(r.inventory_uk_nongrs) }, US: { '3pl': n(r.inventory_us_3pl), fba: n(r.inventory_us_fba), awd: n(r.inventory_us_awd), nongrs: n(r.inventory_us_nongrs) }, EU: { '3pl': n(r.inventory_eu_3pl), fba: n(r.inventory_eu_fba) }, AU: { '3pl': n(r.inventory_au_3pl), fba: n(r.inventory_au_fba) }, CA: { fba: n(r.inventory_ca_fba) } } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Single-segment GETs for the Create-PO redesign — MUST be before the /api/supply/:section catch-all (else swallowed as "unknown section").
 app.get('/api/supply/buy-projects', async (_req, res) => {   // ① Save Project — list
   try { const r = await pool.query(`SELECT id, name, mode, coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects ORDER BY updated_at DESC`); res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/open-pos', async (_req, res) => {   // ③ Add-to-existing — open FUTURE/PRODUCTION/READY-TO-SHIP POs (masters excluded)
   try { const r = await pool.query(`SELECT po, coalesce(supplier_name,'') supplier, coalesce(status,'') status,
@@ -13739,7 +13758,7 @@ app.get('/api/supply/open-pos', async (_req, res) => {   // ③ Add-to-existing 
       FROM planner.purchase_orders
       WHERE upper(coalesce(status,'')) IN ('FUTURE','PRODUCTION','READY TO SHIP') AND master_po IS NULL
       ORDER BY prod_no DESC NULLS LAST, po`); res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 supplySectionHandler = async (req, res, next) => {
   if (req.params.section === 'po-delays') return next();   // handled by its own route below (has bespoke logic)
@@ -14773,7 +14792,7 @@ supplySectionHandler = async (req, res, next) => {
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }
-  } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
+  } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: clientErr(e) }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
 };
 // v28.363 (Ben 14-Oct-26): PURCHASE ORDERS > Import/Export > Export XLSX. Every PO in the chosen statuses with its supplier, branch,
 // dates, shipment (carrier, mode, tracking, dates), links (Fulfil, Xero, Flexport, DHL), units / cartons / CBM / weight and order value,
@@ -14850,7 +14869,7 @@ app.get('/api/supply/po-export.xlsx', async (req, res) => {
     [ws1, ws2].forEach(ws => ws.eachRow((r, i) => { if (i > 1 && i % 2 === 0) r.eachCell({ includeEmpty: true }, c => { if (!c.fill || !c.fill.fgColor) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6F8FB' } }; }); }));
     const buf = await wb.xlsx.writeBuffer(); const stamp = new Date().toISOString().slice(0, 10);
     res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="HORIZON POs ' + (want.length ? want.join('+') : 'all') + ' ' + stamp + '.xlsx"', 'Cache-Control': 'no-store' }).send(Buffer.from(buf));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.148: moved above the :section catch-all, which swallowed it as "unknown section" (404 on CONFIG ▸ Portal users).
 app.get('/api/supply/portal-signals', async (req, res) => {
@@ -14858,7 +14877,7 @@ app.get('/api/supply/portal-signals', async (req, res) => {
     const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
     const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
     res.json({ unread, subs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.738 (declared before the /api/supply/:section catch-all) (Ben 06-Nov-26): supplier portal HELP, in testing. Shown only in HORIZON's admin portal preview (CONFIG > Portal preview), never on
 // the suppliers' /portal yet. Each video is the full recording in private Storage (horizon-uploads/help/...), served by a short-lived signed
@@ -14894,7 +14913,7 @@ app.post('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
   try { const ov = await portalHelpPaths(); ov[v.id] = String(b.storage_path);
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('portal_help_paths',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(ov), (me && me.email) || authUser(req) || 'admin']);
     res.json({ ok: true, id: v.id }); }
-  catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
   if (!(await portalHelpAdmin(req, res))) return;
@@ -14943,7 +14962,7 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn
     let extra = {};
     if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
     res.json({ updated: r.rowCount, ...extra });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 app.post('/api/supply/deposit/:id', async (req, res) => {
   // a typed supplier that isn't in the master gets added (so the picker stays a real dropdown)
@@ -15010,7 +15029,7 @@ app.post('/api/supply/other/:id/xero-link', async (req, res) => {
         [d.id, type, id, region, String(b.number || '').slice(0, 120) || null, by]); }
     try { await invalidateSupplyCaches('deposit'); } catch (_) {} try { invalidateSupplyCaches('payment'); } catch (_) {}
     res.json({ ok: true });
-  } catch (e) { if (/xero_doc_/.test(e.message)) return res.status(409).json({ error: 'Linking Xero documents needs migration 427' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/xero_doc_/.test(e.message)) return res.status(409).json({ error: 'Linking Xero documents needs migration 427' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete a deposit / other-payment row. Other payments (is_deposit=false) delete freely. A deposit
 // (is_deposit=true) can only be deleted when NO purchase order is assigned to its reference; any
@@ -15036,7 +15055,7 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
     await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);
     invalidateSupplyCaches('deposit');   // deposit removed + linked POs re-pointed → bust the cached deposits/PO/cashflow sections so a silent reload shows reality
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Apply a deposit to every open PO in its production + supplier that has no deposit yet.
 // Region-guarded: an AU deposit only lands on AU POs, a non-AU deposit only on non-AU POs.
@@ -15056,7 +15075,7 @@ app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
     const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
     if (match.length) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]); invalidateSupplyCaches('deposit'); }   // POs re-pointed → bust cached deposits/PO sections
     res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CASH FLOW — manual "likely payment date" for an overdue line. Empty date clears the override.
 app.post('/api/supply/likely-date', async (req, res) => {
@@ -15068,7 +15087,7 @@ app.post('/api/supply/likely-date', async (req, res) => {
       ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [line_key, likely_date]);
     invalidateSupplyCaches('payment');   // bump the epoch so the CACHED purchase-orders / cash flow / payments-due builds rebuild; otherwise a new likely date shows in the PO drawer (fresh fetch) but not in the payment LISTS until the TTL
     res.json({ saved: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // All manual likely-payment-date overrides, keyed by line_key (dep:/comp:/bal:/bal2:PO). Tiny table, read DIRECT and
 // UNCACHED (no epoch gate) so the Payments Due list always reflects a just-saved date — the big poRowsCache is epoch-
@@ -15091,7 +15110,7 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
     await pool.query(`INSERT INTO planner.import_tax_rates (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (country) DO UPDATE SET ${upd}, updated_at=now()`, vals);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // (Removed dead routes freight-rate/:id, freight-rate-create, duty-rate/:id, duty-rate-create —
 //  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
@@ -15105,7 +15124,7 @@ app.post('/api/supply/branch/:name', async (req, res) => {
     await pool.query(`INSERT INTO planner.branches (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (name) DO UPDATE SET ${upd}`, vals);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Deposit context for a PO's Payments tab: remaining on the deposit, how many OTHER open POs on the same
 // ref have no start deposit allocated, the extra start deposit this PO could take (deposit remaining minus the
@@ -15145,7 +15164,7 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
       est_others: estOthers, unalloc_value: unallocValue, is_last: isLast,
       suggest_extra: (isLast || estOthers < remaining) ? extra : null,
       at_risk: unallocValue > 0 && remaining > 0.5 * unallocValue });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Suppliers — editable terms table (CONFIG). Edit by id; create a new supplier (name required).
 app.post('/api/supply/supplier/:id', async (req, res) => {
@@ -15174,7 +15193,7 @@ app.get('/api/supply/xero/contact-check', async (req, res) => {
     const r = name ? await xeroContactLookup(region, name, { fresh: true }) : await xeroContactFor(region, String(req.query.supplier || ''), { fresh: true });
     if (r.lookup_failed && (r.code === 503 || r.code === 502)) return res.set('Cache-Control', 'no-store').json({ ok: false, connected: false, region, name: r.target, error: r.error });
     res.set('Cache-Control', 'no-store').json({ ok: true, connected: true, region, name: r.target, found: !!r.ok, contact_id: r.ContactID || null, contact_name: r.Name || null, error: r.ok ? null : r.error, lookup_failed: !!r.lookup_failed });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.176 (Ben): READ-ONLY roll-up: every active supplier's resolved Xero contact in UK and AU (found / missing), so Ben can
 // see which '<name> - <code>' contacts still need creating or merging. GETs only, serial, uses the 10 min contact cache.
@@ -15191,7 +15210,7 @@ app.get('/api/supply/xero/supplier-contacts', async (req, res) => {
       out.push(row);
     }
     res.set('Cache-Control', 'no-store').json({ ok: true, suppliers: out, missing: { uk: out.filter(x => !x.uk.found).map(x => x.uk.target), au: out.filter(x => !x.au.found).map(x => x.au.target) } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
@@ -15202,7 +15221,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.suppliers (name, code, kind) VALUES ($1,$2,$3) RETURNING id`,
       [name, (b.code || '').trim() || null, kind]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── KEY ACCOUNTS (CONFIG) — clients whose packing/labelling + requirements + address default onto a PO's
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
@@ -15219,13 +15238,13 @@ app.post('/api/supply/key-account-create', async (req, res) => {
   const name = ((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ error: 'key account name required' });
   try { const r = await pool.query(`INSERT INTO planner.key_accounts (name) VALUES ($1) RETURNING id`, [name]); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/key-account/:id', (req, res) =>
   patch(res, 'planner.key_accounts', 'id', req.params.id, KA_FIELDS, req.body, 'int'));
 app.post('/api/supply/key-account/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_accounts WHERE id=$1::int`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Copy a key account's stored settings onto a PO's Direct-to-Client details + tag it a key-account order.
 app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
@@ -15249,7 +15268,7 @@ app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
        ka.consignee, ka.contact_person, ka.contact_number, ka.freight_forwarder,   // SUG-0041 reuse (mig 272)
        req.params.po]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a key account in config FROM a PO's current Direct-to-Client details (client name + packing +
 // requirements + address), and tag the PO as a key-account order. For clients not yet in the config list.
@@ -15275,7 +15294,7 @@ app.post('/api/supply/po/:po/create-key-account', async (req, res) => {
        p.pack_pallet_notes, p.pack_other_notes, p.po_consignee, p.po_contact_person, p.po_contact_number, p.po_freight_forwarder]);
     await pool.query(`UPDATE planner.purchase_orders SET dtc_key_account=true, updated_at=now() WHERE po=$1`, [req.params.po]);
     res.json({ ok: true, id: r.rows[0].id, name });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Batches — editable buying-batch table (CONFIG). Edit by batch name; create a new batch.
 app.post('/api/supply/batch/:batch', (req, res) =>
@@ -15289,7 +15308,7 @@ app.post('/api/supply/batch-create', async (req, res) => {
     if (dup.rowCount) return res.status(409).json({ error: 'batch ' + batch + ' already exists' });
     await pool.query(`INSERT INTO planner.batches (batch, batch_date) VALUES ($1,$2)`, [batch, b.batch_date || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete a batch — ONLY if no PO is linked to it (guarded server-side; the UI also hides the button when POs exist).
 app.post('/api/supply/batch-delete/:batch', async (req, res) => {
@@ -15299,7 +15318,7 @@ app.post('/api/supply/batch-delete/:batch', async (req, res) => {
     if (n > 0) return res.status(409).json({ error: 'Cannot delete — ' + n + ' PO' + (n === 1 ? '' : 's') + ' linked to batch ' + batch });
     const r = await pool.query(`DELETE FROM planner.batches WHERE batch=$1`, [batch]);
     res.json({ ok: true, deleted: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a production number (registers it in prod_numbers so it's pickable; a PO joins a production by
 // setting its prod_no). A production row appears in PRODUCTIONS once a PO carries the prod_no.
@@ -15311,7 +15330,7 @@ app.post('/api/supply/production-create', async (req, res) => {
     if (dup.rowCount) return res.status(409).json({ error: 'production ' + prod + ' already exists' });
     await pool.query(`INSERT INTO planner.prod_numbers (prod_no, status) VALUES ($1,'active')`, [prod]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Edit a production row (CONFIG ▸ Productions). Edit/Save sends all fields at once.
 app.post('/api/supply/prod-number/:id', (req, res) =>
@@ -15335,7 +15354,7 @@ app.post('/api/supply/portal-user-create', async (req, res) => {
 });
 app.post('/api/supply/portal-user/:id', async (req, res) => {
   const b = req.body || {};
-  if (b._delete) { try { await pool.query(`DELETE FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id]); return res.json({ deleted: true }); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); } }
+  if (b._delete) { try { await pool.query(`DELETE FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id]); return res.json({ deleted: true }); } catch (e) { log500(e); return res.status(500).json({ error: clientErr(e) }); } }
   // if supplier_name changes, re-resolve supplier_id
   if (b.supplier_name !== undefined && b.supplier_id === undefined) {
     const r = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1`, [b.supplier_name]);
@@ -15355,7 +15374,7 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(token), u.email, PORTAL_LINK_HOURS]);   // v28.186 (Ben): 24 h link life (was 7 days). v28.210 (Ben, H2): stored hashed
     const base = portalLinkBase(req);   // v28.151 (review B5)
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_hours: PORTAL_LINK_HOURS, expires_days: Math.round(PORTAL_LINK_HOURS / 24 * 10) / 10 });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.575 (Ben 29-Oct-26: "internal users of supplier and client portals, choose the supplier we want a magic link into ... we don't need
@@ -15378,7 +15397,7 @@ app.post('/api/supply/portal-staff/:sid', async (req, res) => {
     res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=28800; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
     console.log('[portal-staff] ' + who + ' opened the supplier portal as ' + sup.name + (canEdit ? ' (can edit)' : ' (read only)'));
     res.json({ ok: true, url: '/portal', supplier: sup.name, can_edit: canEdit, hours: 8 });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
@@ -15403,7 +15422,7 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     const _rid = await r.json().then(j => j && j.id).catch(() => null);
     logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', ref: b.supplier_name || null, by: authUser(req), status: 'sent', resend_id: _rid });
     res.json({ ok: true, sent: emails.length, emails });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── General settings (CONFIG ▸ General Settings) — key/value store ──────────────────────────────
@@ -15414,7 +15433,7 @@ app.get('/api/app-settings', async (req, res) => {
   try { let admin = false; try { const me = await permsFor(req); admin = !me.live || !!me.is_admin; } catch (_) {}
     const o = {}; (await pool.query(`SELECT key, value FROM planner.app_settings`)).rows.forEach(r => { if (APP_SETTINGS_SECRET.test(r.key) || (r.key === 'export_token' && !admin)) return; o[r.key] = r.value; });
     res.set('Cache-Control', 'private, no-store').json(o); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/app-settings', async (req, res) => {
   const b = req.body || {}, key = (b.key || '').trim();
@@ -15428,7 +15447,7 @@ app.post('/api/app-settings', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now())
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, b.value || '', authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Klaviyo BIS per-market upload (SUG-0018). Raw Klaviyo back-in-stock export → sum "Queued Subscriptions" per SKU
@@ -15484,7 +15503,7 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
       await kc.query('COMMIT');
     } catch (e) { try { await kc.query('ROLLBACK'); } catch (_) {} throw e; } finally { kc.release(); }
     res.json({ ok: true, market, n_skus: skus.length, total_subs: totalSubs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/klaviyo-bis/status', async (req, res) => {
   try {
@@ -15498,7 +15517,7 @@ app.get('/api/klaviyo-bis/status', async (req, res) => {
     });
     const rows = Object.values(agg).sort((x, y) => y.total - x.total);
     res.set('Cache-Control', 'no-store').json({ ok: true, markets: by, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Manufacturing notes: save the shared free-text notes (top of the Manufacturing tab). Supply-edit gated by the
@@ -15509,7 +15528,7 @@ app.post('/api/supply/manufacturing-notes', async (req, res) => {
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`,
       [String((req.body || {}).body || ''), authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Escalate a timeline message as an email ─────────────────────────────────────────────────────
 // initiator 'supplier' (portal) → routed to a CONFIG-managed internal list by context; link → planner.
@@ -15827,7 +15846,7 @@ app.post('/api/supply/escalate', async (req, res) => {
     const user = initiator === 'internal' ? (shortUser(authUser(req)) || b.user || 'A user') : (b.user || 'The supplier');
     const replyTo = initiator === 'internal' ? authUser(req) : (b.reply_to || b.email || null);   // reply-to = the person who escalated
     res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id, setEscalated: !!b.set_escalated, postNote: !!b.post_note, replyTo }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 const qp = (sql, vals) => pool.query(sql, vals).then(r => r.rows);   // rows helper for the standalone portal routes
@@ -15850,14 +15869,14 @@ app.post('/api/supply/portal-line-cost', async (req, res) => {
         is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, cost, qty, added, b.submitted_by || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // supplier removes a SKU they had added to the order (only removes supplier-added rows)
 app.post('/api/supply/portal-line-remove', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // SKUs assignable by a supplier (from products.supplier_multiple_all) — for the portal "add SKU" picker
 app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
@@ -15865,7 +15884,7 @@ app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
       coalesce(product_ean,'') ean, coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long,
       coalesce(colour_long,'') colour, coalesce(release_window,'') release_window
     FROM planner.products WHERE coalesce(supplier_multiple_all,'') ILIKE '%'||$1||'%' AND coalesce(sku,'')<>'' ORDER BY sku`, [req.params.supplier])); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Internal (PO PLAN) sets the FINAL agreed cost price per line (the value that would push to ERP). Upserts onto
 // the same portal_line_costs row so supplier-submitted (actual_cost) and D&B-final (final_cost) sit side by side.
@@ -15883,7 +15902,7 @@ app.post('/api/supply/po-line-final', async (req, res) => {
         confirmed_at = CASE WHEN excluded.final_cost IS NOT NULL THEN now() ELSE planner.portal_line_costs.confirmed_at END`,
       [b.po, b.sku, cost]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PO PLAN order plan: D&B accepts a supplier-submitted change (cost / amended qty / added SKU). Confirms the line
 // and, if no final price set yet, adopts the supplier's cost as the final. `all:true` accepts every unconfirmed line on the PO.
@@ -15914,7 +15933,7 @@ app.post('/api/supply/po-line-accept', async (req, res) => {
     // 3) mark the portal lines confirmed; adopt supplier cost as final if none set
     await pool.query(`UPDATE planner.portal_line_costs plc SET confirmed_at=now(), final_cost=coalesce(plc.final_cost, plc.actual_cost) WHERE ${scope}`, params);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PO PLAN order plan: D&B REJECTS a supplier-submitted change — discard it WITHOUT touching the order-plan line.
 // Added-SKU proposals are removed outright; qty/cost amendments are cleared and marked reviewed (confirmed_at=now)
@@ -15931,7 +15950,7 @@ app.post('/api/supply/po-line-reject', async (req, res) => {
     await pool.query(`DELETE FROM planner.portal_line_costs WHERE ${scope} AND is_added=true`, params);
     await pool.query(`UPDATE planner.portal_line_costs SET amended_qty=NULL, actual_cost=NULL, confirmed_at=now() WHERE ${scope}`, params);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PO PLAN Timeline: mark a supplier note read / unread (toggle).
 // DEMAND ▸ Key Accounts Forecast inline editor — upsert a row (insert when no id, else update) direct to Supabase.
@@ -15949,11 +15968,11 @@ app.post('/api/supply/ka-forecast', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
       VALUES ($1,$2,$3,$4::date,$5,'manual',now()) RETURNING id`, [client, sku, warehouse, ship, qty]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_account_forecasts WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Month-cell upsert for the pivoted Key Accounts grid: (client, sku, warehouse, month) is authoritative.
 // Deletes any existing forecast rows for that client/sku/warehouse within the month, then inserts one row at
@@ -16043,7 +16062,7 @@ app.post('/api/supply/ka-forecast-cell', async (req, res) => {
     }
     await client2.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client2.release(); }
 });
 // Suggestion-box stakeholders: emailed on a new suggestion + on a status change. Configured in CONFIG ▸ Suggestions
@@ -16086,7 +16105,7 @@ app.post('/api/supply/suggestion', async (req, res) => {
       }
     } catch (e) { /* email is best-effort — never fail the submit */ }
     res.json({ ok: true, id: r.rows[0].id, ref });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/suggestion/:id/status', async (req, res) => {
   const b = req.body || {}, status = (b.status || '').trim(), by = (b.status_by || '').trim() || null;
@@ -16121,17 +16140,17 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
       }
     } catch (e) { /* best-effort */ }
     res.json({ ok: true, emailed });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-suggestion stakeholders (mig 162) — comma/space-separated emails, notified on this suggestion's status changes.
 app.post('/api/supply/suggestion/:id/stakeholders', async (req, res) => {
   const v = parseEmails((req.body || {}).stakeholders).join(', ');
   try { await pool.query(`UPDATE planner.suggestions SET stakeholders=$2 WHERE id=$1`, [req.params.id, v || null]); res.json({ ok: true, stakeholders: v }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ════════════════════════════════════════════════════════════════════════════
 // PRODUCT module — product-development management (migration 128). Reads are open (GET); writes require the
@@ -16144,7 +16163,7 @@ app.get('/api/product/unread', async (_req, res) => {   // total unread supplier
   try { res.json(await swrGet('sup:product-unread', 60 * 1000, async () => {   // v28.081: 60s SWR memo (polled every 4 min per tab; 2.8s measured live)
     const r = await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes n
       WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
-    return { count: r.rows[0].n }; })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { count: r.rows[0].n }; })); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCT ▸ STAGE state machine (v27.395). One stored field on product_dev_items drives everything;
 // APPROVAL (.status, read by PIM/Buy Plan/POs) derives from the terminal stage.
@@ -16219,7 +16238,7 @@ async function _supplierCodeFor(client, name) { const sr = (await client.query(`
 app.get('/api/product/item/:ref/requests', async (req, res) => {
   try { const r = await pool.query(`SELECT i.id, i.stage stage_override, ${REQS_JSON_SQL} requests FROM planner.product_dev_items i WHERE i.ref=$1`, [req.params.ref]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' }); const row = r.rows[0]; const d = deriveProductStage(row.requests, row.stage_override);
-    res.json({ requests: row.requests, stage: d.stage, stage_overridden: d.overridden }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ requests: row.requests, stage: d.stage, stage_overridden: d.overridden }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a request: {item_ref, supplier_name, component_ids[], size_ids[], approval_method, recipient_countries, dev_start, internal_stakeholders[], notify_emails[], notes}
 app.post('/api/product/request', async (req, res) => {
@@ -16254,7 +16273,7 @@ app.post('/api/product/request', async (req, res) => {
     try { await logProductChange(it.ref, 'Development request ' + ins.rows[0].ref + ' → ' + sup + ' (' + names.join(', ') + ')', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
     try { portalCacheMarkStale(sup); } catch (e) {}
     res.json({ ok: true, id: rid, ref: ins.rows[0].ref });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // v28.460 (Ben): Draft → Sent. A request is created as DRAFT (internal only); SENT makes it visible on the supplier portal and posts
@@ -16273,7 +16292,7 @@ app.post('/api/product/request/:id/send', async (req, res) => {
     try { await logProductChange(rq.item_ref, 'Request ' + rq.ref + (st === 'sent' ? ' sent to ' + rq.supplier_name : ' set back to draft (hidden from the supplier)'), null, by); } catch (e) {}
     try { portalCacheMarkStale(rq.supplier_name); } catch (e) {}
     res.json({ ok: true, send_status: st });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Update a request: any of ref, stage, approval_method, recipient_countries, dev_start, size_ids, internal_stakeholders, notify_emails, notes, component_ids (replace-all)
 app.post('/api/product/request/:id', async (req, res) => {
@@ -16306,7 +16325,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     for (const l of log) { try { await logProductChange(rq.item_ref, l, null, authUser(req) || 'Dock & Bay'); } catch (e) {} }
     try { portalCacheMarkStale(rq.supplier_name); } catch (e) {}
     res.json({ ok: true, product_stage: stage });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/product/request/:id/delete', async (req, res) => {
@@ -16316,7 +16335,7 @@ app.post('/api/product/request/:id/delete', async (req, res) => {
     await pool.query(`DELETE FROM planner.product_dev_requests WHERE id=$1`, [id]); await recomputeProductStatus(null, rq.item_id);
     try { await logProductChange(rq.item_ref, 'Development request ' + rq.ref + ' (' + rq.supplier_name + ') deleted', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
     try { portalCacheMarkStale(); } catch (e) {}
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v27.704 SAMPLING page (P2) — every development request with its sample versions, shipment + timeline counters ──
 app.get('/api/product/sampling', async (_req, res) => {
@@ -16350,7 +16369,7 @@ app.get('/api/product/sampling', async (_req, res) => {
       FROM planner.product_dev_requests rq JOIN planner.product_dev_items i ON i.id=rq.item_id
       ORDER BY i.season DESC NULLS LAST, i.category, i.ref, rq.id`);
     res.json(r.rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Tick / un-tick a sample version as RECEIVED (SAMPLING grid). Receiving advances that sample's request to "sample in review"
 // (forward-only, never past a D&B decision); un-receiving never walks a stage back. {received:true|false, date?:YYYY-MM-DD}
@@ -16363,7 +16382,7 @@ app.post('/api/product/sample/:id/received', async (req, res) => {
     if (receive) await prodStageAdvance(s.item_ref, 'sample_in_review', s.request_id ? { requestId: s.request_id } : { sampleId: id });
     try { await logProductChange(s.item_ref, 'Sample v' + s.version + (receive ? ' received ' + ddMonYy(dt) : ' un-received'), null, authUser(req) || 'Dock & Bay'); } catch (e) {}   // v27.729: dd-mmm-yy in the record-of-change (was ISO)
     res.json({ ok: true, received_at: receive ? dt.slice(0, 10) : null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/items', async (_req, res) => {
   try {
@@ -16406,7 +16425,7 @@ app.get('/api/product/items', async (_req, res) => {
         FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref AND ps.approved_for_photography),'[]'::json) photo
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows.map(applyDerivedStage));   // v27.702: stage derived from requests (override honoured)
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCT ▸ DASHBOARD — approval matrix: one row per product with per-component-type {required, approved} counts.
 app.get('/api/product/dashboard', async (req, res) => {
@@ -16429,7 +16448,7 @@ app.get('/api/product/dashboard', async (req, res) => {
       (SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref)::int sample_count
       FROM planner.product_dev_items i ORDER BY i.category, i.ref`);
     res.json(r.rows.map(applyDerivedStage));   // v27.702
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.848 (Ben): shared item payload. supplierScope (array of supplier names) scopes the samples server-side so the
 // supplier portal never receives another supplier's sample versions/shipments; pass null for the full (admin) view.
@@ -16488,7 +16507,7 @@ async function productItemPayload(ref, supplierScope) {
 }
 app.get('/api/product/item/:ref', async (req, res) => {
   try { const p = await productItemPayload(req.params.ref, null); if (!p) return res.status(404).json({ error: 'not found' }); res.json(p); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.848 (Ben): portal-scoped item — same shape, but samples are limited to the caller's own supplier(s) server-side.
 app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
@@ -16501,7 +16520,7 @@ app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
     p.docs = (p.docs || []).filter(d => d.uploader_kind !== 'supplier' || ppl.has(String(d.uploaded_by || '').toLowerCase()));
     (p.components || []).forEach(c => { if (Array.isArray(c.req_suppliers)) c.req_suppliers = [...new Set(c.req_suppliers.map(n => mine.has(String(n).toLowerCase().trim()) ? n : 'another supplier'))]; });
     res.json(p); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
 app.get('/api/product/item/:ref/core', async (req, res) => {
@@ -16522,7 +16541,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
     ]);
     const item = itemR.rows[0]; if (!item) return res.status(404).json({ error: 'not found' }); applyDerivedStage(item);
     res.json({ item, unread_supplier: unreadR.rows[0].n });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Light docs-only endpoint — the Documents tab used to re-fetch the whole heavy /item/:ref (5 queries) just for
 // this. One indexed query instead → the tab loads fast (esp. on the remote sandbox pooler ~330ms/query).
@@ -16535,7 +16554,7 @@ app.get('/api/product/item/:ref/docs', async (req, res) => {
     const latestId = explicit ? explicit.id : (internal[0] ? internal[0].id : null);
     docs.forEach(d => { d.is_latest = (d.id === latestId); d.latest_explicit = !!explicit; });
     res.json({ docs, latest_id: latestId });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Record of change (PRODUCT ▸ Timeline). Light — its own endpoint so the timeline can merge it with the notes.
 app.get('/api/product/item/:ref/changes', async (req, res) => {
@@ -16576,7 +16595,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     res.json({ sizes, samples, components: compsR.rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.186 (Ben): shared by the staff route and the portal twin /api/portal/product-swatch/:ref (ownership checked there).
 async function serveProductSwatch(res, ref) {
@@ -16629,7 +16648,7 @@ app.post('/api/product/item', async (req, res) => {
     await client.query('COMMIT');
     try { portalCacheMarkStale(); } catch (e) {}   // a new product must appear in the supplier portal at once — drop the cached portal bootstrap (else it lags a whole TTL)
     res.json({ ok: true, ref, id });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/product/item/:ref', async (req, res) => {
@@ -16657,7 +16676,7 @@ app.post('/api/product/item/:ref', async (req, res) => {
       const _pby = authUser(req) || 'Dock & Bay';
       for (const k of Object.keys(_plbl)) { if (k in b) { const v = String(b[k] == null ? '' : b[k]).trim(); await logProductChange(ref, _plbl[k] + (v ? (' → ' + (v.length > 80 ? v.slice(0, 80) + '…' : v)) : ' cleared'), null, _pby); } } }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Rename a product's reference — cascades to samples, timeline notes, product documents & any staged submissions.
 app.post('/api/product/item/:ref/rename', async (req, res) => {
@@ -16680,12 +16699,12 @@ app.post('/api/product/item/:ref/rename', async (req, res) => {
     await client.query('COMMIT');
     await logProductChange(newRef, 'Reference renamed', 'from ' + oldRef, authUser(req) || 'Dock & Bay');
     res.json({ ok: true, ref: newRef });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/product/item/:ref/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCT ▸ Reports — counts + sample/approval metrics grouped by season, category, supplier.
 app.get('/api/product/reports', async (_req, res) => {
@@ -16719,7 +16738,7 @@ app.get('/api/product/reports', async (_req, res) => {
     const byReason = tally(r => r.reason).map(x => ({ key: x.key, count: x.count, suppliers: splitStr(x.key, r => r.supplier), seasons: splitStr(x.key, r => r.season) }));
     const reject = { total: rj.length, byReason, bySupplier: tally(r => r.supplier), bySeason: tally(r => r.season), byCategory: tally(r => r.category) };
     res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier), reject });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.773 (Ben): SAMPLING ▸ Reports — big metrics (products / samples in progress), a Type×Season pivot of samples in
 // progress, and a Supplier×Season KPI table (avg samples per request; avg samples to approve / to reject) with a
@@ -16759,7 +16778,7 @@ app.get('/api/product/reports/sampling', async (_req, res) => {
     const detail = {}; rows.forEach(r => { const k = r.supplier + '||' + r.season; (detail[k] = detail[k] || []).push({ item_ref: r.item_ref, colour: r.colour, type: r.type, samples: r.samples, outcome: r.status, dev_start: r.dev_start }); });
     Object.keys(detail).forEach(k => detail[k].sort((a, b) => String(a.item_ref).localeCompare(String(b.item_ref))));
     res.json({ big, typeSeason: { seasons, types, cells }, supplierSeason, detail });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.453 (Ben): PRODUCT ▸ Reports ▸ Sample costs. One row per sample-request line (SKU lines + linked development
 // samples), costed in GBP so the client can filter and group instantly. Per request: product cost (supplier charges'
@@ -16829,7 +16848,7 @@ app.get('/api/product/reports/sample-costs', async (_req, res) => {
         by_weight: avgW > 0 && ls.length > 1, kg: Number(l.w) > 0 ? Number(l.w) : null, kg_src: l.wsrc || (avgW > 0 ? 'average' : 'units'), kg_size: l.wsize || null });
     }
     res.set('Cache-Control', 'no-store').json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.456 (Ben, screenshot spec): PRODUCT ▸ Reports ▸ Approval stats. One row per development SKU (item size: mapped SKU,
 // else working SKU, else "ref size"). A sample covers a size when its sample_sizes is empty, names the size, or names none
@@ -16894,7 +16913,7 @@ app.get('/api/product/reports/approval-stats', async (_req, res) => {
       }
     }
     res.set('Cache-Control', 'no-store').json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product SIZE (barcodes live on sizes, mig 294): season /
 // ref / product type / colour way / size / SKU / EAN / components / stage. Items with no sizes still get one blank-size
@@ -16925,7 +16944,7 @@ app.get('/api/product/reports/catalogue', async (req, res) => {
       ORDER BY 2 DESC, i.ref, s.sort NULLS LAST, s.id`, [season])).rows;
     const seasons = (await pool.query(`SELECT DISTINCT ${CAT_SEASON_SQL} season FROM planner.product_dev_items i ORDER BY 1 DESC`)).rows.map(r => r.season).filter(Boolean);
     res.json({ ok: true, season, seasons, count: rows.length, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.154 (Ben): landscape A4 PDF of the VISIBLE catalogue rows (client posts what it shows: filtered + sorted). pdf-lib,
 // repeated column headers per page, "Page n of N" footer. Standard fonts are WinAnsi-only, so text is sanitised to
@@ -16987,7 +17006,7 @@ app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
     const pages = doc.getPages(); pages.forEach((p, i) => { const t = 'Page ' + (i + 1) + ' of ' + pages.length + '   ' + rows.length + ' rows'; p.drawText(t, { x: W - MR - F.widthOfTextAtSize(t, 7.5), y: 20, size: 7.5, font: F, color: mut }); });
     const bytes = await doc.save();
     res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="catalogue_' + season.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() + '_' + today + '.pdf"'); res.send(Buffer.from(bytes));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.520: {ref, size_label} as before, or {ref, library_code} = a size from the library (label + L / W / H cm copied in; editable after).
 app.post('/api/product/size', async (req, res) => {
@@ -16998,7 +17017,7 @@ app.post('/api/product/size', async (req, res) => {
     const so = (await pool.query(`SELECT coalesce(max(sort),0)+1 n FROM planner.product_dev_sizes WHERE item_id=$1`, [it.id])).rows[0].n;
     const r = await pool.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort, library_code, length_cm, width_cm, height_cm) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [it.id, label, so, lib ? lib.code : null, lib ? lib.length_cm : null, lib ? lib.width_cm : null, lib ? lib.height_cm : null]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/size/:id', (req, res) =>
   patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', working_sku: 'text', approved_sample_id: 'bigint', length_cm: 'numeric', width_cm: 'numeric', height_cm: 'numeric', library_code: 'text' }, req.body, 'bigint'));
@@ -17009,7 +17028,7 @@ app.get('/api/product/size-library', async (req, res) => {
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE upper(s.library_code)=upper(l.code)) used
       FROM planner.product_size_library l ${all ? '' : 'WHERE active'} ORDER BY sort NULLS LAST, code`);
     res.set('Cache-Control', 'no-store').json({ sizes: r.rows });
-  } catch (e) { if (e.code === '42P01') return res.json({ sizes: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.json({ sizes: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/size-library', async (req, res) => {   // {id?, code, label, length_cm, width_cm, height_cm, active, sort}: add or edit
   try { const b = req.body || {}, code = String(b.code || '').trim().toUpperCase(), label = String(b.label || '').trim(), by = (req.me && req.me.email) || null;
@@ -17019,7 +17038,7 @@ app.post('/api/product/size-library', async (req, res) => {   // {id?, code, lab
     const r = Number(b.id) ? await pool.query(`UPDATE planner.product_size_library SET code=$1, label=$2, length_cm=$3, width_cm=$4, height_cm=$5, active=$6, sort=$7, updated_by=$8, updated_at=now() WHERE id=$9 RETURNING id`, [...vals, Number(b.id)])
       : await pool.query(`INSERT INTO planner.product_size_library (code, label, length_cm, width_cm, height_cm, active, sort, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, vals);
     if (!r.rowCount) return res.status(404).json({ error: 'size not found' }); res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'There is already a size with code ' + String((req.body || {}).code || '').toUpperCase() }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'There is already a size with code ' + String((req.body || {}).code || '').toUpperCase() }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.748 (Ben 10-Nov-26): SIZE-TYPE WEIGHTS for sample freight. A real size type is a products.size code (TOWLB-LG, PICNIC-LG ...);
 // its weight is the PIM product weight (UK, kg), which is one value per size, so HORIZON only reads it. Custom types (mig 426,
@@ -17037,7 +17056,7 @@ async function sizeTypeWeights() {
 }
 app.get('/api/product/size-weights', async (_req, res) => {
   try { const w = await sizeTypeWeights(); res.set('Cache-Control', 'no-store').json({ real: w.real, custom: w.custom, missing: w.missing }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/size-weights', async (req, res) => {   // {code, label, weight_kg}: add or edit a CUSTOM size type
   try { const b = req.body || {}, code = String(b.code || '').trim().toUpperCase().replace(/\s+/g, '-'), label = String(b.label || '').trim(), kg = Number(String(b.weight_kg == null ? '' : b.weight_kg).replace(',', '.')), by = (req.me && req.me.email) || authUser(req) || null;
@@ -17048,14 +17067,14 @@ app.post('/api/product/size-weights', async (req, res) => {   // {code, label, w
     await pool.query(`INSERT INTO planner.size_type_weights (code, label, weight_kg, created_by, updated_by) VALUES ($1,$2,$3,$4,$4)
       ON CONFLICT (code) DO UPDATE SET label=excluded.label, weight_kg=excluded.weight_kg, updated_by=excluded.updated_by, updated_at=now()`, [code, label, kg, by]);
     res.json({ ok: true, code });
-  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/size-weights/:code/delete', async (req, res) => {
   try { const code = String(req.params.code || '').toUpperCase();
     const used = (await pool.query(`SELECT count(*)::int n FROM planner.sample_line_weights WHERE upper(size_code)=$1`, [code])).rows[0].n;
     if (used) return res.status(400).json({ error: code + ' is used on ' + used + ' sample line' + (used === 1 ? '' : 's') + '. Change those lines first.' });
     await pool.query(`DELETE FROM planner.size_type_weights WHERE code=$1`, [code]); res.json({ ok: true });
-  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // the weight for one sample-request line: {sku, size_code, weight_kg}; both blank clears it
 app.post('/api/supply/sample/:id/line-weight', async (req, res) => {
@@ -17068,7 +17087,7 @@ app.post('/api/supply/sample/:id/line-weight', async (req, res) => {
     else await pool.query(`INSERT INTO planner.sample_line_weights (sample_id, sku, size_code, weight_kg, updated_by) VALUES ($1,$2,$3,$4,$5)
       ON CONFLICT (sample_id, sku) DO UPDATE SET size_code=excluded.size_code, weight_kg=excluded.weight_kg, updated_by=excluded.updated_by, updated_at=now()`, [id, sku, sc, kg, by]);
     res.json({ ok: true });
-  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(400).json({ error: 'Run migration 426 first.' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Product SIZES master (phase 2): claim / release a Workshop-pool barcode (mig 293) for a size. Transactional so the
 // pool's status stays in sync — one barcode ↔ one size. Body {barcode:'<ean>'} to claim (frees the size's old code first),
@@ -17096,7 +17115,7 @@ app.post('/api/product/size/:id/barcode', async (req, res) => {
     await client.query(`UPDATE planner.product_dev_sizes SET barcode=$2 WHERE id=$1::bigint`, [sizeId, bc || null]);
     await client.query('COMMIT');
     res.json({ ok: true, barcode: bc || null });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Approved products waiting room (mig 295, phase 3): push a SIZE with a working SKU into the Horizon PIM waiting room —
@@ -17118,7 +17137,7 @@ app.post('/api/product/size/:id/push-pim', async (req, res) => {
         size_label=excluded.size_label, product_name=excluded.product_name, category=excluded.category, status='waiting', pushed_by=excluded.pushed_by, pushed_at=now()`,
       [s.id, s.ref, sku, s.barcode || null, s.colourway || null, s.size_label || null, s.product_name || null, s.category || null, authUser(req)]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/pim-waiting-room', async (_req, res) => {
   try {
@@ -17127,24 +17146,24 @@ app.get('/api/product/pim-waiting-room', async (_req, res) => {
         status, coalesce(pushed_by,'') pushed_by, to_char(pushed_at,'YYYY-MM-DD') pushed_at, coalesce(notes,'') notes
       FROM planner.product_pim_waiting_room ORDER BY (status='waiting') DESC, pushed_at DESC, id DESC`)).rows;
     res.json({ ok: true, rows, waiting: rows.filter(r => r.status === 'waiting').length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/pim-waiting-room/:id/status', async (req, res) => {
   const st = (req.body && req.body.status) || '';
   if (['waiting', 'in_pim', 'dropped'].indexOf(st) < 0) return res.status(400).json({ error: 'status must be waiting | in_pim | dropped' });
   try { await pool.query(`UPDATE planner.product_pim_waiting_room SET status=$2 WHERE id=$1::bigint`, [req.params.id, st]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/pim-waiting-room/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_pim_waiting_room WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // SKU picker source for mapping an approved size → a planner SKU (full searchable list).
 app.get('/api/product/skus', async (_req, res) => {
   try { const rows = (await pool.query(`SELECT sku,
       trim(both ' ' from coalesce(colour_long,'')||' '||coalesce(size_short,'')) label
       FROM planner.products ORDER BY sku`)).rows;
-    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a D&B-uploaded DESIGN version for a dimension (packaging / polybag / labels). Version numbers per (ref, dimension).
 app.post('/api/product/design-version', async (req, res) => {
@@ -17156,7 +17175,7 @@ app.post('/api/product/design-version', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5) RETURNING id`, [ref, v, dim, (b.description || '').trim() || null, shortUser(authUser(req)) || null]);
     try { await ensureShortCode(r.rows[0].id); } catch (e) {}   // v27.744: assign the QR / phone-scan short code up front
     res.json({ ok: true, id: r.rows[0].id, version: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 const PROD_COMPONENTS = ['product', 'packaging', 'labels', 'polybag', 'other'];
 // v27.713: a size×component key is a legacy aspect name OR 'comp:<component id>' (net-new catalogue components, mig 262)
@@ -17175,7 +17194,7 @@ app.post('/api/product/size/:id/dimension', async (req, res) => {
     await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
     if (fields.length) await pool.query(`UPDATE planner.product_dev_size_dimensions SET ${fields.join(',')} WHERE size_id=$1 AND dimension=$2`, params);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Upload a versioned file to a size's component (ensures the component row exists first). Returns the new file id.
 app.post('/api/product/component-file', async (req, res) => {
@@ -17190,21 +17209,21 @@ app.post('/api/product/component-file', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,'product_dim','internal',$8) RETURNING id`,
       ['PDIM-' + row.id, b.filename || 'file', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/component-file/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product_dim'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product_dim'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/component-file/:id', async (req, res) => {   // assign / change a file's version number
   const v = (req.body || {}).version, vv = (v === '' || v == null) ? null : parseInt(v, 10) || null;
-  try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/size/:id/delete', async (req, res) => {
   try {
     // phase 2: release any workshop barcode this size claimed back into the free pool before deleting the size.
     await pool.query(`UPDATE planner.product_workshop_barcodes SET status='free', assigned_size_id=NULL, assigned_ref=NULL, assigned_sku=NULL, assigned_by=NULL, assigned_at=NULL WHERE assigned_size_id=$1::bigint`, [req.params.id]);
     await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/swatch', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), mime = b.mime || 'image/png';
@@ -17213,7 +17232,7 @@ app.post('/api/product/swatch', async (req, res) => {
   try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (buf.length > 2 * 1024 * 1024) return res.status(413).json({ error: 'swatch exceeds 2MB' });
     await pool.query(`UPDATE planner.product_dev_items SET swatch=$2, swatch_mime=$3, updated_at=now() WHERE ref=$1`, [ref, buf, mime]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/doc', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
@@ -17227,7 +17246,7 @@ app.post('/api/product/doc', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, version, thumb, thumb_mime) VALUES ($1,$2,$3,$4,$5,$6,$7,'product',$8,$9,$10) RETURNING id`,
       [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v, thumb, thumbMime]);
     try { await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [ref]); } catch (e) {}   // busts the ?t= swatch cache when the auto swatch changes
-    res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize, version: v, has_thumb: !!thumb }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize, version: v, has_thumb: !!thumb }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/doc/:id/thumb', staffOnly, async (req, res) => {   // v27.708 the small PNG rendered at upload (shown in the Documents tab; also the auto swatch)
   try { const r = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
@@ -17241,21 +17260,21 @@ app.post('/api/product/doc/:id/latest', async (req, res) => {
     if ((req.body || {}).latest !== false) await pool.query(`UPDATE planner.portal_attachments SET is_latest=true WHERE id=$1`, [req.params.id]);
     await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [d.po]);
     try { await logProductChange(d.po, 'Latest version → ' + ((await pool.query(`SELECT filename FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0] || {}).filename, null, authUser(req) || 'Dock & Bay'); } catch (e) {}
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/doc/:id', staffOnly, async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveStored(res, r);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/doc/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── PRODUCT ▸ SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: admin upload + scope + effective-from. ──
 app.get('/api/product/spec-types', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, name, sort FROM planner.product_spec_types WHERE active ORDER BY sort, name`); res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/spec-types', async (req, res) => {
   const b = req.body || {}, act = (b.action || '').trim(), id = b.id, name = String(b.name || '').trim();
@@ -17266,7 +17285,7 @@ app.post('/api/product/spec-types', async (req, res) => {
     const mx = (await pool.query(`SELECT coalesce(max(sort),0)+1 s FROM planner.product_spec_types`)).rows[0].s;
     const r = await pool.query(`INSERT INTO planner.product_spec_types (name, sort) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET active=true RETURNING id`, [name, mx]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/spec-scope-options', async (_req, res) => {   // categories, size-within-category, and production numbers for the assignment form
   try {
@@ -17278,7 +17297,7 @@ app.get('/api/product/spec-scope-options', async (_req, res) => {   // categorie
     const mx = (await pool.query(`SELECT max(prod_no::int) m FROM planner.purchase_orders WHERE prod_no ~ '^[0-9]+$'`)).rows[0].m;
     const defaultProdNo = (mx != null) ? String(mx + 1) : (productions[0] || '');
     res.json({ categories: cats, catSizes, productions, defaultProdNo });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // scope → WHERE clause on planner.products (shared by spec-suppliers)
 function specScopeWhere(q) {
@@ -17306,7 +17325,7 @@ app.get('/api/product/spec-suppliers', async (req, res) => {   // distinct suppl
     if (names.length) { sup = (await pool.query(`SELECT name, coalesce(email,'') email, coalesce(active,true) active FROM planner.suppliers WHERE name = ANY($1)`, [names])).rows; }
     const byName = {}; sup.forEach(s => { byName[s.name] = s; });
     res.json({ suppliers: names.map(n => ({ name: n, email: (byName[n] || {}).email || '', known: !!byName[n] })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/specs', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, spec_type, filename, mime, scope_type,
@@ -17324,7 +17343,7 @@ app.get('/api/product/specs', async (_req, res) => {
       s.approval_status = s.confirm_with_supplier ? (directed.length > 0 && done.length >= directed.length ? 'approved' : 'pending') : 'pending';
     });
     res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin override: approve-all directed suppliers, or reset to pending
   const id = req.params.id, st = ((req.body || {}).status || '').trim() === 'approved' ? 'approved' : 'pending';
@@ -17335,7 +17354,7 @@ app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin ove
     else { await pool.query(`DELETE FROM planner.product_spec_approvals WHERE spec_id=$1`, [id]); }
     await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [id, st]);   // legacy column kept in sync
     res.json({ ok: true, status: st });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/specs', async (req, res) => {
   const b = req.body || {}, st = String(b.spec_type || '').trim(), scope = (b.scope_type || 'all').trim();
@@ -17368,7 +17387,7 @@ app.post('/api/product/specs', async (req, res) => {
       } catch (e) { console.log('[spec-email] ' + e.message); }
     }
     res.json({ ok: true, id: newId, superseded: sup.rowCount, emailed });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs (kept for history) — most recent first
   try { const r = await pool.query(`SELECT id, spec_type, filename, scope_type,
@@ -17377,17 +17396,17 @@ app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs 
       confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers, superseded_by,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY') uploaded_at, to_char(superseded_at,'DD-Mon-YY HH24:MI') superseded_at
       FROM planner.product_specs WHERE NOT active AND superseded_at IS NOT NULL ORDER BY superseded_at DESC`); res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/specs/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.product_specs SET active=false WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/spec-file/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/notes/:ref', async (req, res) => {
   try {
@@ -17402,7 +17421,7 @@ app.get('/api/product/notes/:ref', async (req, res) => {
     n.sample_id, (SELECT ps.version FROM planner.product_dev_samples ps WHERE ps.id=n.sample_id) sample_version
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 AND ($2::bigint IS NULL OR n.supplier_id=$2 OR n.supplier_id IS NULL) ORDER BY n.created_at`, [req.params.ref, supName ? supId : null]);
-    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Sanitise Pantone reference cards attached to a message → array of {code,name,hex,book}
 function cleanPantone(arr) {
@@ -17422,7 +17441,7 @@ app.post('/api/product/note', async (req, res) => {
   const sampleId = (b.sample_id != null && String(b.sample_id).trim() !== '' && Number.isFinite(Number(b.sample_id))) ? Number(b.sample_id) : null;   // v27.750 (P6): /s chip → link this note to a specific development sample
   try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id, sample_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6,$7) RETURNING id`,
     [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, sampleId]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.550: sample FEEDBACK notes are one-per-(sample × component) on the timeline. Re-saving feedback rewrites that note
 // (text, tags, Pantone) instead of adding another. Matched by the stable prefix "Feedback on REF_vN · Component:" on the
@@ -17447,7 +17466,7 @@ app.post('/api/product/note/upsert-feedback', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, tags, pantone, attachment_id, sample_id) VALUES ($1,$7,$2,'internal',$3,$4::jsonb,$5::jsonb,$6,$8) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
       [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, supId, smpId]);
     res.json({ ok: true, id: r.rows[0].id, updated: false, at: r.rows[0].at });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // In-app Pantone search (seeded from Dock & Bay's Connect export; approximate on-screen swatch). Powers the
 // "/p" picker in the product-timeline compose box. Filter by book (TCX / Coated / Uncoated) optional.
@@ -17459,13 +17478,13 @@ app.get('/api/product/pantone/search', async (req, res) => {
     if (book) { params.push(book); where += ` AND book=$${params.length}`; }
     const rows = (await pool.query(`SELECT code, name, hex, book FROM planner.pantone_colors WHERE ${where} ORDER BY sort, code LIMIT 24`, params)).rows;
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Re-tag an existing product timeline message (D&B side). tags = full replacement array of tag ids.
 app.post('/api/product/note/:id/tags', async (req, res) => {
   const tags = Array.isArray((req.body || {}).tags) ? req.body.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   try { await pool.query(`UPDATE planner.supplier_notes SET tags=$2::jsonb WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id, JSON.stringify(tags)]);
-    res.json({ ok: true, tags }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, tags }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.753 (P6, Ben): tag an EXISTING timeline note to a sample version (retro-tag from the "🏷 tag" menu). null clears it.
 app.post('/api/product/note/:id/sample', async (req, res) => {
@@ -17476,13 +17495,13 @@ app.post('/api/product/note/:id/sample', async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: 'note not found' });
     const version = sid ? (await pool.query(`SELECT version FROM planner.product_dev_samples WHERE id=$1`, [sid])).rows[0]?.version : null;
     res.json({ ok: true, sample_id: sid, sample_version: version != null ? version : null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/notes-read', async (req, res) => {   // mark this product's internal (D&B) timeline notes read
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── SAMPLE SHIPMENT CONTENTS — candidate lists for the "Add contents" picker ──
 // A sample shipment IS a sample_request; its contents are bulk-SKU lines (sample_request_lines)
@@ -17567,15 +17586,15 @@ async function setSampleLines(sampleId, lines) {   // replace-all the bulk-SKU l
 }
 // Candidate lists (admin/preview — supplier passed as ?supplier=)
 app.get('/api/product/open-samples', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Supplier-scoped SKU + dev-item SEARCH (supplier / q / dev). Its own path because the plain /api/product/skus above
 // returns the full {sku,label} list (used elsewhere) and, being registered first, would otherwise shadow this.
 app.get('/api/product/sku-search', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Sample-shipment contents (admin/preview) — dev samples attach to a sample_request
 app.post('/api/supply/sample/:id/dev-samples', async (req, res) => { const b = req.body || {};
   try { await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, shortUser(authUser(req)) || null); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 async function sampleContents(id) {   // one sample shipment's contents — light payload for silent in-place refresh
   const lines = (await pool.query(`SELECT sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint ORDER BY id`, [id])).rows;
   const dev = (await pool.query(`SELECT ds.id, (ds.item_ref||'_v'||ds.version) ref, ds.item_ref, ls.qty, coalesce(i.colour_name,'') colour_name
@@ -17584,7 +17603,7 @@ async function sampleContents(id) {   // one sample shipment's contents — ligh
   return { lines, dev_samples: dev };
 }
 app.get('/api/supply/sample/:id/contents', async (req, res) => {
-  try { res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Product team marks a shipped sample request RECEIVED → every product linked to it (SKU lines used as a product
 // ref, SKU lines mapping to a product size, or dev-samples on the request) auto-advances to "sample_in_review"
 // (forward-only). Pass {received:false} to un-mark (does not walk stages back).
@@ -17612,13 +17631,13 @@ app.post('/api/supply/sample/:id/received', async (req, res) => {
       for (const ref of refs) { try { await prodStageAdvance(ref, 'sample_in_review', (_srSup && _srSup.supplier_name) ? { supplierNames: [_srSup.supplier_name] } : {}); advanced.push(ref); } catch (e) { /* best-effort */ } }
     }
     res.json({ ok: true, received: receive, advanced });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]); swrDrop('sup:product-unread'); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/escalate', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), message = String(b.message || '').trim();
@@ -17637,7 +17656,7 @@ app.post('/api/product/escalate', async (req, res) => {
       + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
     const sent = await sendResendEmail({ channel: 'supplier', to: emails, subject: 'horizon escalation - ' + ref, html, kind: 'escalation', ref: ref });
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.698 (mig 277) — per-category display colour. Palette = Ben's "20 lovely colours" board (one duplicate #008080
 // removed → 19), ordered so neighbouring categories land on contrasting hues. ensureCategoryColours() fills any
@@ -17666,7 +17685,7 @@ app.get('/api/product/config', async (_req, res) => {
   try { await ensureCategoryColours();
     const seasons = (await pool.query(`SELECT code, coalesce(label,'') label, active, sort FROM planner.seasons ORDER BY sort, code`)).rows;
     const categories = (await pool.query(`SELECT category, coalesce(code,'') code, coalesce(colour_hex,'') colour_hex FROM planner.categories WHERE coalesce(is_active,true) ORDER BY category`)).rows;
-    res.json({ seasons, categories, palette: CAT_PALETTE }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ seasons, categories, palette: CAT_PALETTE }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/category-colour', async (req, res) => {   // v27.698 hand-pick a category colour (blank = re-auto-assign)
   const b = req.body || {}, category = (b.category || '').trim(), hex = String(b.colour_hex || '').trim().toUpperCase();
@@ -17675,7 +17694,7 @@ app.post('/api/product/category-colour', async (req, res) => {   // v27.698 hand
   try { await pool.query(`UPDATE planner.categories SET colour_hex=$2 WHERE category=$1`, [category, hex || null]);
     if (!hex) await ensureCategoryColours(true);
     const row = (await pool.query(`SELECT coalesce(colour_hex,'') colour_hex FROM planner.categories WHERE category=$1`, [category])).rows[0];
-    res.json({ ok: true, colour_hex: row ? row.colour_hex : hex }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, colour_hex: row ? row.colour_hex : hex }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/season', async (req, res) => {
   const b = req.body || {}, code = (b.code || '').trim().toUpperCase();
@@ -17683,25 +17702,25 @@ app.post('/api/product/season', async (req, res) => {
   try { await pool.query(`INSERT INTO planner.seasons (code, label, active, sort) VALUES ($1,$2,$3,$4)
     ON CONFLICT (code) DO UPDATE SET label=excluded.label, active=excluded.active, sort=excluded.sort`,
     [code, (b.label || '').trim() || null, b.active == null ? true : !!b.active, b.sort == null ? null : parseInt(b.sort, 10)]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/season/:code/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.seasons WHERE code=$1`, [req.params.code]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.seasons WHERE code=$1`, [req.params.code]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/category-code', async (req, res) => {
   const b = req.body || {}, category = (b.category || '').trim();
   if (!category) return res.status(400).json({ error: 'category required' });
-  try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/category', async (req, res) => {   // add (or re-activate) a category
   const b = req.body || {}, category = (b.category || '').trim();
   if (!category) return res.status(400).json({ error: 'category required' });
   try { await pool.query(`INSERT INTO planner.categories (category, code, is_active) VALUES ($1,$2,true)
     ON CONFLICT (category) DO UPDATE SET code=coalesce(excluded.code, planner.categories.code), is_active=true`,
-    [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/category/:category/delete', async (req, res) => {   // soft-delete (n8n may re-add from products; is_active=false hides it)
-  try { await pool.query(`UPDATE planner.categories SET is_active=false WHERE category=$1`, [req.params.category]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.categories SET is_active=false WHERE category=$1`, [req.params.category]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCT component catalogue (mig 261) — component types + their default supplier + sampling mode. Managed in
 // PRODUCT ▸ Config. Returns the supplier list too (for the default-supplier dropdown).
@@ -17710,7 +17729,7 @@ app.get('/api/product/component-types', async (_req, res) => {
     const types = (await pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode, sort, active FROM planner.component_types ORDER BY sort, id`)).rows;
     const suppliers = (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(active,true) ORDER BY name`)).rows.map(r => r.name);
     res.json({ types, suppliers });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/component-type', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
@@ -17722,10 +17741,10 @@ app.post('/api/product/component-type', async (req, res) => {
     if (b.id) { await pool.query(`UPDATE planner.component_types SET name=$2, default_supplier=$3, sampling_mode=$4, sort=$5, active=$6 WHERE id=$1::bigint`, [b.id, name, sup, mode, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.component_types (name, default_supplier, sampling_mode, sort, active) VALUES ($1,$2,$3,$4,$5)
       ON CONFLICT (name) DO UPDATE SET default_supplier=excluded.default_supplier, sampling_mode=excluded.sampling_mode, sort=excluded.sort, active=true RETURNING id`, [name, sup, mode, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/component-type/:id/delete', async (req, res) => {
-  try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Product Workshop Barcodes (mig 293, Ben) — the fixed pool of real GS1 EAN-13s for the design/product team. Read-only
 // list here (seeded via migration); assignment happens from the product Sizes grid (phase 2). Rendered/printed client-side.
@@ -17741,7 +17760,7 @@ app.get('/api/product/workshop-barcodes', async (_req, res) => {
     const assigned = rows.filter(r => r.status === 'assigned').length;
     const used = rows.filter(r => r.status === 'used').length;   // v27.837 (Ben): manually marked used (not tied to a product)
     res.json({ ok: true, total: rows.length, free, assigned, used, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.837 (Ben): manually mark a pool barcode 'used' (consumed outside the app) or release it back to 'free'. Never
 // touches an 'assigned' barcode — that must be freed from its size on the product's Sizes grid first.
@@ -17755,7 +17774,7 @@ app.post('/api/product/workshop-barcode/:barcode/used', async (req, res) => {
     const next = used ? 'used' : 'free';
     await pool.query(`UPDATE planner.product_workshop_barcodes SET status=$2, assigned_at=CASE WHEN $2='used' THEN now() ELSE NULL END WHERE barcode=$1 AND status<>'assigned'`, [bc, next]);
     res.json({ ok: true, barcode: bc, status: next });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Sample reject reasons (mig 264) — the defined, editable list tagged when a sample aspect is rejected. Powers the
 // mandatory reason picker in the Samples tab + the rejection metrics report.
@@ -17764,7 +17783,7 @@ app.get('/api/product/reject-reasons', async (req, res) => {
     const all = String(req.query.all || '') === '1';
     const rows = (await pool.query(`SELECT id, name, sort, active FROM planner.sample_reject_reasons ${all ? '' : 'WHERE active'} ORDER BY sort, id`)).rows;
     res.json({ reasons: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/reject-reason', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
@@ -17774,10 +17793,10 @@ app.post('/api/product/reject-reason', async (req, res) => {
     if (b.id) { await pool.query(`UPDATE planner.sample_reject_reasons SET name=$2, sort=$3, active=$4 WHERE id=$1::bigint`, [b.id, name, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.sample_reject_reasons (name, sort, active) VALUES ($1,$2,$3)
       ON CONFLICT (name) DO UPDATE SET sort=excluded.sort, active=true RETURNING id`, [name, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/reject-reason/:id/delete', async (req, res) => {
-  try { await pool.query(`UPDATE planner.sample_reject_reasons SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.sample_reject_reasons SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCT per-product COMPONENTS (mig 262) — the component set for one product development, each with its supplier
 // + sampling mode. Returns the product's main supplier (to resolve "= product supplier"), the catalogue + suppliers.
@@ -17806,7 +17825,7 @@ app.get('/api/product/item/:ref/components', async (req, res) => {
       return Object.assign({}, c, st ? { total: st.total, approved: st.approved, rejected: st.rejected, files: st.files } : { total: 0, approved: 0, rejected: 0, files: 0 });
     });
     res.json({ components, product_supplier: (item.rows[0] || {}).supplier || '', catalogue: cat.rows, suppliers: sups.rows.map(r => r.name) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/item/:ref/component', async (req, res) => {
   const ref = req.params.ref, b = req.body || {}, name = (b.name || '').trim();
@@ -17821,10 +17840,10 @@ app.post('/api/product/item/:ref/component', async (req, res) => {
     else { const r = await pool.query(`INSERT INTO planner.product_dev_components (item_ref, component_type_id, name, supplier, sampling_mode, spec_id, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT (item_ref, name) DO UPDATE SET supplier=excluded.supplier, sampling_mode=excluded.sampling_mode, spec_id=excluded.spec_id, sort=excluded.sort RETURNING id`, [ref, ctid, name, sup, mode, specId, sort]); res.json({ ok: true, id: r.rows[0].id }); }
   } catch (e) { if (e && e.code === '23505') return res.status(400).json({ error: 'This product already has a component called "' + name + '".' });   // v28.582: rename onto an existing name
-    log500(e); res.status(500).json({ error: e.message }); }
+    log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/component/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_dev_components WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.product_dev_components WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── PRODUCT timeline config — tags/badges + quick phrases (migration 258). Shared by the CONFIG ▸ Product
 // panel and the timeline compose box (the "/" phrase picker + tag chips). Includes inactive rows so config
@@ -17834,7 +17853,7 @@ app.get('/api/product/timeline-config', async (_req, res) => {
     const tags = (await pool.query(`SELECT id, name, coalesce(colour,'#64748b') colour, sort, active FROM planner.product_timeline_tags ORDER BY sort, id`)).rows;
     const snippets = (await pool.query(`SELECT id, body, sort, active FROM planner.product_timeline_snippets ORDER BY sort, id`)).rows;
     res.json({ tags, snippets });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/timeline-tag', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
@@ -17843,10 +17862,10 @@ app.post('/api/product/timeline-tag', async (req, res) => {
   try {
     if (b.id) { await pool.query(`UPDATE planner.product_timeline_tags SET name=$2, colour=$3, sort=$4, active=$5 WHERE id=$1::bigint`, [b.id, name, colour, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.product_timeline_tags (name, colour, sort, active) VALUES ($1,$2,$3,$4) RETURNING id`, [name, colour, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/timeline-tag/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_timeline_tags WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.product_timeline_tags WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/timeline-snippet', async (req, res) => {
   const b = req.body || {}, body = (b.body || '').trim();
@@ -17855,10 +17874,10 @@ app.post('/api/product/timeline-snippet', async (req, res) => {
   try {
     if (b.id) { await pool.query(`UPDATE planner.product_timeline_snippets SET body=$2, sort=$3, active=$4 WHERE id=$1::bigint`, [b.id, body, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.product_timeline_snippets (body, sort, active) VALUES ($1,$2,$3) RETURNING id`, [body, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/timeline-snippet/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_timeline_snippets WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.product_timeline_snippets WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
 // v27.848 (Ben): normalise an optional supplier scope for the samples query — array of names → lowercased array, else null (no scope).
@@ -17970,7 +17989,7 @@ app.get('/api/product/batch-review-list', async (_req, res) => {
     FROM planner.sample_requests s JOIN planner.sample_request_dev_samples ls ON ls.sample_request_id=s.id
     LEFT JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id
     GROUP BY s.id ORDER BY s.id DESC`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/batch-review/:id', async (req, res) => {
   const id = req.params.id;
@@ -18001,10 +18020,10 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
         components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples };
     }));
     res.json({ sr, items });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/product/samples/:ref', async (req, res) => {
-  try { const sup = String(req.query.supplier || '').trim(); res.json(await productSampleList(decodeURIComponent(req.params.ref), sup ? { supplierScope: [sup] } : {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }   // v27.873 (Ben): ?supplier scopes the sample list to that supplier's request (timeline /s chips)
+  try { const sup = String(req.query.supplier || '').trim(); res.json(await productSampleList(decodeURIComponent(req.params.ref), sup ? { supplierScope: [sup] } : {})); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }   // v27.873 (Ben): ?supplier scopes the sample list to that supplier's request (timeline /s chips)
 });
 // Sample REQUESTS (SR-nn) linked to this product — either a line SKU maps to one of the product's sizes,
 // or a dev-sample on the request belongs to this product (product_dev_samples.item_ref = ref).
@@ -18032,7 +18051,7 @@ app.get('/api/product/:ref/sample-requests', async (req, res) => {
               WHERE ls.sample_request_id=s.id AND ds.item_ref=$1)
       ORDER BY s.created_at DESC`, [ref])).rows;
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/sample', async (req, res) => {
   try { res.json({ ok: true, ...(await createProductSample(req.body || {}, ((req.body || {}).created_by || '').trim() || shortUser(authUser(req)) || null)) }); }
@@ -18049,7 +18068,7 @@ app.post('/api/product/sample/:id/feedback', async (req, res) => {   // admin-au
       await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [prev.item_ref, by, 'Feedback on sample ' + verRef + ': ' + fb]);
     }
     res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // "Approved for photography" flag + optional comments on a sample version (mig 265). Independent of the bulk decision.
 app.post('/api/product/sample/:id/photography', async (req, res) => {
@@ -18059,7 +18078,7 @@ app.post('/api/product/sample/:id/photography', async (req, res) => {
     const notes = approved ? String(b.photography_notes || '').trim() : '';   // notes only meaningful when ticked
     await pool.query(`UPDATE planner.product_dev_samples SET approved_for_photography=$2, photography_notes=$3 WHERE id=$1`, [req.params.id, approved, notes || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-aspect feedback + approve/reject on a sample version (Product / Packaging / Labels-wraps / Polybag / Other).
 // The decision FLOWS THROUGH to the Variants tab: approving/rejecting an aspect writes that component's approval on
@@ -18110,12 +18129,12 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
       }
     }
     res.json({ ok: true, flowed });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_samples WHERE id=$1`, [req.params.id]);
     await pool.query(`DELETE FROM planner.portal_attachments WHERE po=$1 AND category='product_sample'`, ['PSAMPLE-' + req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Printable SAMPLE card as a downloadable PDF (Content-Disposition: attachment → downloads, doesn't render a tab).
 // v27.553: ONE sample-card generator for admin and supplier portal (same layout, boxed). Returns {bytes, filename} or null.
@@ -18185,14 +18204,14 @@ async function sampleScanPayload(code, ctx) {
 }
 app.get('/api/product/scan/:code', async (req, res) => {
   try { const p = await sampleScanPayload(req.params.code, 'admin'); if (!p) return res.status(404).json({ error: 'no sample for that code' }); res.json({ ok: true, sample: p }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.824 (Ben): open the phone receive/review card by SAMPLE ID (mobile SAMPLING taps a sample chip). Ensures the sample
 // has a short code (generating one if it never had a printed card), then returns the same payload as the scan route.
 app.get('/api/product/sample/:id/card', async (req, res) => {
   try { const code = await ensureShortCode(req.params.id); if (!code) return res.status(404).json({ error: 'sample not found' });
     const p = await sampleScanPayload(code, 'admin'); if (!p) return res.status(404).json({ error: 'sample not found' }); res.json({ ok: true, sample: p }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier portal: the SAME scan, ownership-guarded — a supplier who scans their own sample card on a phone
 // gets the sample record (swatch image + received state + their feedback). Portal writes still go through the
@@ -18203,7 +18222,7 @@ app.get('/api/portal/scan/:code', portalAuth, async (req, res) => {
     if (!(await portalOwnsProductSample(req, p.id))) return res.status(403).json({ error: 'not your sample' });
     p.supplier = portalOwnNames(req, p.supplier);   // v28.151 (review C5): only the caller's own supplier name(s), not every supplier on the item
     res.json({ ok: true, sample: p });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal swatch (ownership-guarded) — same image the admin swatch route serves, so the portal phone card can show a clear swatch.
 app.get('/api/portal/product-swatch/:ref', portalAuth, async (req, res) => {
@@ -18289,30 +18308,30 @@ async function sampleCardPdf(sampleId) {
 function sendSampleCard(res, out) { res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="' + out.filename + '"'); res.end(out.bytes); }
 app.get('/api/product/sample/:id/card.pdf', async (req, res) => {
   try { const out = await sampleCardPdf(req.params.id); if (!out) return res.status(404).json({ error: 'sample not found' }); sendSampleCard(res, out); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier portal: the SAME card (ownership-guarded) — replaces the portal's old canvas label.
 app.get('/api/portal/product-sample/:id/card.pdf', portalAuth, async (req, res) => {
   if (!(await portalOwnsProductSample(req, req.params.id))) return res.status(403).json({ error: 'not your sample' });
   try { const out = await sampleCardPdf(req.params.id); if (!out) return res.status(404).json({ error: 'sample not found' }); sendSampleCard(res, out); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
   const b = req.body || {}, id = b.sample_id;
   if (!id || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(id, b, (b.uploaded_by || '').trim() || null) }); }
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/product/sample/:id/photo', async (req, res) => {
   if (!(req.body && (req.body.data_base64 || req.body.storage_path))) return res.status(400).json({ error: 'data_base64/storage_path required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(req.params.id, req.body, (req.body.uploaded_by || '').trim() || null) }); }
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Unified top-bar Inbox mark-read (v28.070) — one endpoint for every inbox source: {src:'po'|'smp'|'cli', id}.
 // po → supplier_notes.read_at, smp → sample_notes.read_at, cli → client_messages.read_by_ops_at.
@@ -18325,7 +18344,7 @@ app.post('/api/supply/inbox-read', async (req, res) => {
     const t = map[src]; if (!t) return res.status(400).json({ error: 'unknown src: ' + src });
     await pool.query(`UPDATE planner.${t[0]} SET ${t[1]}=${read ? 'now()' : 'NULL'} WHERE id=$1`, [id]);
     res.json({ ok: true, read });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete the MOST RECENT note in a timeline thread. Guards against deleting older history: the id must be the
 // latest note for its thread (looked up from the note's own thread key). Optional supplierOnly restricts to
@@ -18348,7 +18367,7 @@ async function deleteLatestNote(res, table, keyCol, id, opts) {
     if (!latest || String(latest.id) !== String(id)) return res.status(409).json({ error: 'only the most recent message can be deleted' });
     await pool.query(`DELETE FROM planner.${table} WHERE id=$1`, [id]);
     res.json({ ok: true, deleted: id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 // Admin: delete the latest note on a PO/product (supplier_notes), shipment, or sample timeline. You can only
 // delete YOUR OWN most-recent Dock & Bay message (ownAuthorOnly) — the signed-in user (authUser), or the client's
@@ -18511,7 +18530,7 @@ app.get('/api/todos', async (req, res) => {
     const open = (await pool.query(`SELECT ${TODO_COLS} FROM planner.user_todos WHERE email=$1 AND done_at IS NULL ORDER BY due_date NULLS LAST, created_at`, [who])).rows;
     const done = (await pool.query(`SELECT ${TODO_COLS} FROM planner.user_todos WHERE email=$1 AND done_at IS NOT NULL ORDER BY done_at DESC LIMIT 200`, [who])).rows;
     res.set('Cache-Control', 'no-store').json({ open, done });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/todos', async (req, res) => {
   try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
@@ -18522,7 +18541,7 @@ app.post('/api/todos', async (req, res) => {
     if (n >= 500) return res.status(400).json({ error: 'Your list has 500 open items. Finish or delete some first.' });
     const r = (await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,$4) RETURNING ${TODO_COLS}`, [who, title, notes, due])).rows[0];
     res.json({ ok: true, item: r });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.patch('/api/todos/:id', async (req, res) => {
   try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
@@ -18536,7 +18555,7 @@ app.patch('/api/todos/:id', async (req, res) => {
     const r = (await pool.query(`UPDATE planner.user_todos SET ${sets.join(', ')}, updated_at=now() WHERE id=$1 AND email=$2 RETURNING ${TODO_COLS}`, args)).rows[0];
     if (!r) return res.status(404).json({ error: 'That item is not on your list.' });
     res.json({ ok: true, item: r });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.delete('/api/todos/:id', async (req, res) => {
   try { const who = await todoOwner(req); if (!who) return res.status(401).json({ error: 'sign in to use your to do list' });
@@ -18544,7 +18563,7 @@ app.delete('/api/todos/:id', async (req, res) => {
     const r = await pool.query(`DELETE FROM planner.user_todos WHERE id=$1 AND email=$2`, [id, who]);
     if (!r.rowCount) return res.status(404).json({ error: 'That item is not on your list.' });
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/home', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
@@ -18567,30 +18586,20 @@ app.get('/api/home', async (req, res) => {
       try { out.workflows = (await pool.query(`SELECT count(*) FILTER (WHERE state='waiting')::int waiting, count(*) FILTER (WHERE state='applied' AND decided_at > date_trunc('day', now() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London')::int applied_today, count(*) FILTER (WHERE state='failed' AND decided_at > now() - interval '24 hours')::int failed_24h FROM planner.workflow_items`)).rows[0]; } catch (e) { out.workflows = null; }   // v28.599 HOME Workflows card
     }
     res.set('Cache-Control', 'no-store').json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });   // v28.297: never hand the client zero rights on a DB blip
   // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path
   let lo = ''; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='auth_logout_url'`)).rows[0]; lo = (r && r.value) || ''; } catch (e) {}
-  me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, ' + (await connectColExpr()) + ' connect_access, ' + (await b2bColExpr()) + ' b2b_forecast_edit, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
     r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
     res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
-// ── Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP HTTP proxy. ──
-// Config-level access (supply OR demand edit, or admin). Connection params come from env (see coghlans_sftp.mjs); the
-// password is never in git. Returns { ready, configured } when not set up so the UI can prompt instead of erroring.
-app.get('/api/config/coghlans-sftp/list', async (req, res) => {
-  const me = await permsFor(req);
-  if (!(me.supply_edit || me.demand_edit || me.is_admin)) return res.status(403).json({ error: 'not permitted' });
-  if (!coghlansSftpReady()) return res.json({ ready: false, error: 'Coghlans SFTP is not configured yet — set COGHLANS_SFTP_PASSWORD (and confirm the Webshare proxy port/auth) in the environment.' });
-  const dir = typeof req.query.path === 'string' && req.query.path ? req.query.path : '/';
-  try { const out = await coghlansSftpList(dir); res.json({ ready: true, ...out }); }
-  catch (e) { log500(e); res.status(e && e.notConfigured ? 200 : 502).json({ ready: !e.notConfigured, error: (e && e.message) || String(e), path: dir }); }
-});
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+// v28.780 (Ben 11-Nov-26): the Coghlans SFTP browser (CONFIG ▸ Coghlans SFTP, v27.604) is removed: not required (security review finding 21).
 // v28.647: the one write path for "PO received → COMPLETE" (received-POs feed and the po_received workflow).
 // Only moves a PO that is not already COMPLETE; logs an internal timeline note. Returns true when it changed the PO.
 async function markPoReceivedComplete(po, note) {
@@ -18643,7 +18652,7 @@ app.post('/api/supply/received-pos/process', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
   if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── DHL / carrier tracking (P2b, v27.718) ────────────────────────────────────
@@ -18886,7 +18895,7 @@ app.post('/api/tracking/poll', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
   if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json(await pollTracking({ force: req.query.force === '1' })); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin test button (CONFIG): live single lookup, never writes the cache.
 app.post('/api/tracking/test', async (req, res) => {
@@ -18909,7 +18918,7 @@ app.get('/api/tracking/status', async (req, res) => {
     const rows = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [nums])).rows;
     const out = {}; for (const r of rows) out[r.tracking_number] = r;
     res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.727: full tracking detail for ONE number (status + all cached events) — powers the click-to-open tracking log.
 app.get('/api/tracking/detail', async (req, res) => {
@@ -18926,12 +18935,12 @@ app.get('/api/tracking/detail', async (req, res) => {
         WHERE $1 IN (s.tracking_code, s.tracking_code_2) ORDER BY ps.id DESC LIMIT 1`, [number])).rows[0];
       if (sr) sample = { id: sr.id, version: sr.version, item_ref: sr.item_ref, received: !!sr.received_at }; } catch (e) {}
     res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null, sample });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Config get/set (CONFIG ▸ Admin ▸ Integrations ▸ DHL tracking).
 app.get('/api/tracking/config', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, config: await getDhlConfig() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/tracking/config', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
@@ -18948,13 +18957,13 @@ app.post('/api/tracking/config', async (req, res) => {
         ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`,
       [JSON.stringify(cfg), me.email || 'sandbox']);
     res.json({ ok: true, config: { ...cfg, key_present: !!process.env.DHL_API_KEY } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Modular channel registry (CONFIG ▸ Admin ▸ Channels) — Phase 1. Reads open; writes admin-only. ──
 app.get('/api/config/channels', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, channels: await buildChannels(), countries: await buildCountries() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/config/channel', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
@@ -18979,7 +18988,7 @@ app.post('/api/config/channel', async (req, res) => {
     await pool.query(`DELETE FROM planner.channel_countries WHERE channel_code=$1`, [code]);
     for (const cc of countries) await pool.query(`INSERT INTO planner.channel_countries (channel_code,country_code) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [code, cc]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/config/country', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
@@ -18991,7 +19000,7 @@ app.post('/api/config/country', async (req, res) => {
         ON CONFLICT (code) DO UPDATE SET label=excluded.label,sort=excluded.sort,active=excluded.active,updated_at=now()`,
       [code, String(b.label).trim(), Number.isFinite(+b.sort) ? +b.sort : 0, b.active !== false]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
@@ -19015,31 +19024,31 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
     // v28.483: Connect grant (Gmail add-on / Chrome side panel); unticking refuses their next Connect request
     if (b.connect_access !== undefined && (await connectColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET connect_access=$2 WHERE email=$1`, [email, !!b.connect_access]);
     if (b.b2b_forecast_edit !== undefined && (await b2bColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET b2b_forecast_edit=$2 WHERE email=$1`, [email, !!b.b2b_forecast_edit]);   // v28.603
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
   try { // never let the last admin be removed (lockout guard)
     const isAdminRow = (await pool.query('SELECT is_admin FROM planner.app_permissions WHERE lower(email)=$1', [email])).rows[0];
     if (isAdminRow && isAdminRow.is_admin) { const n = (await pool.query('SELECT count(*)::int n FROM planner.app_permissions WHERE is_admin')).rows[0].n; if (n <= 1) return res.status(400).json({ error: 'cannot remove the last admin' }); }
     permsMemoDrop(email); await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ── CONFIG ▸ Consignees ── per-delivery-country consignee + notify-party addresses for the invoice generator.
 // The generator falls back to the UK row for any country not listed here. Config-gated (see CONFIG_WRITE).
 app.get('/api/consignees', async (req, res) => {
   try { const r = await pool.query("SELECT country, consignee, notify_party, port_of_discharge, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at, updated_by FROM planner.invoice_consignees ORDER BY country");
-    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/consignee', async (req, res) => {
   const b = req.body || {}; const country = String(b.country || '').trim().toUpperCase();
   if (!country) return res.status(400).json({ error: 'country required' });
   try { await pool.query(`INSERT INTO planner.invoice_consignees (country, consignee, notify_party, port_of_discharge, updated_at, updated_by)
       VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (country) DO UPDATE SET consignee=excluded.consignee, notify_party=excluded.notify_party, port_of_discharge=excluded.port_of_discharge, updated_at=now(), updated_by=excluded.updated_by`,
       [country, b.consignee || null, b.notify_party || null, b.port_of_discharge || null, (await permsFor(req)).email || 'sandbox']);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/consignee/:country/delete', async (req, res) => {
   const country = String(req.params.country || '').trim().toUpperCase();
   try { await pool.query('DELETE FROM planner.invoice_consignees WHERE country=$1', [country]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ── Invoice + Packing List generator (xlsx download) ──
 // Commercial Invoice = one PO. Tax Invoice = a shipment (every PO whose shipment_ref is the master PO ref).
@@ -19051,7 +19060,7 @@ function sendXlsx(res, r) {
 app.get('/api/invoice/po/:po', async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po })); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/invoice/shipment/:ref', async (req, res) => {
   const ref = decodeURIComponent(req.params.ref || '');
@@ -19059,13 +19068,13 @@ app.get('/api/invoice/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Direct-to-Client packing list for one PO (seller = Dock & Bay, consignee = the client).
 app.get('/api/invoice/dtc-packing/:po', async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { sendXlsx(res, await buildDtcPackingList(pool, { pos: [po], master: po })); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Consolidated Direct-to-Client packing list for a whole shipment (all POs aboard).
 app.get('/api/invoice/dtc-packing/shipment/:ref', async (req, res) => {
@@ -19074,7 +19083,7 @@ app.get('/api/invoice/dtc-packing/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildDtcPackingList(pool, { pos, master: ref }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal-scoped invoice downloads — same generator, namespaced under /api/portal/* (so they route on the
 // portal host) and scoped to the caller's own suppliers. The supplier portal fetches these as a blob.
@@ -19084,13 +19093,13 @@ app.get('/api/portal/invoice/shipment/:ref', portalAuth, async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE (shipment_ref=$1 OR po=$1) AND supplier_name = ANY($2)', [ref, names])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/invoice/po/:po', portalAuth, async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
     sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ASN pallet labels PDF (AU Coghlans) — one A4 landscape page per ASN number (1 ASN = 1 pallet).
 app.get('/api/asn-labels/:po', async (req, res) => {
@@ -19103,7 +19112,7 @@ app.get('/api/asn-labels/:po', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal-side ASN download (gate-exempt supplier session) — same generated PDF.
 // v28.123 (Diviyaj prod): was under the gate-exempt /api/portal/ prefix with NO session check → portalAuth + ownership.
@@ -19118,7 +19127,7 @@ app.get('/api/portal/asn-labels/:po', portalAuth, async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // DTC shipment details (supplier-entered in portal ▸ SHIPMENT). Upsert + a supplier timeline note so it shows on
 // the PO timeline and lights the admin ✉ bell. entered_by/entered_at are kept from the first entry; updated_at moves.
@@ -19152,7 +19161,7 @@ app.post('/api/supply/dtc-shipment', staffOnly, async (req, res) => {   // admin
   const b = req.body || {}, po = (b.po || '').trim();
   if (!po) return res.status(400).json({ error: 'po required' });
   try { await dtcShipmentSave(po, b, b.entered_by); res.json({ ok: true }); }
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
@@ -19201,7 +19210,7 @@ app.post('/api/supply/portal-note', async (req, res) => {
       } catch (e) { console.error('[mention] email failed:', e.message); }
     }
     res.json({ ok: true, mentions, mailed, email: preview, sandbox: IS_SANDBOX });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Report-level internal notes (timeline) — first use: the DTC Mismatch report. Internal-only thread per report_key;
 // @mentions email tagged Dock & Bay users a link straight to that report. Mirrors the PO timeline note mention flow.
@@ -19214,7 +19223,7 @@ app.get('/api/supply/report-notes/list', async (req, res) => {   // 2-segment pa
     const rows = (await pool.query(`SELECT id, coalesce(author_email,'') author_email, body, coalesce(mentions,'{}') mentions,
       to_char(created_at,'DD-Mon-YY HH24:MI') created_at FROM planner.report_notes WHERE report_key=$1 ORDER BY created_at DESC, id DESC LIMIT 300`, [key])).rows;
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/report-note', async (req, res) => {
   const b = req.body || {}, key = String(b.key || '').trim(), body = String(b.body || '').trim();
@@ -19245,14 +19254,14 @@ app.post('/api/supply/report-note', async (req, res) => {
       } catch (e) { console.error('[report-note mention] failed:', e.message); }
     }
     res.json({ ok: true, note: { id: ins.id, author_email: author, body, mentions, created_at: ins.created_at }, email: preview, sandbox: IS_SANDBOX });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/report-note/:id/delete', async (req, res) => {
   try {
     const me = internalAuthor(req, (req.body || {}).by);
     const r = await pool.query(`DELETE FROM planner.report_notes WHERE id=$1 AND lower(coalesce(author_email,''))=lower($2)`, [parseInt(req.params.id, 10), me || '']);
     res.json({ ok: true, deleted: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v27.571: timeline attachments (PO / shipment / sample timelines; admin here, portal route next to /api/portal/note).
 // One file per call, 4MB cap (413 above it), stored in portal_attachments with po = the timeline's ref (PO ref /
@@ -19274,7 +19283,7 @@ app.post('/api/supply/timeline-attachment', async (req, res) => {
   const b = req.body || {};
   try { const { ref } = await tlAttachRef(b); if (!ref) return res.status(400).json({ error: 'ref required' });
     res.json(await tlAttachInsert(ref, b, internalAuthor(req, b.uploaded_by), 'internal')); }
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
   const b = req.body || {};
@@ -19284,28 +19293,28 @@ app.post('/api/supply/portal-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by || null, b.category || 'invoice']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Remove a supplier-uploaded document. (Won't remove Client/FBA docs — those are managed admin-side.)
 app.post('/api/supply/portal-attachment-remove', async (req, res) => {
   const id = req.body && req.body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(category,'')<>'client'`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin PO ▸ DOCUMENTS tab: delete ANY document for a PO (incl. client/FBA docs — admin-managed here).
 app.post('/api/supply/po-doc-delete', async (req, res) => {
   const id = req.body && req.body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PO ▸ DOCUMENTS tab: change a document's type/category inline (drives which tab surfaces it, e.g. Payments ▸ Invoice).
 app.post('/api/supply/po-doc-category', async (req, res) => {
   const { id, category } = req.body || {};
   if (!id || !category) return res.status(400).json({ error: 'id and category required' });
   try { const r = await pool.query(`UPDATE planner.portal_attachments SET category=$2 WHERE id=$1 RETURNING id`, [id, String(category)]); res.json({ ok: true, updated: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin PO ▸ DOCUMENTS tab: upload a document against a PO (held in the DB, like all other uploads).
 app.post('/api/supply/po-doc-upload', async (req, res) => {
@@ -19316,7 +19325,7 @@ app.post('/api/supply/po-doc-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by || 'admin', b.category || 'document']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── SUPPLY ▸ Quality Control (migration 160): test reports / GRS certs etc., stored in-DB, mapped to prod/batch/PO.
 // Admin upload (supply-edit gated by the global write guard). Requires at least one of prod_no / batch_id / po.
@@ -19331,18 +19340,18 @@ app.post('/api/supply/quality-doc', async (req, res) => {
       [String(b.doc_type), b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, b.supplier_name || null, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/quality-doc/:id/delete', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/quality-doc/:id', async (req, res) => {
   try {
     const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     return serveStored(res, r);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Payments Report: remittance upload + delayed "paid" notification to the supplier (migration 164) ──────────
@@ -19360,7 +19369,7 @@ app.post('/api/supply/remittance', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // (List endpoints /api/supply/remittances + /api/supply/payment-emails are served by the /api/supply/:section switch above.)
 app.get('/api/supply/remittance/:id', async (req, res) => {
@@ -19368,11 +19377,11 @@ app.get('/api/supply/remittance/:id', async (req, res) => {
     const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.payment_remittances WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     return serveStored(res, r);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/remittance/:id/delete', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.payment_remittances WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Resolve a supplier name → its active portal-user emails.
 async function supplierPortalEmails(name) {
@@ -19395,12 +19404,12 @@ app.post('/api/supply/payment-notify', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [b.run_key, b.supplier_name, emails.join(', '), (b.amount == null || b.amount === '') ? null : Number(b.amount), (b.currency || '').toUpperCase() || null, b.pay_date || null, sendAfter, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, to_emails: emails, send_after: sendAfter });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/payment-notify/:id/cancel', async (req, res) => {
   try { const r = await pool.query(`UPDATE planner.payment_emails SET status='cancelled' WHERE id=$1 AND status='queued'`, [req.params.id]);
     res.json({ ok: true, cancelled: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // (Status list /api/supply/payment-emails is served by the /api/supply/:section switch above.)
 // Build + send one queued paid-notification. Attaches the remittance(s) for the run if any exist.
@@ -19452,7 +19461,7 @@ async function processPaymentEmails() {
 if (!process.env.VERCEL || process.env.PAYMENT_EMAIL_CRON !== '1') setInterval(processPaymentEmails, HZ_LEAN ? 300000 : 30000).unref?.();
 app.post('/api/cron/payment-emails', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.261: safeEq like every other cron
-  try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
@@ -19474,7 +19483,7 @@ app.post('/api/supply/po-doc-review', async (req, res) => {
         [doc.po, internalAuthor(req, b.reviewed_by), body]); } catch (e) { /* timeline best-effort */ }
     }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/portal-submit', async (req, res) => {
   const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';
@@ -19555,7 +19564,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     await client.query('COMMIT');
     if (_invoiceSubmit != null) scheduleInvoiceSubmitEmail(b.po);   // v28.644: emails 2 min later with the latest amount (repeat amounts skipped there)
     res.json(out);
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // ── Supplier invoice/packing .xlsx parsing (pure Node — no external dependency) ──────────────────────────
@@ -19717,7 +19726,7 @@ const _invoiceApplyHandler = async (req, res) => {   // v27.707: shared by the a
         const html = '<p style="color:#b45309"><b>⚠ Duplicate SKU lines on the invoice for ' + po + '</b> (' + escHtml(supName) + ').</p><p>The same SKU appeared on more than one invoice line. HORIZON <b>summed</b> them into the order plan — please check:</p><ul>' + dups.map(d => '<li><b>' + escHtml(d.sku) + '</b>: ' + d.lines.join(' + ') + ' = <b>' + d.qty + '</b>' + (d.price_mixed ? ' <i>(mixed unit prices → weighted average ' + d.price + ')</i>' : '') + '</li>').join('') + '</ul><p>Applied by: ' + escHtml(by || 'portal') + '</p><p><a href="' + link + '">Open the Order plan for ' + po + '</a></p>';
         await sendResendEmail({ to: emails, subject: '⚠ Duplicate SKU lines on invoice — ' + po + ' (' + supName + ')', html, kind: 'invoice-notify', ref: po, replyTo: by }); } catch (e) {} }
     res.json({ ok: true, po, applied, added, unchanged, zeroed, total: parsed.lines.length, duplicates: dups, duplicate_summary: invoiceDupSummary(dups) });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 };
 app.post('/api/supply/portal-invoice-apply', _invoiceApplyHandler);
@@ -19738,10 +19747,10 @@ app.post('/api/portal/invoice-apply', portalAuth, async (req, res) => {
 app.get('/api/supply/po/:po/invoice-duplicates', async (req, res) => {
   try { const r = (await pool.query(`SELECT id, value, submitted_by, to_char(submitted_at,'YYYY-MM-DD HH24:MI') at FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_duplicates' AND status='pending' ORDER BY id DESC LIMIT 1`, [req.params.po])).rows[0];
     if (!r) return res.json({ pending: null }); let v = {}; try { v = JSON.parse(r.value || '{}'); } catch (e) { v = { summary: r.value }; }
-    res.json({ pending: { id: r.id, summary: v.summary || '', duplicates: v.duplicates || [], by: r.submitted_by, at: r.at } }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ pending: { id: r.id, summary: v.summary || '', duplicates: v.duplicates || [], by: r.submitted_by, at: r.at } }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po/:po/invoice-duplicates/dismiss', async (req, res) => {
-  try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$2, applied_at=now() WHERE po=$1 AND kind='invoice_duplicates' AND status='pending'`, [req.params.po, authUser(req) || 'PO PLAN']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$2, applied_at=now() WHERE po=$1 AND kind='invoice_duplicates' AND status='pending'`, [req.params.po, authUser(req) || 'PO PLAN']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Manufacturing: accept (sign off) a component's shortage/overage between finished-bundle demand and the mfg POs.
 app.post('/api/supply/manufacturing-accept', async (req, res) => {
@@ -19752,7 +19761,7 @@ app.post('/api/supply/manufacturing-accept', async (req, res) => {
       VALUES ($1, true, $2, now()) ON CONFLICT (component_sku) DO UPDATE SET accepted=true, accepted_by=$2, accepted_at=now()`, [b.component_sku, b.accepted_by || 'PO PLAN']);
     else await pool.query(`DELETE FROM planner.manufacturing_accept WHERE component_sku=$1`, [b.component_sku]);
     res.json({ ok: true, component_sku: b.component_sku, accepted: on });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // SUPPLY ▸ Manufacturing — manual "covered by existing stock" per (prod_no, component_sku). (mig 197)
 app.post('/api/supply/manufacturing-stock', async (req, res) => {
@@ -19767,7 +19776,7 @@ app.post('/api/supply/manufacturing-stock', async (req, res) => {
       [prod, comp, qty, b.updated_by || null]);
     else await pool.query(`DELETE FROM planner.manufacturing_stock_cover WHERE prod_no=$1 AND component_sku=$2`, [prod, comp]);
     res.json({ ok: true, prod_no: prod, component_sku: comp, qty });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ Manufacturing BOM — upsert a parent→component row (qty per finished unit). Add or edit.
 app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
@@ -19780,7 +19789,7 @@ app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.manufacturing_bom (parent_sku, component_sku, qty, updated_at)
       VALUES ($1,$2,$3, now()) ON CONFLICT (parent_sku, component_sku) DO UPDATE SET qty=$3, updated_at=now()`, [parent, comp, qty]);
     res.json({ ok: true, parent_sku: parent, component_sku: comp, qty });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ Manufacturing BOM — delete a parent→component row, or the WHOLE bundle when no component given.
 app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
@@ -19795,7 +19804,7 @@ app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
       const r = await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1`, [parent]);
       res.json({ ok: true, parent_sku: parent, deleted: r.rowCount });
     }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — upsert a set output→input row (component qty per set). Add or edit.
 app.post('/api/supply/set-bom-save', async (req, res) => {
@@ -19808,7 +19817,7 @@ app.post('/api/supply/set-bom-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.set_bom (output_sku, input_sku, input_quantity, updated_at)
       VALUES ($1,$2,$3, now()) ON CONFLICT (output_sku, input_sku) DO UPDATE SET input_quantity=$3, updated_at=now()`, [out, inp, qty]);
     res.json({ ok: true, output_sku: out, input_sku: inp, input_quantity: qty });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — delete one component row, or the WHOLE set when no input given.
 app.post('/api/supply/set-bom-delete', async (req, res) => {
@@ -19818,7 +19827,7 @@ app.post('/api/supply/set-bom-delete', async (req, res) => {
   try {
     if (inp) { await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1 AND input_sku=$2`, [out, inp]); res.json({ ok: true, output_sku: out, input_sku: inp }); }
     else { const r = await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1`, [out]); res.json({ ok: true, output_sku: out, deleted: r.rowCount }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — bulk upload rows [{output_sku,input_sku,input_quantity}] (replace=true wipes first).
 app.post('/api/supply/set-bom-upload', async (req, res) => {
@@ -19839,7 +19848,7 @@ app.post('/api/supply/set-bom-upload', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, saved: n, errors: errors.slice(0, 10) });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // CONFIG ▸ BOM ▸ Prepack sets — upsert one prepack→set mapping (prepack_sku is unique; a prepack maps to one set).
@@ -19851,14 +19860,14 @@ app.post('/api/supply/prepack-map-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.prepack_map (prepack_sku, set_sku, updated_at)
       VALUES ($1,$2, now()) ON CONFLICT (prepack_sku) DO UPDATE SET set_sku=$2, updated_at=now()`, [pp, set]);
     res.json({ ok: true, prepack_sku: pp, set_sku: set });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ BOM ▸ Prepack sets — delete one prepack mapping.
 app.post('/api/supply/prepack-map-delete', async (req, res) => {
   const pp = String((req.body || {}).prepack_sku || '').trim();
   if (!pp) return res.status(400).json({ error: 'prepack_sku required' });
   try { const r = await pool.query(`DELETE FROM planner.prepack_map WHERE prepack_sku=$1`, [pp]); res.json({ ok: true, prepack_sku: pp, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // CONFIG ▸ BOM ▸ Prepack sets — bulk upload rows [{prepack_sku,set_sku}] (replace=true wipes first).
 app.post('/api/supply/prepack-map-upload', async (req, res) => {
@@ -19878,7 +19887,7 @@ app.post('/api/supply/prepack-map-upload', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, saved: n, errors: errors.slice(0, 10) });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
@@ -19889,7 +19898,7 @@ app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
       VALUES ($1,$2, CASE WHEN $2 THEN now() END)
       ON CONFLICT (shipment_ref) DO UPDATE SET escalated=$2, escalated_at=CASE WHEN $2 THEN now() ELSE NULL END, updated_at=now()`, [ref, on]);
     res.json({ ok: true, escalated: on });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Shipment Plan timeline — post a note against a master shipment (admin or supplier).
 app.post('/api/supply/shipment-note', async (req, res) => {
@@ -19901,7 +19910,7 @@ app.post('/api/supply/shipment-note', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body, attachment_id)
       VALUES ($1,$2,$3,$4,$5) RETURNING id`, [b.shipment_ref, kind, email, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Shipment Plan timeline: mark a supplier note read / unread (toggle) — admin side, mirrors note-read for POs.
 app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
@@ -19909,19 +19918,19 @@ app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.shipment_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal data for the preview/portal: notes + submissions for a supplier (scoped by supplier_id).
 app.get('/api/supply/portal-notes/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
     FROM planner.supplier_notes WHERE supplier_id=$1 AND NOT coalesce(private,false) ORDER BY created_at`, [req.params.sid])); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note
     FROM planner.supplier_submissions WHERE supplier_id=$1 ORDER BY submitted_at DESC`, [req.params.sid])); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Payments made to a supplier (payment ledger) — feeds the CONFIG ▸ Portal preview's master PAYMENTS tab (the
 // real portal gets the same data via /api/portal/bootstrap).
@@ -19949,7 +19958,7 @@ app.get('/api/supply/supplier-payments/:name', async (req, res) => {
       SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', ''
         FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
     ) t ORDER BY payment_date DESC NULLS LAST`, [nm]).then(r => r.rows)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO
 // (the internal click is the confirmation); completion_date → end_production_overide, invoice_value → supplier_invoice_total.
@@ -19985,11 +19994,11 @@ async function applySupplierSubmission(id, by) {
 app.post('/api/supply/submission/:id/apply', async (req, res) => {
   // Attribute the real approver (the logged-in D&B user) — was recorded as a generic 'PO PLAN' from the client.
   try { const r = await applySupplierSubmission(req.params.id, authUser(req) || (req.body && req.body.by) || 'internal'); res.json({ applied: r.applied }); }
-  catch (e) { if (e.code === 404 || e.code === 400) return res.status(e.code).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.code === 404 || e.code === 400) return res.status(e.code).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.519 (Ben 27-Oct-26: "any way to have a preview of each uploaded file saved for hover over visibility?"): hover previews for any
 // attachment link. GET answers the saved preview (portal_attachments.thumb, made at upload since v27.708), redirects an image with no
@@ -20001,7 +20010,7 @@ app.get('/api/supply/portal-attachment/:id/thumb', staffOnly, async (req, res) =
     if (r.thumb) { res.setHeader('Content-Type', r.thumb_mime || 'image/png'); res.setHeader('Cache-Control', 'private, max-age=86400'); return res.end(r.thumb); }
     if (/^image\//i.test(r.mime || '')) return res.redirect(302, '/api/supply/portal-attachment/' + Number(req.params.id));
     res.status(404).json({ make: /pdf/i.test(r.mime || ''), mime: r.mime || '', bytes: Number(r.bytes) || 0 });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/portal-attachment/:id/thumb', async (req, res) => {
   try { const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(String((req.body && req.body.data_url) || ''));
@@ -20009,13 +20018,13 @@ app.post('/api/supply/portal-attachment/:id/thumb', async (req, res) => {
     const buf = Buffer.from(m[2], 'base64'); if (buf.length > 600 * 1024) return res.status(400).json({ error: 'preview too large' });
     const r = await pool.query(`UPDATE planner.portal_attachments SET thumb=$2, thumb_mime=$3 WHERE id=$1 AND thumb IS NULL`, [Number(req.params.id) || 0, buf, m[1]]);
     res.json({ ok: true, saved: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/portal-attachment/:id', staffOnly, async (req, res) => {   // v28.186 (Ben, C2): staff only; the portal uses /api/portal/attachment/:id
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── 3PL Invoice (REPORTS ▸ 3PL Invoice) ─────────────────────────────────────
 // 3PLs: uk_ilg | us_geneva | eu_ifulfilment (=Blade) | au_coghlans. Phase 1: uploaded invoice files per
@@ -20076,7 +20085,7 @@ async function coghlansMailMaybe() {   // from the health-check run: at most eve
   return coghlansMailImport('schedule');
 }
 app.post('/api/supply/tpl/coghlans/scan', async (req, res) => {
-  try { const me = await permsFor(req).catch(() => ({})); const r = await coghlansMailImport((me && me.email) || 'button'); res.status(r.ok ? 200 : 409).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const me = await permsFor(req).catch(() => ({})); const r = await coghlansMailImport((me && me.email) || 'button'); res.status(r.ok ? 200 : 409).json(r); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.636 (Ben 03-Nov-26: "close that May 15 item", DOK50349 with no Xero bill): close / reopen a Coghlans week by hand. ACCOUNTS access.
 app.post('/api/supply/tpl/coghlans/close', async (req, res) => {
@@ -20085,7 +20094,7 @@ app.post('/api/supply/tpl/coghlans/close', async (req, res) => {
     const cl = (await accSettingGet('coghlans_closed')) || {}; const by = me.email || authUser(req) || '';
     if (req.body.reopen) delete cl[inv]; else cl[inv] = { by, at: new Date().toISOString(), note: String(req.body.note || '').slice(0, 300) };
     await accSettingSet('coghlans_closed', cl, by); res.json({ ok: true, invoice_no: inv, closed: cl[inv] || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/tpl/coghlans/weekly', async (req, res) => {
   try {
@@ -20110,7 +20119,7 @@ app.get('/api/supply/tpl/coghlans/weekly', async (req, res) => {
     rows.forEach(r => { r.status = r.bill_id ? 'processed' : closed[r.invoice_no] ? 'closed' : r.file_id ? 'imported' : 'missing'; if (r.bill_id) r.bill_url = xbUrl(r.bill_id); if (closed[r.invoice_no]) r.closed = closed[r.invoice_no]; });
     const scanned = await accSettingGet('coghlans_mail_scanned'), g = await gmailRow().catch(() => null);
     res.set('Cache-Control', 'no-store').json({ rows, scanned, gmail_connected: !!(g && !g.missing) });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/tpl/data', async (req, res) => {
   const tpl = String(req.query.tpl || ''), period = String(req.query.period || '');
@@ -20128,7 +20137,7 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
     const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period, tpl) : null;
     res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // 3PL Forecast tab — known inbound to this 3PL, grouped under the master SHIPMENT: shipment id, effective delivery
 // date, units (Σ line qty), and a container COUNT (pallets ÷ 20 → 40ft-equivalent, rounded up). Open POs only. The
@@ -20173,7 +20182,7 @@ app.get('/api/supply/tpl/goods-in', async (req, res) => {
       pallets: pal, containers: air ? 0 : (pal > 0 ? Math.ceil(pal / 20) : 0), air: air,
       fill: realAir ? 'air' : (subPallet ? 'lcl' : ''), pos: r.pos || '', po_count: r.po_count || 0 }; });
     res.json({ ok: true, shipments: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/tpl/upload', async (req, res) => {
   const b = req.body || {};
@@ -20193,17 +20202,17 @@ app.post('/api/supply/tpl/upload', async (req, res) => {
       if (cm.invoiceNo || cm.periodEnd) { cog = { invoice_no: cm.invoiceNo ? String(cm.invoiceNo).toUpperCase() : null, period_end: cm.periodEnd || null };
         await pool.query(`UPDATE planner.tpl_invoice_files SET invoice_no=coalesce($2, invoice_no), period_end=coalesce($3::date, period_end), period=coalesce(to_char($3::date,'YYYY-MM'), period) WHERE id=$1`, [r.rows[0].id, cog.invoice_no, cog.period_end]); } } catch (e) { cog = { error: 'could not read the invoice number / period end: ' + e.message }; } }
     res.json({ ok: true, id: r.rows[0].id, byte_size: byteSize, coghlans: cog || undefined });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/tpl/file/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, content_type, content, storage_path FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveStored(res, { storage_path: r.storage_path, data: r.content, filename: r.filename, mime: r.content_type });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/tpl/file/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/tpl/cost-account', async (req, res) => {
   const b = req.body || {};
@@ -20213,7 +20222,7 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
       ON CONFLICT (tpl, cost_type) DO UPDATE SET account_code=excluded.account_code, account_name=excluded.account_name`,
       [b.tpl, b.cost_type, (b.account_code || '').trim() || null, (b.account_name || '').trim() || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Edit a single account-map cell (region×channel → COGS/Sales/Fulfilment/Cost of Sales), keyed by label.
 app.post('/api/supply/tpl/account-map', async (req, res) => {
@@ -20396,7 +20405,7 @@ app.post('/api/supply/tpl/parse/:id', async (req, res) => {
       });
     }
     res.json({ ok: true, filename: fname, sheets });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // 3PL invoice — Phase 2: map each order line's Reference to its Cin7 sales-order CostCenter, then group the
 // freight (Shipping Fee) + fulfilment (Total Excl Shipping) cost by CostCenter. 2-pass match (Reference, then
@@ -21089,7 +21098,7 @@ async function tplPushChunk(id, offset0, limit0) {
 }
 app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {   // one chunk (kept for scripts / older pages)
   try { res.json(await tplPushChunk(req.params.id, req.body && req.body.offset, req.body && req.body.limit)); }
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.634 (Ben 03-Nov-26, Rita: "it just keeps saying loading ... can you find a way to do this push in the background?"): the WHOLE push runs
 // on the server. Start returns at once; the job runs chunk after chunk (state in accounts settings 'tpl_push:<id>', saved after each chunk)
@@ -21140,13 +21149,13 @@ app.post('/api/supply/tpl/push-actuals/:id/start', async (req, res) => {
     const origin = (req.get('x-forwarded-proto') || req.protocol || 'https') + '://' + req.get('host');
     hzWaitUntil(tplPushRun(id, token, origin));
     const pub = Object.assign({}, st); delete pub.token; res.status(202).json({ ok: true, started: true, state: pub });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/tpl/push-actuals/:id/status', async (req, res) => {
   try { const st = await tplPushState(req.params.id); if (st) { st.alive = tplPushAlive(st); delete st.token; }
     const log = ((await accSettingGet('tpl_push_log:' + req.params.id)) || []).map(r => { const x = Object.assign({}, r); delete x.token; return x; });
     res.set('Cache-Control', 'no-store').json({ ok: true, state: st, log }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/tpl-push-continue', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
@@ -21201,7 +21210,7 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
     const _cur = {}; orders.forEach(o => { if (o.reference) _cur[o.reference] = (_cur[o.reference] || 0) + (o.shipping || 0) + (o.fulfilment || 0); });
     const cross_month_duplicates = await _tplCrossMonthDupes(tpl0, row.period, _cur);   // v27.906
     res.json({ ok: true, cross_month_duplicates, imported_matched: dbrows.length, fulfil_table_matched: Object.keys(shipByRef).length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
 // planner.tpl_cin7_orders so the Map step can resolve Reference -> CostCenter offline. Paginated, throttled,
@@ -21282,7 +21291,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
     await setLog(runId, imported, calls, done ? 'ok' : 'running', null);
     if (done) { const summary = await tplCin7Summary(period, tpl0); return res.json({ ok: true, done: true, period, from: start, to: end, kind, imported, cin7_calls: calls, run_id: runId, summary }); }
     return res.json({ ok: true, done: false, imported, cin7_calls: calls, run_id: runId, resume: { run_id: runId, start, end, period, kind, page, imported } });
-  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── SUG-0020 DTC Mismatch ── on-demand Cin7 sales-order import for the Direct-to-Client branches (read-only Cin7).
 const DTC_BRANCHES = { 5051: 'Direct to Client', 27889: 'UK B2B JLEW', 27890: 'UK B2B NEXT' };
@@ -21337,12 +21346,12 @@ app.post('/api/supply/dtc/import', async (req, res) => {
     await setLog(runId, imported, calls, done ? 'ok' : 'running', null);
     if (done) return res.json({ ok: true, done: true, imported, cin7_calls: calls, run_id: runId });
     return res.json({ ok: true, done: false, imported, cin7_calls: calls, run_id: runId, resume: { run_id: runId, bi, page, imported, days } });
-  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/dtc/status', async (_req, res) => {
   try { const o = (await pool.query(`SELECT count(*)::int n, count(*) FILTER (WHERE NOT is_void AND dispatched_date IS NULL)::int open, to_char(max(imported_at),'DD-Mon-YY HH24:MI') at FROM planner.dtc_sales_orders`)).rows[0] || {};
     res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier Timing: mark a PO's delay as OUR issue (excluded from supplier slip stats) + optional manual delay days/note.
 app.post('/api/supply/supplier-timing/review', async (req, res) => {
@@ -21354,7 +21363,7 @@ app.post('/api/supply/supplier-timing/review', async (req, res) => {
       ON CONFLICT (po) DO UPDATE SET our_issue=excluded.our_issue, manual_delay_days=excluded.manual_delay_days, note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`,
       [po, !!b.our_issue, (md != null && !isNaN(md)) ? md : null, b.note ? String(b.note) : null, authUser(req)]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Manage 3PL: import a market's 3PL stock report (drivehq CSV) and compare on-hand vs planner.products.inventory_<mkt>_3pl ──
 // EU has no source yet. URLs are cache-busted with a timestamp. Read-only (no writes) — it's a comparison view.
@@ -21531,7 +21540,7 @@ app.get('/api/supply/inventory-3pl/status', async (req, res) => {
     if (!m || !m.report) return res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: false });
     const rep = {}; Object.keys(m.report).forEach(sku => { const a = m.report[sku]; rep[sku] = { oh: Number(a[0]) || 0, av: Number(a[1]) || 0 }; });
     res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await inv3plCompare(mkt, rep)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // POST: fetch the market's report fresh, parse, persist (who/when + report), and return the comparison.
 app.post('/api/supply/inventory-3pl/import', async (req, res) => {
@@ -21556,7 +21565,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, label: cfg.label || mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.553 (Ben 28-Oct-26): ILG "DOCKBAY Daily Stock Report" → Manage 3PL ▸ UK (UK ILG / UK Non GRS / UK Vendor), compared with Fulfil,
 // and a ticked rebaseline: HORIZON queues one Fulfil stock count per ILG warehouse ('pending'); the n8n flow "Fulfil | ILG stocktake" writes
@@ -21652,11 +21661,11 @@ app.get('/api/supply/ilg/status', async (req, res) => {
       report: { id: rep.id, filename: rep.filename, report_at: rep.report_at, received_at: rep.received_at, source: rep.source, imported_at: rep.imported_at, imported_by: rep.imported_by },
       ...(cmp || {}) });
   } catch (e) { if (/ilg_stock_reports" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 399' });
-    if (/column "site" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 415' }); log500(e); res.status(500).json({ error: e.message }); }
+    if (/column "site" does not exist/.test(e.message)) return res.json({ site, pools: poolsOut, missing: 'migration 415' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/ilg/import', async (req, res) => {   // "Check ops@ now" (body.site GENEVA = the US Geneva report)
   try { const site = String((req.body && req.body.site) || 'ILG').toUpperCase();
-    res.json(site === 'GENEVA' ? await genevaImportFromGmail(authUser(req)) : await ilgImportFromGmail(authUser(req))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(site === 'GENEVA' ? await genevaImportFromGmail(authUser(req)) : await ilgImportFromGmail(authUser(req))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/ilg/upload', async (req, res) => {   // manual fallback: upload the .xls (ILG) or the .csv (Geneva)
   try { const b = req.body || {}, fn = String(b.filename || ''), site = String(b.site || 'ILG').toUpperCase();
@@ -21676,11 +21685,11 @@ app.post('/api/supply/ilg/upload', async (req, res) => {   // manual fallback: u
 });
 app.post('/api/cron/ilg-stock-import', async (req, res) => {   // n8n "Ops | ILG stock report import (hourly)"
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(await ilgImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await ilgImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/geneva-stock-import', async (req, res) => {   // v28.682: n8n "Ops | Geneva stock report import (hourly)"
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(await genevaImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await genevaImportFromGmail('n8n')); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Rebaseline: recompute the ticked SKUs against Fulfil now, queue one batch (count) for the pool's warehouse, nudge n8n.
 app.post('/api/supply/ilg/rebaseline', async (req, res) => {
@@ -21694,7 +21703,7 @@ app.post('/api/supply/ilg/rebaseline', async (req, res) => {
     const q = await ilgQueueBatch(rep, poolKey, cmp, skus, authUser(req) || null, { reason: String(b.reason || '').trim().slice(0, 2000) || null, tags: sadjTagList(b.tags) });   // v28.744: reason + tags for Adjustments
     if (!q.batch_id) return res.status(400).json({ error: 'Nothing to rebaseline: ' + q.skipped.join('; ') });
     res.json({ ok: true, batch_id: q.batch_id, lines: q.lines, skipped: q.skipped, nudged: q.nudged });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.682: one batch path for the manual "Send to Fulfil" and the automated daily run: lines from the fresh compare, insert 'pending', nudge n8n
 async function ilgQueueBatch(rep, poolKey, cmp, skus, createdBy, why) { why = why || {};
@@ -21777,16 +21786,16 @@ function ilgAutoEmailHtml(res) {
   });
   return h + '<p>Review or rebaseline these in HORIZON: Buy &amp; Move, Inventory, Manage 3PL, ' + (res.site === 'GENEVA' ? 'US (Geneva)' : 'UK (ILG)') + '.</p>';
 }
-app.get('/api/supply/ilg/auto', async (req, res) => { try { res.set('Cache-Control', 'no-store').json(await ilgAutoCfg()); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/supply/ilg/auto', async (req, res) => { try { res.set('Cache-Control', 'no-store').json(await ilgAutoCfg()); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/ilg/auto', async (req, res) => {
   try { const v = ilgAutoClean(req.body || {}, await ilgAutoCfg());
     await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES ('ilg_auto_rebaseline', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify(v)]);
     res.json({ ok: true, ...v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/ilg/auto/preview', async (req, res) => {   // dry run: what the next daily run would do for this site (nothing is queued or emailed)
   const site = String(req.query.site || 'ILG').toUpperCase(); if (!ILG_SITES[site]) return res.status(400).json({ error: 'Unknown site' });
-  try { res.set('Cache-Control', 'no-store').json(await ilgAutoRun(site, false)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await ilgAutoRun(site, false)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/ilg-auto-rebaseline', async (req, res) => {   // n8n daily: ?site=ILG (21:00 UK) / ?site=GENEVA (01:00 UK)
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
@@ -21800,12 +21809,12 @@ app.post('/api/cron/ilg-auto-rebaseline', async (req, res) => {   // n8n daily: 
       mail = await sendResendEmail({ to: cfg.to, cc: cfg.cc, channel: 'admin', kind: 'ilg-auto-rebaseline', ref: site,
         subject: ILG_SITES[site].label + ' daily stock check: ' + (r.pools.every(o => o.status === 'skipped') ? 'not run, see reasons' : nq + ' auto-queued, ' + nov + ' need action'), html: ilgAutoEmailHtml(r) }); }
     res.json({ ok: true, imported, mail: mail ? { sent: mail.sent, sandbox: !!mail.sandbox } : null, ...r });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/ilg/rebaseline/:id/cancel', async (req, res) => {
   try { const r = await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status='cancelled', error=coalesce(error,'')||'cancelled by '||$2 WHERE id=$1 AND status='pending' RETURNING id`, [Number(req.params.id), authUser(req) || 'user']);
     if (!r.rows[0]) return res.status(409).json({ error: 'Only a pending rebaseline can be cancelled (n8n may already be writing it)' }); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // n8n: claim pending batches (pending → sent) with what the count needs; the flow resolves Fulfil ids by name / SKU in its own tenant.
 app.post('/api/cron/ilg-rebaseline/claim', async (req, res) => {
@@ -21817,7 +21826,7 @@ app.post('/api/cron/ilg-rebaseline/claim', async (req, res) => {
       RETURNING id, pool, lines, created_by, to_char(created_at,'YYYY-MM-DD') date, to_jsonb(rb)->>'reason' why`, only ? [only] : [])).rows;
     res.json({ batches: rows.map(r => ({ id: r.id, pool: r.pool, warehouse: ILG_POOLS[r.pool].warehouse, date: r.date, created_by: r.created_by,
       reason: 'HORIZON ' + ILG_SITES[ILG_POOLS[r.pool].site].label + ' rebaseline #' + r.id + ' (' + ILG_POOLS[r.pool].label + ', ' + (r.created_by || '') + ')' + (r.why ? ': ' + String(r.why).replace(/\s+/g, ' ').slice(0, 180) : ''), lines: r.lines.map(l => ({ sku: l.sku, set_to: l.set_to })) })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
@@ -21826,7 +21835,7 @@ app.post('/api/cron/ilg-rebaseline/result', async (req, res) => {
     const r = await pool.query(`UPDATE planner.ilg_rebaseline_batches SET status=$2, done_at=now(), fulfil_count_id=$3, fulfil_number=$4, result=$5::jsonb, error=$6 WHERE id=$1 AND status='sent' RETURNING id`,
       [id, ok ? 'done' : 'error', b.count_id || null, b.number != null ? String(b.number) : null, JSON.stringify(b.readback || null), ok ? null : String(b.error || 'failed').slice(0, 2000)]);
     _ilgCmp.clear(); res.json({ ok: !!r.rows[0] });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.744 (Ben 09-Nov-26, SUG-0047 Alexandria): BUY & MOVE ▸ Inventory ▸ Adjustments. Large Fulfil stock adjustments (done moves to or
 // from a Lost and Found location: 3PL and Amazon cycle counts, HORIZON ILG / Geneva rebaselines, manual counts) are synced into
@@ -21923,15 +21932,15 @@ app.get('/api/supply/stock-adjustments/list', async (req, res) => {
       FROM planner.stock_adjustments WHERE effective_date BETWEEN $1 AND $2 ORDER BY effective_date DESC, location_name, sku LIMIT 5000`, [from, to])).rows;
     const tags = (await pool.query(`SELECT tag FROM planner.stock_adjustment_tags ORDER BY (created_by='system') DESC, tag`)).rows.map(r => r.tag);
     res.set('Cache-Control', 'no-store').json({ ok: true, from, to, cfg: await sadjCfg(), last_sync: last, syncing: !!_sadjBusy, tags, rows });
-  } catch (e) { if (/stock_adjustments" does not exist/.test(e.message)) return res.json({ ok: false, missing: 'migration 423' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/stock_adjustments" does not exist/.test(e.message)) return res.json({ ok: false, missing: 'migration 423' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/stock-adjustments/sync', async (req, res) => {
-  try { res.json(await stockAdjSync({ full: !!(req.body && req.body.full) })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await stockAdjSync({ full: !!(req.body && req.body.full) })); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/stock-adjustments/sync', async (req, res) => {   // n8n hourly
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const r = await stockAdjSync({ full: !!(req.body && req.body.full) }); try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('stock_adjustments_sync','ok',$1,$2)`, [r.adjustments, JSON.stringify(r).slice(0, 500)]); } catch (_) {} res.json(r); }
-  catch (e) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('stock_adjustments_sync','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('stock_adjustments_sync','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 const sadjTagList = t => Array.from(new Set((Array.isArray(t) ? t : []).map(x => String(x || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 40)).filter(Boolean))).slice(0, 12);
 async function sadjEnsureTags(tags, who) { for (const t of tags) await pool.query(`INSERT INTO planner.stock_adjustment_tags (tag, created_by) VALUES ($1,$2) ON CONFLICT (tag) DO NOTHING`, [t, who || null]); }
@@ -21944,18 +21953,18 @@ app.post('/api/supply/stock-adjustments/reason', async (req, res) => {
       ? await pool.query(`UPDATE planner.stock_adjustments SET reason=coalesce($2, reason), tags=(SELECT coalesce(array_agg(DISTINCT x),'{}') FROM unnest(tags || $3::text[]) x), reason_by=$4, reason_at=now() WHERE move_id = ANY($1::bigint[]) RETURNING move_id`, [ids, reason, tags, who])
       : await pool.query(`UPDATE planner.stock_adjustments SET reason=$2, tags=$3::text[], reason_by=CASE WHEN $2::text IS NULL AND cardinality($3::text[])=0 THEN NULL ELSE $4 END, reason_at=CASE WHEN $2::text IS NULL AND cardinality($3::text[])=0 THEN NULL ELSE now() END WHERE move_id = ANY($1::bigint[]) RETURNING move_id`, [ids, reason, tags, who]);
     res.json({ ok: true, updated: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/stock-adjustments/tags', async (req, res) => {   // the tag list (rebaseline review box)
   try { res.json({ ok: true, tags: (await pool.query(`SELECT tag FROM planner.stock_adjustment_tags ORDER BY (created_by='system') DESC, tag`)).rows.map(r => r.tag) }); }
-  catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, tags: [] }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, tags: [] }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/stock-adjustments/tags', async (req, res) => {   // add a tag on the fly; {delete:true} removes an unused, non-system tag
   try { const b = req.body || {}, t = sadjTagList([b.tag])[0]; if (!t) return res.status(400).json({ error: 'Type a tag' });
     if (b.delete) { const used = (await pool.query(`SELECT 1 FROM planner.stock_adjustments WHERE $1 = ANY(tags) LIMIT 1`, [t])).rows[0]; if (used) return res.status(409).json({ error: 'Tag "' + t + '" is in use' });
       await pool.query(`DELETE FROM planner.stock_adjustment_tags WHERE tag=$1 AND coalesce(created_by,'')<>'system'`, [t]); return res.json({ ok: true }); }
     await sadjEnsureTags([t], shortUser(authUser(req))); res.json({ ok: true, tag: t });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/stock-adjustments/config', async (req, res) => {
   try { const b = req.body || {}, cur = await sadjCfg(), o = {};
@@ -21965,7 +21974,7 @@ app.post('/api/supply/stock-adjustments/config', async (req, res) => {
     // a changed window or % re-checks every open Amazon adjustment on the next sync
     if (o.reversal_days !== cur.reversal_days || o.reversal_pct !== cur.reversal_pct) await pool.query(`UPDATE planner.stock_adjustments SET reversal_checked_at=NULL, reversed_at=NULL, reversed_qty=NULL, reversed_by=NULL WHERE kind='amazon'`);
     res.json({ ok: true, cfg: o, note: o.tpl_min < cur.tpl_min || o.amazon_min < cur.amazon_min ? 'Lower thresholds pick up smaller adjustments from the next full sync.' : '' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
 // vs planner.products.inventory_<mkt>_fba; the aged buckets (91-180 … 456+) feed the FBA Aged tab. Persisted per market.
@@ -22179,7 +22188,7 @@ app.get('/api/supply/inventory-awd/status', async (_req, res) => {
   try { const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
     if (!m || !m.report) return res.json({ market: 'US_AWD', imported: false });
     res.json({ market: 'US_AWD', imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await awdCompare(m.report)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/inventory-awd/import', async (req, res) => {
   const b = req.body || {}; let text = String(b.csv || '');
@@ -22193,7 +22202,7 @@ app.post('/api/supply/inventory-awd/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [by, JSON.stringify(parsed.rep)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
     res.json({ market: 'US_AWD', imported: true, imported_by: by, imported_at: m.imported_at, ...(await awdCompare(parsed.rep)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
@@ -22202,7 +22211,7 @@ app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('fba_aged_rates',$1)
       ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(cur)]);
     res.json({ ok: true, market: mkt, rates: cur[mkt] });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/inventory-fba/status', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
@@ -22211,7 +22220,7 @@ app.get('/api/supply/inventory-fba/status', async (req, res) => {
     const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     if (!m || !m.report) return res.json({ market: mkt, imported: false });
     res.json({ market: mkt, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, m.report)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/inventory-fba/import', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
@@ -22228,7 +22237,7 @@ app.post('/api/supply/inventory-fba/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, imported: true, imported_by: by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, parsed.rep)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.494 (Ben 26-Oct-26): the Amazon FBA inventory (planning) report, fetched by n8n through SP-API (workflow "Horizon — Amazon FBA
 // inventory report → HORIZON"), replaces the manual upload for BUY & MOVE ▸ Inventory ▸ Manage FBA and FBA Aged (aged inventory
@@ -22252,7 +22261,7 @@ app.post('/api/cron/fba-report-import', async (req, res) => {
     await pool.query(`INSERT INTO planner.inventory_fba_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
     res.json({ ok: true, market: mkt, skus: Object.keys(parsed.rep).length, rows: rows.length, missing_columns: missing, report_type: b.report_type || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── PO inbound delays + impacted products (SUG-0024 Inventory Status Report §6) ───────────────
 // Landing (into-stock) date per open PO = coalesce(shipment arrival/delivery/landing, PO override, prod_end+7+sea lead).
@@ -22340,7 +22349,7 @@ async function poDeliveryDelays(market) {
 app.get('/api/supply/po-delays', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
   try { res.json(await poDeliveryDelays(mkt)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
 // A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).
@@ -22367,7 +22376,7 @@ app.get('/api/supply/master-po/new-data', async (req, res) => {   // suppliers w
       LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(f.supplier_name))
       WHERE p.master_po IS NULL AND NOT coalesce(p.is_master,false) AND coalesce(f.supplier_name,'')<>'' ORDER BY 1`)).rows;
     res.json({ suppliers: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/master-po/eligible', async (req, res) => {   // POs eligible to become children of a master
   const sup = String((req.query && req.query.supplier) || '').trim(); if (!sup) return res.json({ pos: [] });
@@ -22376,7 +22385,7 @@ app.get('/api/supply/master-po/eligible', async (req, res) => {   // POs eligibl
       AND lower(trim(f.supplier_name))=lower(trim($1)) AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
       AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) ORDER BY p.po`, [sup])).rows;
     res.json({ pos: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/master-po/children', async (req, res) => {   // Child PO tab: all children grouped by master + master link/status
   try {
@@ -22386,7 +22395,7 @@ app.get('/api/supply/master-po/children', async (req, res) => {   // Child PO ta
       LEFT JOIN planner.purchase_orders mp ON mp.po=p.master_po
       WHERE p.master_po IS NOT NULL ORDER BY p.master_po, p.po`)).rows;
     res.json({ children: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/master-po/create', async (req, res) => {
   const b = req.body || {}, childPos = Array.isArray(b.child_pos) ? b.child_pos.filter(Boolean) : [];
@@ -22444,7 +22453,7 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true, master_po: mpo, biggest_child: big });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // detach ONE child → it becomes a normal PO again; re-sum the master's lines
@@ -22470,7 +22479,7 @@ app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // de
     await client.query('COMMIT');
     invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true, remaining });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: remove the master row + lines, free the children
@@ -22486,7 +22495,7 @@ app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: 
     await client.query('COMMIT');
     invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 
@@ -22495,7 +22504,7 @@ app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / a
   try { await pool.query(`INSERT INTO planner.dtc_mismatch_review (so_cin7_id,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (so_cin7_id) DO UPDATE SET note=coalesce(excluded.note,planner.dtc_mismatch_review.note), accepted=excluded.accepted, accepted_by=excluded.accepted_by, updated_at=now()`,
       [id, (b.note != null ? String(b.note) : null), !!b.accepted, !!b.accepted ? authUser(req) : null]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Normalise a sales-order ref for matching: trim, collapse inner whitespace, uppercase.
 function _dtcNorm(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toUpperCase(); }
@@ -22539,17 +22548,17 @@ async function dtc2Sync(user) {
 // v28.368: scheduled DTC 2.0 refresh. PROD SCHEDULE (optional): n8n daily, POST /api/cron/dtc2-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET.
 app.post('/api/cron/dtc2-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(Object.assign({ ok: true }, await dtc2Sync('cron'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await dtc2Sync('cron'))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/dtc2/sync', async (req, res) => {
-  try { res.json(Object.assign({ ok: true }, await dtc2Sync(authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await dtc2Sync(authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/dtc2/review', async (req, res) => {
   try { const b = req.body || {}; const so = String(b.so || '').trim(); if (!so) return res.status(400).json({ error: 'so required' });
     await pool.query(`INSERT INTO planner.dtc2_review (so_number,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (so_number) DO UPDATE SET note=coalesce(excluded.note,planner.dtc2_review.note), accepted=excluded.accepted, accepted_by=excluded.accepted_by, updated_at=now()`,
       [so, b.note == null ? null : String(b.note), !!b.accepted, b.accepted ? authUser(req) : null]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 function _dtc2Key(s) { return String(s == null ? '' : s).toUpperCase().replace(/\s+/g, ''); }
 // v28.408 (Ben 20-Oct-26): custom-order service lines are not exceptions: never shown or counted in DTC mismatch 2.0.
@@ -22629,7 +22638,7 @@ async function dtc2Build(db) {
   }
 }
 app.get('/api/supply/dtc2/report', async (req, res) => {
-  try { res.json(await dtc2Build(pool)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await dtc2Build(pool)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.416 (Ben 20-Oct-26): WEEKLY DEMAND PHASE 1 (spec docs/specs/WEEKLY_DEMAND_AND_ORDER_EXCLUSIONS_SPEC_2026-10-20.md).
 // planner.order_lines = every Fulfil sale line (LIVE Fulfil, read only), mapped to HORIZON market + channel, with the demand date rule:
@@ -22900,11 +22909,11 @@ async function _weeklyActualsBuild() {
 }
 app.post('/api/cron/order-lines-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(Object.assign({ ok: true }, await orderLinesSync('cron', String(req.query.full || '') === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await orderLinesSync('cron', String(req.query.full || '') === '1'))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/order-lines/sync', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
-  try { res.json(Object.assign({ ok: true }, await orderLinesSync(authUser(req), !!(req.body || {}).full))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await orderLinesSync(authUser(req), !!(req.body || {}).full))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.757 (Ben 10-Nov-26): FULFIL SALES IMPORT, TEST (spec docs/specs/FULFIL_SALES_IMPORT_SPEC_2026-11-10.md, migration 428).
 // History (range) import: the ORDERS of the given Fulfil channels between two order dates (keyset by order id, 200 orders a page), then
@@ -23042,7 +23051,7 @@ async function _salesImportAdmin(req, res) {
 }
 app.post('/api/demand/sales-import/range', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
-  try { res.json(Object.assign({ ok: true }, await salesImportRange(req.body || {}, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await salesImportRange(req.body || {}, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.760: the Fulfil channels the refresh can pick from (the channel map) with what HORIZON holds for each
 app.get('/api/demand/sales-import/channels', async (req, res) => {
@@ -23054,16 +23063,16 @@ app.get('/api/demand/sales-import/channels', async (req, res) => {
         to_char(least(d.a, r.a),'YYYY-MM-DD') first, to_char(greatest(d.b, r.b),'YYYY-MM-DD') last, coalesce(d.orders,0) + coalesce(r.orders,0) orders
       FROM planner.fulfil_channel_map m LEFT JOIN d ON d.fulfil_channel = m.channel_name LEFT JOIN r ON r.fulfil_channel = m.channel_name
       WHERE m.kind <> 'ignore' ORDER BY m.is_historical DESC, 2, 1`)).rows;   // v28.761: detail + roll-up
-    res.json({ history_from: hf, channels: rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ history_from: hf, channels: rows }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/sales-import/build', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
-  try { res.json(Object.assign({ ok: true }, await salesFulfilBuild())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await salesFulfilBuild())); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/demand/sales-import/reconcile', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
   try { const from = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from + '-01' : '2025-01-01', to = /^\d{4}-\d{2}$/.test(req.query.to || '') ? req.query.to + '-01' : '2099-12-01';
-    res.json({ rows: await salesImportReconcile(from, to) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ rows: await salesImportReconcile(from, to) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.758 (Ben 10-Nov-26): DEMAND > Analysis > Historical compare. Per market x channel x month: today's monthly actuals (sales_actuals, the
 // Google Sheet) vs the new Fulfil monthly (sales_actuals_fulfil), plus the Fulfil WEEKLY series (ISO weeks, Monday) rolled into months two
@@ -23107,7 +23116,7 @@ app.get('/api/demand/historical-compare', async (req, res) => {
       WHERE class_rule IS NOT NULL AND order_date BETWEEN $1 AND ($2::date + interval '1 month' - interval '1 day') AND coalesce(product_category,'') <> 'Shipping' GROUP BY 1,2 ORDER BY 4 DESC`, [from, to])).rows;   // incl. v28.760 reclassified (dtc_non_shopify_ref_b2b): counted, shown for information
     out.anomalies = (await pool.query(`SELECT rule, count(*)::int orders, sum(units)::int units FROM planner.order_anomalies GROUP BY 1 ORDER BY 1`).catch(() => ({ rows: [] }))).rows;
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.759 (Ben 10-Nov-26): the sales actuals SOURCE switch (migration 429). GET = current source + cut-over months; POST {source} (admin)
 // = 'sheet' (Cin7 historical + Fulfil current) | 'fulfil_monthly' | 'fulfil_weekly'; POST {cut:{country, channel, fulfil_from|null}} sets
@@ -23118,7 +23127,7 @@ app.get('/api/demand/sales-source', async (req, res) => {
     const cuts = (await pool.query(`SELECT country, channel, to_char(fulfil_from,'YYYY-MM') fulfil_from, auto, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at FROM planner.sales_source_cuts ORDER BY 1,2`).catch(() => ({ rows: [] }))).rows;
     const runs = (await pool.query(`SELECT mode, scope, lines_saved, to_char(finished_at,'YYYY-MM-DD"T"HH24:MI') at FROM planner.sales_import_runs ORDER BY id DESC LIMIT 1`).catch(() => ({ rows: [] }))).rows;
     res.json({ source: src, label: SALES_SOURCES[src] || src, options: SALES_SOURCES, cuts, last_import: runs[0] || null }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/sales-source', async (req, res) => {
   if (!(await _salesImportAdmin(req, res))) return;
@@ -23139,7 +23148,7 @@ app.post('/api/demand/sales-source', async (req, res) => {
     refreshDataCache().catch(e => console.warn('[sales-source] cache rebuild: ' + e.message));
     const src = (((await pool.query(`SELECT value FROM planner.app_settings WHERE key='sales_actuals_source'`)).rows[0] || {}).value) || 'sheet';
     res.json({ ok: true, source: src, label: SALES_SOURCES[src] || src }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // n8n entry (inside the /api/cron/ secret bracket): body {mode:'range', channels, from, to} for the history load (call while more), else the
 // daily incremental sync (changed lines + changed order headers since the last run) followed by the monthly build.
@@ -23155,7 +23164,7 @@ app.post('/api/cron/sales-import', async (req, res) => {
     if (q.length) { const [ch, ym] = q[0].split('|'); refreshed = await salesImportRange({ channels: [ch], from: ym + '-01', to: ym + '-28', replace: true, budget_ms: 40000 }, 'cron');
       if (!refreshed.more) { q.shift(); await pool.query(`UPDATE planner.app_settings SET value = $1 WHERE key = 'sales_refresh_queue'`, [JSON.stringify(q)]); } }
     const built = (refreshed && refreshed.more) ? null : await salesFulfilBuild();
-    res.json(Object.assign({ ok: true }, r, { refreshed, queue_left: q.length, monthly: built })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json(Object.assign({ ok: true }, r, { refreshed, queue_left: q.length, monthly: built })); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ORDER EXCLUSIONS (Demand > Inputs): every order with a line over the threshold, searchable; toggle per order (default not excluded).
 // v28.767 (Ben 10-Nov-26): ORDER EXCLUSIONS v2. Candidates = orders flagged by an anomaly rule or with a line over the threshold (live
@@ -23191,7 +23200,7 @@ app.get('/api/demand/order-exclusions', async (req, res) => {
     const fc = fulfilConfigFor('live');
     res.set('Cache-Control', 'no-store').json({ ok: true, threshold: thr, show, counts, excluded_skus: skuEx, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null,
       synced_at: ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_lines_synced_at'`)).rows[0] || {}).value || null, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.767: exclude / include ONE line
 app.post('/api/demand/order-exclusions/line/:line', async (req, res) => {
@@ -23204,7 +23213,7 @@ app.post('/api/demand/order-exclusions/line/:line', async (req, res) => {
     await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [l.sale_id, l.so_number, b.excluded !== false, 'line ' + l.sku + (b.excluded !== false ? ' excluded' : ' included'), by]).catch(() => {});
     salesFulfilBuildSoon('line exclusion ' + line); weeklyActualsBuildSoon('line exclusion');
     res.json({ ok: true, rebuilding: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/order-exclusions/:sale', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit || me.supply_edit)) return res.status(403).json({ error: 'Edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
@@ -23219,7 +23228,7 @@ app.post('/api/demand/order-exclusions/:sale', async (req, res) => {
     await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
     salesFulfilBuildSoon('exclusion ' + sale); weeklyActualsBuildSoon('exclusion');   // v28.759 / 768: the final view follows, in the background
     res.json({ ok: true, rebuilding: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/demand/order-exclusions-threshold', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
@@ -23227,7 +23236,7 @@ app.post('/api/demand/order-exclusions-threshold', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('order_exclusion_threshold', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]);
     salesFulfilBuildSoon('threshold ' + v);
     res.json({ ok: true, threshold: v, weekly: await weeklyActualsBuild() });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.416: FORECAST MIGRATION monthly -> weekly (decision (a), Ben 20-Oct-26: each financial year's total per SKU x market x channel is kept,
 // months may shift). From the current month onwards, per FY (March to February): FY total = sum of the monthly forecast; spread over the
@@ -23292,7 +23301,7 @@ async function forecastWeeklyMigrate(confirm, by) {
 }
 app.post('/api/demand/forecast-weekly/migrate', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
-  try { res.json(Object.assign({ ok: true }, await forecastWeeklyMigrate((req.body || {}).confirm === true, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await forecastWeeklyMigrate((req.body || {}).confirm === true, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══ v28.759 (Ben 10-Nov-26): DEMAND > Plan (weekly). ONE forecast kept in step with the monthly plan: planner.forecast_outputs (monthly,
 // read by the buy plan) stays the stored forecast. Weeks are worked out from it: each month's total is spread over its DAYS by last year's
@@ -23362,10 +23371,10 @@ async function planWeekly(q) {
   return { country, channel, warehouse: wh, weeks: wks, this_week: thisMon, rows, shape: shp.all ? 'last year weekly shape' : 'even (no weekly history)', capped: !want && prods.length >= 400 };
 }
 app.post('/api/demand/plan-weekly', async (req, res) => {   // v28.762: the page posts the SKU list Plan monthly shows
-  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.body || {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.body || {})); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/demand/plan-weekly', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.query || {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await planWeekly(req.query || {})); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Edit one week: pin it and move the difference into the month(s) it touches by its days there (whole units, the largest share takes the rounding).
 app.post('/api/demand/plan-weekly/cell', async (req, res) => {
@@ -23396,14 +23405,14 @@ app.post('/api/demand/plan-weekly/cell', async (req, res) => {
     await client.query('COMMIT');
     invalidateDataCache(); invalidateBiCache();
     res.json({ ok: true, before, after: units, months: parts.filter(p => p.v) });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { client.release(); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); } finally { client.release(); }
 });
 // Unpin a week: it goes back to following its month(s) (the monthly totals are kept as they are).
 app.post('/api/demand/plan-weekly/unpin', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit)) return res.status(403).json({ error: 'Demand edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   const b = req.body || {};
   try { const r = await pool.query(`DELETE FROM planner.forecast_weekly WHERE version = 'pinned' AND sku = $1 AND country = $2 AND channel = $3 AND iso_week = $4`, [String(b.sku || ''), String(b.country || '').toUpperCase(), String(b.channel || '').toUpperCase(), String(b.iso_week || '')]);
-    res.json({ ok: true, removed: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, removed: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // IMPACT REPORT (phase 1, read only): monthly actuals ship-date (today, sales_actuals) vs order-date (order_lines, same exclusions as the
 // weekly build) per market x channel x month over the Fulfil months, the biggest SKU moves, and the excluded units.
@@ -23426,14 +23435,14 @@ app.get('/api/demand/weekly-impact', async (req, res) => {
         coalesce(sum(qty) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded)),0)::int excluded_units FROM planner.order_lines l WHERE l.qty > $1 AND l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed')`, [thr])).rows[0];
     const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled','ignored','failed') AND (l.is_key_account OR (l.is_custom AND coalesce(l.agent_code,'')='' AND NOT ${OL_HZ_TAGGED})) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, from: from.slice(0, 7), fulfil_from: cutInfo.from.slice(0, 7), monthly_only: cutInfo.monthly_only, imported: imp, threshold: thr, cuts: cutInfo.cuts, key_custom: ka, by_market_month: mc, top_sku_moves: sku, unmapped_channels: unm, exclusions: flags });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/dtc/mismatch', async (req, res) => {
   const countOnly = !!(req.query && req.query.count);
   // v28.081: the badge (?count=1) is served from a 10-min SWR memo (was a full 9s reconciliation on every page load); the
   // full report still runs live. Any supply edit marks the memo stale (invalidateSupplyCaches → swrStale('sup:')).
-  if (countOnly) { try { return res.json(await swrGet('sup:dtc-count', 10 * 60 * 1000, () => _dtcMismatchCompute(true))); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); } }
-  try { return res.json(await _dtcMismatchCompute(false)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  if (countOnly) { try { return res.json(await swrGet('sup:dtc-count', 10 * 60 * 1000, () => _dtcMismatchCompute(true))); } catch (e) { log500(e); return res.status(500).json({ error: clientErr(e) }); } }
+  try { return res.json(await _dtcMismatchCompute(false)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 async function _dtcMismatchCompute(countOnly) {
   {
@@ -23555,14 +23564,14 @@ app.post('/api/supply/dtc/map', async (req, res) => {
         ON CONFLICT (po, sales_order_ref) DO UPDATE SET link=excluded.link, created_by=excluded.created_by, created_at=now()`,
       [po, ref, link, authUser(req)]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Remove an in-app mapping row (reverts that PO<->SO edge to the Cin7 default — undoes an add OR a suppress).
 app.post('/api/supply/dtc/unmap', async (req, res) => {
   const b = req.body || {}; const po = String(b.po || '').trim(); const ref = _dtcNorm(b.sales_order_ref);
   if (!po || !ref) return res.status(400).json({ error: 'po and sales_order_ref required' });
   try { await pool.query(`DELETE FROM planner.dtc_po_so_map WHERE po=$1 AND sales_order_ref=$2`, [po, ref]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.797 (Ben): DTC ↔ Fulfil alignment (READ ONLY — Fulfil is the source of truth; Horizon flags divergence, never writes).
 // For each Horizon PO↔SO mapping (dtc_po_so_map), show the Fulfil PO's ACTUAL linked sale so misalignment is visible.
@@ -23605,7 +23614,7 @@ app.get('/api/supply/dtc/fulfil-alignment', async (req, res) => {
       return { po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: fpId, fulfil_so: sale ? sale.ref : null, fulfil_client: sale ? sale.client : null, status: sale ? 'linked-in-fulfil' : 'no-fulfil-sale-link' };
     });
     res.json({ ok: true, env: cfg.env, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Accept / note an unmapped-PO row (the reverse DTC view) — mig 222
 app.post('/api/supply/dtc/po-review', async (req, res) => {
@@ -23617,7 +23626,7 @@ app.post('/api/supply/dtc/po-review', async (req, res) => {
       ON CONFLICT (po) DO UPDATE SET accepted=excluded.accepted, accepted_by=excluded.accepted_by, note=coalesce(excluded.note, planner.dtc_po_review.note), updated_at=now()`,
       [po, !!b.accepted, by, b.note != null ? String(b.note) : null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that
 // aren't yet cached, directly from Cin7 (Reference IN, then CustomerOrderNo IN) with NO branch/date filter,
@@ -23679,7 +23688,7 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     await logRun(fetched, 'ok', null, calls);
     const cov3 = await covOf(sweepable); const stillMissing = sweepable.filter(r => !cov3.has(r));
     res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls, rule_excluded: ruleRefs.length, still_missing: stillMissing.length, still_missing_refs: stillMissing.slice(0, 50) });
-  } catch (e) { await logRun(0, 'error', e.message, 0); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await logRun(0, 'error', e.message, 0); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // 3PL invoice — Xero bill CSV (Phase 3). Assembles a Xero bills-import CSV: one line per non-order cost type
 // (Storage/Returns/Inbound/Other → the cost-type account codes) + two lines per cost centre (Freight + Fulfilment
@@ -23833,7 +23842,7 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="journal-' + (REG || tpl0) + '-' + period + '.csv"'); res.send(csv);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Coghlans (AU) invoices WEEKLY, not monthly — pull the Period End (Effective Date) + Invoice Number from the
 // "Coghlan Settings" sheet so the Xero bill's date + reference reflect the week, not the calendar-month end.
@@ -24039,7 +24048,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + invSuffix + '-' + (taxCfg.mode === 'inclusive' ? 'TAX-INCLUSIVE' : taxCfg.mode === 'exclusive' ? 'TAX-EXCLUSIVE' : 'NO-TAX') + '.csv"');
     res.setHeader('X-Horizon-Tax-Mode', check.import_as);
     res.send(csv);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
 // ── Open-actions scoreboard (SUPPLY ▸ Reports ▸ Metrics) — weekly snapshot of open actions (mig 226) ──────────
@@ -24155,7 +24164,7 @@ app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment
         supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, coalesce(reallocations,0) reallocations, total_our
       FROM planner.action_metrics_snapshot ORDER BY week_ending DESC LIMIT 52`)).rows;
     res.json({ ok: true, current: await getOpenActionsCached(), history });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.261 (Diviyaj's prod fix taken upstream): routes that n8n calls with x-webhook-secret but users also press from the app. The login gate
 // lets a valid secret through; here the handler accepts the secret OR a signed-in user with the given right (requiredCap leaves these to the handler).
@@ -24168,7 +24177,7 @@ async function hzSecretOrCap(req, res, cap) {
 }
 app.post('/api/supply/action-metrics/snapshot', async (req, res) => {
   if (!(await hzSecretOrCap(req, res, 'supply'))) return;
-  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // The individual PO-level open actions (from the same exceptions engine as the ACTIONS tab) — PO + type + explainer,
 // so the Metrics scoreboard can list every PO with an open action and link each to its drawer.
@@ -24179,14 +24188,14 @@ app.get('/api/supply/action-metrics/pos', async (_req, res) => {
     const pos = rows.filter(r => r.target === 'po' && (r.ref || r.target_key))
       .map(r => ({ po: r.ref || r.target_key, type: r.type, detail: r.detail, severity: r.severity }));
     res.json({ ok: true, pos });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Weekly snapshot: n8n now calls /api/supply/action-metrics/snapshot (Thursday 11:59 GMT). This route has no scheduler calling it
 // (vercel.json has no crons key, v28.297); kept for a manual admin run. Same idempotent upsert of this week's row.
 // v28.255: writes an open-actions snapshot, so it needs the webhook secret (n8n) or an admin (manual). GET kept for an existing scheduler.
 const _actionMetricsRun = async (req, res) => {
   try { const secret = process.env.N8N_WEBHOOK_SECRET; if (!(secret && safeEq(req.get('x-webhook-secret'), secret))) { const me = await hzAdminOnly(req, res); if (!me) return; }
-    res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 };
 app.get('/api/cron/action-metrics', _actionMetricsRun); app.post('/api/cron/action-metrics', _actionMetricsRun);
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
@@ -24346,11 +24355,11 @@ app.post('/api/supply/fba-transfers/excluded-warehouses', async (req, res) => { 
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('inflight_excluded_warehouses',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify([...new Set(codes)])]);
     bumpSupplyEpoch();
     res.json({ ok: true, codes: [...new Set(codes)], note: 'Takes effect on the next in-flight refresh.' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
   try { res.json(await refreshFbaInflight({})); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.168 (Ben): daily in-flight FBA refresh. POST /api/cron/fba-inflight-refresh (x-webhook-secret = N8N_WEBHOOK_SECRET,
 // timing-safe). { dry_run: true } = fetch + preview, no write, no etl_runs row. Each real run records planner.etl_runs job
@@ -24369,7 +24378,7 @@ async function runFbaInflightCron({ dry = false } = {}) {
 app.post('/api/cron/fba-inflight-refresh', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {}; const r = await runFbaInflightCron({ dry: b.dry_run === true || b.dry_run === 'true' }); res.status(r.ok || r.inert ? 200 : 500).json(r); }   // 500 on a real failure so the n8n error workflow fires
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 if (HZ_BG && process.env.HZ_FBA_INFLIGHT_CRON !== '0') {
   const _fi = () => runFbaInflightCron({}).then(r => console.log('[fba-inflight] ' + (r.ok ? ('refreshed ' + r.lines + ' line(s)') : ('not refreshed: ' + r.error))), e => console.warn('[fba-inflight] failed: ' + (e && e.message)));
@@ -24385,7 +24394,7 @@ app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: sin
     const skus = Object.keys(forecast); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
     if (skus.length) (await pool.query(`SELECT sku, replace(coalesce(product_ean,''), chr(39), '') ean FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { if (r.ean) eans[r.sku] = r.ean; });
     res.set('Cache-Control', 'no-store').json({ ok: true, forecast, months, stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0, stock_updated_by: up.by || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
 app.post('/api/supply/zalando/stock-upload', async (req, res) => {
@@ -24416,7 +24425,7 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
       await zc.query('COMMIT');
     } catch (e) { await _rollback(zc); throw e; } finally { zc.release(); }
     res.json({ ok: true, count: rows.length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Serve the in-flight (not-yet-inbound) FBA transfers for the FBA tab + last-run stamp. Only rows whose
 // reference isn't already in inbound_shipments (defensive — the refresh also prunes them).
@@ -24641,7 +24650,7 @@ async function fbaIbAdmin(req, res) {   // v28.499 (Ben: "it shouldn't be admin 
 }
 app.get('/api/supply/fba-inbound/ship-from', async (req, res) => {
   try { res.json({ ok: true, rows: (await pool.query(`SELECT code, label, default_for, name, company_name, address_line1, address_line2, city, state_code, postal_code, country_code, phone, email FROM planner.fba_ship_from WHERE active ORDER BY default_for NULLS LAST, label`)).rows, markets: Object.keys(FBA_IB_MKT) }); }
-  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [], markets: Object.keys(FBA_IB_MKT), missing: 'Migration 389 not applied' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [], markets: Object.keys(FBA_IB_MKT), missing: 'Migration 389 not applied' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/fba-inbound/ship-from', async (req, res) => {   // add or edit an address (e.g. the Flexport warehouse in China)
   const me = await fbaIbAdmin(req, res); if (!me) return;
@@ -24655,17 +24664,17 @@ app.post('/api/supply/fba-inbound/ship-from', async (req, res) => {   // add or 
         city=EXCLUDED.city, state_code=EXCLUDED.state_code, postal_code=EXCLUDED.postal_code, country_code=EXCLUDED.country_code, phone=EXCLUDED.phone, email=EXCLUDED.email, updated_at=now(), updated_by=EXCLUDED.updated_by`,
       [code, s(b.label), s(b.name), s(b.company_name), s(b.address_line1), s(b.address_line2), s(b.city), s(b.state_code), s(b.postal_code), s(b.country_code), s(b.phone), s(b.email), me.email || authUser(req) || 'admin']);
     res.json({ ok: true, code }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/fba-inbound/plans', async (req, res) => {
   try { const m = String(req.query.market || '').toUpperCase();
     const r = await pool.query(`SELECT ${FBA_IB_COLS} FROM planner.fba_inbound_plans WHERE ($1 = '' OR market = $1) ORDER BY id DESC LIMIT 30`, [m]);
     res.json({ ok: true, rows: r.rows.map(p => Object.assign(p, { log: (p.log || []).slice(-3) })) }); }
-  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [] }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [] }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/fba-inbound/plans/:id', async (req, res) => {
   try { const p = await fbaIbGet(Number(req.params.id) || 0); if (!p) return res.status(404).json({ error: 'Not found' }); res.json({ ok: true, plan: p, sc: FBA_IB_MKT[p.market] && FBA_IB_MKT[p.market].sc }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/fba-inbound/plans', async (req, res) => {   // record the ticked rows; nothing is sent to Amazon until advance
   const me = await fbaIbAdmin(req, res); if (!me) return;
@@ -24693,7 +24702,7 @@ app.post('/api/supply/fba-inbound/plans', async (req, res) => {   // record the 
     const id = r.rows[0].id, name = 'HORIZON ' + mkt + ' #' + id + ' ' + ddMonYy(new Date().toISOString().slice(0, 10));
     await pool.query(`UPDATE planner.fba_inbound_plans SET name=$2 WHERE id=$1`, [id, name]);
     res.json({ ok: true, plan: await fbaIbGet(id), sc: M.sc, not_boxed: bad });
-  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 389 (fba_inbound_plans) not applied' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 389 (fba_inbound_plans) not applied' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 const FBA_IB_RUNNING = new Set();
 app.post('/api/supply/fba-inbound/plans/:id/advance', async (req, res) => {   // one Amazon step; the client calls again while stage is automatic
@@ -24736,7 +24745,7 @@ app.get('/api/supply/actions/state', async (req, res) => {
   try {
     const r = await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`);
     res.json(r.rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Lifecycle for SUPPLY ▸ Actions (dismiss / snooze / done) by stable key. Absent row = open; restore deletes.
 app.post('/api/supply/actions/state', async (req, res) => {
@@ -24753,7 +24762,7 @@ app.post('/api/supply/actions/state', async (req, res) => {
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, snoozed_by=excluded.snoozed_by, snoozed_at=excluded.snoozed_at, updated_at=now()`,
       [key, b.status || 'dismissed', days, b.note || null, who || null, indef]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Drop the cached Actions build so the next fetch reflects a just-made data edit (the client calls this from
 // invalidateDerived after any PO/shipment/payment change). Idle visits still ride the 10-min cache; editors get
@@ -24775,7 +24784,7 @@ app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (re
 // n8n /api/data-cache/invalidate. Lets a user pick up a product/scope change without waiting on the TTL. (v27.327)
 app.post('/api/demand/cache/invalidate', async (_req, res) => {
   try { _dataCache = null; const vals = await refreshDataCache(); res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, at: new Date().toISOString() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // n8n post-ETL trigger: after a sales/inventory upload, rebuild the demand-data cache from Supabase ONCE and push it to
 // KV so every serverless instance converges — instead of each Vercel cold start re-pulling ~12MB from Supabase. Awaits
@@ -24785,7 +24794,7 @@ app.post('/api/data-cache/invalidate', async (req, res) => {
   if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { _dataCache = null; const vals = await refreshDataCache(); invalidateBiCache();
     res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, kv: KV_ON, at: new Date().toISOString() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
 app.post('/api/supply/duty-upsert', async (req, res) => {
@@ -24797,7 +24806,7 @@ app.post('/api/supply/duty-upsert', async (req, res) => {
     if (ex.rowCount) await pool.query(`UPDATE planner.duty_rates SET duty_pct=$1 WHERE id=$2`, [dv, ex.rows[0].id]);
     else await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3)`, [cat, country, dv]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Transfer lead-time matrix (CONFIG ▸ Branches ▸ Transfer lead times): set the weeks for one from→to lane.
 // Empty/blank weeks DELETES the lane (a missing lane = "we don't transfer that way", so the recommendations skip it).
@@ -24816,7 +24825,7 @@ app.post('/api/supply/transfer-lead-upsert', async (req, res) => {
         [from, to, wk, authUser(req) || null]);
     }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Air-freight tier rate edit (CONFIG ▸ Freight rates ▸ Air): rate per kg by weight band.
 app.post('/api/supply/air-rate/:id', (req, res) =>
@@ -24828,14 +24837,14 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
   if (!sz) return res.status(400).json({ error: 'container_size required' });
   const p = (b.pallets === '' || b.pallets == null) ? null : parseInt(b.pallets, 10);
   try { await pool.query(`UPDATE planner.freight_rates SET pallets=$1 WHERE container_size=$2`, [p, sz]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Freight-rate pivot (CONFIG ▸ Freight rates): set the USD rate for a container size × destination. Upserts.
 // ── SUPPLY ▸ Barcodes — "customise" projects (mig 260): per-SKU barcode-number overrides for a download ──
 // (the LIST route is registered earlier, before the /api/supply/:section catch-all)
 app.get('/api/supply/barcode-project/:id', async (req, res) => {
   try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides, coalesce(pos,'{}'::text[]) pos FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
-    if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/barcode-project', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
@@ -24856,10 +24865,10 @@ app.post('/api/supply/barcode-project', async (req, res) => {
   try {
     if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, batch=$4, overrides=$5::jsonb, pos=$6::text[], updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, batch, JSON.stringify(ov), pos]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, batch, overrides, created_by, pos) VALUES ($1,$2,$3,$4::jsonb,$5,$6::text[]) RETURNING id`, [name, target, batch, JSON.stringify(ov), authUser(req) || null, pos]); res.json({ ok: true, id: r.rows[0].id }); }
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/barcode-project/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/freight-upsert', async (req, res) => {
   const b = req.body || {}, dest = (b.destination || '').trim(), sz = (b.container_size || '').trim();
@@ -24870,7 +24879,7 @@ app.post('/api/supply/freight-upsert', async (req, res) => {
     if (ex.rowCount) await pool.query(`UPDATE planner.freight_rates SET cost=$1 WHERE id=$2`, [cost, ex.rows[0].id]);
     else await pool.query(`INSERT INTO planner.freight_rates (destination, container_size, cost, currency) VALUES ($1,$2,$3,'USD')`, [dest, sz, cost]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a deposit ("Deposit") or a sundry payment ("Other", is_deposit=false). Fields then edit
 // inline. reference is optional (Other payments often have none) and need not be unique.
@@ -24886,7 +24895,7 @@ app.post('/api/supply/deposit-create', async (req, res) => {
     // Await the bump so that re-fetch is guaranteed to see it (edits go through patch(), which already bumps).
     try { await invalidateSupplyCaches('deposit'); } catch (_) { /* non-fatal: TTL backstop */ }   // v28.167: scoped; the creator's re-fetch waits for the rebuild (read-your-writes)
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/payment-txn/:id', (req, res) =>
   patch(res, 'planner.payment_transactions', 'id', req.params.id,
@@ -24905,7 +24914,7 @@ app.post('/api/supply/run-meta/:date', async (req, res) => {
     await pool.query(`INSERT INTO planner.payment_run_meta (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (run_date) DO UPDATE SET ${upd}, updated_at=now()`, vals);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Order-plan line qty edit — sets our planned qty and stamps proposed_at/by while it differs from
 // the ERP source of truth (erp_qty). Clears the stamp if the edit returns it to the ERP value.
@@ -24946,7 +24955,7 @@ app.get('/api/supply/po-polybags/:po', async (req, res) => {
       return { polybags: r.polybags, sku, units: r.units, raw: Math.round(raw * 10) / 10, bags, on_order: on, add: Math.max(0, bags - on) }; })
       .filter(g => g.bags > 0 || g.on_order > 0);
     res.set('Cache-Control', 'no-store').json({ enabled: true, branch: poRow.branch, returns_pct: pct, groups, existing });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/po-line/:po_sku', async (req, res) => {
   const b = req.body || {};
@@ -24993,7 +25002,7 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
       logPoChange(po, 'Order plan', detail, authUser(req) || b.who || null);
     }
     res.json({ updated: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Pallet rebalance: even a production's open POs toward 20 pallets each (one container). Pools all line
 // qty across the same supplier+production's open, UNSHIPPED, non-Direct POs and first-fit packs into the
@@ -25064,7 +25073,7 @@ app.post('/api/supply/rebalance-apply/:po', async (req, res) => {
         [m.po + '|' + m.sku, m.po, m.sku, m.new]);
     }
     res.json({ applied: plan.moves.length, bins: plan.bins.map(b => ({ po: b.po, pallets: b.pallets })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-SKU supplier resolution for BUY→PO: main supplier (default) + all options (multi-supplier) + pallet_qty.
 // Supplier name→code via suppliers.name (exact, case-insensitive) then first-word fallback (handles "MQ Print
@@ -25197,7 +25206,7 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
     }
     invalidateSupplyCaches('po');   // new POs written → bump the epoch so the cached PO-rows / order-plan build rebuilds; otherwise the new POs don't show in Order Plan until the TTL / a hard refresh
     res.json({ committed: true, created, pos, warnings: warn });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-SKU supplier options for the BUY→PO dialog: each SKU's qty, pallet_qty, main supplier (default) and the
 // full option list (multi-supplier). The UI shows a tick + supplier picker per SKU.
@@ -25223,13 +25232,13 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
         main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl,
         release_window: m.rw || '', carton_qty: m.carton_qty || 0, inprod: inprod[sku] || { qty: 0, china: false }, discontinue: discFor(m) }; }) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Create-PO "Save Project" (Ben, mig 270). The list GET is registered earlier (before the /api/supply/:section catch-all). ──
 app.get('/api/supply/buy-projects/:id', async (req, res) => {
   try { const r = await pool.query(`SELECT id, name, mode, data, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects WHERE id=$1`, [req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'project not found' }); res.json(r.rows[0]); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/buy-projects', async (req, res) => {
   const b = req.body || {}; const name = String(b.name || '').trim();
@@ -25240,11 +25249,11 @@ app.post('/api/supply/buy-projects', async (req, res) => {
         ON CONFLICT (lower(name)) DO UPDATE SET mode=EXCLUDED.mode, data=EXCLUDED.data, updated_at=now()
         RETURNING id, name`, [name, String(b.mode || '3pl'), b.data || {}, (me && me.email) || null]);
     res.json({ ok: true, ...r.rows[0] }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.delete('/api/supply/buy-projects/:id', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.buy_projects WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // (③ open-pos list GET is registered earlier, before the /api/supply/:section catch-all.)
 // Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab
@@ -25362,7 +25371,7 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
 // v28.428 (Ben 21-Oct-26: PURCHASE ORDERS > PLAN "Approve all partials"): approve the partial-carton flag on the given order-plan lines in one
 // go (the page sends the unapproved partial lines of open POs). Supply edit or admin; one PO record of change entry per PO.
 app.post('/api/supply/po-lines/approve-partials', async (req, res) => {
-  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); }
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: clientErr(e) }); }
   const keys = [...new Set(((req.body || {}).po_skus || []).map(String).filter(Boolean))].slice(0, 5000), by = authUser(req) || 'unknown';
   if (!keys.length) return res.status(400).json({ error: 'no lines' });
   try { const r = (await pool.query(`UPDATE planner.purchase_order_lines l SET partial_carton_approved=true FROM planner.purchase_orders p
@@ -25371,7 +25380,7 @@ app.post('/api/supply/po-lines/approve-partials', async (req, res) => {
     for (const po of Object.keys(byPo)) await pool.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Order plan: partials approved (all)',$2,$3)`, [po, (byPo[po].length + ' line(s): ' + byPo[po].join(', ')).slice(0, 1000), by]).catch(() => {});
     try { invalidateSupplyCaches('po'); } catch (_) {}
     res.json({ ok: true, approved: r.length, pos: Object.keys(byPo).length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
 // v28.624 (Ben): client-specific carton qty for one order-plan line (blank = standard). Logged on the PO timeline.
@@ -25387,7 +25396,7 @@ app.post('/api/supply/po-line-ctn', async (req, res) => {
     const old = r.rows[0].old;
     if (old !== v) await logPoChange(b.po, 'Order plan', b.sku + ' client carton qty ' + (old == null ? 'standard' : old) + ' → ' + (v == null ? 'standard' : v), authUser(req));
     res.json({ ok: true, client_carton_qty: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.
 app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
@@ -25452,7 +25461,7 @@ app.post('/api/supply/po/:po/use-erp-qty', async (req, res) => {
     if (r.rowCount) try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,'Order plan: use Fulfil qty',$2,$3)`, [po, r.rows.map(x => x.sku + ' = ' + x.erp_qty).join(', ').slice(0, 1000), by]); } catch (_) {}
     try { invalidateSupplyCaches('po'); } catch (_) {}
     res.json({ ok: true, lines: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // "Upload changes" — push a PO's planned qtys to the ERP (Cin7/Fulfil). The actual ERP API write
 // is a gated Diviyaj integration; here we record the push (erp_qty := qty) and log it, clearing the
@@ -25467,7 +25476,7 @@ app.post('/api/supply/po/:po/upload', async (req, res) => {
        VALUES ('supply_erp_push','pending',$1,$2)`,
       [r.rowCount, `${r.rowCount} line(s) staged to push to ERP (qty + cost) for ${req.params.po}`]);
     res.json({ uploaded: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete a Purchase Order and its owned children (Master Data tab). Gated/confirmed in the UI.
 app.post('/api/supply/po/:po/delete', async (req, res) => {
@@ -25489,7 +25498,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Resolve the Cin7 Authorization header from env — accepts EITHER form, so it's flexible:
@@ -25587,7 +25596,7 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // BULK paste SKU/qty rows into a PO's order plan (Excel / Sheets paste). Each row is validated against our SKU
@@ -25626,7 +25635,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, po, added, updated, skipped, badQty });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
@@ -25669,7 +25678,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd, erp_mirror_updated: mirrored,
       approval_preserved: curApproved === undefined ? 'unchanged' : (curApproved ? 'approved' : 'draft'),
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Push a PO's line items (SKU / qty / price) to Cin7 (#14b). Price = the approved supplier final cost where
 // there is one (portal_line_costs.final_cost, confirmed), else the standard plan cost (cost_price).
@@ -25930,7 +25939,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation, cin7_trace: trace,
       total_units, total_cost: Math.round(total_cost * 100) / 100, currency: poRow.currency || 'USD',
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // READ-ONLY verify: GET the Cin7 PO's line items and compare to the planner order plan (qty AND price).
 // No write. price = approved supplier final cost, else cost_price (same as the push). ratio = cin7/plan
@@ -25970,7 +25979,7 @@ app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
       qty_off: rows.filter(r => !r.qty_ok).map(r => r.sku),
       price_off: rows.filter(r => !r.price_ok).map(r => ({ sku: r.sku, plan_usd: r.plan_price, cin7_usd: r.cin7_usd, created: r.created, qtyShipped: r.qtyShipped, holdingQty: r.holdingQty })),
       extras_in_cin7: extras });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // BULK "Update Cin7 Date" — push the planner completion date to Cin7 EstimatedDeliveryDate for every supplied PO.
 // body: { pos: [{ po, completion_date }] }. Server RE-VALIDATES: only ACTIVE (non-complete) POs that exist in Cin7
@@ -26046,7 +26055,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
     let mirrored = 0;
     for (const t of todo) { try { const u = await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [t.po, t.date]); mirrored += u.rowCount; } catch (e) { /* non-fatal */ } }
     res.json({ ok: true, updated: batch.length, erp_mirror_updated: mirrored, skipped: skipped.length, skippedDetail: skipped });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.
 app.post('/api/supply/po/:po/rename', async (req, res) => {
@@ -26070,7 +26079,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
     await client.query('UPDATE planner.shipments SET master_po=$1 WHERE master_po=$2', [newpo, oldpo]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // v27.858 (Ben): rename a master shipment's reference (e.g. to match the Fulfil internal shipment IS124). Cascades the
@@ -26095,7 +26104,7 @@ app.post('/api/supply/shipment/:ref/rename', async (req, res) => {
     await client.query('UPDATE planner.ship_plan_locks SET ref=$1 WHERE ref=$2', [newref, oldref]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true, shipments: s.rowCount, pos: p.rowCount, new_ref: newref });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
@@ -26200,7 +26209,7 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
       `UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped', production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
         WHERE po=$1 AND status ILIKE '%production%' RETURNING po`, [req.params.po])).rows;
     res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // "Shipped to master": a rider PO the supplier shipped to the consolidator, but the master hasn't sailed. OUR
 // side stays upstream (≈ ready to ship) — set the single PO to SHIPPED TO MASTER. When the master departs, the
@@ -26214,7 +26223,7 @@ app.post('/api/supply/po/:po/set-shipped-to-master', async (req, res) => {
         RETURNING po`, [req.params.po])).rows;
     if (!rows.length) return res.status(409).json({ error: 'PO not eligible (already shipped/complete, or not found)' });
     res.json({ updated: rows.length, po: req.params.po });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Shared: advance every PO on a shipment still in PRODUCTION to SHIPPING + production_status 'shipped'.
 // Matches the shipment's children (shipment_ref=ref), the ref itself (self-master), and the shipment's
@@ -26252,7 +26261,7 @@ app.post('/api/supply/po/:po/supplier', async (req, res) => {
       SET supplier_id=(SELECT id FROM planner.suppliers WHERE name=$2 LIMIT 1)
       WHERE po=$1 AND supplier_id IS NULL`, [req.params.po, name]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier production-confidence: set the confirmed production status and stamp the confirmation time
 // (now). Clearing the status clears the stamp. Drives the "Production unconfirmed" action.
@@ -26265,7 +26274,7 @@ app.post('/api/supply/po/:po/prod-status', async (req, res) => {
       SET production_status=$2, production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`,
       [req.params.po, st]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create / input a new purchase order. Minimal header; the rest is filled inline + in the PLAN panel.
 // supplier_id is resolved from the supplier name so payment terms / production lead apply immediately.
@@ -26288,7 +26297,7 @@ app.post('/api/supply/po-create', async (req, res) => {
     await notePoCreated(pool, po, authUser(req));
     invalidateSupplyCaches('po');   // new PO written → rebuild cached PO-rows / order-plan so it shows without a hard refresh
     res.json({ ok: true, po });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Import a purchase order FROM Cin7 into the planner (reverse of the push). Provide a Cin7 PO reference; we
 // read it from Cin7, map the supplier (via suppliers.cin7_member_id, else the Cin7 company name) and branch
@@ -26336,7 +26345,7 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [o.reference, String(o.id), supplier_name]);
     if (!exists) await notePoCreated(pool, o.reference, authUser(req));
     res.json({ ok: true, imported: true, po: o.reference, lines: lines.length, supplier_name, branch, currency: o.currencyCode || null, cin7_id: o.id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ===================== Fulfil PO import (v27.778, Ben) =====================
 // Import a purchase order FROM Fulfil into the planner — the reverse of the Fulfil push. Two lookup modes:
@@ -26510,7 +26519,7 @@ app.post('/api/supply/po-import-fulfil', async (req, res) => {
     for (const p of toImport) results.push(await importFulfilPoToPlanner(p, req, opts));
     if (typeof invalidateSupplyCaches === 'function') invalidateSupplyCaches();
     res.json({ ok: true, imported: results.length, pos: results, po: results[0] && results[0].po });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bulk-upload POs from a pasted/uploaded list. Each row: PO (+ optional supplier/ship-to/branch/status/start
 // + optional SKU/Qty). Rows are grouped by PO — a NEW PO is created from its header fields; an EXISTING PO is
@@ -26710,7 +26719,7 @@ app.get('/api/supply/po/:po/pdf', async (req, res) => {
     const d = await poPdfData(req.params.po);
     if (!d.p) return res.status(404).json({ error: 'PO not found' });
     res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${_pdfName(req.params.po)}"`).send(await buildPoPdf(d.p, d.lines, d.ship));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier-portal PO PDF — ownership-guarded + internal fields hidden (deposit ref / ERP PO / other suppliers).
 app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
@@ -26720,7 +26729,7 @@ app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
     const d = await poPdfData(po);
     if (!d.p) return res.status(404).json({ error: 'PO not found' });
     res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${_pdfName(po)}"`).send(await buildPoPdf(d.p, d.lines, d.ship, { portal: true }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.083 (Ben, perf audit Sprint C): the 20 per-PO lookups of the PO drawer used to go out as 13 + 9 separate pool.query()
 // calls (two Promise.all rounds). On the small pool that is ~6 queue waves × a pooler round trip = 1.1–1.6 s per drawer open
@@ -26879,7 +26888,7 @@ app.get("/api/supply/po-detail/:po", async (req, res) => {
       notes: notes.rows, subs: subs.rows, line_costs: lc,
       sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows,
       erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // SHIPS-WITH master label fields for one PO. source supplier + production ref = this PO; ships-with supplier + PO
 // = the supplier/ref of the master shipment this PO rides on (sh.master_po, fallback shipment_ref); plus dest + client.
@@ -26898,7 +26907,7 @@ app.get('/api/supply/ships-with/:po', async (req, res) => {
       LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
       WHERE po.po=$1`, [req.params.po]);
     res.json(r.rows[0] || {});
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.657 (Ben 04-Nov-26): portal PO > SHIPMENT tab. Reads the PO's shipment directly, whatever its status, so a complete PO still shows
 // its shipment (PO-56UKXR1's "Open shipment" went to an empty Shipment Plan, which only lists open shipments). Returns the shipment, the
@@ -26930,7 +26939,7 @@ async function portalPoShipment(req, po) {
 app.get('/api/portal/po-shipment/:po', portalAuth, async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' }); res.set('Cache-Control', 'no-store').json(await portalPoShipment(req, po)); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.662 (Ben 04-Nov-26: "QR code on each pallet for identification in HORIZON of what shipment and pallet number it is"): one QR per pallet,
 // the HORIZON link #/supply/purchase-orders/shipments/<ref>/pallet/<n>-of-<N> (scanning it in HORIZON opens the shipment and says which pallet).
@@ -26945,7 +26954,7 @@ app.get('/api/portal/po-shipment/:po/pallet-qr', portalAuth, async (req, res) =>
     const qrs = []; for (let n = 1; n <= N; n++) { const url = base + '/#/supply/purchase-orders/shipments/' + encodeURIComponent(d.shipment.shipment_ref) + '/pallet/' + n + '-of-' + N;
       const m = qrMatrix(url, 'M'); qrs.push({ n, url, size: m.size, rows: m.modules.map(r => r.map(b => b ? '1' : '0').join('')) }); }
     res.set('Cache-Control', 'no-store').json({ ref: d.shipment.shipment_ref, total: N, qrs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // The master supplier confirms the shipment's pallet count (blank clears it). Logged on the master PO's timeline.
 app.post('/api/portal/po-shipment/:po/pallets', portalAuth, async (req, res) => {
@@ -26960,7 +26969,7 @@ app.post('/api/portal/po-shipment/:po/pallets', portalAuth, async (req, res) => 
     logPoChange(d.shipment.master_po || po, 'Pallets confirmed', 'Shipment ' + d.shipment.shipment_ref + ': ' + (n == null ? 'cleared' : n + ' pallets') + ' (supplier portal)', String(who));
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json(await portalPoShipment(req, po));
-  } catch (e) { if (/pallets_confirmed/.test(String(e.message))) return res.status(503).json({ error: 'Pallet confirmation needs migration 413' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/pallets_confirmed/.test(String(e.message))) return res.status(503).json({ error: 'Pallet confirmation needs migration 413' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Production detail (a prod_no × supplier): SKU × total qty, the POs, and assigned deposits.
 app.get('/api/supply/production-detail/:prod', async (req, res) => {
@@ -26987,7 +26996,7 @@ app.get('/api/supply/production-detail/:prod', async (req, res) => {
         WHERE pd.prod_no=$1 AND coalesce(pd.supplier_name,'')=$2 ORDER BY pd.deposit_ref`, [prod, supplier]),
     ]);
     res.json({ skus: skus.rows, pos: pos.rows, deposits: deps.rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Assign / unassign a deposit to a production (prod_no × supplier).
 app.post('/api/supply/production-deposit', async (req, res) => {
@@ -27001,7 +27010,7 @@ app.post('/api/supply/production-deposit', async (req, res) => {
         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [b.prod_no, sup, b.deposit_ref]);
     }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a deposit FOR a production (prod_no × supplier) and assign it. Reference auto-formats as
 // {prod_no}-{supplier 2-digit code}-{n}; amount defaults to 30% of the production value LESS deposits
@@ -27030,7 +27039,7 @@ app.post('/api/supply/production-deposit-create', async (req, res) => {
     await pool.query(`INSERT INTO planner.production_deposits (prod_no, supplier_name, deposit_ref)
       VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [prod, sup, ref]);
     res.json({ ok: true, reference: ref, amount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Record the actual paid currency + amount for a payment (date × supplier) — alt to the USD legs.
 app.post('/api/supply/payment-fx', async (req, res) => {
@@ -27069,7 +27078,7 @@ app.post('/api/supply/payment-fx', async (req, res) => {
           VALUES ($1,$2,'',$3,$4,$5::date,now(),'failed',$6,$7)`, [runKey, b.supplier, newAmt, newCcy, b.run_date, String(e.message || e).slice(0, 300), authUser(req) || 'system']); } catch (e2) {} }
     }
     res.json({ ok: true, confirmed: nowConfirmed, emailPreview });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Shipment detail — the POs aboard a shipment (master first).
 app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
@@ -27084,7 +27093,7 @@ app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
       WHERE po.shipment_ref=$1 OR po.po = coalesce((SELECT master_po FROM planner.shipments WHERE shipment_ref=$1), $1)
       ORDER BY is_master DESC, po.po`, [req.params.ref]);   // v27.869 (Ben): also include the master PO via shipments.master_po — a master's own shipment_ref may be NULL (or, after a rename, differ from the shipment ref), so filtering on shipment_ref alone dropped it from "POs aboard"
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Shipment edit (upsert) — carrier/ref/master/status/notes + the date OVERRIDES that win over the
 // POs aboard. Row may not exist yet (a shipment_ref freshly typed onto a PO), so insert-on-conflict.
@@ -27176,7 +27185,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     // Record of change on the SHIPMENT's own timeline (field edits: carrier / status / mode / freight / dates).
     try { if (_oldShipFull) await logShipFieldChanges(ref, _oldShipFull, req.body, authUser(req)); } catch (e) { /* best-effort */ }
     res.json({ ok: true, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create a new shipment (header only; POs are assigned separately). master_po defaults to the ref.
 app.post('/api/supply/shipment-create', async (req, res) => {
@@ -27188,7 +27197,7 @@ app.post('/api/supply/shipment-create', async (req, res) => {
       [ref, (req.body.master_po || ref), req.body.carrier || null, req.body.carrier_ref || null]);
     if (ins.rowCount) await noteShipmentCreated(pool, ref, authUser(req));
     res.json({ ok: true, shipment_ref: ref });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete a now-empty SELF-shipment (its master IS itself) left orphaned when its only PO was reassigned away.
 // Guarded: only when no POs reference it AND it has no supplier charges (protects money/claim data). Notes are removed with it.
@@ -27225,7 +27234,7 @@ app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
     // the PO's PRIOR shipment may now be an empty self-shipment → clean it up
     if (prior) await pruneEmptySelfShipment(pool, prior);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Delete a shipment. Unassigns every PO aboard (clears their shipment_ref), removes its timeline notes,
 // then deletes the shipment row. POs themselves are left intact.
@@ -27239,7 +27248,7 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
     const r = await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount, unassigned_pos: unassigned.rowCount });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // SELF-SHIPMENT mode gate (PO ▸ SHIPMENTS). Picking a mode turns the PO into its own shipment (a planner.shipments
@@ -27281,7 +27290,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     const ship = await poShipObj(po);   // includes the FINAL calculated dates so the client can fill them silently
     const row1 = (await poRowsQ(' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
     res.json({ ok: true, mode, is_shipment: true, manufacturing, ship, row: row1 });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 
@@ -27380,7 +27389,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
         trail_cover: trailCover, days_since: daysSince, slow_moving: slowMoving, rec_clearance: recClearance };
     });
     res.json({ rows, country, channel, month, isUS, forecast_run: run });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 app.post('/api/scenario/prime-day', async (req, res) => {
@@ -27437,7 +27446,7 @@ app.post('/api/scenario/prime-day', async (req, res) => {
       ORDER BY total DESC, inb_fba DESC`, [...vals, awdApplies, skus.length > 0, by]);
     const tot = rows.reduce((a, r) => { ['fba', 'three_pl', 'awd', 'total', 'inb_fba', ...FBA_COS.map(c => 'inb_' + c)].forEach(k => { a[k] = (a[k] || 0) + r[k]; }); return a; }, { fba: 0, three_pl: 0, awd: 0, total: 0, inb_fba: 0 });
     res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies, inb_countries: country ? [country] : FBA_COS, by });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Buy-plan extra stock pools per SKU: AWD (US upstream, inventory_us_awd) + NonGRS on-hand (UK/US). The buy
@@ -27493,7 +27502,7 @@ app.get('/api/inventory/stock-availability', async (req, res) => {
     const at = await ksAttrs(Object.keys(by));
     const rows = Object.values(by).map(x => { const a = at[x.sku] || {}; return Object.assign(x, { n: a.n || '', c: a.c || '', s: a.s || '', st: a.st || '' }); });
     res.set('Cache-Control', 'no-store').json({ rows, at: new Date().toISOString() });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Settings: GBP per unit of each currency (locked monthly, not live) + VAT divisors. EU divisor has no default: Retail / margin stay blank for
 // EU until it is set (a business decision, Kathryn's open item).
@@ -27506,7 +27515,7 @@ app.get('/api/inventory/stock-on-order', async (req, res) => {
       return { sku: r.sku, n: a.n || '', c: a.c || '', s: a.s || '', st: a.st || '', supplier: r.supplier, po: r.po, mkt: mk.toUpperCase(), dest: r.wh.split('_')[1].toUpperCase(),
         status: r.status, intake: r.intake, qty: r.qty, rrp: a[mk] != null ? a[mk] : null, cost: r.line_cost != null ? r.line_cost : r.sku_cost, cost_src: r.line_cost != null ? 'po' : (r.sku_cost != null ? 'product' : null), ccy: r.ccy }; });
     res.set('Cache-Control', 'no-store').json({ rows, settings: await ksSettings() });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/inventory/stock-on-order/settings', async (req, res) => {
   try { const b = req.body || {}, cur = await ksSettings(), out = Object.assign({}, cur);
@@ -27517,7 +27526,7 @@ app.post('/api/inventory/stock-on-order/settings', async (req, res) => {
     out.updated_by = authUser(req) || null; out.updated_at = new Date().toISOString();
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('stock_on_order_settings', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(out)]);
     res.json({ ok: true, settings: out });
-  } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Read LIVE Fulfil's currency rates (read only) to prefill the Settings panel; nothing is saved until the user saves. Fulfil's rate is
 // units of the currency per £1 (company currency GBP), so GBP per unit = 1 / rate.
@@ -27540,7 +27549,7 @@ app.get('/api/buy-extra-stock', async (req, res) => {
     const stock = {};
     rows.forEach(r => { if (r.awd || r.nuk || r.nus) stock[r.sku] = { awd: r.awd, nuk: r.nuk, nus: r.nus }; });
     res.json({ stock, has_nongrs: cols.length === 2 });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // B2B Allocation — per requested SKU: available stock in the market, recent velocity (cover),
@@ -27605,7 +27614,7 @@ app.post('/api/scenario/b2b', async (req, res) => {
     const held = await b2bHeld(skus, market, null);   // v28.590: units held by approved B2B requests, and asked for by open ones
     rows.forEach(r => Object.assign(r, held[String(r.sku).toUpperCase()] || { held: 0, held_refs: [], pending: 0, pending_refs: [] }));
     res.json({ market: market.toUpperCase(), date, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Shared B2B analyses (migration 184) — "Save & share" a run so the team sees recent analyses by others.
@@ -27616,7 +27625,7 @@ app.get('/api/scenario/b2b/recent', async (req, res) => {
         coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') created_at
       FROM planner.b2b_analysis ORDER BY created_at DESC LIMIT 20`)).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/scenario/b2b/save', async (req, res) => {
   try {
@@ -27625,7 +27634,7 @@ app.post('/api/scenario/b2b/save', async (req, res) => {
         VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6) RETURNING id`,
       [String(b.client || ''), String(b.market || ''), b.date || null, JSON.stringify(b.lines), JSON.stringify(b.result || null), authUser(req) || ''])).rows[0];
     res.json({ ok: true, id: r.id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/scenario/b2b/open/:id', async (req, res) => {
   try {
@@ -27634,7 +27643,7 @@ app.get('/api/scenario/b2b/open/:id', async (req, res) => {
       FROM planner.b2b_analysis WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     res.set('Cache-Control', 'no-store').json({ ok: true, ...r });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.585 (Ben 29-Oct-26): B2B allocation REQUESTS (migration 402). Submitted from SCENARIO ▸ B2B Allocation with the same inputs
 // as the analysis (client, market, required-by date, SKU lines) plus notes. One email with the full analysis to the notify list
@@ -27837,13 +27846,13 @@ app.get('/api/scenario/b2b/requests', async (req, res) => {
       open: rows.filter(r => r.status === 'open'), closed: rows.filter(r => r.status !== 'open') };
     if (out.is_admin) out.settings = { notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers, reserve: await b2bReserveRules(), chase_hours: await b2bChaseHours() };
     res.set('Cache-Control', 'no-store').json(out);
-  } catch (e) { if (e && e.code === '42P01') return res.json({ open: [], closed: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e && e.code === '42P01') return res.json({ open: [], closed: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/scenario/b2b/requests/:ref', async (req, res) => {
   try { const r = await b2bReqGet(req.params.ref); if (!r) return res.status(404).json({ error: 'request not found' });
     const an = (await pool.query(`SELECT kind, summary, rows, coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') created_at FROM planner.b2b_request_analyses WHERE request_id=$1 ORDER BY created_at, id`, [r.id])).rows;
     res.set('Cache-Control', 'no-store').json({ request: r, analyses: an, whatsapp: b2bReqWhatsApp(r, an[an.length - 1]), link: b2bReqLink(r.ref) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/scenario/b2b/requests', async (req, res) => {
   try { const { email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in to submit a request' });
@@ -27861,7 +27870,7 @@ app.post('/api/scenario/b2b/requests', async (req, res) => {
     if (notify.length) { try { await sendResendEmail({ to: notify, subject: 'B2B request ' + ref + ': ' + (r.client || 'no client') + ', ' + market + ', ' + b2bN(s.requested) + ' units, required by ' + b2bFd(date),
       html: b2bReqEmailHtml(r, a, 'New B2B allocation request'), kind: 'b2b-request', ref, by: email }); emailed = !!process.env.RESEND_API_KEY; } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); } }
     res.json({ ok: true, ref, link: b2bReqLink(ref), whatsapp: b2bReqWhatsApp(r, a), notified: emailed ? notify : [], summary: s });
-  } catch (e) { if (e && e.code === '42P01') return res.status(503).json({ error: 'B2B requests are not set up on this server yet (migration 402).' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e && e.code === '42P01') return res.status(503).json({ error: 'B2B requests are not set up on this server yet (migration 402).' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.592: analyse one alternative SKU against a request's market and date (decision panel "Offer alternative"); read only
 app.post('/api/scenario/b2b/requests/:ref/analyse-sku', async (req, res) => {
@@ -27872,7 +27881,7 @@ app.post('/api/scenario/b2b/requests/:ref/analyse-sku', async (req, res) => {
     const a = await b2bReqAnalyse([{ sku, qty }], r.market, r.required_by, r.id), row = a.rows[0];
     if (!row || row.found === false) return res.status(404).json({ error: sku + ' is not in PRODUCT.' });
     res.json({ ok: true, row, summary: a.summary });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!email) return res.status(401).json({ error: 'sign in first' });
@@ -27990,7 +27999,7 @@ app.post('/api/scenario/b2b/requests/:ref/:act', async (req, res) => {
     try { if (to.length) await sendResendEmail({ to, subject: 'B2B request ' + r.ref + ' ' + stTxt + ': ' + (r.client || 'no client') + ', ' + r.market + (part ? ', ' + b2bN(approvedUnits) + ' of ' + b2bN(reqUnits) + ' units' : ''),
       html: b2bReqEmailHtml(r2, a, 'B2B request ' + stTxt, '<p style="font-size:14px;margin:0 0 12px"><b>' + word + '</b> by ' + b2bEsc(email) + (part ? ' (' + b2bN(approvedUnits) + ' of ' + b2bN(reqUnits) + ' units)' : '') + (why ? ': ' + b2bEsc(why) : '') + '</p>'), kind: 'b2b-request', ref: r.ref, by: email }); } catch (e) { console.warn('[b2b-request] email ' + (e && e.message)); }
     res.json({ ok: true, status: st, todos, notified: process.env.RESEND_API_KEY ? to : [] });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/scenario/b2b/request-settings', async (req, res) => {
   try { const { me, email } = await b2bReqWho(req); if (!(me.is_admin || me.live === false)) return res.status(403).json({ error: 'admin only' });
@@ -28004,7 +28013,7 @@ app.post('/api/scenario/b2b/request-settings', async (req, res) => {
     if (b.chase_hours !== undefined) { const h = Number(b.chase_hours); if (!Number.isFinite(h) || h < 1 || h > 720) return res.status(400).json({ error: 'Chase after must be 1 to 720 hours.' });
       await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('b2b_chase_hours',$1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(Math.round(h))]); }
     res.json({ ok: true, notify: await b2bReqList('b2b_request_notify', B2B_REQ_NOTIFY_DEFAULT), approvers: await b2bReqList('b2b_request_approvers', B2B_REQ_APPROVERS_DEFAULT), reserve: await b2bReserveRules(), chase_hours: await b2bChaseHours(), by: email });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.593 (Kathryn's improvement 11): chaser for open requests. n8n calls POST /api/cron/b2b-chase (x-webhook-secret = N8N_WEBHOOK_SECRET),
 // e.g. hourly. Requests open longer than b2b_chase_hours (Settings, default 24) and not chased in the last 20 hours go into ONE digest
@@ -28030,12 +28039,12 @@ async function b2bChase(dry) {
 }
 app.post('/api/cron/b2b-chase', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(Object.assign({ ok: true }, await b2bChase(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await b2bChase(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // settings USD→GBP rate (app_settings.usd_gbp_rate; USD per GBP) for the B2B air-rush £ bracket
 app.get('/api/scenario/fx', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, usd_gbp: await gbpRate() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // all-SKU search for the B2B SKU picker (not supplier-scoped) — sku code or name
 app.get('/api/scenario/b2b/sku-search', async (req, res) => {
@@ -28046,7 +28055,7 @@ app.get('/api/scenario/b2b/sku-search', async (req, res) => {
         AND (sku ILIKE '%'||$1||'%' OR product_name ILIKE '%'||$1||'%')
       ORDER BY (sku ILIKE $1||'%') DESC, sku LIMIT 40`, [q])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // (Removed dead /api/scenario/fin-model GET/POST/import — old FY×category×quarter model on
@@ -28056,7 +28065,7 @@ app.get('/api/scenario/b2b/sku-search', async (req, res) => {
 // Financial Forecast scenario overlays (exec-summary-style view): growth % + price % per channel × country.
 app.get('/api/scenario/fin-overlay', async (req, res) => {
   try { res.json((await pool.query(`SELECT channel, country, coalesce(subcategory,'') subcategory, coalesce(period,'') period, growth_pct, price_pct FROM planner.scenario_fin_overlay`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/scenario/fin-overlay', async (req, res) => {
   const b = req.body || {};
@@ -28069,7 +28078,7 @@ app.post('/api/scenario/fin-overlay', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6, now()) ON CONFLICT (channel, country, subcategory, period) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
       [b.channel, b.country, sub, period, num(b.growth_pct), num(b.price_pct)]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // PO STOCK PRIORITY — for a given PO, how critical is each SKU's quantity, vs stock-on-hand + OTHER inbound
@@ -28116,7 +28125,7 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
     });
     res.json({ po: meta.po, warehouse: meta.wh, supplier_name: meta.supplier_name, status: meta.status,
       landing: meta.landing, cover_weeks: PO_STOCK_COVER_WEEKS, rows: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Auto Forecast — a 12-month buy plan by subcategory × primary supplier, and the resulting
@@ -28427,7 +28436,7 @@ async function computeAutoForecastFromFeed(feed, markets, includeGap=true){
 }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Option B: client posts the buy plan's per-subcat×market×arrival-month buys; server phases into cash.
 app.post('/api/scenario/auto-forecast', async (req, res) => {
@@ -28435,7 +28444,7 @@ app.post('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (b.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(b.market||'uk').toLowerCase()];
   const feed = Array.isArray(b.buyFeed) ? b.buyFeed : [];
   const includeGap = b.includeGap!==false;   // default on
-  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecastFromFeed(feed, markets, includeGap)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecastFromFeed(feed, markets, includeGap)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
 // CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).
@@ -28467,7 +28476,7 @@ app.post('/api/auto-forecast/email', async (req, res) => {
     const r = await sendResendEmail({ to: emails, subject, html, kind: 'auto-forecast', by: authUser(req),
       attachments: [{ filename: 'auto_forecast_buy_plan.csv', content: Buffer.from(csv).toString('base64') }] });
     res.json({ ok: true, recipients: emails, sent: r.sandbox ? 0 : emails.length, sandbox: !!r.sandbox });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Slow Moving — per SKU × warehouse stock health. Returns the raw metrics (on-hand, trailing velocity,
@@ -28527,7 +28536,7 @@ app.get('/api/scenario/slow-moving', async (req, res) => {
         value: Math.round(r.on_hand * Number(r.unit_cost)) };
     });
     res.json({ rows: out, vel_weeks: VEL_WEEKS });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Markdown & EOS plan — at end of season, which stock won't clear, and what to do with it. Per SKU × market:
@@ -28600,7 +28609,7 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
     }).filter(r => r.residual > 0 || r.status === 'clear');
     out.sort((a, b) => (b.residual_cost - a.residual_cost) || (b.residual - a.residual));
     res.json({ rows: out, season_end: endISO, wks_to_eos: Math.round(wksToEos), vel_weeks: VEL_WEEKS, basis });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.487 (Ben 26-Oct-26): DEMAND ▸ Inputs ▸ Open to buy. v28.547 (Ben 28-Oct-26, WSSI phase 2 from Kathryn's template): "Proposed" buys =
@@ -28956,7 +28965,7 @@ app.get('/api/demand/wssi', async (req, res) => {
     _wssiCache.set(fy, { at: Date.now(), data });
     hzWaitUntil(wssiSnapshotCurrent(data, now.toISOString().slice(0, 7)));   // v28.548: month-end forecast snapshot (background). v28.617 (slow pages, 02-Nov-26): kept alive with hzWaitUntil; it was frozen with the instance mid-transaction (live: INSERT / DELETE wssi_fc_snapshot rows spanning 10 s to 20 min freezes, holding a pooled connection and the month's row locks)
     res.json(data);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.492 (SUG-0040, Zera / Ben 26-Oct-26): the open Fulfil sales orders behind a backorder (negative available stock) in
@@ -28997,7 +29006,7 @@ app.post('/api/inventory/backorder-orders', async (req, res) => {
     const data = { mkt, pool: out, lines: n, at: new Date().toISOString() };
     _boCache.set(key, { at: Date.now(), data }); if (_boCache.size > 50) _boCache.delete(_boCache.keys().next().value);
     res.set('Cache-Control', 'no-store').json(data);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Key Stock Arrivals — what is landing soon and how desperately it's needed. For every open PO with an
@@ -29067,7 +29076,7 @@ app.get('/api/scenario/key-arrivals', async (req, res) => {
         lines: g.lines };
     }).sort((a, b) => a.arrival < b.arrival ? -1 : a.arrival > b.arrival ? 1 : 0);
     res.json({ arrivals, fc_weeks: FC_WEEKS });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── DEMAND ▸ Revenue: price changes + revenue-growth targets (migrations 168/169) ──────────────────────────
@@ -29087,11 +29096,11 @@ app.post('/api/price-changes', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.price_changes (country, channel, subcategory, effective_month, uplift_pct, note, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.country, b.channel || null, b.subcategory || null, b.effective_month, Number(b.uplift_pct), b.note || null, authUser(req) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/price-changes/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.price_changes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // BUY ▸ Complex Rules — cover-target override rules for the buy engine. GET returns all (enabled + disabled,
 // newest first); POST upserts one rule; /:id/delete removes it. Read-only fields are the scope/window/coverage.
@@ -29133,11 +29142,11 @@ app.post('/api/buy-complex-rules', async (req, res) => {
       [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
        ct, cm, rf, rt, rmo, rsl, b.enabled !== false, authUser(req) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/buy-complex-rules/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.buy_complex_rules WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Filter Rules engine (mig 249) — reusable saveable SKU-selector filters (jsonb-first). See
 //    Claude Analyses/SPEC_FILTER_RULES_ENGINE.md. Mirrors buy-complex-rules; the whole rule body is `definition`.
@@ -29161,11 +29170,11 @@ app.post('/api/filter-rules', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.filter_rules (name, enabled, definition) VALUES ($1,$2,$3::jsonb) RETURNING id`,
       [name, b.enabled !== false, JSON.stringify(def)]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/filter-rules/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.filter_rules WHERE id=$1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).
 app.get('/api/demand-revenue-targets', async (_req, res) => {
@@ -29197,7 +29206,7 @@ app.post('/api/demand-revenue-targets', async (req, res) => {
       DO UPDATE SET target_type=excluded.target_type, target_pct=excluded.target_pct, target_value=excluded.target_value, target_q1_pct=excluded.target_q1_pct, target_q2_pct=excluded.target_q2_pct, target_q3_pct=excluded.target_q3_pct, target_q4_pct=excluded.target_q4_pct, updated_by=excluded.updated_by, updated_at=now()`,
       [b.country, b.channel, b.fy, type, pct, val, q1, q2, q3, q4, authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-subcategory month/quarter/half revenue growth-% targets (migration 175). subcategory='' = market total.
 app.get('/api/demand-revenue-targets/periods', async (req, res) => {
@@ -29225,7 +29234,7 @@ app.post('/api/demand-revenue-targets/periods', async (req, res) => {
       DO UPDATE SET growth_pct=excluded.growth_pct, target_gbp=excluded.target_gbp, updated_by=excluded.updated_by, updated_at=now()`,
       [b.country, b.channel, b.fy, sub, b.level, b.idx, g, tg, authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bulk upsert/clear of per-subcategory period targets (used by the Summary ▸ Add targets CSV import).
 app.post('/api/demand-revenue-targets/periods/bulk', async (req, res) => {
@@ -29244,7 +29253,7 @@ app.post('/api/demand-revenue-targets/periods/bulk', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, saved });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Sell-through targets (DEMAND ▸ Sell-through targets) — target % by category × market. GET returns the in-scope
@@ -29406,7 +29415,7 @@ app.get('/api/demand-actions', async (req, res) => {
         else if (s.status !== 'snoozed') o.status = s.status; }
       return o; });
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Lifecycle: dismiss / snooze / done a demand action (by stable key); restore (status:'open') deletes it.
 app.post('/api/demand-actions/state', async (req, res) => {
@@ -29421,7 +29430,7 @@ app.post('/api/demand-actions/state', async (req, res) => {
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
       [key, b.status || 'dismissed', days, b.note || null, indef]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Read the lifecycle state map (for client-side-computed demand actions to apply their own
 // done/snooze/dismiss status). Snoozes past their date read back as 'open'.
@@ -29435,7 +29444,7 @@ app.get('/api/demand-actions/state', async (req, res) => {
         if (status !== 'open') state[s.action_key] = { status, snooze_until };
       });
     res.json({ today, state });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Forecast cell notes (DEMAND ▸ Plan grid) — per-cell notes keyed level|item|country|channel|month.
@@ -29455,7 +29464,7 @@ app.get('/api/forecast/replacements', async (req, res) => {
       ORDER BY p.sku`)).rows;
     rows.forEach(r => { r.has_override = (r.source_sku != null || r.ignore || r.note != null); r.effective = r.ignore ? null : ((r.source_sku && r.source_sku.trim()) || r.product_rep || null); });
     res.set('Cache-Control', 'no-store').json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/forecast/replacements', async (req, res) => {
   const b = req.body || {}; const newSku = String(b.new_sku || '').trim(); if (!newSku) return res.status(400).json({ error: 'new_sku required' });
@@ -29466,11 +29475,11 @@ app.post('/api/forecast/replacements', async (req, res) => {
              ON CONFLICT (new_sku) DO UPDATE SET source_sku=excluded.source_sku, ignore=excluded.ignore, note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`,
       [newSku, src, ign, note, me.email || 'sandbox']); }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/forecast/replacements/:sku/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.forecast_inheritance WHERE new_sku=$1`, [String(req.params.sku)]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 app.get('/api/forecast/notes', async (req, res) => {
@@ -29482,7 +29491,7 @@ app.get('/api/forecast/notes', async (req, res) => {
       FROM planner.forecast_notes WHERE upper(country)=$1 AND upper(channel)=$2 ORDER BY created_at`,
       [country, channel])).rows;
     res.json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/forecast/notes', async (req, res) => {
   const b = req.body || {}, level = (b.level || 'sku').trim(), item = (b.item || '').trim();
@@ -29494,7 +29503,7 @@ app.post('/api/forecast/notes', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
       [level, item, country, channel, month, note, who || null])).rows[0];
     res.json({ ok: true, id: r.id, created_at: r.created_at, created_by: who || '' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/forecast/note/:id', async (req, res) => {
   const id = req.params.id, b = req.body || {};
@@ -29505,7 +29514,7 @@ app.post('/api/forecast/note/:id', async (req, res) => {
     if (!note) return res.status(400).json({ error: 'note required (or delete:true)' });
     await pool.query(`UPDATE planner.forecast_notes SET note=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, note, who || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── DEMAND plan "R" record-of-change (forecast_changes) ──────────────────────────────────────────
@@ -29516,7 +29525,7 @@ app.get('/api/forecast/changes/keys', async (req, res) => {
     const rows = (await pool.query(`SELECT DISTINCT level, item, month FROM planner.forecast_changes
       WHERE upper(country)=$1 AND upper(channel)=$2`, [country, channel])).rows;
     res.json({ keys: rows.map(r => r.level + '|' + r.item + '|' + country + '|' + channel + '|' + r.month) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Full history for ONE cell (descending), loaded on click.
 app.get('/api/forecast/changes', async (req, res) => {
@@ -29529,7 +29538,7 @@ app.get('/api/forecast/changes', async (req, res) => {
       WHERE upper(country)=$1 AND upper(channel)=$2 AND level=$3 AND item=$4 AND month=$5
       ORDER BY created_at DESC, id DESC`, [country, channel, level, item, month])).rows;
     res.json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Record a change. Actor from the auth layer (falls back to body.actor for local/sandbox).
 app.post('/api/forecast/change', async (req, res) => {
@@ -29543,7 +29552,7 @@ app.post('/api/forecast/change', async (req, res) => {
     await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [level, item, country, channel, month, who, action, num(b.from), num(b.to)]);
     res.json({ ok: true, actor: who || '' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bulk-record changes (a smoothing sweep / target-rec apply touches many cells at once).
 app.post('/api/forecast/changes/bulk', async (req, res) => {
@@ -29569,7 +29578,7 @@ app.post('/api/forecast/changes/bulk', async (req, res) => {
       saved += slice.length;
     }
     res.json({ ok: true, saved, actor: who || '' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
@@ -29609,7 +29618,7 @@ app.get('/api/trading-calendar', async (req, res) => {
     }
     const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`)).rows.map(c => c.category);
     res.json({ events: rows, categories: cats, campaigns, intake_days: CAMPAIGN_INTAKE_DAYS });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // New campaign: a Draft, UK, DTC, launching on the 1st of next month until edited.
 app.post('/api/trading-calendar/campaign', async (req, res) => {   // declared before /:id so it isn't caught by it
@@ -29619,7 +29628,7 @@ app.post('/api/trading-calendar/campaign', async (req, res) => {   // declared b
       VALUES (coalesce($1::date, (date_trunc('month', current_date) + interval '1 month')::date), $2, 'ALL', 'Marketing', $3, 'DTC', 'draft', $4, now()) RETURNING id`,
       [b.event_date || null, b.market || 'UK', String(b.title || 'New campaign').slice(0, 200), authUser(req) || null]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Replace a campaign's SKUs: body {skus:[{sku, tier, uplift_low?, uplift_high?}]}. Unknown SKUs are refused; sku_list follows.
 app.post('/api/trading-calendar/:id/skus', async (req, res) => {
@@ -29648,7 +29657,7 @@ app.post('/api/trading-calendar/:id/skus', async (req, res) => {
     res.json({ ok: true, count: items.length });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
-    if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message });
+    if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: clientErr(e) });
   } finally { client.release(); }
 });
 // Campaign intake deadlines for DEMAND > Analysis > Intake deadlines: every CONFIRMED campaign SKU x (market x channel) location
@@ -29756,7 +29765,7 @@ async function campaignReadiness(opts = {}) {
 app.get('/api/trading-calendar/readiness', async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : null, id = parseInt(req.query.id, 10) || null;
   try { res.set('Cache-Control', 'no-store').json(await campaignReadiness({ month, id })); }
-  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.597 (Ben 31-Oct-26, Kathryn's spec phase 3): campaign PRIORITY for Zera. One row per open inbound leg (PO or transfer) feeding a
 // campaign SKU at a campaign location, plus one "no PO" row for each Red / Amber campaign line with nothing inbound. Confirmed campaigns
@@ -29804,11 +29813,11 @@ app.get('/api/campaigns/priority', async (req, res) => {
     const me = await permsFor(req).catch(() => ({}));
     if (me && (me.is_admin || me.live === false)) out.settings = { alert_emails: await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT) };
     res.set('Cache-Control', 'no-store').json(out); }
-  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_campMissing(e)) return res.status(503).json({ error: 'Campaigns need migration 403' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/campaigns/alert-settings', async (req, res) => {   // v28.608: DEMAND > Config > Campaign alerts
   try { res.set('Cache-Control', 'no-store').json({ alert_emails: await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/campaigns/priority/settings', async (req, res) => {   // who gets the ETA-past-intake alert (v28.608: anyone signed in, @dockandbay.com addresses only)
   try { const me = await permsFor(req); if (!(me && (me.email || me.live === false))) return res.status(403).json({ error: 'Sign in first' });
@@ -29818,7 +29827,7 @@ app.post('/api/campaigns/priority/settings', async (req, res) => {   // who gets
     await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('campaign_alert_emails',$1,$2,now())
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [list.join(', '), me.email || authUser(req) || null]);
     res.json({ ok: true, alert_emails: list }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 async function campaignEtaAlert(dry) {
   const d = await campaignPriority({}), to = await b2bReqList('campaign_alert_emails', CAMP_ALERT_DEFAULT);
@@ -29840,7 +29849,7 @@ async function campaignEtaAlert(dry) {
 }
 app.post('/api/cron/campaign-eta', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(Object.assign({ ok: true }, await campaignEtaAlert(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(Object.assign({ ok: true }, await campaignEtaAlert(req.query.dry === '1'))); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // WORKFLOWS (v28.599, Ben 31-Oct-26): CONFIG ▸ Admin ▸ Workflows. A workflow = a saved copy of a TEMPLATE below
@@ -30049,7 +30058,7 @@ app.get('/api/workflows', async (req, res) => {
     const me = await permsFor(req).catch(() => ({}));
     res.set('Cache-Control', 'no-store').json({ can_edit: !!(me && (me.is_admin || me.live === false)), workflows: wfs.map(w => Object.assign(w, { config: wfCfg(w) })),
       templates: Object.entries(WF_TEMPLATES).map(([k, T]) => ({ key: k, name: T.name, area: T.area, when: T.when, then: T.then, fields: T.fields, dflt: T.dflt })) }); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/workflows/:id/items', async (req, res) => {   // ?state=waiting|applied|failed|skipped|dry|superseded|all
   try { const st = String(req.query.state || 'waiting'), lim = Math.min(500, parseInt(req.query.limit, 10) || 200);
@@ -30064,7 +30073,7 @@ app.get('/api/workflows/:id/items', async (req, res) => {   // ?state=waiting|ap
         UNION ALL SELECT po, fulfil_id::text, 2 FROM planner.fulfil_purchase_orders WHERE po = ANY($1) AND coalesce(state,'') NOT IN ('cancel','cancelled')) t ORDER BY po, pri`, [[...refs]]).catch(() => ({ rows: [] }))).rows.forEach(r => { fpo[r.po] = Number(r.external_id); });
     let fbase = null; try { const fc = fulfilConfigFor(await activeFulfilEnv()); if (fc.subdomain) fbase = 'https://' + fc.subdomain + '.fulfil.io/v2/erp/model/'; } catch (_) {}
     res.set('Cache-Control', 'no-store').json({ items: rows, runs, fulfil_po: fpo, fulfil_base: fbase }); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/workflows/:id', async (req, res) => {   // admin: name, enabled, mode, config (merged over the template defaults)
   try { const me = await wfAdmin(req, res); if (!me) return; const b = req.body || {};
@@ -30078,13 +30087,13 @@ app.post('/api/workflows/:id', async (req, res) => {   // admin: name, enabled, 
     const name = b.name ? String(b.name).trim().slice(0, 120) || wf.name : wf.name;
     await pool.query(`UPDATE planner.workflows SET name=$2, enabled=$3, mode=$4, config=$5, updated_by=$6, updated_at=now() WHERE id=$1`, [wf.id, name, enabled, mode, JSON.stringify(cfg), authUser(req) || null]);
     res.json({ ok: true }); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/workflows/:id/run', async (req, res) => {   // admin: Run now (body {dry:true} = test without writing)
   try { const me = await wfAdmin(req, res); if (!me) return;
     const wf = (await pool.query(`SELECT * FROM planner.workflows WHERE id=$1`, [req.params.id])).rows[0]; if (!wf) return res.status(404).json({ error: 'no such workflow' });
     res.json(await wfRun(wf, { trigger: 'manual', dry: !!(req.body && req.body.dry), by: authUser(req) || 'admin' })); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/workflows/items/decide', async (req, res) => {   // admin: {ids:[...], action:'approve'|'skip'}; approve applies now
   try { const me = await wfAdmin(req, res); if (!me) return; const b = req.body || {}, by = authUser(req) || 'admin';
@@ -30097,12 +30106,12 @@ app.post('/api/workflows/items/decide', async (req, res) => {   // admin: {ids:[
       results.push(await wfApplyItem({ template: it.template, name: it.wf_name }, it, by));
     }
     res.json({ ok: true, done: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results, ignored: ids.length - items.length }); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cron/workflows', async (req, res) => {   // n8n hourly; ?dry=1 lists only
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { res.json(await wfRunAll({ trigger: 'cron', dry: req.query.dry === '1' })); }
-  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (_wfMissing(e)) return res.status(503).json({ error: 'Workflows need migration 406' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};
@@ -30110,7 +30119,7 @@ app.post('/api/trading-calendar', async (req, res) => {     // create a row (bla
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [b.event_date || null, b.market || 'ALL', b.category || 'ALL', b.sku_list || null, b.event_type || null, b.title || null,
      (b.uplift_pct === '' || b.uplift_pct == null ? null : b.uplift_pct), b.notes || null]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/trading-calendar/import', async (req, res) => {   // declared before /:id so it isn't caught by it
   const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
@@ -30135,12 +30144,12 @@ app.post('/api/trading-calendar/import', async (req, res) => {   // declared bef
       [r.event_date || null, r.market || 'ALL', r.category || 'ALL', r.sku_list || null, r.event_type || null, r.title || null, r.uplift_pct, r.notes || null]);
     await client.query('COMMIT');
     res.json({ ok: true, imported: keep.length });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/trading-calendar/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.trading_calendar WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/trading-calendar/:id', (req, res) =>
   patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint', async (n) => {   // v28.589: audit trail (who / when)
@@ -30190,7 +30199,7 @@ app.post('/api/supply/sample/:id/send', async (req, res) => {
       [id, authUser(req) || null, '📨 New sample request ' + sr.ref + ' sent to ' + sr.supplier_name + ' by ' + who + '. Please review and accept.']);
     invalidateSupplyCaches('sample'); try { portalCacheMarkStale(sr.supplier_name); } catch (e) {}
     res.json({ ok: true, send_status: st });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
@@ -30223,7 +30232,7 @@ app.post('/api/supply/sample-create', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches('sample');   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
     res.json({ ok:true, id, ref });
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all lines (paste + inline edits)
@@ -30244,18 +30253,18 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
     await client.query('COMMIT');
     await logSampleLinesChanged(req.params.id, _oldLines, lines, authUser(req) || 'Dock & Bay', 'internal');   // detailed record-of-change + timeline note (skips no-op saves)
     res.json({ ok:true, count: lines.length });
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
     await logSampleChange(req.params.id, 'Confirmed sample request', null, authUser(req) || 'Dock & Bay');   // record of change
     await sampleTimelineNote(req.params.id, 'Confirmed the sample request', 'internal', authUser(req));   // shared timeline notification
-    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.sample_requests WHERE id=$1::bigint`, [req.params.id]); res.json({ ok:true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Email the "notify when shipped" stakeholders: tracking code, carrier + a direct link to the sample in HORIZON.
 async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient, by) {
@@ -30308,14 +30317,14 @@ app.post('/api/supply/sample-note', async (req, res) => {
     const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
     const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body, attachment_id)
     VALUES ($1::bigint,$2,$3,$4,$5) RETURNING id`, [sid, kind, email, String(b.body), Number(b.attachment_id) || null]);
-    res.json({ id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin-gated sample actions matching the portal-view body shapes ({id} in body) — used by the
 // admin "preview as supplier" (the real portal uses the /api/portal/sample-* equivalents).
 app.post('/api/supply/sample-accept', async (req, res) => {
   const id = req.body && req.body.id; if(!id) return res.status(400).json({ error: 'id required' });
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
   await maybeShippedNote(b.id, b, 'supplier', 'D&B');   // preview/admin acting as supplier → "D&B as <supplier>"
@@ -30326,22 +30335,22 @@ app.post('/api/supply/sample-charge', async (req, res) => {
     if(!s) return res.status(404).json({ error: 'sample not found' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']); res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/sample-attachment', async (req, res) => {   // admin/preview upload to a sample (body {id})
   const b = req.body || {}; if(!b.id || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'id and data_base64/storage_path required' });
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try { const s = (await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0]; if(!s) return res.status(404).json({ error: 'sample not found' });
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`,
       [s.ref, b.filename||'attachment', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/sample-attachment-remove', async (req, res) => {
   const id = req.body && req.body.att_id;
   try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='sample'`, [id]); res.json({ ok:true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/sample-note-read/:id', async (req, res) => {
   try { const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint`, [req.params.id]);
-    res.json({ ok:true, read }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, read }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── SUPPLIER CHARGES (samples + shipments) → Other Payment on accept ─────────────
@@ -30366,7 +30375,7 @@ app.post('/api/supply/sample/:id/ref', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches(['sample', 'deposit']);   // v28.167: scoped (sample ref + its Other Payments)
     res.json({ ok: true, ref: newRef, old_ref: oldRef });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Post a charge event onto the source's timeline (sample_notes for a sample, shipment_notes for a shipment). Best-effort.
@@ -30385,17 +30394,17 @@ app.post('/api/supply/charge-create', async (req, res) => {
     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [b.source_type, b.source_ref, b.supplier_name||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||null]);
     await chargeTimelineNote(pool, b.source_type, b.source_ref, `💰 Charge added — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, shortUser(authUser(req)) || b.created_by || null);
-    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/charge/:id/reject', async (req, res) => {
   try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='rejected' WHERE id=$1::bigint AND status='pending' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `🚫 Charge rejected — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
-    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/charge/:id/unreject', async (req, res) => {   // put a rejected charge back to pending so it can be accepted
   try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='pending' WHERE id=$1::bigint AND status='rejected' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `↺ Charge un-rejected (back to pending) — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
-    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.335 (Ben, spec 13-Oct-26): Accept + bill. A pending supplier charge (on a PO's shipment, or on a sample request) goes through the
 // same routing as Create sample bills: a PO in Fulfil -> Fulfil draft supplier invoice; a pre-Fulfil PO -> Xero 302 / 313; a sample -> Xero
@@ -30450,7 +30459,7 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
     await client.query('COMMIT');
     invalidateSupplyCaches('deposit');   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // ===================== v28.327 (Ben 13-Oct-26): Create sample bills (SUPPLY ▸ PAYMENTS ▸ Other Payments) =====================
@@ -30666,7 +30675,7 @@ function sbValidate(head, lines, auCodes) { const p = []; auCodes = auCodes || [
   return p; }
 
 app.get('/api/supply/sample-bills/accounts', async (req, res) => {   // v28.339: the form's Xero account list (mapping table)
-  try { const a = await sbAccounts(); const seen = new Set(); res.json({ ok: true, accounts: a.list.filter(x => { const k = x.org + '|' + x.code; if (seen.has(k)) return false; seen.add(k); return true; }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const a = await sbAccounts(); const seen = new Set(); res.json({ ok: true, accounts: a.list.filter(x => { const k = x.org + '|' + x.code; if (seen.has(k)) return false; seen.add(k); return true; }) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/sample-bills/parse', async (req, res) => {
   try { const b = req.body || {};
@@ -30693,7 +30702,7 @@ app.post('/api/supply/sample-bills/resolve', async (req, res) => {   // re-route
       if (!o.link_locked) { SB_DERIVED.forEach(k => { delete o[k]; }); delete o.fulfil_po_id; delete o.link_type; delete o.xero_org; delete o.xero_account; delete o.fulfil_company; delete o.fulfil_product; }
       return o; }));
     res.json({ ok: true, lines: out, docs: sbGroup(out.filter(l => l.link_type), String((req.body && req.body.ref_base) || 'REF')).map(d => ({ reference: d.reference, system: d.system, org: d.org, po: d.po, amount: d.amount, seqs: d.lines.map(l => l.seq), desc: sbDocDesc(d) })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/sample-bills/po-search', async (req, res) => {   // HORIZON POs (with their Fulfil link) for the line picker
   try { const q = String(req.query.q || '').trim(); if (q.length < 2) return res.json({ rows: [] });
@@ -30702,14 +30711,14 @@ app.get('/api/supply/sample-bills/po-search', async (req, res) => {   // HORIZON
                  (SELECT m.fulfil_id::text FROM planner.fulfil_purchase_orders m WHERE m.po=p.po AND m.fulfil_id IS NOT NULL LIMIT 1)) fulfil_id
       FROM planner.purchase_orders p WHERE p.po ILIKE $1 ORDER BY (p.po ILIKE $2) DESC, p.po DESC LIMIT 25`, ['%' + q.replace(/[%_\\]/g, '\\$&') + '%', q.replace(/[%_\\]/g, '\\$&') + '%'])).rows;
     res.json({ rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/sample-bills/sample-search', async (req, res) => {   // SR-n sample requests + product samples, for the optional sample reference
   try { const q = String(req.query.q || '').trim(); if (q.length < 1) return res.json({ rows: [] }); const pat = '%' + q.replace(/[%_\\]/g, '\\$&') + '%';
     const sr = (await pool.query(`SELECT ref, coalesce(array_to_string(purpose, ', '),'') purpose, coalesce(supplier_name,'') supplier FROM planner.sample_requests WHERE ref ILIKE $1 OR coalesce(supplier_name,'') ILIKE $1 ORDER BY id DESC LIMIT 15`, [pat]).catch(() => ({ rows: [] }))).rows.map(r => ({ ref: r.ref, kind: 'Sample request', note: [r.purpose, r.supplier].filter(Boolean).join(' · ') }));
     const ps = (await pool.query(`SELECT item_ref || ' v' || version ref, coalesce(short_code,'') code FROM planner.product_dev_samples WHERE item_ref ILIKE $1 OR coalesce(short_code,'') ILIKE $1 ORDER BY id DESC LIMIT 15`, [pat]).catch(() => ({ rows: [] }))).rows.map(r => ({ ref: r.ref, kind: 'Product sample', note: r.code }));
     res.json({ rows: sr.concat(ps) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Create: one Other payment per document (same reference); optionally push each document straight away.
 // v28.335: the create step is shared by Create sample bills and by billing a supplier charge (PO shipment / sample request).
@@ -30888,15 +30897,13 @@ const AI_ALLOWED_MODELS = new Set(['claude-sonnet-4-6', 'claude-opus-4-8', 'clau
 const AI_DEFAULT_MODEL = 'claude-sonnet-4-6';
 const AI_MAX_TOKENS_CAP = 8192;
 // v28.779 (security review finding 15): the AI proxy needs a named HORIZON user (not a header key or an anonymous gate pass) and has a daily cap
-// per person (AI_DAILY_CAP, default 400 calls). The count is per server instance, so it is a brake, not an exact quota.
-const _aiDay = new Map(), AI_DAILY_CAP = Number(process.env.AI_DAILY_CAP) || 400;
+// per person (AI_DAILY_CAP, default 400 calls a day; v28.780 counted in KV across instances).
+const AI_DAILY_CAP = Number(process.env.AI_DAILY_CAP) || 400;
 app.post('/api/ai', async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: { message: 'AI not configured (no API key set)' } });
   const who = String(authUser(req) || '').toLowerCase();
   if (GATE && !/@dockandbay\.com$/.test(who)) return res.status(403).json({ error: { message: 'AI in HORIZON is for signed-in Dock & Bay staff.' } });   // externals and header-key callers: no AI
-  { const day = new Date().toISOString().slice(0, 10), k = day + '|' + who, n = (_aiDay.get(k) || 0) + 1;
-    if (_aiDay.size > 5000) _aiDay.clear(); _aiDay.set(k, n);
-    if (who && n > AI_DAILY_CAP) return res.status(429).json({ error: { message: 'Daily AI limit reached for ' + who + ' (' + AI_DAILY_CAP + ' calls). It resets at midnight UTC.' } }); }
+  if (who && await hzRateLimited('ai:' + who, AI_DAILY_CAP, 86400000)) return res.status(429).json({ error: { message: 'Daily AI limit reached for ' + who + ' (' + AI_DAILY_CAP + ' calls a day).' } });   // v28.780: shared in KV (finding 22)
   try {
     const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? { ...req.body } : {};
     delete body.mcp_servers;
@@ -30928,7 +30935,7 @@ app.post('/api/ai', async (req, res) => {
 // Storage: planner.ai_conversations / ai_messages / ai_files (migration 307).
 // ════════════════════════════════════════════════════════════════════════════
 function aiUser(req) { const e = (req && req.__aiEmail) || ''; return e || 'sandbox@local'; }
-async function aiGate(req, res, next) { try { const me = await permsFor(req); req.__aiEmail = me.email || ''; req.me = me; next(); } catch (e) { res.status(500).json({ error: e.message }); } }
+async function aiGate(req, res, next) { try { const me = await permsFor(req); req.__aiEmail = me.email || ''; req.me = me; next(); } catch (e) { res.status(500).json({ error: clientErr(e) }); } }
 app.use('/api/assistant', aiGate);
 
 const AI_ASSIST_MODEL = 'claude-sonnet-4-6';
@@ -31672,7 +31679,7 @@ app.delete('/mcp', (req, res) => res.status(405).set('Allow', 'POST').end());
 app.get('/api/config/mcp-audit', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query(`SELECT to_char(at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, email, tool, args, ok, error, ms, rows FROM planner.mcp_audit ORDER BY id DESC LIMIT 200`);
     res.set('Cache-Control', 'no-store').json({ rows: r.rows }); }
-  catch (e) { if (/mcp_audit/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { if (/mcp_audit/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ════════════════════════════════════════════════════════════════════════════
 // v28.483 (Ben 25-Oct-26): CONNECT, the HORIZON side (Gmail add-on / Chrome side panel hub, see the Connect repo docs/contracts.md 1.1 to 1.4).
@@ -32002,20 +32009,20 @@ app.get('/api/assistant/connector', async (req, res) => {
     if (mcpOn() && e) { const r = (await pool.query(`SELECT max(last_used_at) lu, count(*) FILTER (WHERE kind='refresh' AND expires_at > now())::int n FROM planner.mcp_tokens WHERE lower(email)=lower($1)`, [e])).rows[0];
       connected = !!(r && r.n > 0); last_used = r && r.lu; }
     res.set('Cache-Control', 'no-store').json({ connected, last_used, available: mcpOn() });
-  } catch (e) { if (/mcp_tokens/.test(String(e && e.message))) return res.json({ connected: false, available: false }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/mcp_tokens/.test(String(e && e.message))) return res.json({ connected: false, available: false }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/assistant/conversations', async (req, res) => {
   try { const r = await pool.query(`SELECT c.id, c.title, c.created_at, c.updated_at,
       (SELECT count(*) FROM planner.ai_messages m WHERE m.conversation_id=c.id) msgs
       FROM planner.ai_conversations c WHERE c.user_email=$1 ORDER BY c.updated_at DESC LIMIT 300`, [aiUser(req)]);
     res.set('Cache-Control', 'no-store').json({ conversations: r.rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // create an empty conversation
 app.post('/api/assistant/conversations', async (req, res) => {
   try { const r = await pool.query(`INSERT INTO planner.ai_conversations (user_email, title) VALUES ($1,$2) RETURNING id, title, created_at, updated_at`, [aiUser(req), (req.body && req.body.title) ? String(req.body.title).slice(0, 120) : null]);
     res.json({ ok: true, conversation: r.rows[0] });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // read one conversation with its messages + file refs
 app.get('/api/assistant/conversations/:id', async (req, res) => {
@@ -32028,20 +32035,20 @@ app.get('/api/assistant/conversations/:id', async (req, res) => {
     try { const fb = (await pool.query(`SELECT message_id, rating, comment, reason FROM planner.ai_message_feedback WHERE conversation_id=$1 AND user_email=$2`, [c.id, aiUser(req)])).rows;
       const fbBy = {}; fb.forEach(f => { fbBy[f.message_id] = f; }); msgs.forEach(m => { const f = fbBy[m.id]; if (f) { m.rating = f.rating; m.feedback_comment = f.comment || ''; m.feedback_reason = f.reason || ''; } }); } catch (_) {}
     res.set('Cache-Control', 'no-store').json({ conversation: { id: c.id, title: c.title, created_at: c.created_at, updated_at: c.updated_at }, messages: msgs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // rename
 app.post('/api/assistant/conversations/:id', async (req, res) => {
   try { const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
     await pool.query(`UPDATE planner.ai_conversations SET title=$1, updated_at=now() WHERE id=$2`, [String((req.body && req.body.title) || '').slice(0, 120) || null, c.id]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // delete
 app.post('/api/assistant/conversations/:id/delete', async (req, res) => {
   try { const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
     await pool.query(`DELETE FROM planner.ai_conversations WHERE id=$1`, [c.id]); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // download a stored file (upload or returned), scoped to the caller
 const AI_FB_REASONS = { wrong_numbers: 'Wrong numbers / data', not_answered: 'Didn’t answer the question', missing_info: 'Missing information', unclear: 'Too long / unclear', other: 'Other' };
@@ -32066,7 +32073,7 @@ app.post('/api/assistant/messages/:id/feedback', async (req, res) => {
          reason = CASE WHEN excluded.rating = 1 THEN NULL ELSE coalesce(excluded.reason, planner.ai_message_feedback.reason) END, updated_at = now()`,
       [m.id, m.conversation_id, aiUser(req), rating, comment, q ? String(q.content || '').slice(0, 4000) : null, String(m.content || '').slice(0, 8000), AI_ASSIST_MODEL, reason]);
     res.json({ ok: true, rating });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin export for feedback analysis: GET /api/assistant/feedback[?format=csv&days=90&rating=-1]
 app.get('/api/assistant/feedback', async (req, res) => {
@@ -32089,7 +32096,7 @@ app.get('/api/assistant/feedback', async (req, res) => {
       FROM planner.ai_message_feedback WHERE created_at > now() - interval '12 weeks' GROUP BY 1 ORDER BY 1`)).rows;
     const reasons = {}; rows.filter(r => r.rating === 'down').forEach(r => { const k = r.reason || 'none'; reasons[k] = (reasons[k] || 0) + 1; });
     res.set('Cache-Control', 'no-store').json({ days, total: rows.length, up, down: rows.length - up, up_pct: rows.length ? Math.round(up / rows.length * 100) : null, weekly, reasons, reason_labels: AI_FB_REASONS, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/assistant/file/:id', async (req, res) => {
   try { const f = (await pool.query(`SELECT f.filename, f.mime, f.content FROM planner.ai_files f JOIN planner.ai_conversations c ON c.id=f.conversation_id WHERE f.id=$1 AND c.user_email=$2`, [req.params.id, aiUser(req)])).rows[0];
@@ -32162,7 +32169,7 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     await pool.query(`UPDATE planner.ai_conversations SET updated_at=now() WHERE id=$1`, [c.id]);
 
     res.json({ ok: true, title, user_message: { id: um.id, files: inFileRefs }, reply: { id: am.id, content: displayReply, files: outFiles } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -32328,7 +32335,7 @@ app.get('/api/kpi/in-stock', async (req, res) => {
     const tot = type => { const r = rows.filter(x => x.type === type); const s = k => r.reduce((a, x) => a + x[k], 0);
       return { channel: 'Total ' + type, type: 'TOTAL', skus: s('skus'), instock: s('instock'), pct: s('skus') ? Math.round(s('instock') / s('skus') * 100) : 0, a_skus: s('a_skus'), a_instock: s('a_instock'), a_pct: s('a_skus') ? Math.round(s('a_instock') / s('a_skus') * 100) : 0 }; };
     res.json({ ok: true, t3pl: T3, tfba: TF, group: grp || 'All', asof: _ohIS.resolved, rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // market × channel → inventory warehouse (3PL stock serves DTC+B2B; FBA stock serves FBA)
 const KPI_WH = [['US 3PL', 'US', 'us_3pl', '3PL'], ['UK 3PL', 'UK', 'uk_3pl', '3PL'], ['EU 3PL', 'EU', 'eu_3pl', '3PL'], ['AU 3PL', 'AU', 'au_3pl', '3PL'],
@@ -32499,7 +32506,7 @@ app.get('/api/supply/bi/projection', async (req, res) => {
     const counts = { critical: 0, soon: 0, ok: 0, surplus: 0, none: 0 };
     rows.forEach(r => { counts[r.urgency] = (counts[r.urgency] || 0) + 1; });
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, counts, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── BI ▸ REALLOCATE (Phase 1) — within an EDITABLE production (Future/Production), move order-plan qty for a
@@ -32585,7 +32592,7 @@ app.get('/api/supply/bi/reallocations', async (req, res) => {
       open.sort((a, b) => (a.to_urgency === 'critical' ? 0 : 1) - (b.to_urgency === 'critical' ? 0 : 1) || b.qty - a.qty);
       return { ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open };
     }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Apply a reallocation: zero-sum move of `qty` of `sku` from from_po → to_po (transactional), then mark applied.
 app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
@@ -32605,7 +32612,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
       [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 
@@ -32678,7 +32685,7 @@ app.get('/api/supply/bi/container-fill', async (req, res) => {
       if (s.status === 'dismissed' || s.status === 'applied') return false;
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Apply a container-fill: ADD add_qty of sku to the on-board PO (increases the supplier order), then mark applied.
 app.post('/api/supply/bi/apply-fill', async (req, res) => {
@@ -32695,7 +32702,7 @@ app.post('/api/supply/bi/apply-fill', async (req, res) => {
       [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, added: qty, to_po: toPo, sku });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 
@@ -32755,7 +32762,7 @@ app.get('/api/supply/bi/consolidations', async (req, res) => {
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     open.sort((a, b) => b.combined - a.combined);
     res.json({ ok: true, count: open.length, recs: open });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PRODUCTION SUMMARY (SUG-0009) — total qty for a production run / batch, grouped by category → SKU.
 // Always returns the filter option lists; rows only when a prod# or batch is chosen (report shows nothing until then).
@@ -32782,7 +32789,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
         ORDER BY 1, qty DESC`, [prod, batch, supplier])).rows.map(r => ({ ...r, qty: Number(r.qty) }));
     }
     res.json({ prods, batches, suppliers, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.149: Cin7 ERP compare removed (100% on Fulfil). planner.erp_compare_ignored / erp_purchase_orders are left in place (drop = Diviyaj).
 // ===================== Fulfil COMPARE (v27.779, Ben) =====================
@@ -32898,7 +32905,7 @@ app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {
     if (b.ignore === false) await pool.query('DELETE FROM planner.fulfil_compare_ignored WHERE po=$1', [b.po]);
     else await pool.query(`INSERT INTO planner.fulfil_compare_ignored (po, ignored_by) VALUES ($1,$2) ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ORDER PLAN unapproved exceptions per PO (partials / supplier-risk / discontinued / country-risk). Drives the
 // ORDER PLAN top-nav counter (# POs impacted) + the per-PO ORDER PLAN sub-tab badge. Gates mirror the grid:
@@ -33451,7 +33458,7 @@ async function balxWrite(req, res) {
     try { await poRowsPatchPo(po); } catch (_) {}
     invalidateSupplyCaches(_patchScope('planner.purchase_orders', { pay_balance_2_amount: 1 }));
     res.json({ ok: true, row: (await poRowsQ(' WHERE calc4.po = $1', [po])).rows[0] || null });
-  } catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'Another balance payment was added at the same time, refresh and try again' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'Another balance payment was added at the same time, refresh and try again' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 app.post('/api/supply/po/:po/balance-x', balxWrite);
 app.post('/api/supply/po/:po/balance-x/:id', balxWrite);
@@ -33521,7 +33528,7 @@ app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
       [key, 'consolidated ' + merge + ' → ' + keep + ' (' + r.rowCount + ' PO)']);
     await client.query('COMMIT');
     res.json({ ok: true, repointed: r.rowCount, keep, merge });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
@@ -33542,7 +33549,7 @@ app.get('/api/kpi/slow-moving', async (req, res) => {
       return { channel: label, type: ct, slow_skus: slow, slow_units: sUnits, slow_value: sValue, stocked_skus: skus }; });
     const t = kpiTotals(rows, ['slow_skus', 'slow_units', 'slow_value', 'stocked_skus']);
     res.json({ ok: true, cover: COV, group: grp || 'All', asof: _b.asofResolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // KPI 2 — Inventory months of cover: on-hand units, value and weighted months of cover per market×channel
@@ -33559,7 +33566,7 @@ app.get('/api/kpi/inventory-cover', async (req, res) => {
     ['TOTAL3', 'TOTALF'].forEach(k => { const sub = rows.filter(r => r.type === (k === 'TOTAL3' ? '3PL' : 'FBA')); const md = sub.reduce((a, r) => a + r.monthly_demand, 0);
       t[k].monthly_demand = md; t[k].months_cover = md > 0 ? Math.round(t[k].units / md * 10) / 10 : null; });
     res.json({ ok: true, group: grp || 'All', asof: _b.asofResolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // KPI 3 — Stockout risk: active SKUs whose cumulative forecast demand over the next N months exceeds on-hand
@@ -33581,7 +33588,7 @@ app.get('/api/kpi/stockout-risk', async (req, res) => {
     const t = kpiTotals(rows, ['at_risk_skus', 'units_short', 'with_demand']);
     ['TOTAL3', 'TOTALF'].forEach(k => { t[k].pct = t[k].with_demand ? Math.round(t[k].at_risk_skus / t[k].with_demand * 100) : 0; });
     res.json({ ok: true, within: N, group: grp || 'All', asof: _ohSO.resolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // KPI 4 — Discontinued holding stock: SKUs past their discontinue date that still carry on-hand units
@@ -33594,7 +33601,7 @@ app.get('/api/kpi/discontinued-stock', async (req, res) => {
       return { channel: label, type: ct, skus, units, value }; });
     const t = kpiTotals(rows, ['skus', 'units', 'value']);
     res.json({ ok: true, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Snapshot the current SKU-level forecast (forecast_outputs) into forecast_runs + forecasts(level='sku').
@@ -33626,7 +33633,7 @@ app.post('/api/forecast/snapshot', async (req, res) => {
         fo.sku, fo.warehouse, fo.month`, [run.id]);
     await client.query('COMMIT');
     res.json({ ok: true, run_id: run.id, run_at: run.run_at, rows: ins.rowCount });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }   // v28.116 (review S6): was the only pool.connect() site with no release — exhausted the Vercel pool (max 4)
 });
 
@@ -33693,7 +33700,7 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
 
     res.json({ ok: true, level, lag, window: win, snapshots: { runs: Number(snap.runs) || 0, sku_runs: Number(snap.sku_runs) || 0, last_at: snap.last_at },
       accuracy: { overall, rows: accRows }, runrate: { months: rr, rows: rrows } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────
 const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
@@ -33753,17 +33760,17 @@ app.get('/api/forecast/country-csv/:country', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="forecast_${String(req.params.country).toUpperCase()}_12mo.csv"`);
     res.send(csv);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/forecast/export-settings', async (req, res) => {
   try { res.json((await pool.query(`SELECT country, coalesce(email,'') email FROM planner.forecast_export_settings ORDER BY country`)).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/forecast/export-settings/:country', async (req, res) => {
   const co = String(req.params.country || '').toUpperCase(), email = (req.body && req.body.email || '').trim();
   try { await pool.query(`INSERT INTO planner.forecast_export_settings (country,email,updated_at) VALUES ($1,$2,now())
     ON CONFLICT (country) DO UPDATE SET email=$2, updated_at=now()`, [co, email || null]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 function drivehqConfigured() { return !!(process.env.WEBDAV_BASE && process.env.DRIVEHQ_USER && process.env.DRIVEHQ_PASS); }
 // email one country's CSV to its stored address (gated on RESEND_API_KEY; stubbed when absent)
@@ -33786,8 +33793,8 @@ async function emailForecastCountry(country) {
   logEmail({ recipients: email, subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)', kind: 'report-export', ref: co, status: 'sent', resend_id: _rid });
   return { country: co, ok: true, sent_to: email, rows: rowCount };
 }
-app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
-app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Email a report CSV (built client-side, sent here) to the recipient SAVED for that report key (app_settings
 // export_email_<key>). The client supplies the CSV; the recipient is server-controlled (not client-supplied).
 app.post('/api/export/email-csv', async (req, res) => {
@@ -33811,7 +33818,7 @@ app.post('/api/export/email-csv', async (req, res) => {
         attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
     if (!r.ok) return res.json({ ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) });
     res.json({ ok: true, sent_to: email });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.002 (Ben): PERSISTED BUY-PLAN FEED for the Auto Forecast engine (migration 304) ─────────────────────────────
 // The buy plan is computed in the browser (artifact BP engine); the Auto Forecast "Buy plan" engine needs its feed. The
@@ -33845,7 +33852,7 @@ app.post('/api/scenario/auto-forecast/feed', async (req, res) => {
     const rows = Array.isArray(b.buyFeed) ? b.buyFeed : (Array.isArray(b.rows) ? b.rows : []);
     if (!rows.length) return res.json({ ok: false, reason: 'empty feed (buy plan not loaded in this tab)' });
     res.json({ ok: true, ...(await afStoreFeed(rows, authUser(req), b.app_version || null)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/scenario/auto-forecast/feed/status', async (req, res) => {
   const f = await afLatestFeed();
@@ -33870,7 +33877,7 @@ app.post('/api/scenario/buy-plan/feed', async (req, res) => {
     const b = req.body || {}; const rows = Array.isArray(b.rows) ? b.rows : [];
     if (!rows.length) return res.json({ ok: false, reason: 'empty buy feed (buy plan not loaded in this tab)' });
     res.json({ ok: true, ...(await bpStoreFeed(rows, authUser(req), b.app_version || null)) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/scenario/auto-forecast/result/status', async (req, res) => {
   try { const f = (await pool.query(`SELECT id, computed_at, computed_by, app_version, txn_count, total_usd FROM planner.auto_forecast_result ORDER BY computed_at DESC LIMIT 1`)).rows[0];
@@ -33959,7 +33966,7 @@ app.get('/api/client/price-preview', async (req, res) => {
       rt: cpTierPrice(r, market, 'rt', null, offers), ws: cpTierPrice(r, market, 'ws', null, offers),
       dist_fob: cpTierPrice(r, market, 'dist', 'fob', offers), dist_exw: cpTierPrice(r, market, 'dist', 'exw', offers), dist_3pl: cpTierPrice(r, market, 'dist', '3pl', offers) }));
     res.set('Cache-Control', 'no-store').json({ ok: true, market, tax_divisor: CP_TAX_DIV[market], offer: (offers || {})[CP_DIST_OFFER[market]] || null, skus });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // order_origin: before the Cin7 cut-off → cin7 · from the Fulfil start → fulfil · in between → the imported Cin7 list decides.
 async function cpOriginRule(cached) {   // v28.175 (Ben): cached = read through the portal settings cache (portal path only; admin stays live)
@@ -33974,7 +33981,7 @@ async function cpAdminGate(req, res, next) {
     if (me.live && !(me.is_admin || me.client_access) && !(/^\/b2b-forecast/.test(req.path) && me.b2b_forecast_edit)) return res.status(403).json({ error: 'CLIENT access required — ask an admin (CONFIG ▸ Admin ▸ Permissions)', code: 'no_client_access' });
     if (/^\/commission/.test(req.path) && me.live && !(me.is_admin || me.commissions)) return res.status(403).json({ error: 'COMMISSIONS access required', code: 'no_commissions' });
     req.me = me; next();
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: clientErr(e) }); }
 }
 app.use('/api/client', cpAdminGate);
 
@@ -34119,7 +34126,7 @@ app.get('/api/client/b2b-forecast', async (req, res) => {
       client_view: !!(req.me && (req.me.is_admin || req.me.client_access || req.me.live === false)),
       types: B2B_TYPES, currencies: B2B_CURRENCIES, statuses: B2B_STATUSES, cogs_default: B2B_COGS_DEFAULT,
       orders: orders.map(o => { const x = Object.assign({}, o); delete x.client_market; delete x.client_currency; return x; }), summary: b2bSummary(orders), owners, clients });
-  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Save rows: {rows:[{id?, ...fields, payments?}]}. One transaction; a bad value stops the whole save with the row named.
 app.post('/api/client/b2b-forecast/save', async (req, res) => {
@@ -34140,11 +34147,11 @@ app.post('/api/client/b2b-forecast/delete', async (req, res) => {
   try { const gone = (await pool.query(`DELETE FROM planner.b2b_forecast_orders WHERE id = ANY($1) RETURNING id, client_label, reference, value_source::float v, currency`, [ids])).rows;
     for (const g of gone) await pool.query(`INSERT INTO planner.b2b_forecast_changes (order_id, field, old_value, new_value, changed_by) VALUES ($1,'deleted',$2,null,$3)`, [g.id, [g.client_label, g.reference, g.v + ' ' + g.currency].filter(Boolean).join(' | '), by]);
     res.json({ ok: true, deleted: gone.length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/b2b-forecast/history/:id', async (req, res) => {
   try { res.json({ changes: (await pool.query(`SELECT field, old_value, new_value, changed_by, to_char(changed_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.b2b_forecast_changes WHERE order_id=$1 ORDER BY changed_at DESC, id DESC LIMIT 300`, [req.params.id])).rows }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Actual orders to match to a forecast row: Fulfil sales orders in the row's market channels (Key Accounts, Custom/Co-Brand,
 // distributors; never the dockandbay-*-ws warehouse channels unless ?all=1), dated from 60 days before the order date to
@@ -34161,11 +34168,11 @@ app.get('/api/client/b2b-forecast/candidates/:id', async (req, res) => {
         ORDER BY sale_date DESC LIMIT 300`, args)).rows;
     const linked = {}; (await pool.query(`SELECT id, client_label, unnest(fulfil_order_refs) ref FROM planner.b2b_forecast_orders WHERE id<>$1`, [o.id])).rows.forEach(x => { linked[x.ref] = { id: Number(x.id), client: x.client_label }; });
     res.json({ window: anyd || !from ? null : { from, to }, linked_here: o.fulfil_order_refs || [], orders: rows.map(r => Object.assign(r, { linked_to: linked[r.number] || (r.reference && linked[r.reference]) || null })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/b2b-forecast/refresh-fulfil', async (req, res) => {
   if (!b2bCanEdit(req.me)) return res.status(403).json({ error: 'B2B forecast edit rights needed' });
-  try { res.json(await b2bFulfilRefresh((req.me && req.me.email) || 'sandbox')); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await b2bFulfilRefresh((req.me && req.me.email) || 'sandbox')); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Import from the sheet (admin): {text: paste of B2B_DIRECT_FORECAST columns C..O or CSV, apply?: bool, replace?: bool}.
 // Without apply = preview (rows, skipped, unmatched clients, flagged dates, workbook GBP vs HORIZON GBP per row).
@@ -34195,7 +34202,7 @@ app.post('/api/client/b2b-forecast/import', async (req, res) => {
         if (r.import_flags) await client.query(`UPDATE planner.b2b_forecast_orders SET import_flags=$2 WHERE id=$1`, [id, JSON.stringify(r.import_flags)]); ids.push(id); }
       await client.query('COMMIT'); } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
     await b2bStoreCalc(ids); res.json({ ok: true, imported: ids.length, summary });
-  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Feeds (outside the browser session gate; token checked here, fails closed) ──
@@ -34233,7 +34240,7 @@ app.get('/api/feed/b2b-forecast.csv', async (req, res) => {
 // Nightly Fulfil status refresh (n8n). x-webhook-secret, fails closed.
 app.post('/api/cron/b2b-forecast', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(await b2bFulfilRefresh('n8n')); } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await b2bFulfilRefresh('n8n')); } catch (e) { if (_b2bMissing(e)) return res.status(503).json({ error: 'B2B forecast needs migration 407' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── lookups for the admin forms ──
@@ -34255,7 +34262,7 @@ app.get('/api/client/lookups', async (req, res) => {
     });
     res.set('Cache-Control', 'no-store').json(Object.assign({}, base, { owner_boxes: CP_OWNER_BOXES,   // v28.502 owner mailboxes
       me: { email: req.me.email, commissions: !!(req.me.is_admin || req.me.commissions || !req.me.live) } }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── clients ──
@@ -34272,7 +34279,7 @@ app.get('/api/client/clients', async (req, res) => {
       FROM planner.clients c LEFT JOIN planner.rep_groups rg ON rg.id=c.rep_group_id ORDER BY c.active DESC, (c.type='agent'), c.name`)).rows;
     rows.forEach(r => { r.visibility = cpJson(r.visibility, {}); r.stock_scope = cpJson(r.stock_scope, {}); r.features = Object.assign({}, CP_FEATURE_DEFAULTS, cpJson(r.features, {})); });
     res.set('Cache-Control', 'no-store').json({ clients: rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.331 (Ben 13-Oct-26): an agent client's commission settings = its rep group (one per agent client). Created with the client, or by
 // "Set up commission" on an older agent client. Reuses a rep group of the same name when one exists and is not linked to another client.
@@ -34309,7 +34316,7 @@ app.post('/api/client/clients', async (req, res) => {
     await cpAudit(r.rows[0].id, 'Client created', type + ' · ' + market, req.me.email);
     if (type === 'agent') await cpAgentGroup(r.rows[0].id, req.me.email);   // v28.331: an agent client carries its commission settings (rep group) from the start
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/clients/:id', async (req, res) => {
   try {
@@ -34326,7 +34333,7 @@ app.get('/api/client/clients/:id', async (req, res) => {
       lastQ(true).catch(() => lastQ(false)).catch(() => ({ rows: [] })),
     ]);
     res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null, last_login: (last.rows[0] && last.rows[0].last_login) || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', price_tier: 'text', price_method: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool', order_review: 'text' };
 app.post('/api/client/clients/:id', async (req, res) => {
@@ -34346,12 +34353,12 @@ app.post('/api/client/clients/:id', async (req, res) => {
     const detail = changed.map(k => { const nv = b[k]; const ov = before[k]; const s = v => (v && typeof v === 'object') ? JSON.stringify(v) : String(v == null ? '' : v); return k + ': ' + s(ov).slice(0, 60) + ' → ' + s(nv).slice(0, 60); }).join(' · ');
     await cpAudit(req.params.id, 'Client updated', detail, req.me.email);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/clients/:id/delete', async (req, res) => {
   try { const c = await cpClientById(req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
     await pool.query(`DELETE FROM planner.clients WHERE id=$1`, [req.params.id]); await cpAudit(null, 'Client deleted', c.name + ' (#' + c.id + ')', req.me.email); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── users + magic links ──
@@ -34384,7 +34391,7 @@ app.post('/api/client/users/:uid/magic', async (req, res) => {
     const url = await cpMintLink(u.id, req);
     try { await cpAudit(u.client_id, 'Magic link minted', u.email + ' (copied, not emailed)', req.me.email); } catch (e) {}
     res.json({ ok: true, url });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/clients/:id/users', async (req, res) => {
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
@@ -34394,7 +34401,7 @@ app.post('/api/client/clients/:id/users', async (req, res) => {
     await cpAudit(req.params.id, 'User added', email + (b.scope === 'self' ? ' · own customers only' : ''), req.me.email);
     let url = null; if (b.invite) { url = await cpMintLink(r.rows[0].id, req); const c = await cpClientById(req.params.id); await cpSendLink(email, url, c ? c.name : ''); }
     res.json({ ok: true, id: r.rows[0].id, invite_url: url });
-  } catch (e) { if (/client_users_email_idx/.test(e.message)) return res.status(409).json({ error: 'that email already has a portal login (one client per email)' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/client_users_email_idx/.test(e.message)) return res.status(409).json({ error: 'that email already has a portal login (one client per email)' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/users/:uid', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [];
@@ -34405,11 +34412,11 @@ app.post('/api/client/users/:uid', async (req, res) => {
   vals.push(req.params.uid);
   try { const u = (await pool.query(`UPDATE planner.client_users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING client_id, email`, vals)).rows[0]; if (!u) return res.status(404).json({ error: 'not found' });
     await cpAudit(u.client_id, 'User updated', u.email + ' · ' + Object.keys(b).join(', '), req.me.email); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/users/:uid/delete', async (req, res) => {
   try { const u = (await pool.query(`DELETE FROM planner.client_users WHERE id=$1 RETURNING client_id, email`, [req.params.uid])).rows[0]; if (u) await cpAudit(u.client_id, 'User removed', u.email, req.me.email); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 async function cpSendLink(email, url, clientName) {
   const own = (await pool.query(`SELECT c.owner_email FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=lower($1) ORDER BY u.active DESC LIMIT 1`, [email]).catch(() => ({ rows: [] }))).rows[0];
@@ -34421,7 +34428,7 @@ app.post('/api/client/users/:uid/invite', async (req, res) => {
     const url = await cpMintLink(u.id, req); const r = await cpSendLink(u.email, url, u.client_name);
     await cpAudit(u.client_id, 'Magic link sent', u.email, req.me.email);
     res.json({ ok: true, url, emailed: !(r && r.sandbox) });   // the URL is returned so an admin can hand it over directly (sandbox has no Resend key)
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.009 (Ben): "View portal as" — an admin opens the exact client portal in an iframe as a chosen client user / rep.
@@ -34434,7 +34441,7 @@ app.get('/api/client/preview-targets', async (req, res) => {
       FROM planner.clients c LEFT JOIN planner.client_users u ON u.client_id=c.id
       GROUP BY c.id ORDER BY c.active DESC, lower(c.name)`);
     res.json({ clients: r.rows.map(x => ({ id: x.id, name: x.name, type: x.type, market: x.market, active: x.active, users: x.users || [] })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/preview/:uid', async (req, res) => {
   try {
@@ -34448,7 +34455,7 @@ app.post('/api/client/preview/:uid', async (req, res) => {
     res.setHeader('Set-Cookie', `csid=${tok}; HttpOnly; Path=/; Max-Age=7200; SameSite=Lax${secure ? '; Secure' : ''}`);
     await cpAudit(u.client_id, 'Portal previewed', 'as ' + u.email + (u.scope === 'self' ? ' (rep · own customers)' : ''), req.me.email);
     res.json({ ok: true, url: '/client', user: { id: u.id, email: u.email, name: u.name, scope: u.scope }, client: { id: u.client_id, name: u.client_name } });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // stop the preview: clear the cppv_ session + cookie (never touches a real client's csid)
 app.post('/api/client/preview-stop', async (req, res) => {
@@ -34549,14 +34556,14 @@ app.get('/api/config/health-check', async (req, res) => {
     catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
     res.set('Cache-Control', 'no-store').json({ ok: true, id: saved, saved: !!saved, version: APP_VERSION, at: new Date().toISOString(), by: me.email || null, base, includeLive,
       counts, portals, results, report });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.306: App health history. List = newest first, counts only; one run = the full saved result (same shape as a fresh run).
 app.get('/api/config/health-check/runs', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
     const rows = (await pool.query(`SELECT id, ran_at at, ran_by, version, include_live, duration_ms, total, errors, slow, moderate FROM planner.health_check_runs ORDER BY ran_at DESC LIMIT 200`)).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, runs: rows });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, runs: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, runs: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/config/health-check/runs/:id', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
@@ -34565,7 +34572,7 @@ app.get('/api/config/health-check/runs/:id', async (req, res) => {
     if (!r) return res.status(404).json({ error: 'not found' });
     res.set('Cache-Control', 'no-store').json({ ok: true, id: r.id, saved: true, at: r.ran_at, at_local: r.at_local, by: r.ran_by, version: r.version, includeLive: r.include_live, duration_ms: r.duration_ms,
       counts: { total: r.total, errors: r.errors, slow: r.slow, moderate: r.moderate }, portals: r.portals || {}, results: r.results || [], report: r.report || '' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.159 (Ben): HEALTH LOG (migration 328): browser capture endpoints, the weekly report, the Health log UI data and the
@@ -34932,7 +34939,7 @@ function hzHealthMarkdown(d) {
 async function hzAdminOnly(req, res) { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return null; } return me; }
 app.get('/api/health/weekly', async (req, res) => {
   try { if (!(await hzAdminOnly(req, res))) return; res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true }, await hzHealthReport(req.query.days))); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Weekly email. Recipients = app_settings 'health_report_recipients' (JSON array) or the default three. Subject carries the
 // counts; HTML = KPIs + top 5 of each section; the full .md is attached for Claude Code. dry_run returns the exact Resend
@@ -35004,12 +35011,12 @@ app.post('/api/cron/health-weekly', async (req, res) => {
     // v28.163 (Ben): cap-aware. Inside the hour after another health email it is held (app_settings health_weekly_pending) and the
     // next POST /api/cron/health-checks after the hour sends it. Recipients are always the configured list on a real send.
     res.json(await hzWeeklySend(b.days || 7, 'cron'));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Local verification only: HZ_HEALTH_TEST=1 on a non-Vercel server exposes a deliberately slow / failing route. Never on prod.
 if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) app.get('/api/dev/health-fault', async (req, res) => {
   const ms = Math.min(5000, Number(req.query.ms) || 0); if (ms) await new Promise(r => setTimeout(r, ms));
-  if (req.query.fail) { const e = new Error('health-fault test failure ' + String(req.query.fail).slice(0, 40)); log500(e); return res.status(500).json({ error: e.message }); }
+  if (req.query.fail) { const e = new Error('health-fault test failure ' + String(req.query.fail).slice(0, 40)); log500(e); return res.status(500).json({ error: clientErr(e) }); }
   res.json({ ok: true, ms });
 });
 // Health log ▸ "Send test (to me)": admin only, and ONLY to the signed-in admin's own address (never a client-supplied list).
@@ -35022,7 +35029,7 @@ app.post('/api/health/send-test', async (req, res) => {
     if (!(await hzEmailClaim())) { const slot = await hzEmailSlot(); return res.json({ ok: false, throttled: true, error: 'Health emails are capped at one per hour. Next allowed ' + (slot.next_allowed ? hzSydney(slot.next_allowed) + ' Sydney' : 'soon') + '.', next_allowed: slot.next_allowed }); }
     const r = await hzHealthSend(payload, email);
     res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -35315,7 +35322,7 @@ async function accStmtStaleCheck(opts) {
 app.post('/api/cron/health-checks', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } try { r.attach = await accAttachMaybe(); } catch (e) { r.attach = { error: e.message }; } try { r.autobill = await accAutoBillMaybe(); } catch (e) { r.autobill = { error: e.message }; }   /* v28.276 */ }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 if (HZ_BG && process.env.HZ_HEALTH_CHECKS !== '0') {
   const _hc = () => accStmtStaleCheck({}).catch(e => console.warn('[stmt-alert] ' + e.message)).then(() => coghlansMailMaybe().then(x => { if (x && !x.skipped) console.log('[coghlans-mail] ' + JSON.stringify(x).slice(0, 200)); }).catch(e => console.warn('[coghlans-mail] ' + e.message))).then(() => runHealthChecks({})).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
@@ -35323,12 +35330,12 @@ if (HZ_BG && process.env.HZ_HEALTH_CHECKS !== '0') {
 }
 // Local verification only (HZ_HEALTH_TEST=1, never on Vercel): a slow statement, a synthetic red alert, the claim race.
 if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) {
-  app.get('/api/dev/health-slowq', async (req, res) => { try { const s = Math.min(5, Number(req.query.s) || 2.1); await pool.query('SELECT pg_sleep($1::float8), 42 AS answer', [s]); res.json({ ok: true, s }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.get('/api/dev/health-slowq', async (req, res) => { try { const s = Math.min(5, Number(req.query.s) || 2.1); await pool.query('SELECT pg_sleep($1::float8), 42 AS answer', [s]); res.json({ ok: true, s }); } catch (e) { res.status(500).json({ error: clientErr(e) }); } });
   app.post('/api/dev/health-alert', async (req, res) => { try { const b = req.body || {};
     const f = { key: 'test:' + String(b.key || 'synthetic').slice(0, 40), trigger: 'test', title: String(b.title || 'Synthetic red alert (test)').slice(0, 200), n: Number(b.n) || 1, first: new Date().toISOString(), last: new Date().toISOString(), examples: ['synthetic test event'], file: 'n/a (test)' };
-    res.json(await hzRedAlert([f], { dry: b.dry_run === true })); } catch (e) { res.status(500).json({ error: e.message }); } });
-  app.post('/api/dev/health-claim', async (req, res) => { try { const n = Math.min(10, Number((req.body || {}).n) || 2); const r = await Promise.all(Array.from({ length: n }, () => hzEmailClaim())); res.json({ claims: r, winners: r.filter(Boolean).length }); } catch (e) { res.status(500).json({ error: e.message }); } });
-  app.post('/api/dev/health-evaluate', async (req, res) => { try { res.json({ etl: hzEtlEval((req.body || {}).jobs, Number((req.body || {}).now) || Date.now()) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json(await hzRedAlert([f], { dry: b.dry_run === true })); } catch (e) { res.status(500).json({ error: clientErr(e) }); } });
+  app.post('/api/dev/health-claim', async (req, res) => { try { const n = Math.min(10, Number((req.body || {}).n) || 2); const r = await Promise.all(Array.from({ length: n }, () => hzEmailClaim())); res.json({ claims: r, winners: r.filter(Boolean).length }); } catch (e) { res.status(500).json({ error: clientErr(e) }); } });
+  app.post('/api/dev/health-evaluate', async (req, res) => { try { res.json({ etl: hzEtlEval((req.body || {}).jobs, Number((req.body || {}).now) || Date.now()) }); } catch (e) { res.status(500).json({ error: clientErr(e) }); } });
 }
 
 // ── DATA HEALTH (v28.432, Ben 21-Oct-26: "a data quality check, daily, which checks Fulfil for data accuracy across inventory on hand,
@@ -35576,7 +35583,7 @@ async function dhEmail(to, counts, fresh, errors) {
 // POST /api/cron/data-health (x-webhook-secret): the daily run + email. { dry_run: true } computes only (no writes, no email).
 app.post('/api/cron/data-health', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true'; res.json(await dhRun({ by: 'cron', dry, email: dry ? null : 'cron' })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true'; res.json(await dhRun({ by: 'cron', dry, email: dry ? null : 'cron' })); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Signed-in staff (the email goes to non-admins too): the findings, the last run, the checks, the recipients.
 app.get('/api/admin/data-health', async (req, res) => {
@@ -35588,7 +35595,7 @@ app.get('/api/admin/data-health', async (req, res) => {
     const tallies = (await pool.query(`SELECT status, count(*)::int n FROM planner.data_health_findings WHERE status <> 'fixed' OR fixed_at > now() - interval '30 days' GROUP BY 1`)).rows;
     const runs = (await pool.query(`SELECT id, run_at, run_by, ms, counts, errors, emailed, meta->'shopify' shopify, meta->'kits_sold' kits_sold FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 14`)).rows;
     res.set('Cache-Control', 'no-store').json({ migration: true, findings, tallies, runs, checks: DH_CHECKS.map(c => ({ key: c.key, area: c.area, label: c.label })), recipients: await dhRecipients() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/admin/data-health/:id/dismiss', async (req, res) => {
   try { const b = req.body || {}, undo = b.undo === true, reason = String(b.reason || '').trim().slice(0, 300);
@@ -35596,14 +35603,14 @@ app.post('/api/admin/data-health/:id/dismiss', async (req, res) => {
     const r = undo ? await pool.query(`UPDATE planner.data_health_findings SET status = 'open', dismissed_by = NULL, dismissed_at = NULL, dismiss_reason = NULL, dismissed_sig = NULL WHERE id = $1 AND status = 'dismissed' RETURNING id`, [req.params.id])
       : await pool.query(`UPDATE planner.data_health_findings SET status = 'dismissed', dismissed_by = $2, dismissed_at = now(), dismiss_reason = $3, dismissed_sig = sig WHERE id = $1 AND status = 'open' RETURNING id`, [req.params.id, authUser(req) || 'unknown', reason]);
     if (!r.rowCount) return res.status(409).json({ error: 'That finding has changed; reload' }); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Admin: run now (no email), or run now + send the summary to me only (test).
 app.post('/api/admin/data-health/run', async (req, res) => {
   try { const me = await hzAdminOnly(req, res); if (!me) return; const b = req.body || {}, email = me.email || authUser(req);
     if (b.test_email && !email) return res.status(400).json({ error: 'No signed-in email to send to' });
     res.json(await dhRun({ by: email || 'admin', email: b.test_email ? [String(email).toLowerCase()] : null })); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/admin/data-health/recipients', async (req, res) => {
   try { const me = await hzAdminOnly(req, res); if (!me) return;
@@ -35611,7 +35618,7 @@ app.post('/api/admin/data-health/recipients', async (req, res) => {
     if (!list.length) return res.status(400).json({ error: 'Enter at least one email address' });
     await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('data_health_email_to', $1, $2, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`, [list.join(','), me.email || authUser(req) || 'admin']);
     res.json({ ok: true, recipients: list }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
@@ -35659,7 +35666,7 @@ app.get('/api/client/notices', async (req, res) => {
     const notices = ns.rows.map(n => { const a = cpNoticeAud(n.audience), m = clients.filter(c => cpNoticeFor({ audience: a }, c));
       return { ...n, audience: a, reach_clients: m.length, reach_users: m.reduce((s, c) => s + c.users, 0) }; });
     res.set('Cache-Control', 'no-store').json({ notices, clients, markets: Object.keys(CP_MARKETS), types: CP_TYPES });
-  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/notices', async (req, res) => {   // {id?, title, body, link_url, link_label, key_date, pinned, audience, expires_on, email}
   try { const b = req.body || {}, by = (req.me && req.me.email) || 'staff';
@@ -35671,19 +35678,19 @@ app.post('/api/client/notices', async (req, res) => {   // {id?, title, body, li
     if (id) { const r = await pool.query(`UPDATE planner.client_notices SET title=$1, body=$2, link_url=$3, link_label=$4, key_date=$5, pinned=$6, audience=$7::jsonb, expires_on=$8, updated_by=$9, updated_at=now() WHERE id=$10`, [...vals, id]); if (!r.rowCount) return res.status(404).json({ error: 'notice not found' }); }
     else id = (await pool.query(`INSERT INTO planner.client_notices (title, body, link_url, link_label, key_date, pinned, audience, expires_on, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$9) RETURNING id`, vals)).rows[0].id;
     res.json({ ok: true, id, email: b.email ? await cpNoticeEmail(id, req, by, false) : null });
-  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/notices/:id/email', async (req, res) => {   // {again}: email (or re-email) the notice's audience now
   try { const r = await cpNoticeEmail(Number(req.params.id) || 0, req, (req.me && req.me.email) || 'staff', !!(req.body && req.body.again)); if (r.error && !r.sent) return res.status(400).json(r); res.json({ ok: true, ...r }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/notices/:id/archive', async (req, res) => {   // {archived}: hide from clients (or bring back)
   try { const r = await pool.query(`UPDATE planner.client_notices SET archived=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [Number(req.params.id) || 0, req.body && req.body.archived !== false, (req.me && req.me.email) || 'staff']); res.json({ ok: true, updated: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/notices/:id/delete', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.client_notices WHERE id=$1`, [Number(req.params.id) || 0]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/config', async (req, res) => {
   try {
@@ -35694,7 +35701,7 @@ app.get('/api/client/config', async (req, res) => {
       pool.query(`SELECT count(*)::int n, to_char(max(last_synced_at),'YYYY-MM-DD HH24:MI') synced, min(sale_date) mn, max(sale_date) mx FROM planner.fulfil_sales`),
     ]);
     res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_import_channels: CP_IMPORT_CHANNELS_DEFAULT.join(', '), cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL', cp_auto_push_fulfil: 'false' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.441 Image galleries settings (CLIENT > Config > Image galleries; client record > Access). Lists ImageBank's shared galleries, the default
 // rule for every client and, with ?client=<id>, that client's own choice (null = uses the default).
@@ -35709,25 +35716,25 @@ app.post('/api/client/galleries/default', async (req, res) => {
   const b = req.body || {}; const v = { mode: b.mode === 'selected' ? 'selected' : 'all', ids: Array.isArray(b.ids) ? [...new Set(b.ids.map(String))].slice(0, 500) : [] };
   try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cp_galleries_default',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(v), req.me.email || null]);
     await cpAudit(null, 'Image galleries default', v.mode === 'all' ? 'all shared galleries' : v.ids.length + ' selected', req.me.email); res.json({ ok: true, default: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/client/galleries/client/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10); if (!id) return res.status(400).json({ error: 'client id required' });
   const b = req.body || {}; const v = Array.isArray(b.ids) ? { ids: [...new Set(b.ids.map(String))].slice(0, 500) } : null;   // ids null = use the default
   try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, ['cp_galleries_client_' + id, v ? JSON.stringify(v) : '', req.me.email || null]);
     await cpAudit(id, 'Image galleries', v ? v.ids.length + ' selected (overrides the default)' : 'uses the default', req.me.email); res.json({ ok: true, client: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/client/config', async (req, res) => {
   const b = req.body || {}; const key = String(b.key || ''); if (!CP_SETTINGS.includes(key)) return res.status(400).json({ error: 'unknown setting' });
   try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, String(b.value == null ? '' : b.value), req.me.email || null]);
     await cpAudit(null, 'Portal setting', key + ' = ' + String(b.value == null ? '' : b.value).slice(0, 80), req.me.email); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/cin7-refs/import', async (req, res) => {
   const b = req.body || {}; const refs = Array.from(new Set((Array.isArray(b.refs) ? b.refs : String(b.text || '').split(/[\s,;]+/)).map(x => String(x || '').trim()).filter(Boolean)));
   try { if (b.replace) await pool.query(`DELETE FROM planner.client_cin7_refs`);
     let n = 0; for (let i = 0; i < refs.length; i += 500) { const chunk = refs.slice(i, i + 500); await pool.query(`INSERT INTO planner.client_cin7_refs (order_ref) SELECT unnest($1::text[]) ON CONFLICT (order_ref) DO NOTHING`, [chunk]); n += chunk.length; }
     await cpAudit(null, 'Cin7 grey-window list imported', n + ' refs' + (b.replace ? ' (replaced)' : ''), req.me.email); res.json({ ok: true, imported: n });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/price-lists/import', async (req, res) => {
   const b = req.body || {}; const code = String(b.code || '').trim().toUpperCase(); if (!code) return res.status(400).json({ error: 'price list code required' });
@@ -35737,9 +35744,9 @@ app.post('/api/client/price-lists/import', async (req, res) => {
     for (let i = 0; i < rows.length; i += 300) { const chunk = rows.slice(i, i + 300); const vals = chunk.map((_, j) => `($1,$2,$3,$4,$${5 + j * 2},$${6 + j * 2},now())`).join(','); const params = [code, b.label || code, b.market || null, b.currency || null]; chunk.forEach(r => { params.push(r.sku, r.price); });
       await pool.query(`INSERT INTO planner.client_price_lists (code,label,market,currency,sku,price,updated_at) VALUES ${vals} ON CONFLICT (code, sku) DO UPDATE SET price=excluded.price, label=excluded.label, market=excluded.market, currency=excluded.currency, updated_at=now()`, params); }
     await cpAudit(null, 'Price list imported', code + ' · ' + rows.length + ' SKUs', req.me.email); res.json({ ok: true, imported: rows.length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
-app.post('/api/client/price-lists/:code/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.client_price_lists WHERE code=$1`, [String(req.params.code).toUpperCase()]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/price-lists/:code/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.client_price_lists WHERE code=$1`, [String(req.params.code).toUpperCase()]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ── Fulfil SALES mirror import (cron-able like import-pos: x-webhook-secret, or an admin session) ──
 function cpTagsFromMeta(meta) {
@@ -35821,13 +35828,13 @@ app.get('/api/client/agent-codes', async (req, res) => {
       _cpAgentCodesCache = { at: Date.now(), codes: Object.keys(by).sort().map(k => ({ code: k, orders: by[k], clients: used[k] || [] })), fulfil_error: fulfilErr, migration: _cpAgentCol };
     }
     res.set('Cache-Control', 'no-store').json(_cpAgentCodesCache);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // cron entry (webhook-secret gated like import-pos; exempt from the planner key in the gate above)
 app.post('/api/cron/client-sales', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.018: fail closed — no secret set ⇒ reject
   if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'sales import switched off (cp_sales_import_enabled)', gated: true });
-  try { res.json(await fulfilImportSales(req.query.days)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await fulfilImportSales(req.query.days)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.008: TEST DATA seed (Ben, 28-Sep: "build the infrastructure and populate with test data") ──────────────────────
@@ -35894,7 +35901,7 @@ app.post('/api/client/seed-test-data', async (req, res) => {
     await cpPostMessage(t2, 'client', 'Lars Holm', 'Uploaded NL-2026-091 as CSV, let me know if anything needs fixing.', []); await cpPostMessage(t2, 'ops', 'sarah@dockandbay.com', 'Two lines were partial cartons (7 and 12). Rounded up and submitted as a draft, please check.', []);
     await cpAudit(ideco, 'Test data seeded', sales.length + ' synthetic orders, 3 clients, price lists, a finalised commission run', by);
     res.json({ ok: true, clients: { ideco, dillards: dill, nordic }, users: uid, sales: sales.length, commission_run: run, note: 'all order refs start with TEST-; fulfil_sales.source=seed' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── orders: the merged, scoped list (admin sees all or one client; the portal sees its own scope) ──
 function cpVisibilitySql(client, user, params) {
@@ -35973,11 +35980,11 @@ app.get('/api/client/orders', async (req, res) => {
   try { const client = req.query.client_id ? await cpClientById(req.query.client_id) : null; if (req.query.client_id && !client) return res.status(404).json({ error: 'client not found' });
     const rows = await cpOrders({ client, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status });
     res.set('Cache-Control', 'no-store').json({ orders: rows, rule: await cpOriginRule(), scoped: !!client });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/portal-orders', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ auto: String(await cpSetting('cp_auto_push_fulfil', 'false')).toLowerCase() === 'true', orders: (await pool.query(`SELECT o.id, o.client_id, c.name client, c.order_review, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, o.error, o.carrier_name, o.carrier_service_name, o.pushed_by, to_char(o.pushed_at,'YYYY-MM-DD HH24:MI') pushed_at, to_char(o.requested_date,'YYYY-MM-DD') requested_date, to_char(o.created_at,'YYYY-MM-DD HH24:MI') created_at, o.submitted_by, o.ship_to, o.lines FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id ORDER BY o.created_at DESC LIMIT 300`)).rows }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── v28.227 (Ben): portal order REVIEW. A held order (status review; also submitted = auto-post failed, error) is edited here and
@@ -35993,7 +36000,7 @@ app.get('/api/client/portal-orders/:id', async (req, res) => {
     Object.keys(CP_WAREHOUSES).forEach(w => (stockBy[w] || []).forEach(([sku, q]) => { if (prods[sku]) (avail[sku] = avail[sku] || {})[w] = Number(q) || 0; }));
     res.set('Cache-Control', 'no-store').json({ order: o, editable: CP_EDITABLE.includes(o.status), client: c ? { id: c.id, name: c.name, market: c.market, currency: c.currency, owner_email: c.owner_email, order_review: c.order_review || 'inherit', fulfil_party_id: c.fulfil_party_id, fulfil_channel: c.fulfil_channel } : null,
       auto: c ? await cpAutoPush(c) : false, products: prods, avail, warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Fulfil lookups for the review form (reads only): carriers + their services, and each line's suppliers (purchase.product_supplier,
 // the same source as Validate SO). Company filter mirrors Validate SO: the client market's company first, all if none match.
@@ -36011,7 +36018,7 @@ app.get('/api/client/portal-orders/:id/fulfil-options', async (req, res) => {
     skus.forEach(sku => { const p = prods[sku]; let l = p ? (opts[p.id] || []).slice() : []; if (co && l.some(x => x.company === co)) l = l.filter(x => x.company === co);
       const seen = new Set(); bySku[sku] = { in_fulfil: !!p, options: l.sort((a, z) => a.sequence - z.sequence).filter(x => !seen.has(x.id) && seen.add(x.id)).map(x => ({ id: x.id, name: x.name })) }; });
     res.set('Cache-Control', 'no-store').json({ env, carriers: (carriers || []).map(x => ({ id: x.id, name: x.rec_name, services: (x.services || []).map(id => svc[id]).filter(Boolean) })).sort((a, z) => String(a.name).localeCompare(z.name)), suppliers: bySku }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/portal-orders/:id', async (req, res) => {
   const b = req.body || {}; const by = (req.me && req.me.email) || 'sandbox';
@@ -36043,7 +36050,7 @@ app.post('/api/client/portal-orders/:id', async (req, res) => {
     await pool.query(`UPDATE planner.client_orders SET ${keys.map((k, n) => k + '=$' + (n + 2) + (k === 'lines' || k === 'ship_to' ? '::jsonb' : '')).join(', ')}${keys.length ? ', ' : ''}history = history || $${keys.length + 2}::jsonb, updated_by=$${keys.length + 3}, updated_at=now() WHERE id=$1`, [o.id, ...vals, hist, by]);
     await cpAudit(o.client_id, 'Portal order edited', '#' + o.id + ' · ' + (changes.join(' · ') || 'carrier').slice(0, 300), by);
     res.json({ ok: true, changes, order: await cpOrderRow(o.id) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 const _cpPushing = new Set();   // per-order single flight: a double click cannot create two Fulfil drafts
 app.post('/api/client/portal-orders/:id/push', async (req, res) => {
@@ -36062,7 +36069,7 @@ app.post('/api/client/portal-orders/:id/push', async (req, res) => {
     else await pool.query(`UPDATE planner.client_orders SET error=$2, history = history || $3::jsonb WHERE id=$1`, [o.id, fulfil.reason, hist]);
     await cpAudit(o.client_id, fulfil.ok ? 'Portal order pushed to Fulfil' : 'Portal order push failed', '#' + o.id + ' · ' + (fulfil.ok ? fulfil.number : fulfil.reason), by);
     res.status(fulfil.ok ? 200 : 502).json({ ok: fulfil.ok, fulfil: { ok: fulfil.ok, number: fulfil.number || null, reason: fulfil.reason || null, stub: !!fulfil.stub, env: fulfil.env }, order: await cpOrderRow(o.id) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { _cpPushing.delete(id); }
 });
 app.post('/api/client/portal-orders/:id/cancel', async (req, res) => {
@@ -36070,7 +36077,7 @@ app.post('/api/client/portal-orders/:id/cancel', async (req, res) => {
   try { const o = await cpOrderRow(req.params.id); if (!o) return res.status(404).json({ error: 'order not found' }); if (!CP_EDITABLE.includes(o.status)) return res.status(409).json({ error: 'order is ' + o.status });
     await pool.query(`UPDATE planner.client_orders SET status='cancelled', history = history || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1`, [o.id, JSON.stringify([{ at: new Date().toISOString(), by, what: 'Cancelled' + (reason ? ': ' + reason : '') }]), by]);
     await cpAudit(o.client_id, 'Portal order cancelled', '#' + o.id + (reason ? ' · ' + reason : ''), by); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── commission engine ──
@@ -36080,7 +36087,7 @@ app.get('/api/client/commission/groups', async (req, res) => {
       FROM planner.rep_groups g ORDER BY g.active DESC, g.no_commission, g.name`)).rows, overrides: (await pool.query(`SELECT o.*, g.name group_name, g.default_rate group_rate FROM planner.commission_overrides o LEFT JOIN planner.rep_groups g ON g.id=o.rep_group_id ORDER BY o.created_at DESC LIMIT 500`)).rows,
       customer_rates: (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_customer_rates r LEFT JOIN planner.rep_groups g ON g.id=r.rep_group_id ORDER BY lower(r.customer_name)`).catch(() => ({ rows: [] }))).rows,
       customer_counts: (await pool.query(`SELECT rep_group_id, count(*)::int n FROM planner.commission_customers GROUP BY 1`).catch(() => ({ rows: [] }))).rows }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/groups', async (req, res) => {
   try { _cmCache.clear(); } catch (_) {}   // v28.332: a settings change recalculates the commission orders
@@ -36098,7 +36105,7 @@ app.post('/api/client/commission/groups', async (req, res) => {
     const name = String(b.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query(`INSERT INTO planner.rep_groups (name, default_rate, xero_contact, xero_account_code) VALUES ($1,$2,$3,$4) RETURNING id`, [name, Number(b.default_rate) || 0, b.xero_contact || null, b.xero_account_code || null]);
     await cpAudit(null, 'Rep group created', name + ' @ ' + (Number(b.default_rate) || 0) + '%', req.me.email); res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/overrides', async (req, res) => {
   try { _cmCache.clear(); } catch (_) {}   // v28.332: a settings change recalculates the commission orders
@@ -36107,7 +36114,7 @@ app.post('/api/client/commission/overrides', async (req, res) => {
   const _num = v => (v === '' || v == null) ? null : Number(String(v).replace(/[^0-9.\-]/g, ''));
   try { await pool.query(`DELETE FROM planner.commission_overrides WHERE order_ref=$1 AND rep_group_id<>$2`, [ref, b.rep_group_id]);
     await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, commissionable_amount, reason, created_by) VALUES ($1,$2,$3,$6,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, commissionable_amount=excluded.commissionable_amount, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, _num(b.rate), b.reason || null, req.me.email, _num(b.commissionable_amount)]);
-    await cpAudit(null, 'Commission override', ref + ' @ ' + (_num(b.rate) == null ? 'agent rate' : _num(b.rate) + '%'), req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    await cpAudit(null, 'Commission override', ref + ' @ ' + (_num(b.rate) == null ? 'agent rate' : _num(b.rate) + '%'), req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── Agent rules (v28.442, Ben 22-Oct-26: "not every wholesale order has an agent, but we can create some rules to surface reports in horizon >
 // client > commission to check orders without agents that meet conditions like 'country US, state FL, no agent - could be appelman'").
@@ -36136,14 +36143,14 @@ function cmRuleMatch(r, o) {
 async function cmRules() { const v = cpJson(await cpSetting('cm_agent_rules', ''), []); return (Array.isArray(v) ? v : []).map(cmCleanRule); }
 app.get('/api/client/commission/rules', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ rules: await cmRules(), groups: (await pool.query(`SELECT id, name, active, coalesce((to_jsonb(g)->>'no_commission')::boolean,false) no_commission FROM planner.rep_groups g ORDER BY sort_order NULLS LAST, name`)).rows }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/client/commission/rules', async (req, res) => {
   const rules = (Array.isArray((req.body || {}).rules) ? req.body.rules : []).slice(0, 200).map(cmCleanRule);
   const bad = rules.find(r => !r.rep_group_id); if (bad) return res.status(400).json({ error: 'Every rule needs an agent' + (bad.name ? ' (' + bad.name + ')' : '') });
   const empty = rules.find(r => !(r.countries.length || r.states.length || r.zips.length || r.channels.length || r.customers.length || r.emails.length)); if (empty) return res.status(400).json({ error: 'Every rule needs at least one condition' + (empty.name ? ' (' + empty.name + ')' : '') });
   try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_agent_rules',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(rules), req.me.email || null]);
     await cpAudit(null, 'Agent rules', rules.length + ' rule' + (rules.length === 1 ? '' : 's') + ' saved', req.me.email); res.json({ ok: true, rules });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Unassigned orders for a month: the engine's paid wholesale orders with no agent (Fulfil; Xero not needed: a Xero payment only counts for a
 // customer already on an agent's list), one row per order (payments summed), with the first matching rule's agent unless dismissed.
 app.get('/api/client/commission/unassigned', async (req, res) => {
@@ -36164,7 +36171,7 @@ app.post('/api/client/commission/unassigned/dismiss', async (req, res) => {
   const b = req.body || {}, ref = String(b.order_ref || '').trim().toUpperCase(), gid = Number(b.rep_group_id); if (!ref || !gid) return res.status(400).json({ error: 'order_ref and rep_group_id required' });
   try { const dis = cpJson(await cpSetting('cm_unassigned_dismissed', ''), {}) || {}; dis[ref] = [...new Set((dis[ref] || []).map(Number).concat(gid))];
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_unassigned_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), req.me.email || null]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.433 (Ben 21-Oct-26: "Is there an ability to search fulfil for a sales order to add to an agent? Tag it? We should have that ability
 // in orders"; chose: HORIZON tag + optional write to Fulfil). COMMISSIONS > Orders > Tag an order to an agent:
 //  - search Fulfil sale orders (read only) by SO number, Shopify / order reference or customer; each hit shows its client PO, the agent code
@@ -36192,7 +36199,7 @@ app.get('/api/client/commission/orders/search', async (req, res) => {
     orders.forEach(o => { const c = codes[o.sale_id] || null, g = c ? byCode[c.toLowerCase()] : null; o.fulfil_code = c; o.fulfil_agent = g ? g.name : null; o.fulfil_agent_id = g ? g.id : null;
       const t = tags[String(o.reference).toUpperCase()] || tags[String(o.number).toUpperCase()] || null; o.hz_tag = t ? { id: t.id, order_ref: t.k, rep_group_id: t.rep_group_id, agent: t.name, rate: t.rate, reason: t.reason, by: t.created_by } : null; });
     res.set('Cache-Control', 'no-store').json({ env, orders });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/orders/fulfil-tag', async (req, res) => {
   const b = req.body || {};
@@ -36214,9 +36221,9 @@ app.post('/api/client/commission/orders/fulfil-tag', async (req, res) => {
     try { _cmCache.clear(); } catch (_) {}
     const by = authUser(req) || 'unknown'; await cpAudit(null, 'Fulfil agent code set', (so.number || saleId) + ': ' + (before == null ? '(none)' : before || '(blank)') + ' -> ' + code + ' (' + env + ')', by);
     res.json({ ok: after === code, env, number: so.number, before, after, code, agent: g.name });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
-app.post('/api/client/commission/overrides/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_overrides WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/commission/overrides/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_overrides WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 async function cpRunSummary(runId) {
   const t = (await pool.query(`SELECT coalesce(sum(net),0) total, count(*)::int rows, count(*) FILTER (WHERE status='exception')::int exceptions FROM planner.commission_rows WHERE run_id=$1`, [runId])).rows[0];
   await pool.query(`UPDATE planner.commission_runs SET total=$2 WHERE id=$1`, [runId, t.total]); return t;
@@ -36225,12 +36232,12 @@ app.get('/api/client/commission/runs', async (req, res) => {
   try { const month = String(req.query.month || '').trim(); const params = []; let w = '1=1'; if (/^\d{4}-\d{2}$/.test(month)) { params.push(month); w = 'r.month=$1'; }
     const runs = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.sort_order, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id) rows, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id AND x.status='exception') exceptions FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE ${w} ORDER BY r.month DESC, g.name`, params)).rows;
     const months = (await pool.query(`SELECT DISTINCT month FROM planner.commission_runs ORDER BY month DESC LIMIT 24`)).rows.map(x => x.month);
-    res.set('Cache-Control', 'no-store').json({ runs, months }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ runs, months }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/commission/runs/:id', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.xero_contact, g.xero_account_code, to_jsonb(g)->>'statement_email' statement_email, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy, to_char(r.statement_sent_at,'YYYY-MM-DD') sent_on FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
     const rows = (await pool.query(`SELECT *, to_char(paid_date,'YYYY-MM-DD') paid FROM planner.commission_rows WHERE run_id=$1 ORDER BY status='exception' DESC, paid_date, order_ref`, [req.params.id])).rows;
-    res.set('Cache-Control', 'no-store').json({ run, rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ run, rows }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Build / refresh a run. Scope = PAYMENT date in the month. Sources: (a) rows imported from the Xero paid-invoice export
 // (the current monthly process; columns: invoice, customer, po, payment_date, amount, credit_note, order_ref) via
@@ -36582,7 +36589,7 @@ app.post('/api/client/commission/catchup/save', async (req, res) => {
         r.currency || null, r.currency_src || null, r.amount_src == null ? null : r.amount_src, r.fx_rate == null ? null : r.fx_rate, r.commissionable == null ? null : r.commissionable, r.rate == null ? null : r.rate, r.commission, r.rate_source || null, r.agent_source || null, r.source || null, r.note || null, by]); n++; }
     await client.query(`INSERT INTO planner.app_settings (key, value) VALUES ('commission_last_catchup',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [JSON.stringify({ month, at: new Date().toISOString(), by, rows: n, from: b.from || null, to: b.to || null })]);
     await client.query('COMMIT'); res.json({ ok: true, month, saved: n });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { client.release(); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); } finally { client.release(); }
 });
 app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // add missed rows to the agent's OPEN run for a month (made if absent)
   const b = req.body || {}, month = String(b.month || ''), gid = parseInt(b.rep_group_id, 10), rows = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
@@ -36598,7 +36605,7 @@ app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // ad
         'earned ' + ml(r.earned_month || r.earn_date || month) + ', not paid then', r.currency || null, r.currency_src || null, r.amount_src, r.fx_rate, r.invoice_date || null, r.earn_date || null, r.rate_source || null, r.agent_source || null]); added++; }
     const sum = await cpRunSummary(run.id); await cpAudit(null, 'Missed commission added', month + ' · ' + g.name + ' · ' + added + ' rows', req.me && req.me.email);
     res.json({ ok: true, run_id: run.id, added, ...sum });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.421: one agent's run from an engine pass (calculated rows rebuilt; imported / hand rows stay). Throws 409 when the run is not open.
 // v28.421: one agent's run from an engine pass (calculated rows rebuilt; imported / hand rows stay). Throws 409 when the run is not open.
@@ -36732,7 +36739,7 @@ app.post('/api/cron/commission-weekly', async (req, res) => {
     out.step = step; out.secs = Math.round((Date.now() - t0) / 1000);
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('commission_weekly',$1,$2,$3)`, [out.ok ? 'success' : 'error', out.customers || out.saved || 0, JSON.stringify(Object.assign({ step }, out)).slice(0, 500)]); } catch (_) {}
     res.status(out.ok ? 200 : 500).json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.429 (Ben 21-Oct-26: "can it show last imported data on IMPORT DATA"): when the agent customers were last synced, the last payments
 // import (month, when, who, runs built) and when each month's runs were last built.
@@ -36744,7 +36751,7 @@ app.get('/api/client/commission/import-status', async (req, res) => {
     const lc = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='commission_last_catchup'`)).rows[0]; let lastCu = null; try { lastCu = lc ? JSON.parse(lc.value) : null; } catch (_) {}   // v28.430
     const catchup = {}; (await pool.query(`SELECT run_month, count(*)::int n, max(found_at) at FROM planner.commission_catchup GROUP BY run_month`).catch(() => ({ rows: [] }))).rows.forEach(r => { catchup[r.run_month] = { n: r.n, at: r.at }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, customers: { n: cu.n || 0, at: cu.at || null }, last_import: last, months, last_catchup: lastCu, catchup });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.421 (Ben 21-Oct-26): POST /api/client/commission/runs/:id/import-paid (paste a Xero export CSV) removed: the engine reads Xero and Fulfil itself.
 // v28.709 (Ben 05-Nov-26: "september 2026 is the cut off for the old process. can you rebuild the monthly runs from paid history, have a badge
@@ -36875,7 +36882,7 @@ app.get('/api/client/commission/summary', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, month: cur, runs, drafts: runs.filter(r => r.status === 'open'), review: runs.filter(r => r.status === 'finalised'),
       catchup: { found: cu.n, found_commission: cu.c, in_runs: cuIn.n, in_runs_commission: cuIn.c }, adjustments_in_drafts: adj.n, faire_claims_open: faire.n, exceptions_open: excOpen, exceptions_at: chk ? chk.at : null,
       weekly: weekly.map(w => ({ step: w.step, status: w.status, at: w.at })) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.718 (Ben 05-Nov-26: "it calculates every time it opens, can this be cached and pre calculated from previous data imports"): the full list
 // (engine exceptions + checks + customers on no agent's list + agent setup) is saved per month (app_settings cm_checks:<month>) and the page
@@ -36913,7 +36920,7 @@ app.post('/api/client/commission/checks/dismiss', async (req, res) => {   // { k
   try { const dis = cpJson(await cpSetting('cm_exc_dismissed', ''), {}) || {};
     if (b.dismiss === false) delete dis[key]; else dis[key] = { by: (req.me && req.me.email) || null, at: new Date().toISOString(), note: String(b.note || '').slice(0, 300) };
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_exc_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), (req.me && req.me.email) || null]);
-    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, dismissed: b.dismiss !== false }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 const _cmMonth = (d, k) => { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + (k || 0), 1)); return x.toISOString().slice(0, 7); };
 async function cmAdjTarget(client, gid, dry) {   // the agent's first DRAFT run from this month on (this month if still a draft), made if absent
   for (let k = 0; k < 4; k++) { const m = _cmMonth(new Date(), k);
@@ -36970,7 +36977,7 @@ app.get('/api/client/commission/adjustments', async (req, res) => {
       FROM planner.commission_adjustments a LEFT JOIN planner.rep_groups g ON g.id=a.rep_group_id LEFT JOIN planner.rep_groups gf ON gf.id=a.from_rep_group_id LEFT JOIN planner.rep_groups gt ON gt.id=a.to_rep_group_id
       LEFT JOIN planner.commission_runs r ON r.id=a.run_id LEFT JOIN planner.commission_paid_history h ON h.id=a.history_id ORDER BY a.created_at DESC, a.id LIMIT 2000`);
     res.set('Cache-Control', 'no-store').json({ ok: true, rows: r.rows.map(x => Object.assign(x, { state: x.status === 'cancelled' ? 'cancelled' : x.run_status === 'paid' ? 'paid' : x.run_status === 'finalised' ? 'in review' : 'in draft run' })) });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/adjustments/:batch/cancel', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required' }); } catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
@@ -36983,7 +36990,7 @@ app.post('/api/client/commission/adjustments/:batch/cancel', async (req, res) =>
     await c.query(`UPDATE planner.commission_adjustments SET status='cancelled', cancelled_at=now(), cancelled_by=$2 WHERE batch_id=$1`, [req.params.batch, (req.me && req.me.email) || null]);
     await c.query('COMMIT'); for (const id of [...new Set(A.map(a => a.run_id).filter(Boolean))]) { try { await cpRunSummary(id); } catch (_) {} }
     await cpAudit(null, 'Commission adjustment cancelled', (A[0].invoice_ref || '') + ' · ' + A[0].reason, req.me && req.me.email); try { _cphMemo.clear(); } catch (_) {} res.json({ ok: true });
-  } catch (e) { await c.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { c.release(); }
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: clientErr(e) }); } finally { c.release(); }
 });
 const CM_LEGACY_THROUGH = '2026-09';
 app.post(['/api/client/commission/rows/:id', '/api/client/commission/runs/:id/status', '/api/client/commission/runs/:id/xero-bill', '/api/client/commission/runs/:id/email-statement', '/api/client/commission/runs/:id/push-fulfil'], async (req, res, next) => {
@@ -37037,7 +37044,7 @@ app.post('/api/client/commission/runs/legacy-rebuild', async (req, res) => {
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'admin only' }); } catch (e) { return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body || {}).confirm !== true) return res.status(400).json({ error: 'confirm:true required: this replaces the legacy runs and any open run up to the cut-off' });
   try { res.json(Object.assign({ ok: true }, await cmLegacyRebuild((req.body || {}).through, req.me && req.me.email))); }
-  catch (e) { if (/legacy|history_id/.test(e.message) && /does not exist/.test(e.message)) return res.status(409).json({ error: 'Run migration 419 first (planner.commission_runs.legacy).' }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (/legacy|history_id/.test(e.message) && /does not exist/.test(e.message)) return res.status(409).json({ error: 'Run migration 419 first (planner.commission_runs.legacy).' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/rows/:id', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [];
@@ -37045,7 +37052,7 @@ app.post('/api/client/commission/rows/:id', async (req, res) => {
   if (!sets.length) return res.json({ ok: true }); vals.push(req.params.id);
   try { await pool.query(`UPDATE planner.commission_rows SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
     await pool.query(`UPDATE planner.commission_rows SET commission = round(commissionable * rate) / 100, net = round(commissionable * rate) / 100 + credit_adj WHERE id=$1 AND credit_note_ref IS NULL`, [req.params.id]);
-    const r = (await pool.query(`SELECT run_id FROM planner.commission_rows WHERE id=$1`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    const r = (await pool.query(`SELECT run_id FROM planner.commission_rows WHERE id=$1`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.430 (Ben 21-Oct-26, "if you remove an order from a run, what does that mean"; chose "defer to next run"): the run's remove button defers a
 // row: not paid in this run (net 0, greyed), kept through rebuilds, and carried into the agent's next run until a run pays it. Open runs only.
@@ -37056,9 +37063,9 @@ app.post('/api/client/commission/rows/:id/defer', async (req, res) => {
     if (r.status === 'exception') return res.status(409).json({ error: 'resolve the exception first' });
     await pool.query(on ? `UPDATE planner.commission_rows SET status='deferred', net=0 WHERE id=$1` : `UPDATE planner.commission_rows SET status='pending', net=round(coalesce(commission,0)+coalesce(credit_adj,0),2) WHERE id=$1`, [r.id]);
     const sum = await cpRunSummary(r.run_id); res.json(Object.assign({ ok: true, deferred: on }, sum));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
-app.post('/api/client/commission/rows/:id/delete', async (req, res) => { try { const r = (await pool.query(`DELETE FROM planner.commission_rows WHERE id=$1 RETURNING run_id`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/commission/rows/:id/delete', async (req, res) => { try { const r = (await pool.query(`DELETE FROM planner.commission_rows WHERE id=$1 RETURNING run_id`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.444 (Ben 22-Oct-26: Mark paid "only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid"):
 // marking a run paid is HORIZON-only (no Xero payment, nothing in Fulfil): run + rows status paid, rows copied to the paid history (migration 363;
 // replaces an earlier copy of the run). Creating the Xero bill does this too. Returns the paid-history row count (null before migration 363).
@@ -37093,7 +37100,7 @@ app.post('/api/client/commission/runs/:id/status', async (req, res) => {
     try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]); }
     catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
     await cpAudit(null, 'Commission run ' + (st === 'open' ? 'back to draft' : 'sent for review'), run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); res.json({ ok: true, history_rows: hist });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
@@ -37105,7 +37112,7 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
     const lines = [HDR, [run.xero_contact || run.group_name, '', '', '', '', '', '', '', '', '', inv, dd, dd, total, '', 'Commission ' + run.month + ' — ' + rows.length + ' orders (see statement)', '1', total, run.xero_account_code || '', 'No VAT', '', '', '', '', '', '', total].map(esc).join(',')];
     await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2 WHERE id=$1`, [req.params.id, inv]);
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + inv + '.csv"'); res.send(lines.join('\n'));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.059 (Ben): create the commission bill directly in Xero (UK org) instead of the CSV. Admin + confirm; draft
 // by default, approved when {approved:true}. Contact = the rep group's Xero contact; single line coded to its account.
@@ -37154,7 +37161,7 @@ app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
     const esc = x => { x = csvSafe(x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
     const csv = ['Month,Rep group,Order,Invoice,Client PO,Customer,Paid date,Commissionable,Rate %,Commission,Credit note,Credit adj,Net,Payment code,Status,Note'].concat(rows.map(r => [run.month, run.group_name, r.order_ref, r.invoice_ref, r.client_po, r.customer, r.paid, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, r.net, r.payment_code, r.status, r.note].map(esc).join(','))).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="commission-' + run.month + '-' + cpSlug(run.group_name) + '.csv"'); res.send(csv);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.021 (Ben): historical paid commissions (Paid history tab) — every row from a run marked paid.
 app.get('/api/client/commission/paid', async (req, res) => {
@@ -37169,7 +37176,7 @@ app.get('/api/client/commission/paid', async (req, res) => {
         (SELECT count(*) FROM planner.commission_rows cr WHERE cr.run_id=r.id) rows_count
       FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.status='paid'${gp} ORDER BY r.paid_at DESC NULLS LAST, r.month DESC`, params)).rows;
     res.set('Cache-Control', 'no-store').json({ rows, runs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // v28.323 (Ben 13-Oct-26, commissions step 1): Xero contact groups ("Agent - Schauben" ...) are the agents' customer lists. Read only.
@@ -37182,7 +37189,7 @@ app.get('/api/client/commission/xero-groups', async (req, res) => {
     const j = await xeroFetch(org, '/api.xro/2.0/ContactGroups');
     const v = ((j && j.ContactGroups) || []).filter(g => (g.Status || 'ACTIVE') === 'ACTIVE').map(g => ({ id: g.ContactGroupID, name: g.Name })).sort((a, b) => a.name.localeCompare(b.name));
     _cmXg.set(k, { at: Date.now(), v }); res.json({ groups: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/commission/xero-group-members', async (req, res) => {
   try { const org = String(req.query.org || 'uk').toLowerCase(), gid = String(req.query.group || ''); if (!['uk', 'au'].includes(org) || !/^[0-9a-f-]{36}$/i.test(gid)) return res.status(400).json({ error: 'org and group id required' });
@@ -37193,7 +37200,7 @@ app.get('/api/client/commission/xero-group-members', async (req, res) => {
       ((cj && cj.Contacts) || []).forEach(c => members.push({ id: c.ContactID, name: c.Name, email: String(c.EmailAddress || '').trim().toLowerCase() || null, status: c.ContactStatus })); }
     const v = { group: { id: gid, name: g.Name }, members: members.sort((a, b) => String(a.name).localeCompare(String(b.name))) };
     _cmXg.set(k, { at: Date.now(), v }); res.json(v);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.326 (Ben 13-Oct-26, commissions stage 1): customer rates, the customer -> agent list (synced from each agent's Xero contact group,
 // manual assignment wins) and Fulfil wholesale customers with no agent (matched by email). Read only on Xero / Fulfil.
@@ -37203,9 +37210,9 @@ app.post('/api/client/commission/customer-rates', async (req, res) => {
   if (!name || !(rate >= 0) || String(b.rate || '') === '') return res.status(400).json({ error: 'customer name and rate required' });
   try { await pool.query(`INSERT INTO planner.commission_customer_rates (customer_name, rep_group_id, rate, note, created_by) VALUES ($1,$2,$3,$4,$5)
       ON CONFLICT (lower(customer_name)) DO UPDATE SET rep_group_id=EXCLUDED.rep_group_id, rate=EXCLUDED.rate, note=EXCLUDED.note`, [name, b.rep_group_id || null, rate, b.note || null, req.me.email]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
-app.post('/api/client/commission/customer-rates/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_customer_rates WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/commission/customer-rates/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_customer_rates WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Sync: every agent with a Xero contact group (by id, or resolved by its name) -> its members into commission_customers (manual rows kept)
 app.post('/api/client/commission/customers/sync', async (req, res) => {
   try { const out = { agents: 0, customers: 0, resolved: 0, errors: [] };
@@ -37227,7 +37234,7 @@ app.post('/api/client/commission/customers/sync', async (req, res) => {
     }
     try { out.statement_emails = await cmFillStatementEmails(); } catch (e) { out.errors.push('statement emails: ' + e.message); }   // v28.422
     await cpAudit(null, 'Commission customers synced from Xero', out.agents + ' agents, ' + out.customers + ' customers', req.me.email); res.json(Object.assign({ ok: !out.errors.length }, out));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.422 (Ben 21-Oct-26: "the statement email for the agent, can you get this from xero contact and if not, we can add it, highlight it as an
 // action in horizon"): an agent with no statement email gets the email address of its Xero bill contact (Xero UK, read only). Never overwrites
@@ -37258,7 +37265,7 @@ app.post('/api/client/commission/groups/order', async (req, res) => {
     if (!ids.length) return res.status(400).json({ error: 'ids required' });
     await pool.query(`UPDATE planner.rep_groups g SET sort_order = u.ord FROM unnest($1::int[]) WITH ORDINALITY u(id, ord) WHERE g.id = u.id`, [ids]);
     await cpAudit(null, 'Agent order changed', ids.length + ' agents', req.me.email); res.json({ ok: true, n: ids.length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/commission/readiness', async (req, res) => {
   try { const rows = (await pool.query(`SELECT g.id, g.name, coalesce(g.statement_email,'') statement_email, coalesce(g.xero_contact,'') xero_contact, coalesce(g.xero_account_code,'') xero_account_code,
@@ -37269,7 +37276,7 @@ app.get('/api/client/commission/readiness', async (req, res) => {
       ORDER BY g.name`)).rows;
     const actions = rows.map(g => ({ agent: g.name, client_id: g.client_id, missing: [!g.statement_email ? 'statement email' : null, !g.xero_contact ? 'Xero bill contact' : null, !g.xero_account_code ? 'bill account' : null].filter(Boolean) })).filter(a => a.missing.length);
     res.set('Cache-Control', 'no-store').json({ ok: true, agents: rows.length, actions });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/commission/customers', async (req, res) => {
   try { const w = [], p = []; if (req.query.group) { p.push(Number(req.query.group)); w.push('c.rep_group_id=$' + p.length); }
@@ -37277,7 +37284,7 @@ app.get('/api/client/commission/customers', async (req, res) => {
     const rows = (await pool.query(`SELECT c.id, c.customer_name, c.email, c.source, c.rep_group_id, g.name group_name, to_char(c.synced_at,'YYYY-MM-DD') synced FROM planner.commission_customers c LEFT JOIN planner.rep_groups g ON g.id=c.rep_group_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY lower(c.customer_name) LIMIT 1000`, p)).rows;
     const total = (await pool.query(`SELECT count(*)::int n, max(synced_at) at FROM planner.commission_customers`)).rows[0];
     res.set('Cache-Control', 'no-store').json({ rows, total });
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], total: { n: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], total: { n: 0 }, missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/commission/customers/assign', async (req, res) => {
   try { _cmCache.clear(); } catch (_) {}   // v28.332: a settings change recalculates the commission orders
@@ -37285,7 +37292,7 @@ app.post('/api/client/commission/customers/assign', async (req, res) => {
   if (!b.id && !name) return res.status(400).json({ error: 'customer required' });
   try { if (b.id) await pool.query(`UPDATE planner.commission_customers SET rep_group_id=$2, source='manual', updated_by=$3, updated_at=now() WHERE id=$1`, [b.id, b.rep_group_id || null, req.me.email]);
     else await pool.query(`INSERT INTO planner.commission_customers (org, customer_name, email, rep_group_id, source, updated_by) VALUES ('fulfil',$1,$2,$3,'manual',$4)`, [name, email, b.rep_group_id || null, req.me.email]);
-    _cmFu = null; res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    _cmFu = null; res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Fulfil wholesale customers (orders with WS in the reference, or on the native MarketTime channel since v28.649, since a date) whose email is on
 // no agent's list: assign them by hand.
@@ -37298,7 +37305,7 @@ app.get('/api/client/commission/customers/fulfil-unmatched', async (req, res) =>
     const by = new Map(); sales.forEach(s => { const e = String(s['party.email'] || '').toLowerCase().trim(); const k = e || ('#' + s['party.name']); if (e && known.has(e)) return; if (/dock and bay|dock & bay/i.test(s['party.name'] || '')) return;
       const x = by.get(k) || { name: s['party.name'], email: e || null, orders: 0, last: null, value: 0 }; x.orders++; const d = s.sale_date && (s.sale_date.iso_string || s.sale_date); if (!x.last || d > x.last) x.last = d; x.value += Number((s.untaxed_amount && s.untaxed_amount.decimal) || s.untaxed_amount || 0); by.set(k, x); });
     const v = { since, orders: sales.length, unmatched: [...by.values()].sort((a, b) => String(b.last).localeCompare(String(a.last))) }; _cmFu = { at: Date.now(), v }; res.json(v);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.322: paid commission history (migration 363): the imported sheet (Jan-22 onward) + every HORIZON run marked Paid. Filters: agent
 // (rep group text), year, free text (invoice / PO / customer). Rows newest first (max 1,000) and totals by month and by agent.
@@ -37319,7 +37326,7 @@ app.get('/api/client/commission/history-all', async (req, res) => {
     const cols = ['id', 'period', 'rep_group', 'customer', 'invoice_no', 'po_no', 'invoice_date', 'ccy', 'comm', 'rate', 'paid', 'credit_note', 'status', 'source', 'run_id', 'notes', 'adj'];
     const v = { cols, rows: r.rows.map(x => cols.map(c => x[c] == null ? null : x[c])), at: new Date().toISOString() };
     _cphMemo.set('all', { at: Date.now(), v }); res.set('Cache-Control', 'no-store').json(v);
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ cols: [], rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ cols: [], rows: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.get('/api/client/commission/history', async (req, res) => {
   const _ck = JSON.stringify([req.query.group, req.query.year, req.query.q, req.query.status, req.query.range, req.query.month]), _ch = _cphMemo.get(_ck);
   if (_ch && Date.now() - _ch.at < 120e3) return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, _ch.v));
@@ -37349,7 +37356,7 @@ app.get('/api/client/commission/history', async (req, res) => {
     const v = { rows: rows.rows, by_month: byMonth.rows, by_group: byGroup.rows, groups: groups.rows.map(r => r.rep_group), years: years.rows.map(r => r.y), total: tot.rows[0], tabs: tabs.rows, range: recent ? 'recent' : 'all' };
     _cphMemo.set(_ck, { at: Date.now(), v }); if (_cphMemo.size > 100) _cphMemo.delete(_cphMemo.keys().next().value);
     res.set('Cache-Control', 'no-store').json(v);
-  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], by_month: [], by_group: [], groups: [], years: [], total: { n: 0, paid: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], by_month: [], by_group: [], groups: [], years: [], total: { n: 0, paid: 0 }, missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.021: nicely formatted PDF commission statement for a run (pdf-lib).
 // v28.333: the statement PDF is built once here and used by the download, the statement email, the Xero bill attachment and the client portal.
@@ -37435,7 +37442,7 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
     catch (e) { if (!/does not exist/.test(e.message)) throw e; }   // before migration 384 the draft send is only in the audit log
     await cpAudit(null, draft ? 'Commission DRAFT statement emailed for review' : 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', ') + (cc.length ? ' (cc ' + cc.join(', ') + ')' : '') + (note ? ' · note: ' + note.slice(0, 200) : ''), req.me && req.me.email);
     res.json({ ok: true, to, cc });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.467 (Ben 23-Oct-26: "send statement to client can that be xlsx format as well"): the same statement as an xlsx (same rows as the PDF:
 // deferred rows left out), used by the download and attached to the statement email next to the PDF.
@@ -37516,7 +37523,7 @@ app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
     await pool.query(`UPDATE planner.commission_runs SET fulfil_push_status=$2 WHERE id=$1`, [run.id, st]);
     await cpAudit(null, 'Commission written to Fulfil', run.month + ' · ' + run.group_name + ' · ' + st, req.me && req.me.email);
     res.json({ ok: !errors.length, env: cfg.env, written, skipped, errors, status: st });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── messaging (admin side) ──
@@ -37563,28 +37570,28 @@ async function cpPostMessageX(threadId, senderKind, sender, body, atts, opts) {
   return { id: m.id, files };
 }
 async function cpPostMessage(threadId, senderKind, sender, body, atts) { return (await cpPostMessageX(threadId, senderKind, sender, body, atts)).id; }
-app.get('/api/client/threads', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.query.client_id || null, { kind: req.query.kind }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v28.200 (Ben): + ?kind=order|general
+app.get('/api/client/threads', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.query.client_id || null, { kind: req.query.kind }) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });   // v28.200 (Ben): + ?kind=order|general
 app.get('/api/client/threads/:id', async (req, res) => {
   try { const t = (await pool.query(`SELECT t.*, c.name client, c.owner_email${(await cpHas336()) ? ', ' + CP_OKEY_SQL + ' okey' : ''} FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [req.params.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });   // v28.200 (Ben): + okey (order threads open the order drawer)
     await pool.query(`UPDATE planner.client_messages SET read_by_ops_at=now() WHERE thread_id=$1 AND sender_kind='client' AND read_by_ops_at IS NULL`, [req.params.id]);
-    res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(req.params.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(req.params.id) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/threads', async (req, res) => {
   const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
   try { const t = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,$2,$3,$4,'ops') RETURNING id`, [b.client_id, String(b.subject || 'Message from Dock & Bay').slice(0, 200), b.context || null, req.me.email || null])).rows[0];
     if (b.body) await cpPostMessage(t.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments); await cpNotifyClientMessage(t.id, req);
-    res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/client/threads/:id/reply', async (req, res) => {
   const b = req.body || {}; if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
   // v28.200 (Ben): + internal (staff-only note / document: not shown to the client, no client email). Replying here on an order
   // thread IS replying on the order (same thread as CLIENT > Orders and the portal's My orders).
-  try { const r = await cpPostMessageX(req.params.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments, { internal: !!b.internal }); if (!(b.internal && _cp336)) await cpNotifyClientMessage(req.params.id, req); res.json({ ok: true, id: r.id, files: r.files }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const r = await cpPostMessageX(req.params.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments, { internal: !!b.internal }); if (!(b.internal && _cp336)) await cpNotifyClientMessage(req.params.id, req); res.json({ ok: true, id: r.id, files: r.files }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/client/attachment/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.client_message_files WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 async function cpNotifyClientMessage(threadId, req) {   // email the client's active users that Dock & Bay replied (best-effort)
   try { const has = await cpHas336();
@@ -37689,7 +37696,7 @@ const _cp503 = (res) => res.status(503).json({ error: 'order messages need migra
 app.get('/api/client/order-threads', async (req, res) => {
   try { if (!(await cpHas336())) return res.set('Cache-Control', 'no-store').json({ counts: {}, migration: false });
     const ts = await cpThreadList(req.query.client_id || null, { kind: 'order' });
-    res.set('Cache-Control', 'no-store').json({ counts: cpOrderCounts(ts, 'ops') }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ counts: cpOrderCounts(ts, 'ops') }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // staff: the order drawer. ?client_id picks whose conversation (an order can be visible to more than one client, e.g. an agent and
 // the key account); default = the client with an existing thread, else the first client that can see it. Opening marks the
@@ -37703,7 +37710,7 @@ app.get('/api/client/order-thread/:key', async (req, res) => {
     if (want) { thread = await cpOrderThreadFind(want.id, k.key);
       if (thread) { await pool.query(`UPDATE planner.client_messages SET read_by_ops_at=now() WHERE thread_id=$1 AND sender_kind='client' AND read_by_ops_at IS NULL`, [thread.id]); messages = await cpThreadMessages(thread.id); } }
     res.set('Cache-Control', 'no-store').json({ key: k.key, header, clients, client_id: want ? want.id : null, thread: thread ? { id: thread.id, subject: thread.subject, order_ref: thread.order_ref } : null, messages, documents: cpThreadDocs(messages) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // staff: post a message and / or documents on the order (creates the thread on first use). internal = staff-only.
 app.post('/api/client/order-thread/:key/post', async (req, res) => {
@@ -37717,7 +37724,7 @@ app.post('/api/client/order-thread/:key/post', async (req, res) => {
     const r = await cpPostMessageX(t.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments, { internal: !!b.internal });
     if (!b.internal) await cpNotifyClientMessage(t.id, req);
     res.json({ ok: true, thread_id: t.id, id: r.id, files: r.files, client_id: c.id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ═════════════════════════════════════ PORTAL (client-facing) ═════════════════════════════════════
@@ -37775,7 +37782,7 @@ async function cpAuth(req, res, next) {
     req.cp = { user: { id: s.user_id, email: s.email, name: s.name, scope: s.scope }, client, preview: /^cppv_/.test(csid) };
     _cpAuthMemo.set(csid, { t: Date.now(), v: req.cp }); if (_cpAuthMemo.size > 2000) { for (const [k, e] of _cpAuthMemo) if (Date.now() - e.t > CP_AUTH_TTL_MS) _cpAuthMemo.delete(k); }
     next();
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 function loadClientPage() { try { return readFileSync(new URL('./supply/client.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>client portal page missing'; } }
 const CLIENT_PAGE = DEV ? null : loadClientPage();
@@ -37832,12 +37839,18 @@ app.get('/client-view.js', (req, res) => {
   if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.set('Content-Encoding', 'gzip'); return res.end(_cvjs.gz); }
   res.send(_cvjs.src);
 });
+// v28.780 (security review 10-Nov-26, finding 22): limits are shared across instances in KV (fixed window per key: INCR + EXPIRE), so a cold
+// start or another instance no longer resets them; when KV is off or unreachable the per-instance memory count below is used.
+async function hzRateLimited(key, max, windowMs) {
+  if (KV_ON) { try { const w = Math.floor(Date.now() / windowMs), k = 'hz:rl:' + key + ':' + w; const n = Number(await kvCmd(['INCR', k])) || 0;
+      if (n === 1) kvCmd(['PEXPIRE', k, String(windowMs + 5000)]).catch(() => {}); return n > max; } catch (_) { /* fall back to memory */ } }
+  return _cpRateLimited(key, max, windowMs); }
 const _cpLinkHits = new Map();   // v28.018: rate-limit magic-link requests
 function _cpRateLimited(key, max, windowMs) { const now = Date.now(); const arr = (_cpLinkHits.get(key) || []).filter(t => now - t < windowMs); arr.push(now); _cpLinkHits.set(key, arr); if (_cpLinkHits.size > 5000) { for (const [k, v] of _cpLinkHits) if (!v.some(t => now - t < windowMs)) _cpLinkHits.delete(k); } return arr.length > max; }
 app.post('/api/cp/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
-  if (_cpRateLimited('ip:' + ip, 20, 3600000) || (email && _cpRateLimited('em:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests — please wait a few minutes and try again' });
+  if ((await hzRateLimited('ip:' + ip, 20, 3600000)) || (email && (await hzRateLimited('em:' + email, 5, 3600000)))) return res.status(429).json({ error: 'too many requests — please wait a few minutes and try again' });
   // v28.262 (deep dive K2): same fixed response window as the supplier portal (1.8 s + jitter) so timing never reveals whether an email is registered
   const deadline = new Promise((ok) => setTimeout(ok, PORTAL_LINK_WINDOW_MS + Math.floor(Math.random() * 300)));
   const work = (async () => { try { if (email) { const u = (await pool.query(`SELECT u.id, c.name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=$1 AND u.active AND c.active`, [email])).rows[0];
@@ -37853,7 +37866,7 @@ app.get('/api/cp/me', cpAuth, async (req, res) => {
     const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
     const notices_unread = (await cpNoticesFor(req.cp).catch(() => [])).filter(n => !n.seen).length;   // v28.506: Home nav badge
     res.set('Cache-Control', 'no-store').json({ notices_unread, user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSettingC('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSettingC('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Line sheet + stock: one product layer, two views. Market drives dims / HS / currency; stock is banded (default scope) or
 // exact (custom scope, key accounts) — never shown to distributors in order entry.
@@ -37902,10 +37915,10 @@ function cpProductsFrom(client, opts, rows, stockBy, settings) {   // pure: the 
 }
 // v28.175 (Ben): memoised per (bases, client signature) + sendJsonMemo (gzip once, strong ETag, 304). Cache-Control is now
 // `private, no-cache` (browser may keep it but must revalidate every time, so a 304 replaces the ~60 KB gzip body; never stale).
-app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); const v = await cpProductsMemo(req.cp.client, {}); sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); const v = await cpProductsMemo(req.cp.client, {}); sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProductsMemo(req.cp.client, { stockOnly: true });
   const v = _cpMemo('stock|' + _cpSig(req.cp.client.market, req.cp.client.currency, req.cp.client.type, req.cp.client.warehouse_code || null, req.cp.client.stock_scope || null, !!req.cp.client.features.view_stock), [r], () => Object.assign({}, r, { products: r.products.filter(p => p.stock != null) }));   // copy: the memoised line-sheet object is never mutated
-  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // ── Image galleries (v28.441, Ben 22-Oct-26: "build the client portal image galleries ... Use the HORIZON UI kit") ─────────────────
 // ImageBank shares galleries with the portal (docs/integrations/imagebank-client-portal.md). HORIZON's server calls its API with
 // IMAGEBANK_API_KEY (server env only: never sent to a browser, a URL or a log). Which shared galleries a client sees (Ben: "select specific
@@ -37980,7 +37993,7 @@ app.get('/api/cp/prices', cpAuth, async (req, res) => {
     if (!c.price_list) return res.json({ code: null, prices: {}, currency: c.currency });
     const rows = await _lcGet(_cpCache('cp:pl:' + c.price_list, CP_TTL.pl, 10 * 60000, async () => (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows));
     const v = _cpMemo(_cpSig('list', c.price_list, c.currency), [rows], () => { const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); }); return { code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }; });
-    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.503 (Ben 26-Oct-26, Madison): Catalogue SKU lists. A client pastes / uploads SKUs (or picks a saved list) and the line sheet and the
 // image gallery show just those. Saved lists belong to the CLIENT ACCOUNT (any number, named); anyone signed in for that client can use and edit them.
@@ -37989,7 +38002,7 @@ const cpSkuClean = a => [...new Set((Array.isArray(a) ? a : String(a || '').spli
 app.get('/api/cp/sku-lists', cpAuth, async (req, res) => {
   try { const r = await pool.query(`SELECT id, name, skus, coalesce(updated_by, created_by) by, to_char(updated_at,'YYYY-MM-DD') updated FROM planner.client_sku_lists WHERE client_id=$1 ORDER BY lower(name)`, [req.cp.client.id]);
     res.set('Cache-Control', 'no-store').json({ lists: r.rows }); }
-  catch (e) { if (e.code === '42P01') return res.json({ lists: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.code === '42P01') return res.json({ lists: [], missing: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/sku-lists', cpAuth, async (req, res) => {   // {id?, name, skus}: create, or rename / replace an existing list of this client
   const b = req.body || {}, name = String(b.name || '').trim().slice(0, 80), skus = cpSkuClean(b.skus), by = (req.cp.user && req.cp.user.email) || 'portal';
@@ -38002,11 +38015,11 @@ app.post('/api/cp/sku-lists', cpAuth, async (req, res) => {   // {id?, name, sku
           ON CONFLICT (client_id, lower(name)) DO UPDATE SET skus=EXCLUDED.skus, updated_by=EXCLUDED.updated_by, updated_at=now() RETURNING id`, [req.cp.client.id, name, skus, by]);
     if (!r.rowCount) return res.status(404).json({ error: 'List not found' });
     res.json({ ok: true, id: r.rows[0].id, count: skus.length });
-  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'You already have a list called "' + name + '"' }); if (e.code === '42P01') return res.status(503).json({ error: 'Saved lists are not set up yet' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'You already have a list called "' + name + '"' }); if (e.code === '42P01') return res.status(503).json({ error: 'Saved lists are not set up yet' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/sku-lists/:id/delete', cpAuth, async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.client_sku_lists WHERE id=$1 AND client_id=$2`, [Number(req.params.id) || 0, req.cp.client.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.506 (Ben 27-Oct-26, idea from Liam): client notice board (migration 392). Staff post in CLIENT ▸ Notices; clients see the live ones
 // at the top of Home (pinned first, then newest) with NEW until that user has seen them. Audience {markets, types, client_ids}: empty = every
@@ -38024,14 +38037,14 @@ async function cpNoticesFor(cp) {   // live notices for this client, each with s
 }
 app.get('/api/cp/notices', cpAuth, async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ notices: await cpNoticesFor(req.cp) }); }
-  catch (e) { if (e.code === '42P01') return res.json({ notices: [] }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.code === '42P01') return res.json({ notices: [] }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/notices/read', cpAuth, async (req, res) => {   // {ids}: this user has seen them (an admin preview never marks anything)
   try { if (req.cp.preview) return res.json({ ok: true, preview: true });
     const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : []).map(Number).filter(n => n > 0).slice(0, 200);
     if (ids.length) await pool.query(`INSERT INTO planner.client_notice_reads (notice_id, user_id) SELECT n.id, $2 FROM planner.client_notices n WHERE n.id = ANY($1::bigint[]) ON CONFLICT DO NOTHING`, [ids, req.cp.user.id]);
     res.json({ ok: true });
-  } catch (e) { if (e.code === '42P01') return res.json({ ok: true }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e.code === '42P01') return res.json({ ok: true }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Images for a SKU list, across every gallery this client may see. Needs Image Bank's GET /api/v1/portal/products/images?codes= (asked of the
 // Image Bank thread 26-Oct-26); until that is live this answers {pending:true} and the portal says so. Size SKUs are sent as-is; Image Bank
@@ -38090,7 +38103,7 @@ app.get('/api/cp/orders', cpAuth, async (req, res) => { try {
   const opts = { client: c, user: u, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status, cachedRule: true };
   const orders = await _lcGet(_cpCache(key, CP_TTL.orders, 3 * 60000, () => cpOrders(opts)));
   const v = _cpMemo('orders|' + key, [orders], () => ({ orders }));
-  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.475 (Ben 23-Oct-26: "can the client download the Fulfil invoice", "just the invoice download"): an order's posted customer
 // invoices are read live from Fulfil (so one posted after the last sales sync still shows) and the PDF comes from Fulfil's own Invoice
 // print template (report account.invoice.html → short-lived file URL), streamed through HORIZON so the client never sees a Fulfil link.
@@ -38342,7 +38355,7 @@ async function ilDoc(row) { const c = _ilCache.get(row.token); if (c && Date.now
   const doc = row.kind === 'tax' ? await ilLoadTax(row) : await ilLoadProforma(row);
   if (_ilCache.size > 2000) _ilCache.clear(); _ilCache.set(row.token, { at: Date.now(), doc }); return doc; }
 app.get('/invoice/:token', async (req, res) => {
-  if (_cpRateLimited('inv:' + ilIp(req), 120, 600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
+  if (await hzRateLimited('inv:' + ilIp(req), 120, 600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
   let row; try { row = await ilRow(req.params.token); } catch (e) { log500(e); return ilPlain(res, 503, 'This document is temporarily unavailable, please try again in a few minutes.'); }
   if (!row) return ilPlain(res, 404, 'Not found.');
   try {
@@ -38360,7 +38373,7 @@ app.get('/invoice/:token', async (req, res) => {
 // so this stays off (invoice_pay_enabled) and ilFulfilPayLink fails closed until it is wired.
 async function ilFulfilPayLink(row, doc) { const e = new Error('Fulfil payment link API not wired yet (gateway ' + IL_GATEWAY[doc.channel] + ')'); e.code = 'IL_PAY_PENDING'; throw e; }
 app.get('/invoice/:token/pay', async (req, res) => {
-  if (_cpRateLimited('invpay:' + ilIp(req), 20, 3600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
+  if (await hzRateLimited('invpay:' + ilIp(req), 20, 3600000)) return ilPlain(res, 429, 'Too many requests, please try again in a few minutes.');
   try { const row = await ilRow(req.params.token); if (!row || !(await ilPayOn())) return ilPlain(res, 404, 'Not found.');
     _ilCache.delete(row.token); const doc = await ilDoc(row);   // fresh amount owed
     if (!doc) return ilPlain(res, 410, 'This document is no longer available. Please contact Dock & Bay.');
@@ -38374,17 +38387,17 @@ app.get('/api/invoice-links', async (req, res) => { const me = await hzAdminOnly
     if (q) { p.push('%' + q + '%'); w = `WHERE sale_number ILIKE $1 OR invoice_number ILIKE $1 OR channel ILIKE $1`; }
     const rows = (await pool.query(`SELECT id, token, kind, fulfil_sale_id, fulfil_invoice_id, sale_number, invoice_number, channel, created_at, revoked_at, revoked_by, views, last_viewed_at
       FROM planner.invoice_links ${w} ORDER BY created_at DESC LIMIT 300`, p)).rows;
-    res.json({ links: rows, base: ilBase(req), entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ links: rows, base: ilBase(req), entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/invoice-links/:id/revoke', async (req, res) => { const me = await hzAdminOnly(req, res); if (!me) return;
   try { const r = await pool.query(`UPDATE planner.invoice_links SET revoked_at = now(), revoked_by = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING token`, [Number(req.params.id), (me && me.email) || authUser(req) || 'admin']);
-    if (r.rows[0]) _ilCache.delete(r.rows[0].token); res.json({ ok: true, revoked: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    if (r.rows[0]) _ilCache.delete(r.rows[0].token); res.json({ ok: true, revoked: r.rowCount }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/invoice-links/settings', async (req, res) => { const me = await hzAdminOnly(req, res); if (!me) return;
   try { const b = req.body || {};
     if (b.entities !== undefined) { const v = b.entities; if (!v || typeof v !== 'object' || Array.isArray(v)) return res.status(400).json({ error: 'entities must be an object keyed by channel' });
       const bad = Object.keys(v).filter(k => !IL_DEFAULT_ENTITIES[k]); if (bad.length) return res.status(400).json({ error: 'unknown channel: ' + bad.join(', ') });
       await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('invoice_link_entities', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(v)]); }
     if (b.pay_enabled !== undefined) await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('invoice_pay_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [b.pay_enabled ? 'true' : 'false']);
-    _ilCache.clear(); res.json({ ok: true, entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    _ilCache.clear(); res.json({ ok: true, entities: await ilEntities(), pay_enabled: await ilPayOn() }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
 // v28.227 (Ben): the draft also carries what staff set in CLIENT ▸ Orders review: order.carrier_id / carrier_service_id
 // (Fulfil carrier + carrier.service ids) and per line mode 'ship' | 'backorder' | 'dropship' (= sale.line.delivery_mode) with
@@ -38465,7 +38478,7 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
       html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks, we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''} for <b>${E(c.name)}</b>. Our team will review and confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}${b.requested_date ? ' · requested ' + E(b.requested_date) : ''}</p>${lineHtml}${b.notes ? '<p>Notes: ' + E(b.notes) + '</p>' : ''}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
     if (auto && !fulfil.ok && team.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: team, subject: 'Client order #' + o.id + ' from ' + c.name + ' — auto-post to Fulfil failed', html: `<p>The Fulfil draft for portal order <b>#${o.id}</b> (${E(c.name)}) was not created: ${E(fulfil.reason)}.</p><p><a href="${E(adminBase(req))}/#/client/orders">Review and push it in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
     res.json({ ok: true, id: o.id, status, fulfil, units, total, lines });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.333 (Ben): the client portal shows commission only to an AGENT client whose agent has "Portal view" on (agent record ▸ Commission).
 // A key account sitting under an agent never sees the agent's statement. Returns a note when blocked, null when allowed.
@@ -38491,7 +38504,7 @@ app.get('/api/cp/commission', cpAuth, async (req, res) => {
       const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
       return { runs, month, run, rows }; }));
     const v = _cpMemo(_cpSig('comm', gid, qm, c.rep_group_name || null, c.currency), [base], () => ({ group: c.rep_group_name, runs: base.runs, month: base.month, run: base.run, rows: base.rows, currency: (base.run && base.run.currency) || c.currency }));
-    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.200 (Ben): the portal's thread list. Internal (staff-only) messages are invisible here: not in the counts, the preview or the
 // sort time. Order threads are kept only when the user may open that order (cpAllowedOrderKeys: My orders visibility, scope 'self' =
@@ -38523,25 +38536,25 @@ async function cpPortalThread(cp, id) {
   return t;
 }
 const _cpNoMsg = (res) => res.status(403).json({ error: 'messaging not enabled' });
-app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return _cpNoMsg(res); res.set('Cache-Control', 'no-store').json({ threads: await cpPortalThreads(req.cp) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v28.200 (Ben): cpPortalThreads (order threads scoped, internal hidden)
+app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return _cpNoMsg(res); res.set('Cache-Control', 'no-store').json({ threads: await cpPortalThreads(req.cp) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });   // v28.200 (Ben): cpPortalThreads (order threads scoped, internal hidden)
 app.get('/api/cp/threads/:id', cpAuth, async (req, res) => {
   try { if (!req.cp.client.features.messaging) return _cpNoMsg(res);
     const t = await cpPortalThread(req.cp, req.params.id); if (!t) return res.status(403).json({ error: 'not found' });   // v28.200 (Ben): 403 (was 404), + order scope
     if (!req.cp.preview) await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL${(await cpHas336()) ? ' AND NOT internal' : ''}`, [t.id]);   // v28.200 (Ben): an admin preview never marks read
-    res.set('Cache-Control', 'no-store').json({ thread: { id: t.id, subject: t.subject, context: t.context, order_key: t.order_key || null, order_ref: t.order_ref || null, okey: t.okey || null, portal_order_id: t.order_key ? cpOkeyToPortalId(t.okey || t.order_key) : null }, messages: await cpThreadMessages(t.id, { client: true }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.set('Cache-Control', 'no-store').json({ thread: { id: t.id, subject: t.subject, context: t.context, order_key: t.order_key || null, order_ref: t.order_ref || null, okey: t.okey || null, portal_order_id: t.order_key ? cpOkeyToPortalId(t.okey || t.order_key) : null }, messages: await cpThreadMessages(t.id, { client: true }) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/threads', cpAuth, async (req, res) => {
   if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
   const b = req.body || {}; if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); if (!String(b.body || '').trim()) return res.status(400).json({ error: 'message required' });
   try { const t = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,$2,$3,$4,'client') RETURNING id`, [req.cp.client.id, String(b.subject || 'Question').slice(0, 200), b.context || null, req.cp.user.email])).rows[0];
-    await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/threads/:id/reply', cpAuth, async (req, res) => {
   if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
   const b = req.body || {}; try { if (!req.cp.client.features.messaging) return _cpNoMsg(res);
     const t = await cpPortalThread(req.cp, req.params.id); if (!t) return res.status(403).json({ error: 'not found' });   // v28.200 (Ben): + order scope (replying in Messages = replying on the order)
     if (!String(b.body || '').trim() && !cpAttReadable(b.attachments)) return res.status(400).json({ error: 'empty message' });
-    const id = await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    const id = await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/cp/attachment/:id', cpAuth, async (req, res) => {
   // v28.200 (Ben): never an internal file, and an order thread's file only for a user who may open that order. 403 for anything
@@ -38551,7 +38564,7 @@ app.get('/api/cp/attachment/:id', cpAuth, async (req, res) => {
     const r = (await pool.query(`SELECT f.filename, f.mime, f.data, f.storage_path, t.id thread_id${has ? ', t.order_key' : ''} FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id JOIN planner.client_threads t ON t.id=m.thread_id WHERE f.id=$1 AND t.client_id=$2${has ? ' AND NOT m.internal' : ''}`, [req.params.id, req.cp.client.id])).rows[0]; if (!r) return res.status(403).send('not found');
     if (r.order_key && !(await cpPortalThread(req.cp, r.thread_id))) return res.status(403).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── v28.200 (Ben): messages + documents per order, portal side (rule: see "MESSAGES + DOCUMENTS PER CLIENT ORDER" above) ──
 // counts for My orders, keyed by the order's okey; `own` = the order keys a scope 'self' user may open (others see the 💬 on every row)
@@ -38565,7 +38578,7 @@ app.get('/api/cp/order-threads', cpAuth, async (req, res) => {
         (await pool.query(`SELECT 'F'||s.fulfil_id k FROM planner.fulfil_sales s WHERE ${vis} AND lower(coalesce(s.party_email,''))=$${params.length} AND coalesce(s.state,'') <> 'cancel' LIMIT 2000`, params)).rows.forEach(r => own.push(r.k)); }
       (await pool.query(`SELECT 'P'||id k FROM planner.client_orders WHERE client_id=$1 AND user_id=$2`, [c.id, u.id])).rows.forEach(r => own.push(r.k)); }
     res.set('Cache-Control', 'no-store').json({ counts: cpOrderCounts(ts, 'client'), own });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/cp/order-thread/:key', cpAuth, async (req, res) => {
   try { const c = req.cp.client; if (!c.features.messaging) return _cpNoMsg(res); if (!(await cpHas336())) return _cp503(res);
@@ -38574,7 +38587,7 @@ app.get('/api/cp/order-thread/:key', cpAuth, async (req, res) => {
     if (t) { if (!req.cp.preview) await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL AND NOT internal`, [t.id]);
       messages = await cpThreadMessages(t.id, { client: true }); }
     res.set('Cache-Control', 'no-store').json({ key: k.key, thread: t ? { id: t.id, subject: t.subject, order_ref: t.order_ref } : null, messages, documents: cpThreadDocs(messages) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/cp/order-thread/:key/post', cpAuth, async (req, res) => {
   if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only): messaging is disabled while an admin is viewing as the client.', preview: true });
@@ -38588,7 +38601,7 @@ app.post('/api/cp/order-thread/:key/post', cpAuth, async (req, res) => {
     const r = await cpPostMessageX(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments);
     await cpNotifyOpsMessage(t.id, c, req);
     res.json({ ok: true, thread_id: t.id, id: r.id, files: r.files });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ═══════════════════════════════════════════ end CLIENT PORTAL ═══════════════════════════════════════════
 // ── v28.001 (Ben): GOOGLE SHEETS / SCRIPT EXPORTS ─────────────────────────────────────────────────────────────────
@@ -38678,7 +38691,7 @@ app.get('/api/export/csv/:report', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'inline; filename="' + report + '.csv"');
     res.send(_exRowsToCsv(rows));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Catalogue for the config page (logged-in users only — goes through the normal gate).
 app.get('/api/export/reports', async (req, res) => {
@@ -38694,7 +38707,7 @@ app.post('/api/export/token', async (req, res) => {
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [v, authUser(req) || null]);
     _exportTokenMemo = { t: 0, v: null };
     res.json({ ok: true, token: v });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // upload one country's CSV to DriveHQ over WebDAV (HTTP PUT, Basic auth) — gated on WEBDAV_BASE/DRIVEHQ_USER/PASS.
 // Mirrors the Apps Script routine: PUT {base}/{TARGET_FOLDER}/{filename}. Fixed filename → overwrites in place.
@@ -38714,8 +38727,8 @@ async function drivehqForecastCountry(country) {
     return { country: co, ok: true, url, rows: rowCount, bytes: Buffer.byteLength(csv) };
   } catch (e) { return { country: co, ok: false, reason: 'DriveHQ upload error: ' + e.message }; }
 }
-app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
-app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Session middleware for /api/portal/* (except request-link). Sets req.portal = {email, suppliers:[names], supplierIds:[ids]}.
 // v27.879 (Ben, portal perf): the session → supplier resolution (2 sequential queries, ~0.6s on the remote pooler) ran on
 // EVERY portal request. Memoised per session token for 60s; the logout route drops the entry. A supplier-link change made
@@ -38778,7 +38791,7 @@ async function portalAuth(req, res, next) {
     _portalAuthMemo.set(psid, { t: Date.now(), v: req.portal });
     if (_portalAuthMemo.size > 2000) { for (const [k, e] of _portalAuthMemo) if (Date.now() - e.t > PORTAL_AUTH_TTL_MS) _portalAuthMemo.delete(k); }
     next();
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 }
 // Ownership guard: the PO must belong to one of the session's suppliers.
 // v28.151 (review C5): portal payload scoping. A dev item can be requested from several (competing) suppliers; the shared admin
@@ -38920,7 +38933,7 @@ app.post('/api/portal/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   // v28.151 (review B5): same rate limit as /api/cp/request-link (20/h per IP, 5/h per email); separate key prefix
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
-  if (_cpRateLimited('pip:' + ip, 20, 3600000) || (email && _cpRateLimited('pem:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests, please wait a few minutes and try again' });
+  if ((await hzRateLimited('pip:' + ip, 20, 3600000)) || (email && (await hzRateLimited('pem:' + email, 5, 3600000)))) return res.status(429).json({ error: 'too many requests, please wait a few minutes and try again' });
   const deadline = new Promise((ok) => setTimeout(ok, PORTAL_LINK_WINDOW_MS + Math.floor(Math.random() * 300)));
   const work = (async () => {
     if (!email || email.length > 254) return;
@@ -39006,7 +39019,7 @@ app.get('/api/portal/home', portalAuth, async (req, res) => {
           if (v < today) P.push({ kind: 'cert_expired', cert: c.kind, valid_to: v }); else if (v <= soon) P.push({ kind: 'cert_expiring', cert: c.kind, valid_to: v }); });
         out.profile = P; } } catch (e) { out.profile = []; } }
     res.set('Cache-Control', 'no-store').json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/me', portalAuth, async (req, res) => {
   // zh_enabled (v27.508): the EN/中文 toggle is offered only when one of the user's suppliers is based in China (planner.suppliers.country).
@@ -39071,7 +39084,7 @@ async function plPortalData(sups) {
 }
 app.get('/api/portal/price-list', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
-  try { res.json(await plPortalDataCached(req.portal.suppliers || [])); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await plPortalDataCached(req.portal.suppliers || [])); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/price-list/export.xlsx', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).send('not enabled');
@@ -39103,7 +39116,7 @@ app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
       [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, req.portal.email || ''])).rows[0].id;
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3)', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT'); res.json({ ok: true, id });
-  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: clientErr(e) }); }
   finally { client.release(); }
 });
 // Portal price-list change log (scoped to the supplier). No params → recent decisions (approved/rejected/superseded)
@@ -39118,7 +39131,7 @@ app.get('/api/portal/price-list/log', portalAuth, async (req, res) => {
     else where += ` AND e.source='supplier' AND e.status IN ('active','rejected','superseded')`;
     res.json((await pool.query(`SELECT ${PL_LOG_COLS} FROM planner.price_list_entries e WHERE ${where}
       ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 300`, params)).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier portal ▸ Quality Control (migration 160): the supplier's own uploaded QC docs, scoped to their supplier(s).
 app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
@@ -39144,7 +39157,7 @@ app.post('/api/portal/quality-doc', portalAuth, async (req, res) => {
       [String(b.doc_type), b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, sup, req.portal.email || null]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
   try {
@@ -39152,7 +39165,7 @@ app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     const r = (await pool.query(`SELECT filename, mime, data, storage_path, lower(coalesce(supplier_name,'')) sn FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r || !r.sn || sups.indexOf(r.sn) < 0) return res.status(404).json({ error: 'not found' });   // v28.116 (review S14): an unattributed doc is not yours
     return serveStored(res, r);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier may delete their OWN QC upload within 24h of uploading it (mistake window). Scoped to their supplier + uploader_kind='supplier'.
 app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
@@ -39165,7 +39178,7 @@ app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     if (!r.within24) return res.status(403).json({ error: 'delete window (24h) has passed' });
     await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Shared portal renderer (generated from inject.html). Served to the supplier portal page.
@@ -39205,7 +39218,7 @@ app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
     res.json((await pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime
       FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [req.portal.supplierIds])).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Mark a note read/unread — only notes belonging to the session's supplier.
 app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
@@ -39215,7 +39228,7 @@ app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal: delete the most recent timeline message — the supplier's OWN latest note only, on a thread they own.
 app.post('/api/portal/note-delete/:id', portalAuth, (req, res) =>
@@ -39342,7 +39355,7 @@ app.get('/api/portal/onboarding', portalAuth, async (req, res) => {
     if (!open && ack && ack.rules_version === version) rules.forEach(r => { form.warehouse[String(r.id)] = true; });   // current rules already acknowledged → pre-ticked
     res.json({ ok: true, supplier: { id: profile.id, name: profile.name, profile_approved_at: profile.profile_approved_at }, form, request: open ? { ref: open.ref, status: open.status, type: open.type, sections: open.sections, return_note: open.return_note, submitted_at: open.submitted_at, log: open.log } : null,
       last, rules, rules_version: version, ack: ack && ack.rules_version === version ? ack : null, is_new: !profile.profile_approved_at });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Save a draft (autosave from the wizard). Creates the request row on first save.
 app.post('/api/portal/onboarding/draft', portalAuth, async (req, res) => {
@@ -39355,7 +39368,7 @@ app.post('/api/portal/onboarding/draft', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.supplier_onboarding_requests (ref, supplier_id, supplier_name, type, status, form, sections, log) VALUES ($1,$2,$3,$4,'draft',$5::jsonb,'{}'::jsonb,'[]'::jsonb)`,
       [ref, sid, req.portal.suppliers[0] || (prof && prof.name) || '', (prof && prof.profile_approved_at) ? 'change' : 'new', JSON.stringify(form)]);
     res.json({ ok: true, ref, status: 'draft' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Submit for approval: validates the minimum, marks every section pending (sections already approved on a returned
 // request stay approved), records the warehouse acknowledgement, notifies the reviewers.
@@ -39388,7 +39401,7 @@ app.post('/api/portal/onboarding/submit', portalAuth, async (req, res) => {
       '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref); } catch (e) { console.warn('[onboarding] notify failed: ' + (e && e.message)); }   // v28.191 (Ben, M7): the submit is saved; the email is best-effort
     try { portalCacheMarkStale(open.supplier_name); } catch (_) {}
     res.json({ ok: true, ref: open.ref, status: 'submitted' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Certificate / bank-letter upload. Files land in portal_attachments keyed 'SUP-<supplier id>' so the existing
 // attachment plumbing (inline ≤3MB, Supabase storage above) applies. Bank letters are category onboarding_bank:
@@ -39402,7 +39415,7 @@ app.post('/api/portal/onboarding/upload', portalAuth, async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'supplier') RETURNING id`, ['SUP-' + sid, b.filename || 'file', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email, kind]);
     res.json({ ok: true, id: r.rows[0].id, filename: b.filename || 'file' });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // The current warehouse requirements as a dated PDF the supplier can keep (pdf-lib, like the PO PDF).
 async function onbRulesPdf(rules, version, supplierName, ackedAt) {
@@ -39426,7 +39439,7 @@ app.get('/api/portal/warehouse-requirements.pdf', portalAuth, async (req, res) =
     const ack = sid ? (await pool.query(`SELECT to_char(acked_at,'YYYY-MM-DD') d FROM planner.supplier_warehouse_acks WHERE supplier_id=$1 AND rules_version=$2 ORDER BY acked_at DESC LIMIT 1`, [sid, version])).rows[0] : null;
     const pdf = await onbRulesPdf(rules, version, req.portal.suppliers[0], ack && ack.d);
     res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="dock-and-bay-warehouse-requirements.pdf"'); res.send(pdf);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── ADMIN (CONFIG ▸ Onboarding · CONFIG ▸ Warehouse rules) ──────────────────────────────────────────────────────
@@ -39435,7 +39448,7 @@ app.get('/api/supply/onb/requests', async (req, res) => {
     const rows = (await pool.query(`SELECT id, ref, supplier_id, supplier_name, type, status, sections, submitted_by, to_char(submitted_at,'YYYY-MM-DD HH24:MI') submitted_at, to_char(decided_at,'YYYY-MM-DD HH24:MI') decided_at, decided_by
       FROM planner.supplier_onboarding_requests WHERE status<>'draft' ORDER BY (status IN ('submitted','in_review','returned')) DESC, submitted_at DESC NULLS LAST, id DESC LIMIT 300`)).rows;
     res.set('Cache-Control', 'no-store').json({ rows, notify_to: await onbSetting('onboarding_notify_to'), notify_cc: await onbSetting('onboarding_notify_cc') });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/onb/requests/:id', async (req, res) => {
   try {
@@ -39445,7 +39458,7 @@ app.get('/api/supply/onb/requests/:id', async (req, res) => {
     const rules = (await onbLoadRules()).filter(x => x.active);
     const bankMeta = (r.form && r.form.logistics && r.form.logistics.bankDocId) ? ((await pool.query(`SELECT id, filename, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.portal_attachments WHERE id=$1 AND category='onboarding_bank'`, [r.form.logistics.bankDocId])).rows[0] || null) : null;
     res.set('Cache-Control', 'no-store').json({ ok: true, request: r, current: current ? onbFormFromProfile(current) : null, rules, bank_doc: bankMeta });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Per-section decision. Returning ANY section returns the whole request to the supplier with the note.
 app.post('/api/supply/onb/requests/:id/section', async (req, res) => {
@@ -39463,7 +39476,7 @@ app.post('/api/supply/onb/requests/:id/section', async (req, res) => {
     await pool.query(`UPDATE planner.supplier_onboarding_requests SET sections=$2::jsonb, status=$3, return_note=$4, log=$5::jsonb, updated_at=now() WHERE id=$1`, [r.id, JSON.stringify(sections), status, note, JSON.stringify(log)]);
     try { portalCacheMarkStale(r.supplier_name); } catch (_) {}
     res.json({ ok: true, status, sections });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Final approval: every section must be approved. Writes the supplier, contacts, certificates, product submissions,
 // portal logins (+ invites), marks approved and emails the supplier + reviewers.
@@ -39515,7 +39528,7 @@ app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
     await onbNotifyTeam('[Horizon] ' + r.ref + ' approved · ' + escHtml(r.supplier_name), '<p>' + escHtml(by) + ' approved ' + r.ref + ' (' + escHtml(r.supplier_name) + '). Supplier record updated' + (nProd ? ', ' + nProd + ' product submission(s) pending in the PIM queue' : '') + '.</p>', r.ref);
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, invites: invites.length, products_queued: nProd });
-  } catch (e) { if (!_released) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); } log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (!_released) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); } log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/onb/requests/:id/reject', async (req, res) => {
   const by = authUser(req) || 'admin'; const note = String((req.body || {}).note || '').trim();
@@ -39527,7 +39540,7 @@ app.post('/api/supply/onb/requests/:id/reject', async (req, res) => {
     const contact = (r.form && r.form.contacts || []).find(c => c && c.email) || {}; const to = r.submitted_by || contact.email;
     if (to) await sendResendEmail({ channel: 'supplier', to, subject: '[Dock & Bay] Supplier profile request declined (' + r.ref + ')', html: '<p>Hello,</p><p>Your request ' + r.ref + ' was declined.' + (note ? ' Reason: <b>' + escHtml(note) + '</b>' : '') + '</p><p>You can start a new submission from the portal at any time.</p>', kind: 'onboarding', ref: r.ref, by });
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Bank letters: admins only (Finance). Reviewers see that a file exists; only this route serves it.
 app.get('/api/supply/onb/bank-doc/:id', async (req, res) => {
@@ -39539,7 +39552,7 @@ app.get('/api/supply/onb/bank-doc/:id', async (req, res) => {
   } catch (e) { log500(e); res.status(500).send('error'); }
 });
 // Warehouse requirements table (CONFIG ▸ Warehouse rules). POST replaces the whole list (small table; keeps ids where given).
-app.get('/api/supply/onb/rules', async (_req, res) => { try { const rules = await onbLoadRules(); res.set('Cache-Control', 'no-store').json({ rules, version: onbRulesVersion(rules) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/supply/onb/rules', async (_req, res) => { try { const rules = await onbLoadRules(); res.set('Cache-Control', 'no-store').json({ rules, version: onbRulesVersion(rules) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/supply/onb/rules', async (req, res) => {
   const rows = Array.isArray(req.body && req.body.rules) ? req.body.rules : null; if (!rows) return res.status(400).json({ error: 'rules[] required' });
   const by = authUser(req) || 'admin'; const client = await pool.connect();
@@ -39556,15 +39569,15 @@ app.post('/api/supply/onb/rules', async (req, res) => {
     await client.query('COMMIT'); client.release();
     const rules = await onbLoadRules(); try { portalCacheMarkStale(); } catch (_) {}
     res.json({ ok: true, rules, version: onbRulesVersion(rules) });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/supply/onb/rules.pdf', async (req, res) => {
   try { const rules = (await onbLoadRules()).filter(r => r.active); const pdf = await onbRulesPdf(rules, onbRulesVersion(rules), String(req.query.supplier || ''), null);
-    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'inline; filename="warehouse-requirements.pdf"'); res.send(pdf); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'inline; filename="warehouse-requirements.pdf"'); res.send(pdf); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Pending PIM product submissions (CONFIG ▸ Onboarding ▸ PIM queue): list + mark applied/rejected
-app.get('/api/supply/onb/products', async (_req, res) => { try { res.set('Cache-Control', 'no-store').json({ rows: (await pool.query(`SELECT s.*, to_char(s.created_at,'YYYY-MM-DD') created_fmt, r.ref FROM planner.supplier_product_submissions s LEFT JOIN planner.supplier_onboarding_requests r ON r.id=s.request_id ORDER BY (s.status='pending') DESC, s.created_at DESC LIMIT 500`)).rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
-app.post('/api/supply/onb/products/:id/status', async (req, res) => { const st = String((req.body || {}).status || ''); if (!['pending', 'applied', 'rejected'].includes(st)) return res.status(400).json({ error: 'status' }); try { await pool.query(`UPDATE planner.supplier_product_submissions SET status=$2, applied_at=CASE WHEN $2='pending' THEN NULL ELSE now() END, applied_by=$3 WHERE id=$1`, [req.params.id, st, authUser(req) || 'admin']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/supply/onb/products', async (_req, res) => { try { res.set('Cache-Control', 'no-store').json({ rows: (await pool.query(`SELECT s.*, to_char(s.created_at,'YYYY-MM-DD') created_fmt, r.ref FROM planner.supplier_product_submissions s LEFT JOIN planner.supplier_onboarding_requests r ON r.id=s.request_id ORDER BY (s.status='pending') DESC, s.created_at DESC LIMIT 500`)).rows }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
+app.post('/api/supply/onb/products/:id/status', async (req, res) => { const st = String((req.body || {}).status || ''); if (!['pending', 'applied', 'rejected'].includes(st)) return res.status(400).json({ error: 'status' }); try { await pool.query(`UPDATE planner.supplier_product_submissions SET status=$2, applied_at=CASE WHEN $2='pending' THEN NULL ELSE now() END, applied_by=$3 WHERE id=$1`, [req.params.id, st, authUser(req) || 'admin']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // Full _ppData payload in the EXACT shape the shared portal renderer expects, scoped to the session's
 // supplier(s). The PO rows reuse the admin purchase-orders calc verbatim (so figures are identical),
@@ -39611,7 +39624,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     // v28.256 (deep dive gap): bootstrap size and time per request, aggregated per hour in the health log (metric 'portal bootstrap')
     try { const m = _jsonMemo.get(v), bytes = m && m.str ? m.str.length : 0, ms = Date.now() - _t0, stale = res.getHeader('X-HZ-Stale') === '1';
       hzHealthEvt('metric', 'portal_bootstrap|' + (stale ? 'stale' : _fresh ? 'fresh' : 'cached') + '|' + new Date().toISOString().slice(0, 13), { path: 'portal bootstrap', ms, message: 'Portal bootstrap ' + Math.round(bytes / 1024) + ' KB raw, ' + ms + ' ms' + (stale ? ' (stale)' : _fresh ? ' (fresh)' : ''), meta: { bytes, ms, stale, fresh: _fresh, suppliers: names.length } }); } catch (_) {}
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.189 (Ben, deep dive H2): the detail of the caller's own POs, on demand: the full rows (incl. the detail-only fields a completed PO's
 // light row leaves out), lines, line costs, extra costs, approved snapshot, documents, crossdock qtys, and the supplier's SKU list
@@ -39632,17 +39645,17 @@ app.get('/api/portal/po-detail', portalAuth, async (req, res) => {
     const out = Object.assign({ pos, lb, xdByPo }, portalPoDetailMaps(parts, pos));
     if (supAll) { const ls = new Set(lines.map(l => l.sku)); out.supSkus = skus === 'all' ? supAll : supAll.filter(x => ls.has(x.sku)); out.supSkusAll = skus === 'all'; }
     res.set('Cache-Control', 'private, no-cache').json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.189 (Ben): the Payments tab's runs hidden by the archive cutoff (?archived=1 = every payment, as before the trim), on request.
 app.get('/api/portal/payments', portalAuth, async (req, res) => {
   try { res.set('Cache-Control', 'private, no-cache').json({ payments: await portalPaymentsQ(req.portal.suppliers || []) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.189 (Ben, deep dive M3): after a sample write the Samples tab refreshes this list only (was a full bootstrap reload).
 app.get('/api/portal/samples', portalAuth, async (req, res) => {
   try { res.set('Cache-Control', 'private, no-cache').json({ samples: await portalSamplesQ(req.portal.suppliers || [], req.portal.supplierIds || []) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.189 (Ben): the portal samples list and the supplier's SKU list as functions (same SQL as before), shared by the bootstrap build,
 // GET /api/portal/samples (a sample write refreshes just this list, not the whole bootstrap) and GET /api/portal/po-detail (full SKU list).
@@ -39909,7 +39922,7 @@ app.post('/api/portal/spec-approve', portalAuth, async (req, res) => {
     const doneN = (await pool.query(`SELECT count(*)::int n FROM planner.product_spec_approvals WHERE spec_id=$1 AND supplier_name = ANY($2)`, [specId, directed])).rows[0].n;
     await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [specId, doneN >= directed.length ? 'approved' : 'pending']);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Serve a spec file to a supplier — only if the spec is relevant to (directed at / covers a product of) their account.
 app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
@@ -39921,7 +39934,7 @@ app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
     if (!ok) { const ss = await specSupplierSet(s); ok = req.portal.suppliers.some(n => ss.has(n)); }
     if (!ok) return res.status(403).send('forbidden');
     return serveFile(res, s);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal "recent changes" drawer — key events for THIS supplier, newest first (new PO, payment received, sample).
 app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
@@ -39955,7 +39968,7 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
           FROM planner.sample_requests s WHERE created_at IS NOT NULL AND supplier_name = ANY($1) AND coalesce(to_jsonb(s)->>'send_status','sent')='sent'
       ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names, req.portal.email])).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Portal "Inbox" drawer — the actual UNREAD Dock & Bay messages for THIS supplier across every thread type
 // (PO, shipment, sample, product), newest first. Each row carries the note id + its thread type/ref so the
@@ -39988,7 +40001,7 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
           WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1) AND r.send_status='sent')
             AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[]))   -- v28.191 (Ben, H6): never another supplier's request notes
       ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names, ids])).rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
@@ -40006,16 +40019,16 @@ app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { cons
     n.sample_id, (SELECT ps.version FROM planner.product_dev_samples ps WHERE ps.id=n.sample_id) sample_version
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[])) ORDER BY n.created_at`, [ref, ids.length ? ids : [-1]])).rows); }   // v27.866 (Ben): pantone + attachment + sample fields so the portal timeline styles like the admin
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   if (!String(b.body || '').trim()) return res.status(400).json({ error: 'body required' });
   try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }   // v28.191 (Ben, H6): scoped to the caller's supplier
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL AND (supplier_id IS NULL OR supplier_id = ANY($2::bigint[]))`, [ref, (req.portal.supplierIds || []).map(Number)]); res.json({ ok: true }); }   // v28.191 (Ben, H6): only notes the caller can see
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v27.761 (Ben): supplier ACCEPTS a product development request. Whole-product grain — marks every request this supplier
 // holds for the item as accepted. Plain acknowledgement (no gating). Recorded on the timeline AND the change log.
 app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
@@ -40032,11 +40045,11 @@ app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const r
     try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [ref, upd.rows[0].supplier_id || null, by, 'Accepted the development request']); } catch (e) { /* timeline best-effort */ }   // v27.857 (Ben): scope this note to the accepting supplier
     try { await logProductChange(ref, 'Development request accepted by ' + supName, null, by); } catch (e) { /* change-log best-effort */ }
     res.json({ ok: true, accepted: upd.rowCount, accepted_at: new Date().toISOString().slice(0, 10) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // PORTAL product-sample versions (supplier-created, scoped to their assigned products)
 app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { res.json(await productSampleList(ref, { supplierScope: req.portal.suppliers })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v27.848 (Ben): server-enforced — only THIS supplier's sample versions leave the server
+  try { res.json(await productSampleList(ref, { supplierScope: req.portal.suppliers })); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });   // v27.848 (Ben): server-enforced — only THIS supplier's sample versions leave the server
 // v27.533: the components THIS supplier is responsible for on a product → the portal's "Aspects sampled" list. A component with
 // no supplier of its own belongs to the product's main supplier. Spec-linked components are not sampled, so they are left out.
 app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
@@ -40046,7 +40059,7 @@ app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => {
     const comps = (await pool.query(`SELECT id, name, coalesce(supplier,'') supplier, dimension, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
     const mine = comps.filter(c => c.sampling_mode !== 'spec_linked' && (c.supplier ? sups.includes(c.supplier.toLowerCase().trim()) : prodMine));
     res.json({ components: mine.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name, dimension: c.dimension || null })), total: comps.length });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   if (b.request_id != null && b.request_id !== '' && !(await portalMyRequests(req, ref)).some(r => Number(r.id) === Number(b.request_id))) return res.status(403).json({ error: 'That development request is not yours.' });   // v28.191 (Ben, H6)
@@ -40056,7 +40069,7 @@ app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) =
   if (!['in_development', 'completed', 'cancelled'].includes(st)) return res.status(400).json({ error: 'invalid status' });
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
   try { await pool.query(`UPDATE planner.product_dev_samples SET supplier_status=$2 WHERE id=$1`, [id, st]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Supplier edits which sizes + item types (aspects) a sample covers — so older/shipped samples can be backfilled.
 app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
@@ -40065,7 +40078,7 @@ app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => 
     const valid = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [sr ? sr.item_ref : ''])).rows.map(x => x.l);
     const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(String).filter(s => valid.includes(s));
     await pool.query(`UPDATE planner.product_dev_samples SET sample_sizes=$2, sampled_aspects=$3 WHERE id=$1`, [id, sizes, aspects]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Supplier assigns a sample version to a sample shipment (SR), marks it not-shipped, or unassigns it.
 app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
@@ -40078,7 +40091,7 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
       if (mode === 'shipment' && !srId) return res.status(400).json({ error: 'sample_request_id required' });
       await assignSampleToShipment(id, srId, notShipped, req.portal.email || null); }
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if ((!b.data_base64 && !b.storage_path) || !id) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
@@ -40087,7 +40100,7 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
     // timeline note → admin PRODUCT ✉ unread
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
       [sr.item_ref, await portalMyNoteSupplierId(req, sr.item_ref), req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);   // v28.191 (H6)
-    res.json({ ok: true, id: attId }); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, id: attId }); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
   try { const a = (await pool.query(`SELECT po, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE id=$1 AND category='product_sample'`, [req.params.id])).rows[0];
@@ -40096,7 +40109,7 @@ app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, 
     if (!(await portalOwnsProductSample(req, sampleId))) return res.status(403).json({ error: 'not your sample' });
     if (a.uploader_kind !== 'supplier') return res.status(403).json({ error: 'you can only delete files you uploaded' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Supplier uploads a document/photo directly into a product's Documents list (category='product', uploader_kind='supplier').
 app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'ref + data_base64/storage_path required' });
@@ -40108,26 +40121,26 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
       [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
       [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);   // v28.191 (H6)
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
-  try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-SKU candidates, scoped to this supplier
-  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
     const _oldLines = await getSampleLines(req.params.id);
     await setSampleLines(req.params.id, (req.body || {}).lines);
     await logSampleLinesChanged(req.params.id, _oldLines, (req.body || {}).lines, req.portal.email || 'supplier', 'supplier');   // detailed record-of-change + timeline note (supplier side)
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
     for (const d of (Array.isArray(b.dev_samples || b.dev_sample_ids) ? (b.dev_samples || b.dev_sample_ids) : [])) { const did = (d && typeof d === 'object') ? d.id : d; if (did && !(await portalOwnsProductSample(req, did))) return res.status(403).json({ error: 'not your sample' }); }   // v28.262 (S1)
-    await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
-    res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id||!/^\d{1,18}$/.test(String(id).trim()))return null;   // v28.191 (Ben, M6): a malformed id is "not yours" (403), not a database error (500)
@@ -40147,13 +40160,13 @@ app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   //
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email||'supplier']);
     res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) => {
   const id = req.body && req.body.att_id;
   try { const a = (await pool.query(`SELECT po, category FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
     if(!a || a.category!=='sample' || !await portalOwnsSampleRef(req, a.po)) return res.status(403).json({ error: 'not allowed' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok:true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.190 (Ben, deep dive H4): the PO card's document "remove" posted to a route that did not exist (the file vanished from the screen only).
 // A supplier may remove a document IT uploaded to its own PO while it is a draft or was rejected; one sent for approval or approved stays.
 app.post('/api/portal/doc-remove', portalAuth, async (req, res) => {
@@ -40167,12 +40180,12 @@ app.post('/api/portal/doc-remove', portalAuth, async (req, res) => {
     const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(approval_status,'draft') IN ('draft','rejected')`, [id]);
     if (r.rowCount && a.storage_path) storageDelete(a.storage_path);
     res.json({ ok: true, deleted: r.rowCount });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {   // supplier marks a D&B (internal) note read/unread
   try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint AND coalesce(to_jsonb(sr)->>'send_status','sent')='sent'`, [req.params.id])).rows[0];
     if(!n) return res.status(404).json({ error: 'not found' });
@@ -40181,14 +40194,14 @@ app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {  
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id]);
     res.json({ ok: true, read }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]);
     await logSampleChange(s.id, 'Confirmed sample request', null, req.portal.email || 'supplier');   // record of change (supplier side)
     await sampleTimelineNote(s.id, 'Confirmed the sample request', 'supplier', req.portal.email);   // shared timeline notification → shows to both sides + notifies D&B
     res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
@@ -40196,7 +40209,7 @@ app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // sup
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.186 (Ben, H3): SQL twin of portalShipmentRole for a shipments row `sh`; $1 = the caller's supplier names, lower-cased.
 const PORTAL_SHIP_MINE_SQL = `EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref) AND lower(mp.supplier_name) = ANY($1))
   OR EXISTS (SELECT 1 FROM planner.purchase_orders rp WHERE rp.shipment_ref = sh.shipment_ref AND lower(rp.supplier_name) = ANY($1))`;
@@ -40223,7 +40236,7 @@ app.get('/api/portal/tracking-status', portalAuth, async (req, res) => {
     const rows = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [allow])).rows;
     const out = {}; for (const r of rows) out[r.tracking_number] = r;
     res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v27.727: full tracking detail for ONE number — scoped to a number on the signed-in supplier's own records.
 app.get('/api/portal/tracking-detail', portalAuth, async (req, res) => {
@@ -40239,21 +40252,21 @@ app.get('/api/portal/tracking-detail', portalAuth, async (req, res) => {
     if (!owns) return res.json({ ok: true, row: null });
     const r = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at, events FROM planner.carrier_tracking WHERE tracking_number=$1`, [number])).rows[0];
     res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
     if (!await portalAttachmentOk(req, b.attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
     const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body, attachment_id) VALUES ($1::bigint,'supplier',$2,$3,$4) RETURNING id`, [s.id, req.portal.email||null, String(b.body), Number(b.attachment_id) || null]); res.json({ id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // supplier creates a charge → admin accepts → Other Payment
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']);
     await chargeTimelineNote(pool, 'sample', s.ref, `💰 Charge added by supplier — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, req.portal.email || 'supplier'); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // supplier originates a sample request
   const b = req.body || {}; const names = req.portal.suppliers||[], ids = req.portal.supplierIds||[];
   const supName = names[0]||null, supId = ids[0]||null; const client = await pool.connect();
@@ -40270,7 +40283,7 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
       [id, req.portal.email||null, (shortUser(req.portal.email||'')||supName||'Supplier')+' created this sample request']);
     await client.query('COMMIT'); res.json({ ok: true, id, ref });
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); } finally { client.release(); } });
 
 // Supplier marks a shipment's Dock&Bay (internal) timeline notes as read → clears the shipment's notification.
 // v28.189 (Ben, deep dive M2 / M9): marks Dock & Bay's notes on a shipment read for THE CALLER only (one shipment_note_reads row per note
@@ -40290,7 +40303,7 @@ app.post('/api/portal/shipment-notes-read', portalAuth, async (req, res) => {
         UPDATE planner.shipment_notes x SET read_at=now() FROM n WHERE x.id=n.id AND x.read_at IS NULL`, [ref, uptoId, ids]);
     } else await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL AND ($2::bigint IS NULL OR id <= $2)`, [ref, uptoId]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.189 (Ben): is migration 333 (planner.shipment_note_reads) applied? Checked at most once a minute; until it is, the shared read_at rules.
 let _snReadsMemo = { t: 0, v: false };
@@ -40311,7 +40324,7 @@ app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   /
     if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
     res.json(await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.params.ref]).then(r => r.rows));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // supplier posts a shipment timeline note
   const b = req.body || {}; const ref = (b.shipment_ref || '').trim();
@@ -40322,7 +40335,7 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body, attachment_id)
       VALUES ($1,'supplier',$2,$3,$4) RETURNING id`, [ref, req.portal.email || null, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Supplier updates their shipment's carrier / tracking / ship (departure) date / status directly.
@@ -40364,7 +40377,7 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
         VALUES ($1,'supplier',$2,$3)`, [ref, req.portal.email || null, who + ' set the ship date to ' + newDate]); } catch (e) { /* note best-effort */ }
     }
     res.json({ ok: true, date_note: dateChanged });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // v28.663 (Ben 04-Nov-26: "build the supplier portal process"): the merged ORDERS tab (proposal Option A). Behind a switch: staff portal views
 // always; suppliers when app_settings.portal_orders_v2 lists them (supplier names, comma separated) or says 'all'.
@@ -40407,7 +40420,7 @@ app.get('/api/portal/orders', portalAuth, async (req, res) => {
     const unshipped = (await pool.query(`SELECT p.po, coalesce(p.status,'') status, coalesce(p.branch,'') branch, p.prod_no, ${PEND} prod_end FROM planner.purchase_orders p LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
       WHERE p.supplier_name = ANY($1) AND coalesce(p.shipment_ref,'')='' AND upper(coalesce(p.status,''))<>'CANCELLED' ${all ? '' : 'AND ' + live} ORDER BY p.po`, [names])).rows;
     res.set('Cache-Control', 'no-store').json({ enabled: await portalOrdersV2On(req), today, shipments, unshipped });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/orders-enabled', portalAuth, async (req, res) => { res.set('Cache-Control', 'no-store').json({ enabled: await portalOrdersV2On(req).catch(() => false) }); });
 // The master supplier ticks a PO on board as loaded (or unticks it). Needed for every PO before Mark as shipped.
@@ -40418,21 +40431,21 @@ app.post('/api/portal/shipment/:ref/loaded', portalAuth, async (req, res) => {
     if (!r.rowCount) return res.status(404).json({ error: po + ' is not on shipment ' + ref });
     logPoChange(po, b.loaded ? 'Loaded on shipment' : 'Unticked as loaded', 'Shipment ' + ref + ' (supplier portal)', req.portal.email || 'supplier');
     res.json({ ok: true, po, loaded: !!b.loaded });
-  } catch (e) { if (/loaded_on_shipment/.test(String(e.message))) return res.status(503).json({ error: 'Ticking POs needs migration 414' }); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (/loaded_on_shipment/.test(String(e.message))) return res.status(503).json({ error: 'Ticking POs needs migration 414' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];
   // v28.186 (Ben, H3): master or rider may open it; each supplier sees only the charges raised by its own supplier(s), never another supplier's costs
   try { if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
     res.json((await pool.query(`SELECT id, freight_cost, product_cost, coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 AND supplier_name = ANY($2) ORDER BY created_at`, [req.params.ref, names])).rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // supplier creates a charge on a shipment
   const b = req.body||{}, names = req.portal.suppliers||[];
   if(!b.shipment_ref) return res.status(400).json({ error: 'shipment_ref required' });
   try { if (!await portalOwnsShipmentRef(req, b.shipment_ref)) return res.status(403).json({ error: 'not your shipment' });   // v28.186 (Ben, H3): master (consolidator) or rider
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, names[0]||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // Direct to Client details — supplier approves the PO's packing & labelling requirements
 app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
   const po = req.body && req.body.po; const names = req.portal.suppliers||[];
@@ -40440,7 +40453,7 @@ app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
   try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND supplier_name=ANY($2) LIMIT 1`, [po, names])).rows[0];
     if(!own) return res.status(403).json({ error: 'not your PO' });
     await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.portal.email||'supplier']);
-    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: clientErr(e) }); } });
 
 // (Removed dead /api/portal/data — old supplier loader, superseded by /api/portal/bootstrap. Zero callers. v25.653)
 
@@ -40482,7 +40495,7 @@ app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
       LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
       WHERE po.po=$1`, [req.params.po]);
     res.json(r.rows[0] || {});
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/label-data', portalAuth, async (req, res) => {
   try {
@@ -40541,7 +40554,7 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
       return res.json(out);
     }
     res.json(rows);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 
 // ── Session-scoped write-backs (mirror the admin /api/supply/* logic, ownership-checked, submitted_by = session email)
@@ -40554,7 +40567,7 @@ app.post('/api/portal/crossdock-qty', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.crossdock_shipments (po,sku,qty,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`, [b.po, b.sku, qty, req.portal.email]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
@@ -40566,13 +40579,13 @@ app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
         is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, num(b.actual_cost), num(b.amended_qty), !!b.is_added, req.portal.email]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/line-remove', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
   const b = req.body || {}; const num = numOrNull;
@@ -40589,7 +40602,7 @@ app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_additional_costs (po,description,qty,price,submitted_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [b.po, b.description || '', num(b.qty), num(b.price), req.portal.email]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
   const id = req.body && req.body.id; if (!id) return res.status(400).json({ error: 'id required' });
@@ -40597,7 +40610,7 @@ app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
     const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [id])).rows[0];
     if (!r || !await portalOwnsPO(req, r.po)) return portalDeny(res);
     await pool.query(`DELETE FROM planner.portal_additional_costs WHERE id=$1`, [id]); res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier submits a document for approval (Documents section, PAYMENTS & DOCUMENTS tab). Sets it 'submitted',
 // drops an UNREAD supplier timeline note on the PO (→ admin notification badge) and pushes an email to D&B.
@@ -40618,7 +40631,7 @@ app.post('/api/portal/doc-submit', portalAuth, async (req, res) => {
       [doc.po, sid, req.portal.email || null, 'Submitted document “' + doc.filename + '” for approval']); } catch (e) { /* timeline best-effort */ } }
     emailDocSubmit(doc.po, doc.filename, req.portal.email).catch(() => {});
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/timeline-attachment', portalAuth, async (req, res) => {   // v27.571: supplier-side twin of /api/supply/timeline-attachment
   const b = req.body || {};
@@ -40626,7 +40639,7 @@ app.post('/api/portal/timeline-attachment', portalAuth, async (req, res) => {   
     const ok = kind === 'po' ? await portalOwnsPO(req, ref) : kind === 'shipment' ? await portalOwnsShipmentRef(req, ref) : await portalOwnsSampleRef(req, ref);
     if (!ok) return res.status(403).json({ error: 'not on your account' });
     res.json(await tlAttachInsert(ref, b, req.portal.email || 'supplier', 'supplier', (req.portal.supplierIds || [])[0] || null)); }   // v28.186 (Ben, C1): record the uploading supplier
-  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/note', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
@@ -40637,7 +40650,7 @@ app.post('/api/portal/note', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body,attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
       [b.po, sid, req.portal.email, String(b.body).trim(), Number(b.attachment_id) || null]);
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // Supplier escalates a timeline message → routed to a CONFIG internal list by context; link → planner.
 app.post('/api/portal/escalate', portalAuth, async (req, res) => {
@@ -40648,7 +40661,7 @@ app.post('/api/portal/escalate', portalAuth, async (req, res) => {
   try {
     const user = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
     res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user, setEscalated: !!b.set_escalated, postNote: !!b.post_note }));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/upload', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'po and data_base64/storage_path required' });
@@ -40662,7 +40675,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by,category,uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'supplier') RETURNING id`,
       [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email, category]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // #A supplier enters the pallet count on the portal PO card — same purchase_orders.pallets_override field the admin
 // SHIPMENTS tab uses (so it feeds freight/cash flow), and every change is logged to the PO timeline. Blank clears it.
@@ -40681,7 +40694,7 @@ app.post('/api/portal/po-pallets', portalAuth, async (req, res) => {
     await pool.query(`UPDATE planner.purchase_orders SET pallets_override=$2, updated_at=now() WHERE po=$1`, [po, val]);
     try { await logPoFieldChanges(po, ['pallets_override'], old, { pallets_override: val }, by); } catch (e) {}
     res.json({ ok: true, po, pallets_override: val });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/po-pallets/:po', portalAuth, async (req, res) => {   // #A portal-scoped estimate + override for the PO card
   const po = req.params.po;
@@ -40690,7 +40703,7 @@ app.get('/api/portal/po-pallets/:po', portalAuth, async (req, res) => {   // #A 
     const r = (await pool.query(`SELECT ${PO_CARTONS_SQL} est_cartons, ${PO_PALLETS_SQL} est_pallets, p.pallets_override FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     res.json({ po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0, pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
@@ -40765,7 +40778,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
     // v28.191 (Ben, M7): if part of it was already saved, say exactly what (and refresh the caches for it) instead of a bare error
     const done = out.staged.concat(out.applied);
     if (done.length) { try { invalidateSupplyCaches('portal-po'); } catch (_) {} return res.status(409).json({ error: 'Only part of this was saved (' + done.join(', ') + '). Please refresh the page, check it, and send the rest again.', partial: out }); }
-    res.status(500).json({ error: e.message }); }
+    res.status(500).json({ error: clientErr(e) }); }
 });
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.

@@ -1,3 +1,4 @@
+function csvSafe(v){ var t=String(v==null?'':v); return (/^[=+\-@\t\r]/.test(t) && !/^[-+]?\d[\d,]*(\.\d+)?$/.test(t.trim())) ? "'"+t : t; }   /* v28.780 (security review finding 30): a cell a spreadsheet would run as a formula gets a leading apostrophe; numbers untouched */
 window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-file upload limit in MB, one place (server STORAGE_MAX_MB + the Supabase bucket must allow it)
 // Supplier-portal renderer — the SINGLE source of truth, used by BOTH the live /portal and the admin
 // CONFIG ▸ Portal preview (which mounts DBPortalView with an "acting-as" adapter). Originally extracted
@@ -3558,7 +3559,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // ORDER PLAN → download all SKUs/quantities (and costs) for this PO as a CSV
               scope.querySelectorAll('.pp-op-csv').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var lines=_ppData.lb[po]||[], costs=_ppData.costsByPo[po]||{}, lineSkus={};
-                function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+                function csvCell(v){ v=csvSafe(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
                 var out=['SKU,Qty,Est cost,Your cost,Line total'];
                 function pushRow(sku,orderQty,est){ var c=costs[sku]||{};
                   var aq=(c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;

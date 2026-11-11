@@ -1,6 +1,6 @@
 {
   "name": "dock-bay-demand-planner",
-  "version": "28.779",
+  "version": "28.780",
   "private": true,
   "type": "module",
   "engines": {
@@ -20,8 +20,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.296",
-    "pg": "^8.21.0",
-    "ssh2-sftp-client": "^12.1.1"
+    "pg": "^8.21.0"
   },
   "devDependencies": {
     "jsdom": "^29.1.1"
