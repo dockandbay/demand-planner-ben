@@ -28,6 +28,8 @@ sources:
   - server.mjs :: cpNoticeFor
   - server.mjs :: cpNoticeEmail
   - server.mjs :: sendResendEmail, sendResendBatch
+  - server.mjs :: createSampleShipment, trqLinesQ, teamReqSrEvents, /api/supply/sample-team-requests/:id/approve (SUPPLY > Samples > Requests, v28.799)
+  - supply/inject.html :: renderTeamRequests
   - server.mjs :: cpProductsFrom
   - server.mjs :: cpSalesTeam
   - server.mjs :: cpNotifyOpsMessage
@@ -741,6 +743,7 @@ verified_version: v28.616
 
 ## Samples and barcodes (number-producing parts only)
 - An accepted supplier charge (sample or shipment) becomes one Other payment = freight + product cost. The Payments Report Xero download splits a sample charge evenly across the sample's purposes, using sample_purpose_accounts. (source: server.mjs :: charge/:id/accept, payments-report _sampleSplit)
+- Team sample requests (v28.799, Ben 12-Nov-26; SUPPLY ▸ Samples ▸ Requests): a request RQ-<id> has needed-by, purpose, deliver-to and SKU lines (supplier = the product's main supplier unless changed). Lead time is per supplier only (suppliers.sample_lead_weeks): earliest arrival = today + weeks x 7; a line is late when earliest arrival is after needed-by; no lead time = "not set". Approve (SUPPLY edit) groups the lines by supplier and makes one sample shipment (SR) per supplier through the normal create path (required date = needed-by, same purpose and address), links each line to its SR and, when ticked, sends the SRs to the portal. A line's state comes from its SR: CANCELLED (status cancelled), RECEIVED (received_at or status completed / received), SHIPPED (status shipped, production_status shipped, or a tracking code), else PLANNED. Emails: new request to app setting samples_notify_to; approved / rejected to the requester; SR shipped to requester + list and SR received to the requester, each once per SR (team_shipped_emailed_at / team_received_emailed_at). (source: server.mjs :: createSampleShipment, trqLinesQ, teamReqSrEvents, /api/supply/sample-team-requests/:id/approve; supply/inject.html :: renderTeamRequests)
 - Workshop barcodes come from a fixed pool of GS1 EAN-13s (free, assigned or used). The catalogue PDF prints a barcode only when the check digit is valid; a 12-digit code gets a leading 0. (source: server.mjs :: workshop-barcodes, _ean13Bits)
 - Size barcode download (v28.458, v28.466): on PRODUCT ▸ product ▸ Size & variants each assigned barcode has a small ⤓ beside it; it opens a modal listing the sizes that have a barcode, with that size ticked (others can be ticked too). It renders one image per ticked size with the same EAN-13 renderer as Config ▸ Workshop barcodes: PNG or JPG, 452 / 678 / 1000 / 1500 px wide, file named by barcode, SKU (real, else working) or product ref + size (a repeated name gets _2, _3). No server call. (source: supply/inject.html :: prodSizeBarcodeModal)
 

@@ -1439,6 +1439,7 @@ function hzPortalHelp(el){
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPoFilter=null;   // v28.412: global search > open the PO grid with filters (prod / batch / sku), all statuses
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
+  var _sampView='shipments', _pendingTrqRef=null;   // v28.799 (Ben 12-Nov-26): SUPPLY > Samples view (shipments | requests) + the RQ- ref to open
   var _newDepId=null;   // v28.127: id of a just-created deposit → pinned + opened for edit on the next Deposits render
   var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poDrawerRef=null, _shipDrawerRef=null;   // v28.550: the PO / shipment open in a drawer (fresh-section hand-over re-reads it)
@@ -9667,6 +9668,11 @@ function hzPortalHelp(el){
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Invoice submitted</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
+            // v28.799 (Ben 12-Nov-26): who hears about team sample requests (SUPPLY > Samples > Requests). Blank = nobody.
+            +'<div class="sect-h" style="margin-top:18px">Samples</div>'
+            +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Samples notifications: one or more emails</div>'
+              +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when someone makes a sample request (SUPPLY ▸ Samples ▸ Requests) and when a sample shipment made from a request ships. Comma-separate multiple addresses.</div>'
+              +'<input class="fci gs-set" data-key="samples_notify_to" value="'+esc(s.samples_notify_to||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
             +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>'
             ;   // (Buy plan logic toggle moved to DEMAND ▸ Buy Plan)
@@ -9976,6 +9982,7 @@ function hzPortalHelp(el){
               +numBlk('Balance','balance_pct',fieldOf(r,'balance_pct'),'%')
               +numBlk('Production','production_days',fieldOf(r,'production_days'),'days')
               +numBlk('Expedited prod','expedited_production_weeks',fieldOf(r,'expedited_production_weeks'),'weeks')
+              +numBlk('Sample lead time','sample_lead_weeks',fieldOf(r,'sample_lead_weeks'),'weeks')   // v28.799 (Ben 12-Nov-26): drives earliest arrival on SUPPLY > Samples > Requests
               +numBlk('Credit','credit_days',fieldOf(r,'credit_days'),'days')
               +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Credit type</div>'+(function(){ var cv=String(fieldOf(r,'credit_type')||''); var OPTS=[['','— none —'],['on_shipment','On shipment'],['on_clearance','On clearance']]; return '<select class="sup-in" data-f="credit_type" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:130px">'+OPTS.map(function(o){return '<option value="'+o[0]+'"'+(cv===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; })()+'</div>'
               +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Currency</div>'+seln('default_currency',fieldOf(r,'default_currency')||'USD',CURS)+'</div>'
@@ -12633,7 +12640,7 @@ function hzPortalHelp(el){
     body.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'
         +blk('Name',inp('name',fo('name')))+blk('Code',inp('code',fo('code'),'110px','LX'))+blk('Kind',sel('kind',fo('kind')||'supplier',_supDrawerKinds))+blk('Country',inp('country',fo('country'),'150px'))+blk('Currency',sel('default_currency',fo('default_currency')||'USD',_supDrawerCcy))+'</div>'
       +'<div style="border-top:1px solid var(--line2);margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:8px">Payment terms</div><div id="supd-pctsum" class="mut tiny" style="margin-bottom:8px"></div>'
-      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">'+blk('Start deposit %',num('start_deposit_pct',fo('start_deposit_pct')))+blk('Completion %',num('completion_pct',fo('completion_pct')))+blk('Balance %',num('balance_pct',fo('balance_pct')))+blk('Production (days)',num('production_days',fo('production_days')))+blk('Expedited (weeks)',num('expedited_production_weeks',fo('expedited_production_weeks')))+blk('Credit (days)',num('credit_days',fo('credit_days')))+blk('Credit type',creditOpts)+'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">'+blk('Start deposit %',num('start_deposit_pct',fo('start_deposit_pct')))+blk('Completion %',num('completion_pct',fo('completion_pct')))+blk('Balance %',num('balance_pct',fo('balance_pct')))+blk('Production (days)',num('production_days',fo('production_days')))+blk('Expedited (weeks)',num('expedited_production_weeks',fo('expedited_production_weeks')))+blk('Sample lead time (weeks)',num('sample_lead_weeks',fo('sample_lead_weeks')))+blk('Credit (days)',num('credit_days',fo('credit_days')))+blk('Credit type',creditOpts)+'</div>'
       +'<div style="border-top:1px solid var(--line2);margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:8px">Contact &amp; ERP IDs</div>'
       +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+blk('Contact name',inp('contact_name',fo('contact_name')))+blk('Email',inp('email',fo('email')))+blk('Incoterm',inp('incoterm',fo('incoterm'),'110px'))+blk('Export port',inp('export_port',fo('export_port'),'160px'))+blk('Cin7 member ID',inp('cin7_member_id',fo('cin7_member_id'),'160px'))+blk('Fulfil ERP ID',inp('fulfil_id',fo('fulfil_id'),'120px'))+'</div>'
       // v28.176 (Ben): Xero contact per org (bills / credit notes post to this exact contact; blank = '<name> - <code>')
@@ -15065,7 +15072,8 @@ function hzPortalHelp(el){
         else if(_s2){ _pendingPO=_s2; if(_s3 && POTAB_FROM_SLUG[_s3])_pendingPOTab=POTAB_FROM_SLUG[_s3]; showPoSub('plan'); }   // NEW: .../<PO>/<tab-slug> (or just .../<PO>)
         else { showPoSub('plan'); } }
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
-      else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
+      else if(sec==='samples'&&seg[2]==='requests'){ _sampView='requests'; _pendingTrqRef=seg[3]?decodeURIComponent(seg[3]):null; selectSection('samples'); }   // v28.799: #/supply/samples/requests[/RQ-<id>]
+      else if(sec==='samples'){ _sampView='shipments'; if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
       else selectSection(sec);
     } else if(seg[0]==='config'){
       if(seg[1]==='admin'){ CONFIG_SUB=seg[2]||'email-notifications'; enterConfig(); }
@@ -16021,7 +16029,172 @@ function hzPortalHelp(el){
   function _isMySample(r){ var me=((ME&&ME.email)||'').toLowerCase(); if(!me)return false; var a=r&&r.internal_stakeholders; return (Array.isArray(a)?a:[]).some(function(x){return String(x).toLowerCase()===me;}); }
   // v27.693 (Ben): one-line PO meta for the fulfilment-PO picker — status · supplier · ship · arrival.
   function _poMeta(p){ return [p.status, p.supplier_name, (p.ship_date?'ship '+fd(p.ship_date):''), (p.arrival_date?'arr '+fd(p.arrival_date):'')].filter(Boolean).join(' · '); }
-  function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
+  function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; if(_sampView==='requests')return renderTeamRequests(c,_tk); fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
+  // v28.799 (Ben 12-Nov-26): SUPPLY > Samples has two views: SAMPLE SHIPMENTS (the SR grid) and REQUESTS (team sample requests).
+  function sampViewsBar(active){ return '<div class="po-subnav samp-views"><span class="rtab samp-view'+(active==='shipments'?' active':'')+'" data-v="shipments">SAMPLE SHIPMENTS</span><span class="rtab samp-view'+(active==='requests'?' active':'')+'" data-v="requests">REQUESTS <span class="trq-open-badge"></span></span></div>'; }
+  function wireSampViews(c){ c.querySelectorAll('.samp-view').forEach(function(t){ t.onclick=function(){ var v=t.dataset.v; if(v===_sampView)return; _sampView=v; try{ writeHash(v==='requests'?['supply','samples','requests']:['supply','samples']); }catch(e){} selectSection('samples'); }; });
+    function paint(n){ c.querySelectorAll('.trq-open-badge').forEach(function(b){ b.innerHTML=n?'<span class="ex-badge" style="background:var(--blue)">'+n+'</span>':''; }); }
+    if(_trqOpenN.at&&Date.now()-_trqOpenN.at<60000)return paint(_trqOpenN.n);   // the shipments grid re-renders on every filter keystroke: one count fetch a minute
+    fetch('/api/supply/sample-team-requests').then(function(r){return r.json();}).then(function(d){ _trqOpenN={n:((d&&d.rows)||[]).filter(function(r){return r.status==='requested';}).length,at:Date.now()}; paint(_trqOpenN.n); }).catch(function(){}); }
+  var _trqOpenN={n:0,at:0};
+  function trqAddDays(n){ var d=new Date(); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+  function trqStatePill(s){ var m={requested:['var(--blue-soft)','var(--blue-ink)','REQUESTED'],approved:['var(--pos-bg)','var(--pos)','APPROVED'],rejected:['var(--neg-bg)','var(--neg)','REJECTED'],cancelled:['var(--hover)','var(--muted)','CANCELLED'],
+      PLANNED:['var(--blue-soft)','var(--blue-ink)','PLANNED'],SHIPPED:['var(--amber-bg)','var(--amber)','SHIPPED'],RECEIVED:['var(--pos-bg)','var(--pos)','RECEIVED'],CANCELLED:['var(--hover)','var(--muted)','CANCELLED']}[s]; return m?hzChip(m[0],m[1],m[2]):''; }
+  function renderTeamRequests(c,_tk){
+    var st={f:(_pendingTrqRef?'all':'open'),q:''}, D={rows:[],can_approve:false,me:null}, SUPS={}, open={};
+    c.innerHTML=sampViewsBar('requests')+'<div class="count">Loading requests…</div>';
+    function load(cb){ Promise.all([fetch('/api/supply/sample-team-requests').then(function(r){return r.json();}), fetch('/api/supply/suppliers').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(x){ if(_tk!==_navToken)return;
+      if(x[0]&&x[0].error){ c.innerHTML=sampViewsBar('requests')+'<div class="count" style="color:var(--neg)">'+esc(x[0].error)+'</div>'; wireSampViews(c); return; }
+      D=x[0]||D; SUPS={}; (Array.isArray(x[1])?x[1]:[]).forEach(function(s){ if(s&&s.name)SUPS[String(s.name).trim().toLowerCase()]={id:s.id,name:s.name,lead:(s.sample_lead_weeks==null?null:Number(s.sample_lead_weeks)),kind:s.kind,active:s.active}; }); cb&&cb(); }).catch(function(e){ c.innerHTML=sampViewsBar('requests')+'<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; wireSampViews(c); }); }
+    function meE(){ return String(D.me||(ME&&ME.email)||'').toLowerCase(); }
+    var FILT=[['open','Open'],['approved','Approved'],['closed','Rejected / cancelled'],['all','All'],['mine','⭐ My requests']];
+    function cur(){ return (D.rows||[]).filter(function(r){ if(st.q){ var hay=(r.ref+' '+(r.requested_by||'')+' '+(r.deliver_to||'')+' '+(r.notes||'')+' '+(r.lines||[]).map(function(l){return l.sku+' '+l.supplier_name+' '+(l.sr_ref||'');}).join(' ')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
+      if(st.f==='open')return r.status==='requested'; if(st.f==='approved')return r.status==='approved'; if(st.f==='closed')return r.status==='rejected'||r.status==='cancelled';
+      if(st.f==='mine')return String(r.requested_by||'').toLowerCase()===meE(); return true; }); }
+    function lateCount(r){ return (r.lines||[]).filter(function(l){ return l.earliest_arrival&&r.needed_by&&l.earliest_arrival>r.needed_by; }).length; }
+    function rowHTML(r){ var ls=r.lines||[], units=ls.reduce(function(a,l){return a+(Number(l.qty)||0);},0), sups={}, srs={}; ls.forEach(function(l){ if(l.supplier_name)sups[l.supplier_name]=1; if(l.sr_ref)srs[l.sr_ref]=l.sr_state; });
+      var late=r.status==='requested'?lateCount(r):0;
+      return '<tr class="trq-row" data-id="'+r.id+'"><td><button class="samp-exp trq-exp'+(open[r.id]?' open':'')+'" data-id="'+r.id+'" data-ref="'+esc(r.ref)+'" style="cursor:pointer;border:none;background:none;font-size:12px">'+(open[r.id]?'▾':'▸')+'</button></td>'
+        +'<td><b>'+esc(r.ref)+'</b></td><td>'+trqStatePill(r.status)+'</td><td>'+esc(shortU(r.requested_by))+'</td>'
+        +'<td>'+esc(fd(r.needed_by))+(late?' <span class="tool-badge bg-amber" title="earliest arrival is after the needed-by date on '+late+' line'+(late>1?'s':'')+'">⚠ '+late+' late</span>':'')+'</td>'
+        +'<td>'+esc((r.purpose||[]).join(', '))+'</td><td>'+esc(String(r.deliver_to||'').split('\n')[0])+'</td>'
+        +'<td>'+ls.length+' SKU'+(ls.length===1?'':'s')+' · '+units+' u</td><td>'+esc(Object.keys(sups).join(', '))+'</td>'
+        +'<td>'+Object.keys(srs).map(function(x){ return '<a href="#/supply/samples/'+encodeURIComponent(x)+'" title="'+esc(srs[x]||'')+'">'+esc(x)+'</a>'; }).join(', ')+'</td>'
+        +'<td>'+esc(fd(String(r.created_at||'').slice(0,10)))+'</td></tr>'
+        +'<tr id="trqexp-'+r.id+'" style="'+(open[r.id]?'':'display:none')+'"><td colspan="11" style="background:var(--hover);padding:10px 14px">'+(open[r.id]?detailHTML(r):'')+'</td></tr>'; }
+    function shortU(u){ return String(u||'').replace(/@dockandbay\.com$/i,'@'); }
+    function detailHTML(r){ var ls=r.lines||[], mine=String(r.requested_by||'').toLowerCase()===meE(), canEdit=r.status==='requested'&&(D.can_approve||mine);
+      var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th>SKU</th><th>Product</th><th>Qty</th><th>Supplier</th><th>Lead time</th><th>Earliest arrival</th><th>Sample shipment</th><th>Status</th><th>Tracking</th></tr></thead><tbody>'
+        +ls.map(function(l){ var late=l.earliest_arrival&&r.needed_by&&l.earliest_arrival>r.needed_by;
+          return '<tr><td>'+esc(l.sku)+'</td><td>'+esc(l.product_name)+(l.colour?' <span class="mut tiny">'+esc(l.colour)+'</span>':'')+'</td><td>'+esc(l.qty)+'</td><td>'+esc(l.supplier_name||'not set')+'</td>'
+            +'<td>'+(l.lead_weeks!=null?esc(l.lead_weeks)+' weeks':'<span class="mut">not set</span>')+'</td>'
+            +'<td>'+(l.earliest_arrival?'<span'+(late&&r.status==='requested'?' style="color:var(--amber);font-weight:700" title="after the needed-by date ('+esc(fd(r.needed_by))+')"':'')+'>'+esc(fd(l.earliest_arrival))+(late&&r.status==='requested'?' ⚠':'')+'</span>':'<span class="mut">not set</span>')+'</td>'
+            +'<td>'+(l.sr_ref?'<a href="#/supply/samples/'+encodeURIComponent(l.sr_ref)+'">'+esc(l.sr_ref)+'</a>'+(l.sr_send_status==='draft'?' <span class="mut tiny">(draft)</span>':''):'')+'</td><td>'+trqStatePill(l.sr_state)+'</td><td>'+esc(l.tracking_code)+(l.carrier?' <span class="mut tiny">'+esc(l.carrier)+'</span>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+      var late=r.status==='requested'?lateCount(r):0;
+      var info='<div style="display:flex;gap:28px;flex-wrap:wrap;margin:0 0 8px;font-size:12px"><div><b>Deliver to</b><br>'+esc(r.deliver_to||'not set').replace(/\n/g,'<br>')+'</div>'
+        +'<div><b>Needed by</b><br>'+esc(fd(r.needed_by))+'</div><div><b>Purpose</b><br>'+esc((r.purpose||[]).join(', ')||'not set')+'</div>'
+        +(r.notes?'<div style="max-width:360px"><b>Notes</b><br>'+esc(r.notes)+'</div>':'')
+        +(r.approved_by?'<div><b>Approved</b><br>'+esc(shortU(r.approved_by))+' · '+esc(fd(String(r.approved_at||'').slice(0,10)))+'</div>':'')
+        +(r.decided_by?'<div><b>'+(r.status==='rejected'?'Rejected':'Cancelled')+'</b><br>'+esc(shortU(r.decided_by))+' · '+esc(fd(String(r.decided_at||'').slice(0,10)))+(r.decision_note?'<br>'+esc(r.decision_note):'')+'</div>':'')+'</div>';
+      var warn=late?'<div style="margin:0 0 8px;padding:6px 10px;border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:6px;font-size:12px;font-weight:600">⚠ '+late+' line'+(late>1?'s':'')+' cannot arrive by the needed-by date ('+esc(fd(r.needed_by))+') with the supplier’s sample lead time.</div>':'';
+      var acts='';
+      if(r.status==='requested'){ acts='<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        +(D.can_approve?'<button class="save-btn trq-approve" data-id="'+r.id+'" style="background:var(--pos);border-color:var(--pos);color:#fff;font-weight:700">Approve: create sample shipments</button><label class="mut tiny" style="cursor:pointer"><input type="checkbox" class="trq-send" checked style="vertical-align:middle"> send to the suppliers now (portal)</label>'
+          +'<button class="save-btn light trq-reject" data-id="'+r.id+'">Reject</button>':'<span class="mut tiny">Waiting for approval by someone with SUPPLY edit.</span>')
+        +(canEdit?'<button class="save-btn light trq-edit" data-id="'+r.id+'">Edit</button>':'')
+        +((mine||D.can_approve)?'<button class="save-btn light trq-cancel" data-id="'+r.id+'">Cancel request</button>':'')+'</div>'; }
+      return warn+info+tbl+acts; }
+    function view(){ var f=cur();
+      var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill trq-f'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
+        +'<button class="save-btn" id="trq-new" style="margin-left:6px;background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd">+ New request</button>'
+        +'<input class="flt" id="trq-q" placeholder="Filter ref / requester / SKU / supplier…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+(D.rows||[]).length+'</span></div>';
+      var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Requested by</th><th>Needed by</th><th>Purpose</th><th>Deliver to</th><th>Lines</th><th>Suppliers</th><th>Sample shipments</th><th>Created</th></tr></thead><tbody>'
+        +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No requests here.</td></tr>')+'</tbody></table></div>';
+      c.innerHTML=sampViewsBar('requests')+'<div class="annot" style="margin-bottom:8px"><b>Sample requests.</b> Anyone can ask for samples. Someone with SUPPLY edit approves: HORIZON then makes one sample shipment per supplier. Lead times come from each supplier’s <b>Sample lead time</b> (CONFIG ▸ Suppliers).</div><div id="trq-form"></div>'+bar+tbl;
+      wireSampViews(c);
+      c.querySelectorAll('.trq-f').forEach(function(p){ p.onclick=function(){ st.f=p.dataset.f; view(); }; });
+      var q=document.getElementById('trq-q'); q.oninput=debounce(function(){ st.q=q.value.toLowerCase(); view(); var q2=document.getElementById('trq-q'); if(q2){ q2.focus(); q2.setSelectionRange(q2.value.length,q2.value.length); } },250);
+      document.getElementById('trq-new').onclick=function(){ openForm(null); };
+      c.querySelectorAll('.trq-exp').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id; open[id]=!open[id]; try{ writeHash(open[id]?['supply','samples','requests',b.dataset.ref]:['supply','samples','requests']); }catch(e){} view(); }; });
+      c.querySelectorAll('.trq-approve').forEach(function(b){ b.onclick=function(){ var r=byId(b.dataset.id); if(!r)return; var send=!!(b.parentNode.querySelector('.trq-send')||{}).checked;
+        var nSup={}; (r.lines||[]).forEach(function(l){ nSup[l.supplier_name||'?']=1; });
+        if(!confirm('Approve '+r.ref+'?\n\nThis creates '+Object.keys(nSup).length+' sample shipment'+(Object.keys(nSup).length>1?'s':'')+' (one per supplier: '+Object.keys(nSup).join(', ')+')'+(send?' and sends them to the suppliers.':' as drafts.')))return;
+        b.disabled=true; shipPost('/api/supply/sample-team-requests/'+r.id+'/approve',{send:send},function(j){ b.disabled=false; try{ delete cache['samples']; }catch(e){} toast('✓ '+r.ref+' approved: '+(j.created||[]).map(function(x){return x.ref;}).join(', '),j.email); reload(); }); }; });
+      c.querySelectorAll('.trq-reject').forEach(function(b){ b.onclick=function(){ var r=byId(b.dataset.id); var note=prompt('Reject '+r.ref+'? Optional reason for the requester:',''); if(note===null)return;
+        shipPost('/api/supply/sample-team-requests/'+r.id+'/reject',{note:note},function(j){ toast(r.ref+' rejected',j.email); reload(); }); }; });
+      c.querySelectorAll('.trq-cancel').forEach(function(b){ b.onclick=function(){ var r=byId(b.dataset.id); var note=prompt('Cancel '+r.ref+'? Optional note:',''); if(note===null)return;
+        shipPost('/api/supply/sample-team-requests/'+r.id+'/cancel',{note:note},function(){ toast(r.ref+' cancelled'); reload(); }); }; });
+      c.querySelectorAll('.trq-edit').forEach(function(b){ b.onclick=function(){ openForm(byId(b.dataset.id)); }; });
+      if(!/^#\/supply\/samples\/requests/.test(location.hash||'')){ try{ writeHash(['supply','samples','requests']); }catch(e){} }   // section render resets the hash to #/supply/samples: keep the Requests slug so a reload stays here
+      if(_pendingTrqRef){ var pr=String(_pendingTrqRef).toUpperCase(); _pendingTrqRef=null; var hit=(D.rows||[]).filter(function(r){return String(r.ref).toUpperCase()===pr;})[0]; if(hit){ try{ writeHash(['supply','samples','requests',hit.ref]); }catch(e){} } if(hit&&!open[hit.id]){ open[hit.id]=true; view(); var tr=c.querySelector('tr.trq-row[data-id="'+hit.id+'"]'); if(tr)try{ tr.scrollIntoView({block:'center'}); }catch(e){} } }
+    }
+    function byId(id){ return (D.rows||[]).filter(function(r){return String(r.id)===String(id);})[0]; }
+    function reload(){ load(view); }
+    function toast(msg,email){ var extra=''; if(email&&email.to&&email.to.length)extra=email.sent?' · emailed '+email.to.join(', '):' · email not sent'+(email.sandbox?' (sandbox)':'')+', would go to '+email.to.join(', '); else if(email&&email.skipped)extra=' · no email ('+email.skipped+')';
+      var t=document.createElement('div'); t.textContent=msg+extra; t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);max-width:80vw;background:var(--pos);color:#fff;font-weight:700;font-size:13px;padding:9px 18px;border-radius:8px;box-shadow:0 8px 26px rgba(15,23,42,.28);z-index:200000'; document.body.appendChild(t); setTimeout(function(){ t.remove(); },4500); }
+    // New / edit form: needed-by, purpose, deliver-to (past address search), notes, and the SKU grid (season, category, search; type quantities).
+    function openForm(r){ var box=document.getElementById('trq-form'); if(!box)return; if(box.dataset.open==='1'&&!r){ box.dataset.open=''; box.innerHTML=''; return; } box.dataset.open='1';
+      var A=(r&&r.deliver_addr)||{}, sel={}, order=[];   // sel[sku]={sku,qty,supplier_name,product_name}
+      (r?r.lines:[]).forEach(function(l){ sel[l.sku]={sku:l.sku,qty:l.qty,supplier_name:l.supplier_name,product_name:l.product_name}; order.push(l.sku); });
+      function R(l,v){ return '<div class="cli-row"><div class="cli-lbl">'+l+'</div><div class="cli-val">'+v+'</div></div>'; }
+      function H(t){ return '<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em;font-weight:700;color:var(--faint);margin:12px 0 4px;border-bottom:1px solid var(--line2);padding-bottom:3px">'+t+'</div>'; }
+      function I(k,ph,w){ return '<input class="fci txt trq-a-'+k+'" placeholder="'+ph+'" value="'+esc(A[k]||'')+'" style="width:'+w+'">'; }
+      var purp=SAMPLE_PURPOSES.map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="trq-purpose" value="'+p+'"'+((r&&(r.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('');
+      box.innerHTML='<div class="sect-h">'+(r?'Edit '+esc(r.ref):'New sample request')+'</div><div class="cli-form" style="max-width:1100px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)">'
+        +H('Request')
+        +R('Needed by',dateField(r?r.needed_by:'',{cls:'trq-needed',width:'130px'}))
+        +R('Purpose',purp)
+        +R('Notes','<textarea class="fci trq-notes" rows="2" style="width:420px;text-align:left">'+esc(r?r.notes:'')+'</textarea>')
+        +H('Deliver to')
+        +R('Find past address','<input class="fci txt trq-addrsearch" placeholder="search recipient / company…" style="width:260px"><div class="trq-addrmatches"></div>')
+        +R('Company / name',I('recipient_company','company','200px')+' '+I('first_name','first','110px')+' '+I('last_name','last','110px'))
+        +R('Address',I('address_line1','line 1','300px')+'<br>'+'<input class="fci txt trq-a-address_line2" placeholder="line 2" value="'+esc(A.address_line2||'')+'" style="width:300px;margin-top:3px">')
+        +R('City / region / postcode',I('city','city','140px')+' '+I('region','region','110px')+' '+I('postcode','postcode','100px'))
+        +R('Country / phone',I('country','country','80px')+' '+I('phone','phone','170px'))
+        +H('Add SKUs <span style="text-transform:none;font-weight:400">(type a quantity in the grid to add a line)</span>')
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><select class="fci trq-season" style="width:140px"><option value="">All seasons</option></select><select class="fci trq-cat" style="width:180px"><option value="">All categories</option></select>'
+          +'<input class="fci txt trq-skuq" placeholder="search SKU / product / colour / supplier…" style="width:280px"><label class="mut tiny" style="cursor:pointer"><input type="checkbox" class="trq-closed" style="vertical-align:middle"> include closed</label><span class="mut tiny trq-gridcount"></span></div>'
+        +'<div class="trq-grid" style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px"></div>'
+        +H('Lines in this request')
+        +'<div class="trq-warn"></div><div class="trq-lines"></div>'
+        +'<datalist id="trq-suplist">'+Object.keys(SUPS).filter(function(k){return SUPS[k].active!==false&&(SUPS[k].kind||'supplier')==='supplier';}).map(function(k){return '<option value="'+esc(SUPS[k].name)+'">';}).join('')+'</datalist>'
+        +'<div style="margin-top:12px;border-top:1px solid var(--line2);padding-top:10px"><button class="save-btn trq-save" style="background:var(--pos);border-color:var(--pos);color:#fff;font-weight:700">'+(r?'Save changes':'Send request')+'</button> <button class="save-btn light trq-cancelform">Cancel</button></div></div>';
+      bindDatePickers();
+      function needed(){ var v=(box.querySelector('.trq-needed')||{}).value||''; return v?(parseDateLoose(v)||''):''; }
+      function leadOf(name){ var s=SUPS[String(name||'').trim().toLowerCase()]; return s?s.lead:null; }
+      function drawLines(){ var w=box.querySelector('.trq-lines'), nb=needed(), late=0;
+        if(!order.length){ w.innerHTML='<div class="mut tiny">No SKUs yet. Type a quantity in the grid above.</div>'; box.querySelector('.trq-warn').innerHTML=''; return; }
+        w.innerHTML='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th>SKU</th><th>Product</th><th>Qty</th><th>Supplier</th><th>Lead time</th><th>Earliest arrival</th><th></th></tr></thead><tbody>'
+          +order.map(function(k){ var l=sel[k], lw=leadOf(l.supplier_name), ea=lw!=null?trqAddDays(lw*7):'', isLate=!!(ea&&nb&&ea>nb); if(isLate)late++;
+            return '<tr><td>'+esc(l.sku)+'</td><td>'+esc(l.product_name||'')+'</td><td><input class="fci trq-lqty" data-k="'+esc(k)+'" value="'+esc(l.qty)+'" style="width:56px;text-align:left"></td>'
+              +'<td><input class="fci txt trq-lsup" list="trq-suplist" data-k="'+esc(k)+'" value="'+esc(l.supplier_name||'')+'" placeholder="supplier" style="width:200px"></td>'
+              +'<td>'+(lw!=null?lw+' weeks':'<span class="mut">not set</span>')+'</td>'
+              +'<td>'+(ea?'<span'+(isLate?' style="color:var(--amber);font-weight:700" title="after the needed-by date"':'')+'>'+esc(fd(ea))+(isLate?' ⚠':'')+'</span>':'<span class="mut">not set</span>')+'</td>'
+              +'<td><a class="trq-lrm" data-k="'+esc(k)+'" style="color:var(--neg);cursor:pointer;font-weight:800" title="remove">×</a></td></tr>'; }).join('')+'</tbody></table></div>';
+        box.querySelector('.trq-warn').innerHTML=late?'<div style="margin:0 0 6px;padding:6px 10px;border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:6px;font-size:12px;font-weight:600">⚠ '+late+' line'+(late>1?'s':'')+' cannot arrive by the needed-by date ('+esc(fd(nb))+') with the supplier’s sample lead time.</div>':'';
+        w.querySelectorAll('.trq-lqty').forEach(function(x){ x.onchange=function(){ var n=Math.round(Number(x.value)||0); if(n<=0){ delete sel[x.dataset.k]; order=order.filter(function(k){return k!==x.dataset.k;}); } else sel[x.dataset.k].qty=n; drawLines(); syncGridQty(); }; });
+        w.querySelectorAll('.trq-lsup').forEach(function(x){ x.onchange=function(){ sel[x.dataset.k].supplier_name=x.value.trim(); drawLines(); }; });
+        w.querySelectorAll('.trq-lrm').forEach(function(x){ x.onclick=function(){ delete sel[x.dataset.k]; order=order.filter(function(k){return k!==x.dataset.k;}); drawLines(); syncGridQty(); }; }); }
+      function syncGridQty(){ box.querySelectorAll('.trq-gqty').forEach(function(x){ var l=sel[x.dataset.k]; x.value=l?l.qty:''; x.closest('tr').style.background=l?'var(--pos-bg)':''; }); }
+      var facetsDone=false;
+      var loadGrid=debounce(function(){ var g=box.querySelector('.trq-grid'); if(!g)return; var qs='season='+encodeURIComponent(box.querySelector('.trq-season').value)+'&category='+encodeURIComponent(box.querySelector('.trq-cat').value)+'&q='+encodeURIComponent(box.querySelector('.trq-skuq').value.trim())+(box.querySelector('.trq-closed').checked?'&closed=1':'');
+        g.innerHTML='<div class="count" style="padding:8px">Loading…</div>';
+        fetch('/api/supply/sample-team-requests/skus?'+qs).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ g.innerHTML='<div class="count" style="color:var(--neg);padding:8px">'+esc((d&&d.error)||'failed')+'</div>'; return; }
+          if(!facetsDone){ facetsDone=true; var ss=box.querySelector('.trq-season'), cs=box.querySelector('.trq-cat'); ss.innerHTML='<option value="">All seasons</option>'+(d.seasons||[]).map(function(s){return '<option>'+esc(s)+'</option>';}).join(''); cs.innerHTML='<option value="">All categories</option>'+(d.categories||[]).map(function(s){return '<option>'+esc(s)+'</option>';}).join(''); }
+          var rows=d.rows||[]; box.querySelector('.trq-gridcount').textContent=rows.length+(d.more?'+ (narrow the filters)':'')+' SKUs';
+          g.innerHTML='<table class="samp-tbl samp-grid" style="width:100%"><thead style="position:sticky;top:0;background:var(--card)"><tr><th>Qty</th><th>SKU</th><th>Product</th><th>Colour</th><th>Size</th><th>Category</th><th>Season</th><th>Status</th><th>Supplier</th><th>Lead time</th></tr></thead><tbody>'
+            +(rows.length?rows.map(function(p){ var l=sel[p.sku]; return '<tr style="'+(l?'background:var(--pos-bg)':'')+'"><td><input class="fci trq-gqty" data-k="'+esc(p.sku)+'" data-sup="'+esc(p.supplier_name)+'" data-name="'+esc(p.product_name)+'" value="'+(l?esc(l.qty):'')+'" inputmode="numeric" style="width:52px;text-align:left"></td>'
+              +'<td>'+esc(p.sku)+'</td><td>'+esc(p.product_name)+'</td><td>'+esc(p.colour)+'</td><td>'+esc(p.size)+'</td><td>'+esc(p.category)+'</td><td>'+esc(p.season)+'</td><td class="mut tiny">'+esc(p.status)+'</td><td>'+esc(p.supplier_name||'not set')+'</td>'
+              +'<td>'+(p.lead_weeks!=null?esc(p.lead_weeks)+' wk':'<span class="mut">not set</span>')+'</td></tr>'; }).join(''):'<tr><td colspan="10" class="count">No SKUs match.</td></tr>')+'</tbody></table>';
+          g.querySelectorAll('.trq-gqty').forEach(function(x){ x.onchange=function(){ var k=x.dataset.k, n=Math.round(Number(x.value)||0);
+            if(n>0){ if(!sel[k]){ sel[k]={sku:k,qty:n,supplier_name:x.dataset.sup||'',product_name:x.dataset.name||''}; order.push(k); } else sel[k].qty=n; }
+            else if(sel[k]){ delete sel[k]; order=order.filter(function(o){return o!==k;}); }
+            x.closest('tr').style.background=sel[k]?'var(--pos-bg)':''; drawLines(); }; });
+          g.querySelectorAll('.trq-gqty').forEach(function(x,i,all){ x.onkeydown=function(e){ if(e.key==='Enter'||e.key==='ArrowDown'){ e.preventDefault(); x.onchange(); if(all[i+1])all[i+1].focus(); } else if(e.key==='ArrowUp'&&all[i-1]){ e.preventDefault(); x.onchange(); all[i-1].focus(); } }; });
+        }).catch(function(e){ g.innerHTML='<div class="count" style="color:var(--neg);padding:8px">'+esc(String(e))+'</div>'; }); },250);
+      ['.trq-season','.trq-cat','.trq-closed'].forEach(function(s){ box.querySelector(s).onchange=loadGrid; }); box.querySelector('.trq-skuq').oninput=loadGrid;
+      var nd=box.querySelector('.trq-needed'); if(nd){ nd.addEventListener('change',drawLines); nd.addEventListener('blur',drawLines); }
+      loadGrid(); drawLines();
+      var as=box.querySelector('.trq-addrsearch'); as.oninput=debounce(function(){ var q=as.value.trim(), mb=box.querySelector('.trq-addrmatches'); if(q.length<2){ mb.innerHTML=''; return; }
+        fetch('/api/supply/sample-addresses?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!ms||!ms.length){ mb.innerHTML='<div class="mut tiny">no matches</div>'; return; }
+          mb.innerHTML='<div style="border:1px solid var(--line);border-radius:6px;max-height:150px;overflow:auto;background:var(--card);margin-top:3px">'+ms.map(function(a,i){return '<div class="trq-addrpick" data-i="'+i+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--hover)">'+esc(a.recipient_company||'')+' · '+esc(((a.first_name||'')+' '+(a.last_name||'')).trim())+' <span class="mut">'+esc([a.city,a.country].filter(Boolean).join(', '))+'</span></div>';}).join('')+'</div>';
+          mb.querySelectorAll('.trq-addrpick').forEach(function(el){ el.onclick=function(){ var a=ms[el.dataset.i]; ['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone'].forEach(function(k){ var f=box.querySelector('.trq-a-'+k); if(f)f.value=a[k]||''; }); mb.innerHTML=''; as.value=''; }; }); }).catch(function(){}); },250);
+      box.querySelector('.trq-cancelform').onclick=function(){ box.dataset.open=''; box.innerHTML=''; };
+      box.querySelector('.trq-save').onclick=function(){ var btn=this, nb=needed();
+        if(!nb){ alert('Set the needed-by date.'); return; }
+        if(!order.length){ alert('Add at least one SKU: type a quantity in the grid.'); return; }
+        var miss=order.filter(function(k){return !sel[k].supplier_name;}); if(miss.length&&!confirm('No supplier on '+miss.join(', ')+'. The approver will need to set it. Send anyway?'))return;
+        var addr={}; ['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone'].forEach(function(k){ var f=box.querySelector('.trq-a-'+k); if(f&&f.value.trim())addr[k]=f.value.trim(); });
+        var body={needed_by:nb, purpose:Array.prototype.map.call(box.querySelectorAll('.trq-purpose:checked'),function(x){return x.value;}), notes:(box.querySelector('.trq-notes').value||'').trim(), deliver_addr:addr,
+          lines:order.map(function(k){ return {sku:k,qty:sel[k].qty,supplier_name:sel[k].supplier_name||''}; }), requested_by:(ME&&ME.email)||''};
+        btn.disabled=true;
+        fetch(r?'/api/supply/sample-team-requests/'+r.id:'/api/supply/sample-team-requests',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(x){return x.json();}).then(function(j){ btn.disabled=false;
+          if(!j||j.error){ alert('Failed: '+((j&&j.error)||'unknown')); return; }
+          box.dataset.open=''; box.innerHTML=''; var ref=(j.request&&j.request.ref)||j.ref; if(ref){ _pendingTrqRef=ref; st.f='all'; }
+          toast('✓ '+ref+(r?' saved':' sent for approval'),j.email); reload(); }).catch(function(e){ btn.disabled=false; alert('Failed: '+(e.message||e)); }); };
+    }
+    load(view);
+  }
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')+' '+Object.keys(r.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }   // includes the sample's SKUs
@@ -16206,8 +16379,9 @@ function hzPortalHelp(el){
         +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient / SKU…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
       var tbl=(st.f==='arriving')?arrivingHTML(f):'<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Completion req.</th><th>Supplier ETA</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
-      c.innerHTML=lookupDatalists()+'<datalist id="samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="Flexport"><option value="SF Express"><option value="Other"></datalist><div id="samp-form"></div>'+bar+tbl;
+      c.innerHTML=sampViewsBar('shipments')+lookupDatalists()+'<datalist id="samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="Flexport"><option value="SF Express"><option value="Other"></datalist><div id="samp-form"></div>'+bar+tbl;
       c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});
+      wireSampViews(c);   // v28.799: SAMPLE SHIPMENTS | REQUESTS
       var sq=document.getElementById('samp-q'); sq.oninput=debounce(function(){st.q=sq.value.toLowerCase();view();},200);
       var ss=document.getElementById('samp-showsnz'); if(ss)ss.onchange=function(){ _poShowSnoozed=this.checked; view(); };
       c.querySelectorAll('.samp-act-badge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); sampActPopover(b); };

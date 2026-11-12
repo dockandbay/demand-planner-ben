@@ -1497,6 +1497,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/inventory/backorder-orders') return null;   // v28.492 (SUG-0040): live Fulfil READ of the orders behind backorders (POST only to carry the SKU list), no DB write   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
+  if (method === 'POST' && (p === '/api/supply/sample-team-requests' || /^\/api\/supply\/sample-team-requests\/\d+(\/cancel)?$/.test(p))) return 'staff';   // v28.799 (Ben 12-Nov-26): any staff member asks for samples (edit / cancel own, checked in the handler); approve / reject stay SUPPLY edit
   if (p.startsWith('/api/supply/edi-projects')) return 'staff';   // v28.779: staff only. EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (method === 'POST' && /^\/api\/supply\/tpl\/xero-bill\/\d+$/.test(p)) return null;   // v28.301 (Ben): 3PL Xero bill = ACCOUNTS grant (or SUPPLY edit for the preview), checked in the handler
@@ -14313,6 +14314,8 @@ supplySectionHandler = async (req, res, next) => {
         suppliers.forEach(r => { r.expedited_production_weeks = (ew[r.id] != null ? Number(ew[r.id]) : 6); });
         // v28.176 (Ben): Xero contact names per org (migration 330), read defensively like the above (pre-migration = blank)
         const xc = {}; if (await _supXeroColsOk()) { try { (await q(`SELECT id, xero_contact_uk, xero_contact_au FROM planner.suppliers`)).forEach(x => { xc[x.id] = x; }); } catch (e) {} }
+        const slw = {}; try { (await q(`SELECT id, sample_lead_weeks FROM planner.suppliers`)).forEach(x => { slw[x.id] = x.sample_lead_weeks; }); } catch (e) {}   // v28.799: migration 443, read defensively
+        suppliers.forEach(r => { r.sample_lead_weeks = slw[r.id] != null ? Number(slw[r.id]) : null; });
         suppliers.forEach(r => { const x = xc[r.id] || {}; r.xero_contact_uk = x.xero_contact_uk || null; r.xero_contact_au = x.xero_contact_au || null; r.xero_contact_default = xeroContactDefault(r); });
         return res.json(suppliers);
       }
@@ -15300,6 +15303,250 @@ app.get('/api/supply/portal-help/video/:id', staffOnly, async (req, res) => {
   try { res.set('Cache-Control', 'no-store').redirect(302, await storageSignDownload(path, { expiresIn: 3600 })); }
   catch (e) { log500(e); res.status(502).json({ error: 'Video not available: ' + String(e.message || e).slice(0, 120) }); }
 });
+// ── SAMPLES ▸ Requests (team sample requests) ─────────────────────────────────────────────────────────────────────────
+// v28.799 (Ben 12-Nov-26): anyone on the team asks for samples (SKU lines, needed-by, purpose, deliver-to); an approver with SUPPLY edit
+// approves and HORIZON makes ONE sample shipment (SR-<id>) per supplier through createSampleShipment, linking each line to its SR.
+// Lead time is per supplier (suppliers.sample_lead_weeks): earliest arrival = today + weeks. Emails go to the CONFIG list samples_notify_to
+// (new request; SR shipped) and to the requester (approved / rejected; SR shipped / received). Registered before /api/supply/:section.
+const TRQ_PURPOSES = ['sales', 'product', 'photography', 'marketing', 'operations'];
+const TRQ_ADDR_KEYS = ['recipient_company', 'first_name', 'last_name', 'address_line1', 'address_line2', 'city', 'region', 'postcode', 'country', 'phone'];
+// one SR's state for a request line: PLANNED / SHIPPED / RECEIVED / CANCELLED (sr = sample_requests alias)
+const TRQ_SR_STATE = `CASE WHEN sr.id IS NULL THEN NULL WHEN sr.status ILIKE 'cancel%' THEN 'CANCELLED'
+  WHEN sr.received_at IS NOT NULL OR sr.status ILIKE 'complete%' OR sr.status ILIKE 'receiv%' THEN 'RECEIVED'
+  WHEN sr.status ILIKE 'ship%' OR lower(coalesce(sr.production_status,''))='shipped' OR btrim(coalesce(sr.tracking_code,''))<>'' THEN 'SHIPPED'
+  ELSE 'PLANNED' END`;
+function trqLink(ref) { return PLANNER_URL + '/#/supply/samples/requests/' + encodeURIComponent(ref); }
+function srLink(ref) { return PLANNER_URL + '/#/supply/samples/' + encodeURIComponent(ref); }
+async function trqNotifyList() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='samples_notify_to'`)).rows[0]; return _emails(r && r.value); } catch (e) { return []; } }
+async function trqCan(req) {   // { me, approve, user }: approve = SUPPLY edit or admin (sandbox = everyone)
+  const me = await permsFor(req); return { me, approve: !me.live || !!(me.supply_edit || me.is_admin), user: authUser(req) || null };
+}
+// Load one request (by id or RQ-ref) with its lines, lead times and SR states.
+async function trqLoad(key) {
+  const k = String(key || '').trim(), byId = /^\d{1,9}$/.test(k), m = /^RQ-(\d{1,9})$/i.exec(k);
+  const r = (await pool.query(`SELECT r.id, r.ref, r.requested_by, coalesce(r.purpose,'{}') purpose, to_char(r.needed_by,'YYYY-MM-DD') needed_by,
+      coalesce(r.deliver_to,'') deliver_to, r.deliver_addr, coalesce(r.notes,'') notes, r.status, r.approved_by, r.approved_at, r.decided_by, r.decided_at,
+      coalesce(r.decision_note,'') decision_note, r.created_at, r.updated_at
+    FROM planner.sample_team_requests r WHERE r.id = $1::int OR r.ref = $2`, [byId ? Number(k) : (m ? Number(m[1]) : null), k])).rows[0];
+  if (!r) return null;
+  r.lines = (await trqLinesQ([r.id]))[r.id] || [];
+  return r;
+}
+async function trqLinesQ(ids) {   // { request_id: [lines] }
+  const out = {}; if (!ids.length) return out;
+  (await pool.query(`SELECT l.id, l.request_id, l.sku, l.qty, l.supplier_id, coalesce(l.supplier_name,'') supplier_name, coalesce(l.note,'') note, l.sample_id,
+      coalesce(p.product_name_final, p.product_name, '') product_name, coalesce(p.colour_long,'') colour, coalesce(p.release_window,'') season, coalesce(p.category,'') category,
+      s.sample_lead_weeks lead_weeks, CASE WHEN s.sample_lead_weeks IS NOT NULL THEN to_char(current_date + s.sample_lead_weeks * 7,'YYYY-MM-DD') END earliest_arrival,
+      sr.ref sr_ref, ${TRQ_SR_STATE} sr_state, coalesce(sr.tracking_code,'') tracking_code, coalesce(sr.carrier,'') carrier, coalesce(sr.send_status,'') sr_send_status
+    FROM planner.sample_team_request_lines l
+    LEFT JOIN planner.products p ON p.sku = l.sku
+    LEFT JOIN LATERAL (SELECT x.sample_lead_weeks FROM planner.suppliers x WHERE x.id = l.supplier_id
+        OR (l.supplier_id IS NULL AND lower(btrim(x.name)) = lower(btrim(l.supplier_name))) ORDER BY (x.id = l.supplier_id) DESC LIMIT 1) s ON true
+    LEFT JOIN planner.sample_requests sr ON sr.id = l.sample_id
+    WHERE l.request_id = ANY($1::int[]) ORDER BY l.id`, [ids])).rows.forEach(l => { (out[l.request_id] = out[l.request_id] || []).push(l); });
+  return out;
+}
+// Clean lines from the form: SKU, qty >= 1, supplier = typed one, else the product's supplier; supplier_id by name.
+async function trqCleanLines(raw) {
+  const ls = (Array.isArray(raw) ? raw : []).map(l => ({ sku: String((l && l.sku) || '').trim(), qty: Math.round(Number(l && l.qty) || 0), supplier_name: String((l && l.supplier_name) || '').trim(), note: String((l && l.note) || '').trim().slice(0, 500) }))
+    .filter(l => l.sku && l.qty > 0).slice(0, 300);
+  if (!ls.length) return ls;
+  const prod = {}; (await pool.query(`SELECT sku, coalesce(nullif(btrim(main_supplier_final),''), nullif(btrim(supplier),'')) sup FROM planner.products WHERE sku = ANY($1)`, [ls.map(l => l.sku)])).rows.forEach(r => { prod[r.sku] = r.sup; });
+  ls.forEach(l => { if (!l.supplier_name) l.supplier_name = prod[l.sku] || ''; });
+  const sid = {}; (await pool.query(`SELECT id, name FROM planner.suppliers WHERE lower(btrim(name)) = ANY($1)`, [[...new Set(ls.map(l => l.supplier_name.toLowerCase()).filter(Boolean))]])).rows.forEach(r => { sid[String(r.name).trim().toLowerCase()] = r.id; });
+  ls.forEach(l => { l.supplier_id = sid[l.supplier_name.toLowerCase()] || null; });
+  return ls;
+}
+function trqAddr(b) { const a = {}; const src = (b && typeof b.deliver_addr === 'object' && b.deliver_addr) || {}; TRQ_ADDR_KEYS.forEach(k => { const v = String(src[k] == null ? '' : src[k]).trim().slice(0, 300); if (v) a[k] = k === 'country' ? v.toUpperCase() : v; }); return a; }
+function trqDeliverText(b, addr) { const t = String((b && b.deliver_to) || '').trim().slice(0, 2000); if (t) return t;
+  const nm = [addr.first_name, addr.last_name].filter(Boolean).join(' ');
+  return [addr.recipient_company, nm, addr.address_line1, addr.address_line2, [addr.city, addr.region, addr.postcode].filter(Boolean).join(' '), addr.country, addr.phone].filter(Boolean).join('\n'); }
+// Email: never sent from the sandbox (logged instead); returns a preview { to, subject, sent }.
+async function trqEmail(to, subject, html, kind, ref, by) {
+  const list = [...new Set((to || []).map(x => String(x).trim().toLowerCase()).filter(emailOk))];
+  if (!list.length) return { to: [], subject, sent: false, skipped: 'no recipients' };
+  if (IS_SANDBOX) { console.log('[sample request email] sandbox, not sent. would email ' + list.join(', ') + ' :: ' + subject); logEmail({ recipients: list.join(', '), subject, kind, ref, by, status: 'sandbox' }); return { to: list, subject, sent: false, sandbox: true }; }
+  const r = await sendResendEmail({ to: list, subject, html, kind, ref, by });
+  return { to: list, subject, sent: !!(r && r.sent) };
+}
+function trqLinesTable(lines, opts) { opts = opts || {}; const e = escHtml;
+  const th = s => '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #cbd5e1;font-size:12px">' + s + '</th>', td = s => '<td style="text-align:left;padding:4px 8px;border-bottom:1px solid #e2e8f0;font-size:12px">' + s + '</td>';
+  return '<table style="border-collapse:collapse;margin:6px 0 12px">' + '<tr>' + th('SKU') + th('Qty') + th('Supplier') + (opts.sr ? th('Sample shipment') : th('Lead time') + th('Earliest arrival')) + '</tr>'
+    + lines.map(l => '<tr>' + td(e(l.sku) + (l.product_name ? '<br><span style="color:#64748b">' + e(l.product_name) + '</span>' : '')) + td(e(l.qty)) + td(e(l.supplier_name || 'not set'))
+      + (opts.sr ? td(l.sr_ref ? '<a href="' + srLink(l.sr_ref) + '">' + e(l.sr_ref) + '</a>' : '') : td(l.lead_weeks != null ? e(l.lead_weeks) + ' weeks' : 'not set') + td(l.earliest_arrival ? e(ddMonYy(l.earliest_arrival)) + (opts.needed && l.earliest_arrival > opts.needed ? ' <b style="color:#b45309">after needed-by</b>' : '') : 'not set')) + '</tr>').join('')
+    + '</table>'; }
+function trqHtml(parts) { return '<div style="font-family:Arial,sans-serif;font-size:14px;color:#111;line-height:1.5">' + parts.join('') + '</div>'; }
+function trqHeadBlock(r) { const e = escHtml;
+  return '<p><b>Request:</b> <a href="' + trqLink(r.ref) + '">' + e(r.ref) + '</a><br><b>Requested by:</b> ' + e(shortUser(r.requested_by) || 'unknown')
+    + '<br><b>Needed by:</b> ' + e(r.needed_by ? ddMonYy(r.needed_by) : 'not set') + '<br><b>Purpose:</b> ' + e((r.purpose || []).join(', ') || 'not set')
+    + '<br><b>Deliver to:</b><br>' + e(r.deliver_to || 'not set').replace(/\n/g, '<br>') + (r.notes ? '<br><b>Notes:</b> ' + e(r.notes) : '') + '</p>'; }
+async function trqEmailNew(r, by) {
+  const html = trqHtml(['<p><b>New sample request ' + escHtml(r.ref) + '</b></p>', trqHeadBlock(r), '<p><b>Lines</b></p>', trqLinesTable(r.lines, { needed: r.needed_by }),
+    '<p><a href="' + trqLink(r.ref) + '" style="color:#1d4ed8;font-weight:600">Open the request in HORIZON</a></p>']);
+  return trqEmail(await trqNotifyList(), 'New sample request ' + r.ref + ' from ' + (shortUser(r.requested_by) || 'the team'), html, 'sample-team-request', r.ref, by);
+}
+async function trqEmailDecision(r, by) {
+  const ok = r.status === 'approved', srs = [...new Set(r.lines.map(l => l.sr_ref).filter(Boolean))];
+  const html = trqHtml(['<p><b>Sample request ' + escHtml(r.ref) + ' ' + (ok ? 'approved' : r.status) + '</b> by ' + escHtml(shortUser(by) || 'Dock & Bay') + '.</p>',
+    ok ? '<p><b>Sample shipments:</b> ' + srs.map(x => '<a href="' + srLink(x) + '">' + escHtml(x) + '</a>').join(', ') + '</p>' : (r.decision_note ? '<p><b>Note:</b> ' + escHtml(r.decision_note) + '</p>' : ''),
+    trqHeadBlock(r), '<p><b>Lines</b></p>', trqLinesTable(r.lines, { sr: ok }), '<p><a href="' + trqLink(r.ref) + '" style="color:#1d4ed8;font-weight:600">Open the request in HORIZON</a></p>']);
+  return trqEmail(r.requested_by ? [r.requested_by] : [], 'Sample request ' + r.ref + ' ' + (ok ? 'approved: ' + srs.join(', ') : r.status), html, 'sample-team-request', r.ref, by);
+}
+// Called after any SR change (admin save, supplier portal update, received, DHL delivered). Cheap: one indexed read, and only SRs made from a
+// request go further. Shipped -> requester + notify list; received -> requester. Each once per SR (claimed with an UPDATE ... WHERE ... IS NULL).
+async function teamReqSrEvents(srId, by) {
+  try {
+    const s = (await pool.query(`SELECT sr.id, sr.ref, sr.team_request_id, sr.team_shipped_emailed_at, sr.team_received_emailed_at, ${TRQ_SR_STATE} st,
+        coalesce(sr.tracking_code,'') tracking_code, coalesce(sr.carrier,'') carrier, coalesce(sr.supplier_name,'') supplier_name
+      FROM planner.sample_requests sr WHERE sr.id=$1::bigint AND sr.team_request_id IS NOT NULL`, [srId])).rows[0];
+    if (!s || s.st === 'CANCELLED' || s.st === 'PLANNED') return null;
+    const out = {};
+    async function claim(col) { return (await pool.query(`UPDATE planner.sample_requests SET ${col}=now() WHERE id=$1 AND ${col} IS NULL RETURNING id`, [s.id])).rowCount > 0; }
+    const r = await trqLoad(s.team_request_id); if (!r) return null;
+    const mine = r.lines.filter(l => String(l.sample_id) === String(s.id));
+    const e = escHtml, trk = '<p><b>Supplier:</b> ' + e(s.supplier_name || 'not set') + '<br><b>Tracking:</b> ' + e(s.tracking_code || 'not set') + (s.carrier ? ' (' + e(s.carrier) + ')' : '') + '</p>';
+    if (s.st === 'SHIPPED' && !s.team_shipped_emailed_at && await claim('team_shipped_emailed_at')) {
+      const html = trqHtml(['<p><b>Sample shipment <a href="' + srLink(s.ref) + '">' + e(s.ref) + '</a> has shipped</b> (request <a href="' + trqLink(r.ref) + '">' + e(r.ref) + '</a>).</p>', trk,
+        '<p><b>Lines</b></p>', trqLinesTable(mine, { sr: true }), '<p><b>Needed by:</b> ' + e(r.needed_by ? ddMonYy(r.needed_by) : 'not set') + '</p>',
+        '<p><a href="' + srLink(s.ref) + '" style="color:#1d4ed8;font-weight:600">Open ' + e(s.ref) + ' in HORIZON</a></p>']);
+      out.shipped = await trqEmail([r.requested_by].concat(await trqNotifyList()), 'Samples shipped: ' + s.ref + ' for ' + r.ref, html, 'sample-team-shipped', s.ref, by);
+    }
+    if (s.st === 'RECEIVED' && !s.team_received_emailed_at && await claim('team_received_emailed_at')) {
+      try { await pool.query(`UPDATE planner.sample_requests SET team_shipped_emailed_at=coalesce(team_shipped_emailed_at, now()) WHERE id=$1`, [s.id]); } catch (_) {}   // received first = no separate shipped email
+      const html = trqHtml(['<p><b>Sample shipment <a href="' + srLink(s.ref) + '">' + e(s.ref) + '</a> has been received</b> (request <a href="' + trqLink(r.ref) + '">' + e(r.ref) + '</a>).</p>',
+        '<p><b>Lines</b></p>', trqLinesTable(mine, { sr: true }), '<p><a href="' + srLink(s.ref) + '" style="color:#1d4ed8;font-weight:600">Open ' + e(s.ref) + ' in HORIZON</a></p>']);
+      out.received = await trqEmail(r.requested_by ? [r.requested_by] : [], 'Samples received: ' + s.ref + ' for ' + r.ref, html, 'sample-team-received', s.ref, by);
+    }
+    return out;
+  } catch (e) { console.error('[sample request] SR event email failed:', e.message); return null; }
+}
+function trqMissing(e) { return e && e.code === '42P01'; }   // pre-migration 443
+app.get('/api/supply/sample-team-requests', async (req, res) => {
+  try { const c = await trqCan(req);
+    const rows = (await pool.query(`SELECT id, ref, requested_by, coalesce(purpose,'{}') purpose, to_char(needed_by,'YYYY-MM-DD') needed_by, coalesce(deliver_to,'') deliver_to, deliver_addr,
+        coalesce(notes,'') notes, status, approved_by, approved_at, decided_by, decided_at, coalesce(decision_note,'') decision_note, created_at, updated_at
+      FROM planner.sample_team_requests ORDER BY (status='requested') DESC, id DESC LIMIT 500`)).rows;
+    const ls = await trqLinesQ(rows.map(r => r.id)); rows.forEach(r => { r.lines = ls[r.id] || []; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows, can_approve: c.approve, me: c.user, notify_to: await trqNotifyList() });
+  } catch (e) { if (trqMissing(e)) return res.status(503).json({ error: 'Sample requests need migration 443' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// SKU grid for the request form: season (products.release_window), category, free text; CLOSED products only with closed=1.
+app.get('/api/supply/sample-team-requests/skus', async (req, res) => {
+  try { const season = String(req.query.season || '').trim(), cat = String(req.query.category || '').trim(), q = String(req.query.q || '').trim(), closed = req.query.closed === '1';
+    const w = [], p = [];
+    if (!closed) w.push(`upper(coalesce(p.status,'')) <> 'CLOSED'`);
+    if (season) { p.push(season); w.push(`coalesce(p.release_window,'') = $${p.length}`); }
+    if (cat) { p.push(cat); w.push(`coalesce(p.category,'') = $${p.length}`); }
+    if (q) { p.push('%' + q + '%'); w.push(`(p.sku ILIKE $${p.length} OR coalesce(p.product_name_final,p.product_name,'') ILIKE $${p.length} OR coalesce(p.colour_long,'') ILIKE $${p.length} OR coalesce(p.main_supplier_final,p.supplier,'') ILIKE $${p.length})`); }
+    const rows = (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') product_name, coalesce(p.colour_long,'') colour, coalesce(p.size,'') size,
+        coalesce(p.category,'') category, coalesce(p.release_window,'') season, coalesce(p.status,'') status,
+        coalesce(nullif(btrim(p.main_supplier_final),''), nullif(btrim(p.supplier),''), '') supplier_name, s.id supplier_id, s.sample_lead_weeks lead_weeks
+      FROM planner.products p LEFT JOIN planner.suppliers s ON lower(btrim(s.name)) = lower(btrim(coalesce(nullif(btrim(p.main_supplier_final),''), p.supplier)))
+      ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY p.sku LIMIT 601`, p)).rows;
+    const fac = (await pool.query(`SELECT array_agg(DISTINCT release_window) FILTER (WHERE coalesce(release_window,'')<>'') seasons, array_agg(DISTINCT category) FILTER (WHERE coalesce(category,'')<>'') categories FROM planner.products`)).rows[0] || {};
+    const sk = s => { const m = /^(SS|AW)(\d{2})$/i.exec(s); return m ? (+m[2]) * 2 + (/AW/i.test(m[1]) ? 1 : 0) : -1; };
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows: rows.slice(0, 600), more: rows.length > 600, seasons: (fac.seasons || []).sort((a, b) => sk(b) - sk(a) || String(a).localeCompare(b)), categories: (fac.categories || []).sort() });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.get('/api/supply/sample-team-requests/:ref', async (req, res) => {
+  try { const r = await trqLoad(req.params.ref); if (!r) return res.status(404).json({ error: 'not found' });
+    const c = await trqCan(req); res.set('Cache-Control', 'no-store').json({ ok: true, request: r, can_approve: c.approve, me: c.user });
+  } catch (e) { if (trqMissing(e)) return res.status(503).json({ error: 'Sample requests need migration 443' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/supply/sample-team-requests', async (req, res) => {   // any signed-in staff (requiredCap 'staff')
+  const b = req.body || {};
+  const by = authUser(req) || String(b.requested_by || '').trim() || null;   // sandbox has no sign-in: the form sends ME.email
+  if (!b.needed_by || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by))) return res.status(400).json({ error: 'Set the needed-by date.' });
+  try { const lines = await trqCleanLines(b.lines); if (!lines.length) return res.status(400).json({ error: 'Add at least one SKU with a quantity.' });
+    const addr = trqAddr(b), purpose = (Array.isArray(b.purpose) ? b.purpose : []).map(x => String(x).toLowerCase().trim()).filter(x => TRQ_PURPOSES.includes(x));
+    let id; const client = await pool.connect();
+    try { await client.query('BEGIN');
+      id = (await client.query(`INSERT INTO planner.sample_team_requests (requested_by, purpose, needed_by, deliver_to, deliver_addr, notes) VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
+        [by, purpose, b.needed_by, trqDeliverText(b, addr) || null, JSON.stringify(addr), String(b.notes || '').trim().slice(0, 4000) || null])).rows[0].id;
+      await client.query(`UPDATE planner.sample_team_requests SET ref='RQ-'||id WHERE id=$1`, [id]);
+      for (const l of lines) await client.query(`INSERT INTO planner.sample_team_request_lines (request_id, sku, qty, supplier_id, supplier_name, note) VALUES ($1,$2,$3,$4,$5,$6)`, [id, l.sku, l.qty, l.supplier_id, l.supplier_name || null, l.note || null]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    const r = await trqLoad(id); const email = await trqEmailNew(r, by);
+    res.json({ ok: true, id, ref: r.ref, request: r, email });
+  } catch (e) { if (trqMissing(e)) return res.status(503).json({ error: 'Sample requests need migration 443' }); log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Edit (requester or an approver, while still requested): any of purpose / needed_by / deliver_to / deliver_addr / notes; lines (replace all) when sent.
+app.post('/api/supply/sample-team-requests/:id', async (req, res) => {
+  const b = req.body || {};
+  try { const r = await trqLoad(req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
+    const c = await trqCan(req);
+    if (!c.approve && String(r.requested_by || '').toLowerCase() !== String(c.user || '').toLowerCase()) return res.status(403).json({ error: 'Only the requester or someone with SUPPLY edit can change this request.' });
+    if (r.status !== 'requested') return res.status(409).json({ error: 'This request is ' + r.status + ': it can no longer be changed.' });
+    if (b.needed_by !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by || ''))) return res.status(400).json({ error: 'Set the needed-by date.' });
+    const lines = b.lines !== undefined ? await trqCleanLines(b.lines) : null;
+    if (lines && !lines.length) return res.status(400).json({ error: 'Add at least one SKU with a quantity.' });
+    const client = await pool.connect();
+    try { await client.query('BEGIN');
+      const sets = [], vals = [r.id];
+      if (b.purpose !== undefined) { vals.push((Array.isArray(b.purpose) ? b.purpose : []).map(x => String(x).toLowerCase().trim()).filter(x => TRQ_PURPOSES.includes(x))); sets.push('purpose=$' + vals.length); }
+      if (b.needed_by !== undefined) { vals.push(b.needed_by); sets.push('needed_by=$' + vals.length + '::date'); }
+      if (b.deliver_addr !== undefined || b.deliver_to !== undefined) { const addr = b.deliver_addr !== undefined ? trqAddr(b) : (r.deliver_addr || {});
+        vals.push(JSON.stringify(addr)); sets.push('deliver_addr=$' + vals.length + '::jsonb'); vals.push(trqDeliverText(b.deliver_to !== undefined ? b : {}, addr) || null); sets.push('deliver_to=$' + vals.length); }
+      if (b.notes !== undefined) { vals.push(String(b.notes || '').trim().slice(0, 4000) || null); sets.push('notes=$' + vals.length); }
+      await client.query(`UPDATE planner.sample_team_requests SET ${sets.concat(['updated_at=now()']).join(', ')} WHERE id=$1`, vals);
+      if (lines) { await client.query(`DELETE FROM planner.sample_team_request_lines WHERE request_id=$1`, [r.id]);
+        for (const l of lines) await client.query(`INSERT INTO planner.sample_team_request_lines (request_id, sku, qty, supplier_id, supplier_name, note) VALUES ($1,$2,$3,$4,$5,$6)`, [r.id, l.sku, l.qty, l.supplier_id, l.supplier_name || null, l.note || null]); }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    res.json({ ok: true, request: await trqLoad(r.id) });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Approve (SUPPLY edit, via requiredCap 'supply'): one SR per supplier through createSampleShipment, each line linked to its SR.
+// body { send: true } also sends each supplier SR to the portal (sampleSetSendStatus), like the Send button.
+app.post('/api/supply/sample-team-requests/:id/approve', async (req, res) => {
+  const b = req.body || {};
+  try { const c = await trqCan(req); if (!c.approve) return res.status(403).json({ error: 'SUPPLY edit access required to approve.' });
+    const r = await trqLoad(req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
+    if (r.status !== 'requested') return res.status(409).json({ error: 'This request is already ' + r.status + '.' });
+    const noSup = r.lines.filter(l => !l.supplier_name); if (noSup.length) return res.status(400).json({ error: 'Set the supplier on ' + noSup.map(l => l.sku).join(', ') + ' first.' });
+    const groups = new Map(); r.lines.forEach(l => { const k = l.supplier_name.trim().toLowerCase(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(l); });
+    const by = c.user || r.requested_by || null, addr = r.deliver_addr || {}, made = [];
+    const client = await pool.connect();
+    try { await client.query('BEGIN');
+      const lock = await client.query(`UPDATE planner.sample_team_requests SET status='approved', approved_by=$2, approved_at=now(), updated_at=now() WHERE id=$1 AND status='requested' RETURNING id`, [r.id, by]);
+      if (!lock.rowCount) { await client.query('ROLLBACK'); client.release(); return res.status(409).json({ error: 'This request was just decided by someone else.' }); }
+      for (const ls of groups.values()) {
+        const sb = Object.assign({}, addr, { supplier_name: ls[0].supplier_name, supplier_id: ls[0].supplier_id || null, completion_date_required: r.needed_by, purpose: r.purpose && r.purpose.length ? r.purpose : null,
+          notes: ['From request ' + r.ref + (r.requested_by ? ' (' + shortUser(r.requested_by) + ')' : ''), r.notes].filter(Boolean).join('. '),
+          recipients: addr.address_line1 ? [] : (r.deliver_to ? [r.deliver_to] : []), internal_stakeholders: r.requested_by ? [r.requested_by] : [], fulfilment_source: 'supplier',
+          lines: ls.map(l => ({ sku: l.sku, qty: l.qty })) });
+        const sr = await createSampleShipment(client, sb, by || '');
+        await client.query(`UPDATE planner.sample_requests SET team_request_id=$2 WHERE id=$1`, [sr.id, r.id]);
+        await client.query(`UPDATE planner.sample_team_request_lines SET sample_id=$2 WHERE id = ANY($1::int[])`, [ls.map(l => l.id), sr.id]);
+        made.push({ id: sr.id, ref: sr.ref, supplier_name: ls[0].supplier_name, lines: ls.length });
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); client.release(); throw e; }
+    client.release();
+    invalidateSupplyCaches('sample');   // the new SRs show in SUPPLY > Samples (and on the portal once sent) straight away
+    const sent = []; if (b.send) for (const m of made) { try { const x = await sampleSetSendStatus(m.id, 'sent', by); sent.push({ ref: m.ref, ok: !x.code, error: x.error || null }); } catch (e) { sent.push({ ref: m.ref, ok: false, error: e.message }); } }
+    const fresh = await trqLoad(r.id); const email = await trqEmailDecision(fresh, by);
+    res.json({ ok: true, created: made, sent, request: fresh, email });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Reject (approver) or cancel (requester or approver): body { note }.
+async function trqDecide(req, res, status) {
+  const b = req.body || {};
+  try { const r = await trqLoad(req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
+    const c = await trqCan(req);
+    if (status === 'rejected' && !c.approve) return res.status(403).json({ error: 'SUPPLY edit access required to reject.' });
+    if (status === 'cancelled' && !c.approve && String(r.requested_by || '').toLowerCase() !== String(c.user || '').toLowerCase()) return res.status(403).json({ error: 'Only the requester or someone with SUPPLY edit can cancel this request.' });
+    if (r.status !== 'requested') return res.status(409).json({ error: 'This request is already ' + r.status + '.' });
+    const by = c.user || null;
+    await pool.query(`UPDATE planner.sample_team_requests SET status=$2, decided_by=$3, decided_at=now(), decision_note=$4, updated_at=now() WHERE id=$1 AND status='requested'`, [r.id, status, by, String(b.note || '').trim().slice(0, 1000) || null]);
+    const fresh = await trqLoad(r.id);
+    const email = status === 'rejected' ? await trqEmailDecision(fresh, by) : null;   // a cancel is the requester's own step (or the approver tells them)
+    res.json({ ok: true, request: fresh, email });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+}
+app.post('/api/supply/sample-team-requests/:id/reject', (req, res) => trqDecide(req, res, 'rejected'));
+app.post('/api/supply/sample-team-requests/:id/cancel', (req, res) => trqDecide(req, res, 'cancelled'));
 app.get('/api/supply/:section', supplySectionHandler);
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
@@ -15561,7 +15808,8 @@ app.post('/api/supply/supplier/:id', async (req, res) => {
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
       te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
-      include_product_dev: 'boolean', active: 'boolean', xero_contact_uk: 'text', xero_contact_au: 'text' }, body, 'bigint');   // active=false → archived (v27.522)
+      include_product_dev: 'boolean', active: 'boolean', xero_contact_uk: 'text', xero_contact_au: 'text',
+      sample_lead_weeks: 'int' }, body, 'bigint');   // v28.799 (Ben 12-Nov-26): sample lead time per supplier (migration 443)   // active=false → archived (v27.522)
 });
 // v28.176 (Ben): READ-ONLY check that a Xero contact exists (exact name, active) in one org: the "check" buttons beside the
 // supplier's Xero contact fields. GET only to Xero; skips the cache. ?region=uk|au&name=<contact> (or &supplier=<name>
@@ -18009,7 +18257,8 @@ app.post('/api/supply/sample/:id/received', async (req, res) => {
       const _srSup = (await pool.query(`SELECT supplier_name FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
       for (const ref of refs) { try { await prodStageAdvance(ref, 'sample_in_review', (_srSup && _srSup.supplier_name) ? { supplierNames: [_srSup.supplier_name] } : {}); advanced.push(ref); } catch (e) { /* best-effort */ } }
     }
-    res.json({ ok: true, received: receive, advanced });
+    const team_email = receive ? await teamReqSrEvents(id, authUser(req)) : null;   // v28.799: SR from a team request -> received email to the requester (once)
+    res.json({ ok: true, received: receive, advanced, team_email });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
@@ -19212,6 +19461,7 @@ async function upsertTracking(n, res) {
   if (n.source_table === 'sample_requests' && res.status_code === 'delivered' && res.delivered_at) {
     try { const cfg = await getDhlConfig(); if (cfg.auto_package_received) {
       await pool.query(`UPDATE planner.sample_requests SET received_at=$2::timestamptz, updated_at=now() WHERE id=$1::bigint AND received_at IS NULL`, [n.source_id, res.delivered_at]);
+      await teamReqSrEvents(n.source_id, 'DHL tracking');   // v28.799: team-request received email
     } } catch (e) { /* auto-mark best-effort */ }
   }
   // v27.874 (Ben): a DELIVERED sample shipment advances the development request(s) it carries to "Sample delivered"
@@ -30670,19 +30920,26 @@ async function maybeShippedNote(sampleId, body, authorKind, email){
 // Warehouse / PO-fulfilled requests never show on the portal, so they are never sent. Body {status:'sent'|'draft'}.
 app.post('/api/supply/sample/:id/send', async (req, res) => {
   const id = Number(req.params.id), st = (req.body || {}).status === 'draft' ? 'draft' : 'sent'; if (!id) return res.status(400).json({ error: 'bad id' });
-  try { const sr = (await pool.query(`SELECT id, ref, send_status, coalesce(supplier_name,'') supplier_name, coalesce(fulfilment_source,'supplier') src FROM planner.sample_requests WHERE id=$1`, [id])).rows[0];
-    if (!sr) return res.status(404).json({ error: 'not found' });
-    if (st === 'sent' && sr.src !== 'supplier') return res.status(409).json({ error: 'This request is fulfilled from the ' + (sr.src === 'po' ? 'PO' : 'warehouse') + ', not by the supplier: it is never sent to the supplier portal.' });
-    if (st === 'sent' && !sr.supplier_name) return res.status(400).json({ error: 'Set the supplier first.' });
-    if ((sr.send_status || 'draft') === st) return res.json({ ok: true, unchanged: true, send_status: st });
-    const by = authUser(req) || 'Dock & Bay', who = shortUser(by) || 'Dock & Bay';
-    await pool.query(`UPDATE planner.sample_requests SET send_status=$2, sent_at=CASE WHEN $2='sent' THEN now() ELSE sent_at END, sent_by=CASE WHEN $2='sent' THEN $3 ELSE sent_by END WHERE id=$1`, [id, st, by]);
-    if (st === 'sent') await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
-      [id, authUser(req) || null, '📨 New sample request ' + sr.ref + ' sent to ' + sr.supplier_name + ' by ' + who + '. Please review and accept.']);
-    invalidateSupplyCaches('sample'); try { portalCacheMarkStale(sr.supplier_name); } catch (e) {}
-    res.json({ ok: true, send_status: st });
+  try { const r = await sampleSetSendStatus(id, st, authUser(req));
+    if (r.code) return res.status(r.code).json({ error: r.error });
+    res.json(r);
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
+// v28.799 (Ben 12-Nov-26): the Send / back-to-draft step as one function, also used when a team request is approved with "send to suppliers".
+// Returns { ok, send_status, unchanged? } or { code, error }.
+async function sampleSetSendStatus(id, st, byEmail) {
+    const sr = (await pool.query(`SELECT id, ref, send_status, coalesce(supplier_name,'') supplier_name, coalesce(fulfilment_source,'supplier') src FROM planner.sample_requests WHERE id=$1`, [id])).rows[0];
+    if (!sr) return { code: 404, error: 'not found' };
+    if (st === 'sent' && sr.src !== 'supplier') return { code: 409, error: 'This request is fulfilled from the ' + (sr.src === 'po' ? 'PO' : 'warehouse') + ', not by the supplier: it is never sent to the supplier portal.' };
+    if (st === 'sent' && !sr.supplier_name) return { code: 400, error: 'Set the supplier first.' };
+    if ((sr.send_status || 'draft') === st) return { ok: true, unchanged: true, send_status: st };
+    const by = byEmail || 'Dock & Bay', who = shortUser(by) || 'Dock & Bay';
+    await pool.query(`UPDATE planner.sample_requests SET send_status=$2, sent_at=CASE WHEN $2='sent' THEN now() ELSE sent_at END, sent_by=CASE WHEN $2='sent' THEN $3 ELSE sent_by END WHERE id=$1`, [id, st, by]);
+    if (st === 'sent') await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
+      [id, byEmail || null, '📨 New sample request ' + sr.ref + ' sent to ' + sr.supplier_name + ' by ' + who + '. Please review and accept.']);
+    invalidateSupplyCaches('sample'); try { portalCacheMarkStale(sr.supplier_name); } catch (e) {}
+    return { ok: true, send_status: st };
+}
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
   // Who created it: prefer a real supplied user, else the authenticated session user. NEVER the literal 'planner'
@@ -30692,6 +30949,16 @@ app.post('/api/supply/sample-create', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { id, ref } = await createSampleShipment(client, b, createdByUser);
+    await client.query('COMMIT');
+    invalidateSupplyCaches('sample');   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
+    res.json({ ok:true, id, ref });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
+  finally { client.release(); }
+});
+// v28.799 (Ben 12-Nov-26): the sample-create insert as one function (inside the caller's transaction), so an approved team request
+// (SUPPLY > Samples > Requests) makes its SRs exactly like a hand-made one. Returns { id, ref }.
+async function createSampleShipment(client, b, createdByUser) {
     if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
       `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
     let supId = b.supplier_id || null;   // v27.724: link the sample to the supplier id (the picker sends a name) so escalate/notify can resolve the portal users; the upsert above guarantees the row exists
@@ -30711,12 +30978,8 @@ app.post('/api/supply/sample-create', async (req, res) => {
     // timeline entry: created by Dock & Bay → author_kind 'internal' = shows as an UNREAD note for the supplier in the portal
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
       [id, createdByUser||null, (shortUser(createdByUser)||'Dock & Bay')+' created this sample request']);
-    await client.query('COMMIT');
-    invalidateSupplyCaches('sample');   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
-    res.json({ ok:true, id, ref });
-  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: clientErr(e) }); }
-  finally { client.release(); }
-});
+    return { id, ref };
+}
 app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all lines (paste + inline edits)
   const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines : [];
   const client = await pool.connect();
@@ -30790,6 +31053,7 @@ app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admi
         (b.tracking_code != null ? b.tracking_code : _pre.tracking_code),
         (b.carrier != null ? b.carrier : _pre.carrier), _pre.recipient_company, authUser(req));
     }
+    await teamReqSrEvents(id, authUser(req));   // v28.799: SR made from a team request -> shipped / received email (once each)
     return {};
   }); });
 app.post('/api/supply/sample-note', async (req, res) => {
@@ -30810,7 +31074,8 @@ app.post('/api/supply/sample-accept', async (req, res) => {
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
   await maybeShippedNote(b.id, b, 'supplier', 'D&B');   // preview/admin acting as supplier → "D&B as <supplier>"
-  patch(res, 'planner.sample_requests', 'id', b.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); });
+  patch(res, 'planner.sample_requests', 'id', b.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint',
+    async () => { await teamReqSrEvents(b.id, authUser(req)); return {}; }); });   // v28.799: team-request shipped email
 app.post('/api/supply/sample-charge', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
   try { const s = (await pool.query(`SELECT ref, supplier_name FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0];
@@ -40703,7 +40968,8 @@ app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // sup
     if (b.supplier_expected_completion != null && b.supplier_expected_completion !== '' && !(/^\d{4}-\d{2}-\d{2}$/.test(String(b.supplier_expected_completion)) && !isNaN(Date.parse(String(b.supplier_expected_completion))))) return res.status(400).json({ error: 'The expected completion date is not a valid date.' });   // v28.191 (Ben, M7): before the notes are written
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
-    patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
+    patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint',
+      async () => { await teamReqSrEvents(s.id, req.portal.email || 'supplier'); return {}; }); }   // v28.799: supplier marks shipped / adds tracking -> team-request shipped email
   catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
 // v28.186 (Ben, H3): SQL twin of portalShipmentRole for a shipments row `sh`; $1 = the caller's supplier names, lower-cased.
 const PORTAL_SHIP_MINE_SQL = `EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref) AND lower(mp.supplier_name) = ANY($1))
