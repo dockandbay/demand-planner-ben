@@ -14531,18 +14531,18 @@ supplySectionHandler = async (req, res, next) => {
             -- effective dates (override ▸ flexport) and the raw override the UI edits
             -- effective dates: shipment override ▸ Flexport ▸ CALCULATED from the master PO (prod-end +7 = departure;
             -- + branch transit lead by mode = landing/arrival) so an unlinked shipment still shows dates.
-            coalesce(to_char(sh.departure_date,'YYYY-MM-DD'), to_char(fx.departure_date,'YYYY-MM-DD'), to_char(mp.ship_calc,'YYYY-MM-DD')) departure,
+            to_char(coalesce(CASE WHEN (coalesce(mp.mp_shipped,false) OR lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed')) THEN coalesce(sh.departure_date, fx.departure_date) ELSE coalesce(fx.departure_date, sh.departure_date) END, mp.ship_calc),'YYYY-MM-DD') departure,   -- v28.796 (Ben): unshipped = Flexport wins; shipped = the recorded departure first
             -- effective LANDING: override ▸ Flexport ▸ (EFFECTIVE departure + branch transit). Chains off the
             -- departure override, so overriding an earlier date shifts the later CALCULATED ones (final dates).
             coalesce(to_char(sh.landing_date,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD'),
-              to_char((coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date,'YYYY-MM-DD')) landing,
+              to_char((coalesce(CASE WHEN (coalesce(mp.mp_shipped,false) OR lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed')) THEN coalesce(sh.departure_date, fx.departure_date) ELSE coalesce(fx.departure_date, sh.departure_date) END, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date,'YYYY-MM-DD')) landing,
             CASE WHEN sh.landing_date IS NOT NULL THEN 'S' WHEN fx.landing_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END landing_src,
-            CASE WHEN sh.departure_date IS NOT NULL THEN 'S' WHEN fx.departure_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END departure_src,
+            CASE WHEN sh.departure_date IS NOT NULL AND (coalesce(mp.mp_shipped,false) OR lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed')) THEN 'S' WHEN fx.departure_date IS NOT NULL THEN 'FLEX' WHEN sh.departure_date IS NOT NULL THEN 'S' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END departure_src,
             CASE WHEN sh.arrival_date IS NOT NULL THEN 'S' WHEN fx.arrival_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END arrival_src,
             (fx.flex_id IS NOT NULL) flex_matched,
             -- effective ARRIVAL: override ▸ Flexport ▸ EFFECTIVE landing (chained off departure)
             coalesce(to_char(sh.arrival_date,'YYYY-MM-DD'), to_char(fx.arrival_date,'YYYY-MM-DD'),
-              to_char(coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date),'YYYY-MM-DD')) arrival,
+              to_char(coalesce(sh.landing_date, fx.landing_date, (coalesce(CASE WHEN (coalesce(mp.mp_shipped,false) OR lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed')) THEN coalesce(sh.departure_date, fx.departure_date) ELSE coalesce(fx.departure_date, sh.departure_date) END, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date),'YYYY-MM-DD')) arrival,
             to_char(sh.departure_date,'YYYY-MM-DD') ov_departure,
             to_char(sh.landing_date,'YYYY-MM-DD')   ov_landing,
             to_char(sh.delivery_date,'YYYY-MM-DD')  ov_delivery,
@@ -14551,7 +14551,7 @@ supplySectionHandler = async (req, res, next) => {
             -- v28.549 (Ben 28-Oct-26: "on FOB the shipment completed date shouldn't be +7 days, it should be +0"): + 0 for an FOB
             -- shipment and for a Direct to Client one (the PO side uses the same rule, so a PO's completion = its shipment's).
             coalesce(to_char(sh.delivery_date,'YYYY-MM-DD'),
-              to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date))
+              to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(CASE WHEN (coalesce(mp.mp_shipped,false) OR lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed')) THEN coalesce(sh.departure_date, fx.departure_date) ELSE coalesce(fx.departure_date, sh.departure_date) END, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date))
                 + ((CASE WHEN lower(coalesce(sh.mode,''))='fob' OR coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,''), '')='DIRECT' THEN 0 ELSE 7 END)||' days')::interval)::date,'YYYY-MM-DD')) completion,
             CASE WHEN sh.delivery_date IS NOT NULL THEN 'S'
                  WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.ship_calc) IS NOT NULL THEN 'calc' END completion_src,
@@ -14572,12 +14572,14 @@ supplySectionHandler = async (req, res, next) => {
             ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true
           -- master-PO date calc: prod-end +7 = departure; + branch transit (air/sea by shipment mode) = landing/arrival
           LEFT JOIN LATERAL (
-            SELECT CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days')::date END ship_calc,
+            -- v28.796 (Ben 12-Nov-26): until the shipment (or its master PO) is shipped, the calculated departure is never before today
+            SELECT CASE WHEN pe IS NULL THEN NULL WHEN (lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed') OR upper(coalesce(m.status,'')) IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE')) THEN (pe + interval '7 days')::date ELSE greatest((pe + interval '7 days')::date, current_date) END ship_calc,
                    (CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
                          THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END) transit_days,
-                   CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days'
+                   CASE WHEN pe IS NOT NULL THEN (CASE WHEN (lower(coalesce(sh.status,'')) IN ('shipping','active','complete','completed') OR upper(coalesce(m.status,'')) IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE')) THEN (pe + interval '7 days')::date ELSE greatest((pe + interval '7 days')::date, current_date) END
                       + ((CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
                                THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,
+                   upper(coalesce(m.status,'')) IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE') mp_shipped,   -- v28.796
                    coalesce(m.branch,'') mp_branch, coalesce(m.client,'') mp_client,
                    coalesce(ms.export_port,'') mp_export_port,   -- master PO supplier's default export port
                    coalesce(nullif(m.branch_delivery_notes,''), mb.delivery_notes, '') mp_delivery_notes,   -- master PO branch delivery notes (→ shipment inherits)
@@ -33608,15 +33610,16 @@ const PO_ROWS_SQL = `
             LEFT JOIN planner.v_po_finance m ON m.po = coalesce(nullif(sh2.master_po,''), v.shipment_ref) AND m.po <> v.po
             LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments_effective f WHERE sh2.shipment_ref IS NOT NULL AND (f.flex_id=sh2.carrier_ref OR f.shipment_name=sh2.shipment_ref)
               ORDER BY (f.flex_id=sh2.carrier_ref) DESC NULLS LAST LIMIT 1) sfx ON true
-            LEFT JOIN LATERAL (SELECT CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days')::date END ship_calc,
+            LEFT JOIN LATERAL (SELECT CASE WHEN pe IS NULL THEN NULL WHEN (lower(coalesce(sh2.status,'')) IN ('shipping','active','complete','completed') OR upper(coalesce(mm.status,'')) IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE')) THEN (pe + interval '7 days')::date ELSE greatest((pe + interval '7 days')::date, current_date) END ship_calc,   -- v28.796: never before today until shipped
                    (CASE WHEN coalesce(lower(sh2.mode), CASE WHEN sfx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air' THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END) transit_days,
-                   upper(coalesce(nullif(mm.country_code,''), mb.country_code, '')) mp_country
+                   upper(coalesce(nullif(mm.country_code,''), mb.country_code, '')) mp_country,
+                   upper(coalesce(mm.status,'')) IN ('SHIPPING','SHIPPED TO MASTER','DELIVERED','COMPLETE') mp_shipped
               FROM planner.purchase_orders mm LEFT JOIN planner.suppliers ms ON ms.id=mm.supplier_id LEFT JOIN planner.branches mb ON mb.name=mm.branch
               CROSS JOIN LATERAL (SELECT coalesce(mm.end_production_overide, (mm.start_production + (coalesce(ms.production_days,0)||' days')::interval)::date) pe) pec
               WHERE sh2.shipment_ref IS NOT NULL AND mm.po = coalesce(nullif(sh2.master_po,''), sh2.shipment_ref) LIMIT 1) smp ON true
             LEFT JOIN LATERAL (SELECT d.dep, a.arr,
                    coalesce(sh2.delivery_date, (a.arr + ((CASE WHEN lower(coalesce(sh2.mode,''))='fob' OR coalesce(nullif(upper(sh2.country_code),''), nullif(smp.mp_country,''), '')='DIRECT' THEN 0 ELSE 7 END)||' days')::interval)::date) comp
-              FROM (SELECT coalesce(sh2.departure_date, sfx.departure_date, smp.ship_calc) dep) d
+              FROM (SELECT coalesce(CASE WHEN (lower(coalesce(sh2.status,'')) IN ('shipping','active','complete','completed') OR coalesce(smp.mp_shipped,false)) THEN coalesce(sh2.departure_date, sfx.departure_date) ELSE coalesce(sfx.departure_date, sh2.departure_date) END, smp.ship_calc) dep) d   -- v28.796 (Ben): unshipped = Flexport wins; shipped = the recorded departure first
               CROSS JOIN LATERAL (SELECT coalesce(sh2.arrival_date, sfx.arrival_date, sh2.landing_date, sfx.landing_date, (d.dep + (coalesce(smp.transit_days,0)||' days')::interval)::date) arr) a
               WHERE sh2.shipment_ref IS NOT NULL) sd ON true
             LEFT JOIN planner.fulfil_purchase_orders fm ON fm.po = v.po
