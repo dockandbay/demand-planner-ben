@@ -9339,8 +9339,8 @@ function hzPortalHelp(el){
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback','gmail-connectors','workflows']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
-    var ADM_LABEL={workflows:'Workflows','email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback','gmail-connectors','workflows','emergency-login']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
+    var ADM_LABEL={'emergency-login':'Emergency login',workflows:'Workflows','email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback','gmail-connectors':'Gmail connectors'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -9353,7 +9353,7 @@ function hzPortalHelp(el){
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
     if(ME===null && ['xero','workflows','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log','data-health'].indexOf(CONFIG_SUB)>=0){
       c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
-    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
+    if((CONFIG_SUB==='emergency-login'||CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
@@ -10258,6 +10258,29 @@ function hzPortalHelp(el){
           b.querySelectorAll('.wf-open').forEach(function(x){ x.onclick=function(){ var w=(d.workflows||[]).filter(function(y){ return String(y.id)===x.getAttribute('data-id'); })[0]; if(w)wfDrawer(w,T[w.template]||{},d.can_edit,x.getAttribute('data-tab'),function(){ SUBS['workflows'](); }); }; });
           var sg=b.querySelector('#wf-sug'); if(sg)sg.onclick=wfSuggest;   // v28.601
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; });
+      };
+      // v28.804 (Ben 13-Nov-26): EMERGENCY LOGIN. Who has linked an authenticator app (Profile > Emergency login code), the
+      // session-grace switch (while on, Google sessions skip the 7-day re-sign-in, auto-off), reset a lost phone, recent code sign-ins.
+      SUBS['emergency-login']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        var dd=function(x){ if(!x)return ''; var p=String(x).split(/[ T]/); return hzTrkDate(p[0])+(p[1]?' '+p[1].slice(0,5):''); };
+        var post=function(u,o){ return fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(o||{})}).then(function(r){return r.json();}); };
+        fetch('/api/auth/emergency/admin').then(function(r){return r.json();}).then(function(d){
+          if(!d||!d.ok){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'Could not load')+'</div>'; return; }
+          var on=!!d.grace_until, n=(d.users||[]).filter(function(u){return u.confirmed_at;}).length;
+          var h='<div style="text-align:left;max-width:980px"><div class="sect-h">Emergency login</div>'
+            +'<div class="count" style="margin-bottom:12px">If Google sign-in is down: anyone who has set up an emergency code can use <b>Sign in with code</b> on the sign-in page (email + 6-digit code from their authenticator app, 24-hour session). Each person sets it up from their profile menu, top right ▸ Emergency login code.</div>'
+            +'<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);margin-bottom:14px"><div style="font-weight:700;margin-bottom:4px">Session grace '+(on?'<span style="color:var(--amber)">● ON until '+esc(dd(d.grace_until))+'</span>':'<span class="count">● Off</span>')+'</div>'
+            +'<div class="count" style="margin-bottom:8px">While on, people still signed in to Google through HORIZON are let back in without Google prompting them again (the 7-day re-sign-in is paused). Turns itself off at the time shown.</div>'
+            +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(on?'<button class="save-btn" data-g="0">Turn off</button>':'')+'<button class="save-btn" data-g="24">On for 24 hours</button><button class="save-btn" data-g="48">48 hours</button><button class="save-btn" data-g="72">72 hours</button></div></div>'
+            +'<div style="font-weight:700;margin:4px 0 6px">Set up: '+n+' of '+(d.users||[]).length+' users</div><table class="data" style="width:auto"><thead><tr><th style="text-align:left">User</th><th style="text-align:left">Code</th><th style="text-align:left">Last used</th><th></th></tr></thead><tbody>'
+            +(d.users||[]).map(function(u){ return '<tr><td style="text-align:left">'+esc(shortUser(u.email))+'</td><td style="text-align:left">'+(u.confirmed_at?'<span style="color:var(--pos);font-weight:700">✓</span> '+esc(dd(u.confirmed_at).split(' ')[0]):'<span style="color:var(--amber)">Not set up</span>')+'</td><td style="text-align:left">'+esc(dd(u.last_used_at))+'</td><td>'+(u.confirmed_at?'<button class="save-btn" data-reset="'+esc(u.email)+'" title="Lost phone: remove this code so they can set up again">Reset</button>':'')+'</td></tr>'; }).join('')+'</tbody></table>'
+            +'<div style="font-weight:700;margin:16px 0 6px">Recent code sign-in attempts</div>'
+            +((d.log||[]).length?'<table class="data" style="width:auto"><thead><tr><th style="text-align:left">When</th><th style="text-align:left">Email</th><th style="text-align:left">Result</th><th style="text-align:left">IP</th></tr></thead><tbody>'+(d.log||[]).map(function(l){ return '<tr><td style="text-align:left">'+esc(dd(l.at))+'</td><td style="text-align:left">'+esc(shortUser(l.email||''))+'</td><td style="text-align:left;color:'+(l.ok?'var(--pos)':'var(--neg)')+'">'+(l.ok?'Signed in':esc(l.reason||'refused'))+'</td><td style="text-align:left">'+esc(l.ip||'')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="count">None yet.</div>')
+            +'</div>';
+          b.innerHTML=h;
+          b.querySelectorAll('[data-g]').forEach(function(x){ x.onclick=function(){ var hh=+x.getAttribute('data-g'); if(hh&&!confirm('Turn session grace on for '+hh+' hours?'))return; post('/api/auth/emergency/grace',{hours:hh}).then(function(r){ if(!r||!r.ok)alert((r&&r.error)||'Failed'); SUBS['emergency-login'](); }); }; });
+          b.querySelectorAll('[data-reset]').forEach(function(x){ x.onclick=function(){ var em=x.getAttribute('data-reset'); if(!confirm('Reset the emergency code for '+em+'? They will need to set it up again.'))return; post('/api/auth/emergency/reset-user',{email:em}).then(function(){ SUBS['emergency-login'](); }); }; });
+        }).catch(function(){ b.innerHTML='<div class="count" style="color:var(--neg)">Could not load</div>'; });
       };
       SUBS['gmail-connectors']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         var flash=''; try{ var fm=/[?&]gmail=([^&#]*)/.exec(location.search); if(fm){ flash=decodeURIComponent(fm[1].replace(/\+/g,' ')); history.replaceState(null,'',location.pathname+location.hash); } }catch(e){}

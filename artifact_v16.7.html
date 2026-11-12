@@ -23643,11 +23643,60 @@ function hzAccountMenu(ev){ try{ ev&&ev.stopPropagation(); }catch(e){}
   var out=document.createElement('button'); out.type='button';
   out.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Sign out</span>';
   out.onclick=function(){ m.remove(); hzLogout(); };
-  m.appendChild(out); document.body.appendChild(m);
+  var ec=document.createElement('button'); ec.type='button';   // v28.804 (Ben 13-Nov-26): emergency login code set-up
+  ec.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Emergency login code</span>';
+  ec.onclick=function(){ m.remove(); hzEmergencyCode(); };
+  m.appendChild(ec); m.appendChild(out); document.body.appendChild(m);
   var btn=document.getElementById('hz-avatar-btn'), r=btn?btn.getBoundingClientRect():{bottom:52,right:window.innerWidth-8};
   m.style.top=(r.bottom+6)+'px'; m.style.left=''; m.style.right=Math.max(8,window.innerWidth-r.right)+'px';
   var close=function(e){ if(m.contains(e.target)||(btn&&btn.contains(e.target)))return; m.remove(); document.removeEventListener('mousedown',close,true); };
   setTimeout(function(){ document.addEventListener('mousedown',close,true); },0); }
+/* v28.804 (Ben 13-Nov-26): EMERGENCY LOGIN CODE. Link an authenticator app once (while Google works) so "Sign in with code" on the
+   login page works if Google sign-in is down. Nudge banner for anyone not set up (dismiss = 30 days); amber banner during a code session. */
+function hzEmergencyCode(){
+  var old=document.getElementById('hz-emc'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='hz-emc'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10050;display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow:auto';
+  var bx=document.createElement('div'); bx.style.cssText='background:var(--surface,#fff);color:var(--text,#0f172a);border-radius:12px;max-width:460px;width:100%;padding:20px 22px;box-shadow:0 20px 50px rgba(0,0,0,.25);text-align:left;font-size:13px;line-height:1.45';
+  ov.appendChild(bx); document.body.appendChild(ov); ov.addEventListener('mousedown',function(e){ if(e.target===ov)ov.remove(); });
+  var E=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); };
+  var D=function(x){ if(!x)return ''; var p=String(x).slice(0,10).split('-'); if(p.length!==3)return ''; var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return p[2]+'-'+(M[(+p[1])-1]||p[1])+'-'+p[0].slice(2); };
+  var hd='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><b style="font-size:15px">Emergency login code</b><button type="button" id="hz-emc-x" style="border:0;background:none;font-size:18px;cursor:pointer;color:var(--faint,#64748b)">×</button></div><div style="color:var(--faint,#64748b);margin-bottom:12px">For use only if Google sign-in is down. On the sign-in page choose <b>Sign in with code</b>, enter your email and the 6-digit code from your authenticator app. A code sign-in lasts 24 hours.</div>';
+  var wire=function(){ var x=document.getElementById('hz-emc-x'); if(x)x.onclick=function(){ ov.remove(); }; };
+  var post=function(u,b){ return fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();}); };
+  function status(){ bx.innerHTML=hd+'<div style="color:var(--faint,#64748b)">Loading…</div>'; wire();
+    fetch('/api/auth/totp/status').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ bx.innerHTML=hd+'<div style="color:var(--neg,#b91c1c)">'+E((d&&d.error)||'Could not load')+'</div>'; wire(); return; }
+      if(d.enrolled){ bx.innerHTML=hd+'<div style="padding:10px 12px;border-radius:8px;background:var(--pos-bg,#ecfdf5);color:var(--pos,#047857);font-weight:600">✓ Set up '+E(D(d.confirmed_at))+(d.last_used_at?' · last used '+E(D(d.last_used_at)):'')+'</div><div style="margin-top:14px;display:flex;gap:8px"><button type="button" class="save-btn light" id="hz-emc-new">Link a new phone</button><button type="button" class="save-btn light" id="hz-emc-del" style="color:var(--neg,#b91c1c)">Remove</button></div>'; wire();
+        document.getElementById('hz-emc-new').onclick=setup;
+        document.getElementById('hz-emc-del').onclick=function(){ if(!confirm('Remove your emergency login code? You will not be able to sign in with a code until you set it up again.'))return; post('/api/auth/totp/reset').then(function(){ try{ localStorage.removeItem('hz_emc_nudge'); }catch(e){} status(); hzEmcNudge(); }); };
+      } else { bx.innerHTML=hd+'<div style="padding:10px 12px;border-radius:8px;background:var(--amber-bg,#fffbeb);color:var(--amber,#b45309);font-weight:600">Not set up yet</div><div style="margin-top:14px"><button type="button" class="save-btn" id="hz-emc-go">Set up now</button></div>'; wire(); document.getElementById('hz-emc-go').onclick=setup; }
+    }).catch(function(){ bx.innerHTML=hd+'<div style="color:var(--neg,#b91c1c)">Could not load</div>'; wire(); }); }
+  function setup(){ bx.innerHTML=hd+'<div style="color:var(--faint,#64748b)">Creating your code…</div>'; wire();
+    post('/api/auth/totp/setup').then(function(d){
+      if(!d||!d.ok){ bx.innerHTML=hd+'<div style="color:var(--neg,#b91c1c)">'+E((d&&d.error)||'Could not start')+'</div>'; wire(); return; }
+      var qr=''; if(d.qr&&d.qr.length){ var n=d.qr.length, q=4, sz=n+2*q, rects=''; for(var y=0;y<n;y++)for(var x=0;x<n;x++)if(d.qr[y].charAt(x)==='1')rects+='<rect x="'+(x+q)+'" y="'+(y+q)+'" width="1" height="1"/>';
+        qr='<svg viewBox="0 0 '+sz+' '+sz+'" width="190" height="190" shape-rendering="crispEdges" style="background:#fff;border-radius:6px"><g fill="#000">'+rects+'</g></svg>'; }
+      bx.innerHTML=hd+'<div style="font-weight:700;margin-bottom:6px">1. Scan with your authenticator app</div><div style="color:var(--faint,#64748b);margin-bottom:8px">Google Authenticator, Microsoft Authenticator, 1Password, Authy… (add account → scan QR code)</div>'
+        +'<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'+qr+'<div style="font-size:12px;color:var(--faint,#64748b)">Can\'t scan? Enter this key:<div style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--text,#0f172a);margin-top:4px;word-break:break-all;user-select:all">'+E(d.secret)+'</div></div></div>'
+        +'<div style="font-weight:700;margin:16px 0 6px">2. Enter the 6-digit code it shows</div><div style="display:flex;gap:8px;align-items:center"><input id="hz-emc-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" style="font-size:18px;letter-spacing:4px;width:130px;padding:6px 8px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-family:ui-monospace,Menlo,monospace"><button type="button" class="save-btn" id="hz-emc-ok">Confirm</button></div><div id="hz-emc-err" style="color:var(--neg,#b91c1c);margin-top:8px;font-size:12px"></div>';
+      wire(); var inp=document.getElementById('hz-emc-code'); inp.focus();
+      var go=function(){ var c=inp.value.replace(/\D/g,''); if(c.length!==6){ document.getElementById('hz-emc-err').textContent='Enter the 6 digits.'; return; }
+        post('/api/auth/totp/confirm',{code:c}).then(function(r){ if(r&&r.ok){ try{ localStorage.removeItem('hz_emc_nudge'); }catch(e){} var nb=document.getElementById('hz-emc-nudge'); if(nb)nb.remove(); status(); } else document.getElementById('hz-emc-err').textContent=(r&&r.error)||'That code did not match.'; }); };
+      document.getElementById('hz-emc-ok').onclick=go; inp.addEventListener('keydown',function(e){ if(e.key==='Enter')go(); });
+    }); }
+  status();
+}
+function hzEmcBanner(html,bg,fg,id){ var b=document.createElement('div'); b.id=id; b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:10040;max-width:640px;width:calc(100% - 32px);background:'+bg+';color:'+fg+';border-radius:10px;padding:9px 14px;font-size:12.5px;box-shadow:0 6px 20px rgba(0,0,0,.15);display:flex;gap:10px;align-items:center;justify-content:space-between'; b.innerHTML=html; document.body.appendChild(b); return b; }
+function hzEmcNudge(){ try{
+  if(/(?:^|; )pe=1/.test(document.cookie)){ if(!document.getElementById('hz-emc-live')) hzEmcBanner('<span><b>⚠ Emergency sign-in</b> · signed in with a code, this session ends in 24 hours. Sign in with Google again once it is back.</span>','#fffbeb','#92400e','hz-emc-live'); return; }
+  if(document.getElementById('hz-emc-nudge'))return; var until=0; try{ until=+localStorage.getItem('hz_emc_nudge')||0; }catch(e){} if(until>Date.now())return;
+  fetch('/api/auth/totp/status').then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok||d.enrolled)return;
+    var b=hzEmcBanner('<span>🔐 Set up your <b>emergency login code</b> so you can still get into HORIZON if Google sign-in is down (1 minute).</span><span style="display:flex;gap:6px;flex-shrink:0"><button type="button" class="save-btn" id="hz-emc-n-go">Set up</button><button type="button" class="save-btn light" id="hz-emc-n-x">Later</button></span>','var(--surface,#fff)','var(--text,#0f172a)','hz-emc-nudge');
+    b.style.border='1px solid var(--border,#e2e8f0)';
+    document.getElementById('hz-emc-n-go').onclick=function(){ b.remove(); hzEmergencyCode(); };
+    document.getElementById('hz-emc-n-x').onclick=function(){ try{ localStorage.setItem('hz_emc_nudge', String(Date.now()+30*86400000)); }catch(e){} b.remove(); };
+  }).catch(function(){}); }catch(e){} }
+try{ window.hzEmergencyCode=hzEmergencyCode; setTimeout(hzEmcNudge, 8000); }catch(e){}
 try{ window.hzAccountMenu=hzAccountMenu; window.hzSetAvatar=hzSetAvatar; }catch(e){}
 try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventListener('DOMContentLoaded',hzSetAvatar); }catch(e){}
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────

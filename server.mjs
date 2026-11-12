@@ -23830,6 +23830,118 @@ app.post('/api/demand/sales-source', async (req, res) => {
 });
 // n8n entry (inside the /api/cron/ secret bracket): body {mode:'range', channels, from, to} for the history load (call while more), else the
 // daily incremental sync (changed lines + changed order headers since the last run) followed by the monthly build.
+// ── EMERGENCY SIGN-IN (v28.804, Ben 13-Nov-26) ─────────────────────────────────────────────────────────────────────────────
+// A second way in that needs neither Google nor email: each person links an authenticator app (TOTP, RFC 6238, 6 digits / 30 s)
+// once while Google works (Profile > Emergency login code). The login page always offers "Sign in with code" (email + code) under
+// the Google button. A code sign-in lasts 24 hours (not 7 days), a code works once, 5 wrong codes per person (or 20 per address)
+// in 15 minutes lock that route for 15 minutes, every attempt is logged (planner.emergency_login_log), suspended people are refused.
+// SESSION GRACE (admin switch, CONFIG > Admin > Emergency login, auto-off after at most 72 h): while on, the Google exchange skips
+// its 7-day "sign in with Google again" limit, so anyone with a live Supabase session re-enters without Google.
+// The cookie minting (signedIdentity) and the login page are the prod auth harness's; this file only adds the routes.
+const _B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32enc(buf) { let bits = 0, val = 0, out = ''; for (const b of buf) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += _B32[(val >>> (bits - 5)) & 31]; bits -= 5; } } if (bits > 0) out += _B32[(val << (5 - bits)) & 31]; return out; }
+function b32dec(s) { s = String(s || '').toUpperCase().replace(/[^A-Z2-7]/g, ''); let bits = 0, val = 0; const out = []; for (const ch of s) { val = (val << 5) | _B32.indexOf(ch); bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); }
+function totpAt(secretB32, step) { const key = b32dec(secretB32), msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(step)); const h = crypto.createHmac('sha1', key).update(msg).digest(); const o = h[h.length - 1] & 15;
+  return String(((h.readUInt32BE(o) & 0x7fffffff) % 1000000)).padStart(6, '0'); }
+// The matching step (now ±1, i.e. ±30 s of clock drift) or null. A step at or before lastStep is refused (a code works once).
+function totpMatch(secretB32, code, lastStep) { code = String(code || '').replace(/\D/g, ''); if (code.length !== 6) return null; const now = Math.floor(Date.now() / 30000);
+  for (const s of [now, now - 1, now + 1]) { if (lastStep != null && s <= Number(lastStep)) continue; const want = totpAt(secretB32, s); if (want.length === code.length && crypto.timingSafeEqual(Buffer.from(want), Buffer.from(code))) return s; }
+  return null; }
+const EMERG_DOMAIN = 'dockandbay.com';
+let _graceMemo = { at: 0, until: null };
+async function authGraceUntil(force) {   // the session-grace switch: an ISO time in the future = on
+  if (!force && Date.now() - _graceMemo.at < 30000) return _graceMemo.until;
+  let until = null; try { until = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='auth_grace_until'`)).rows[0] || {}).value || null; } catch (_) {}
+  if (until && !(Date.parse(until) > Date.now())) until = null;
+  _graceMemo = { at: Date.now(), until }; return until;
+}
+async function authGraceOn() { return !!(await authGraceUntil()); }
+function _emergIp(req) { return String(req.get('x-real-ip') || String(req.get('x-forwarded-for') || '').split(',')[0] || req.ip || '').trim().slice(0, 64); }
+async function _emergMe(req, res) { const me = authUser(req); if (!me) { res.status(401).json({ error: 'sign in first' }); return null; } return String(me).toLowerCase(); }
+app.get('/api/auth/totp/status', async (req, res) => {
+  try { const me = await _emergMe(req, res); if (!me) return;
+    const r = (await pool.query(`SELECT confirmed_at::text confirmed_at, last_used_at::text last_used_at FROM planner.emergency_totp WHERE email=$1`, [me])).rows[0] || null;
+    res.json({ ok: true, email: me, enrolled: !!(r && r.confirmed_at), confirmed_at: r && r.confirmed_at, last_used_at: r && r.last_used_at, grace_until: await authGraceUntil(true) });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Start (or restart) linking: a fresh secret, stored sealed and unconfirmed. Returns the otpauth link + QR modules for the page to draw.
+app.post('/api/auth/totp/setup', async (req, res) => {
+  try { const me = await _emergMe(req, res); if (!me) return;
+    if (!me.endsWith('@' + EMERG_DOMAIN)) return res.status(403).json({ error: 'only @' + EMERG_DOMAIN + ' accounts can set an emergency code' });
+    const secret = b32enc(crypto.randomBytes(20));
+    await pool.query(`INSERT INTO planner.emergency_totp (email, secret_enc, confirmed_at, last_step) VALUES ($1,$2,NULL,NULL)
+      ON CONFLICT (email) DO UPDATE SET secret_enc=$2, confirmed_at=NULL, last_step=NULL, created_at=now()`, [me, gmailSeal(secret)]);
+    const uri = 'otpauth://totp/' + encodeURIComponent('HORIZON:' + me) + '?secret=' + secret + '&issuer=HORIZON&algorithm=SHA1&digits=6&period=30';
+    let qr = null; try { const { qrMatrix } = await import('./lib/qrcode.mjs'); const q = qrMatrix(uri, 'M'); qr = q.modules.map(row => row.map(v => v ? 1 : 0).join('')); } catch (_) {}
+    res.json({ ok: true, secret: secret.replace(/(.{4})/g, '$1 ').trim(), uri, qr });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/auth/totp/confirm', async (req, res) => {
+  try { const me = await _emergMe(req, res); if (!me) return;
+    const r = (await pool.query(`SELECT secret_enc FROM planner.emergency_totp WHERE email=$1`, [me])).rows[0];
+    if (!r) return res.status(400).json({ error: 'start the set-up first' });
+    const step = totpMatch(gmailUnseal(r.secret_enc), req.body && req.body.code, null);
+    if (step == null) return res.status(400).json({ error: 'That code did not match. Check the app shows HORIZON and try the current code.' });
+    await pool.query(`UPDATE planner.emergency_totp SET confirmed_at=now(), last_step=$2 WHERE email=$1`, [me, step]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/auth/totp/reset', async (req, res) => {
+  try { const me = await _emergMe(req, res); if (!me) return;
+    await pool.query(`DELETE FROM planner.emergency_totp WHERE email=$1`, [me]); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Admin: who has a code, the grace switch, recent attempts.
+app.get('/api/auth/emergency/admin', async (req, res) => {
+  try { const p = await permsFor(req); if (!p.is_admin) return res.status(403).json({ error: 'admin only' });
+    const users = (await pool.query(`SELECT lower(a.email) email, t.confirmed_at::text confirmed_at, t.last_used_at::text last_used_at
+      FROM planner.app_permissions a LEFT JOIN planner.emergency_totp t ON t.email = lower(a.email)
+      WHERE lower(a.email) LIKE '%@' || $1 ORDER BY (t.confirmed_at IS NULL), lower(a.email)`, [EMERG_DOMAIN])).rows;
+    const log = (await pool.query(`SELECT email, ip, ok, reason, at::text at FROM planner.emergency_login_log ORDER BY at DESC LIMIT 30`)).rows;
+    res.json({ ok: true, users, log, grace_until: await authGraceUntil(true) });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/auth/emergency/grace', async (req, res) => {
+  try { const p = await permsFor(req); if (!p.is_admin) return res.status(403).json({ error: 'admin only' });
+    const h = Math.max(0, Math.min(72, Number(req.body && req.body.hours) || 0));
+    const until = h ? new Date(Date.now() + h * 3600000).toISOString() : '';
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('auth_grace_until',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [until]);
+    _graceMemo = { at: 0, until: null }; console.log('[auth] session grace ' + (h ? 'ON until ' + until : 'OFF') + ' by ' + p.email);
+    res.json({ ok: true, grace_until: until || null });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/auth/emergency/reset-user', async (req, res) => {
+  try { const p = await permsFor(req); if (!p.is_admin) return res.status(403).json({ error: 'admin only' });
+    const em = String(req.body && req.body.email || '').trim().toLowerCase(); if (!em) return res.status(400).json({ error: 'email required' });
+    await pool.query(`DELETE FROM planner.emergency_totp WHERE email=$1`, [em]); console.log('[auth] emergency code reset for ' + em + ' by ' + p.email);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// PUBLIC (exempt from the gate): email + 6-digit code → a 24-hour session. Same answer for unknown email / no code / wrong code.
+app.post('/api/auth/code-login', async (req, res) => {
+  const ip = _emergIp(req), email = String(req.body && req.body.email || '').trim().toLowerCase().slice(0, 120);
+  const logIt = (ok, reason) => pool.query(`INSERT INTO planner.emergency_login_log (email, ip, ok, reason) VALUES ($1,$2,$3,$4)`, [email || null, ip || null, ok, reason]).catch(() => {});
+  try {
+    if (!GATE || typeof signedIdentity !== 'function') return res.status(404).json({ error: 'not available here' });
+    if (!email.endsWith('@' + EMERG_DOMAIN)) { await logIt(false, 'domain'); return res.status(401).json({ error: 'Email or code not recognised.' }); }
+    const fails = (await pool.query(`SELECT count(*) FILTER (WHERE email=$1)::int e, count(*) FILTER (WHERE ip=$2)::int i FROM planner.emergency_login_log WHERE NOT ok AND at > now() - interval '15 minutes' AND (email=$1 OR ip=$2)`, [email, ip])).rows[0];
+    if (fails.e >= 5 || fails.i >= 20) { await logIt(false, 'locked'); return res.status(429).json({ error: 'Too many attempts. Wait 15 minutes and try again.' }); }
+    if (await identityBlockedNow(email, true)) { await logIt(false, 'blocked'); return res.status(403).json({ error: 'Your HORIZON access is suspended.' }); }
+    const r = (await pool.query(`SELECT secret_enc, last_step FROM planner.emergency_totp WHERE email=$1 AND confirmed_at IS NOT NULL`, [email])).rows[0];
+    const step = r ? totpMatch(gmailUnseal(r.secret_enc), req.body && req.body.code, r.last_step) : null;
+    if (step == null) { await logIt(false, r ? 'bad code' : 'no code set'); return res.status(401).json({ error: 'Email or code not recognised.' }); }
+    const upd = await pool.query(`UPDATE planner.emergency_totp SET last_step=$2, last_used_at=now() WHERE email=$1 AND (last_step IS NULL OR last_step < $2)`, [email, step]);
+    if (!upd.rowCount) { await logIt(false, 'replay'); return res.status(401).json({ error: 'Email or code not recognised.' }); }
+    await logIt(true, 'ok'); console.log('[auth] emergency code sign-in: ' + email + ' from ' + ip);
+    const ttl = 86400, exp = Math.floor(Date.now() / 1000) + ttl, sec = (req.get('x-forwarded-proto') === 'https') ? '; Secure' : '';
+    res.setHeader('Set-Cookie', [
+      `pk=${encodeURIComponent(GATE)}; Path=/; Max-Age=${ttl}; SameSite=Lax; HttpOnly${sec}`,
+      `pu=${signedIdentity(email, exp)}; Path=/; Max-Age=${ttl}; SameSite=Lax; HttpOnly${sec}`,
+      `pe=1; Path=/; Max-Age=${ttl}; SameSite=Lax${sec}`,   // not secret: lets the app show the "Emergency sign-in" banner
+    ]);
+    res.json({ ok: true, email });
+  } catch (e) { log500(e); res.status(500).json({ error: 'Sign-in could not be completed, try again.' }); }
+});
 app.post('/api/cron/sales-import', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const b = req.body || {};
