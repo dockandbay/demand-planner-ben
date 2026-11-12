@@ -1497,6 +1497,8 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/inventory/backorder-orders') return null;   // v28.492 (SUG-0040): live Fulfil READ of the orders behind backorders (POST only to carry the SKU list), no DB write   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
+  if (method === 'POST' && p === '/api/auth/code-login') return null;   // v28.804 emergency code sign-in: PUBLIC by design (no session yet); the handler rate limits, logs, refuses suspended people
+  if (method === 'POST' && /^\/api\/auth\/totp\/(setup|confirm|reset)$/.test(p)) return 'staff';   // v28.804: anyone signed in sets up / removes their OWN emergency code (grace + reset-user stay admin by default)
   if (method === 'POST' && (p === '/api/supply/sample-team-requests' || /^\/api\/supply\/sample-team-requests\/\d+(\/cancel)?$/.test(p))) return 'staff';   // v28.799 (Ben 12-Nov-26): any staff member asks for samples (edit / cancel own, checked in the handler); approve / reject stay SUPPLY edit
   if (p.startsWith('/api/supply/edi-projects')) return 'staff';   // v28.779: staff only. EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
