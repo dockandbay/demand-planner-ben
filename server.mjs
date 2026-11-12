@@ -8335,13 +8335,13 @@ app.post('/api/supply/cogs-channel/xero', async (req, res) => {   // { month, or
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
 });
 // v28.736 step 1 in one press: rebuild the month from LIVE Fulfil, then create (or rebuild) the DRAFTS in Xero for that org; emails on creation.
-app.post('/api/supply/cogs-channel/create', async (req, res) => {
+app.post('/api/supply/cogs-channel/create', async (req, res) => {   // v28.797 (Ben 12-Nov-26): creates the journals POSTED (approved) like the n8n run; the accountants revert to draft in Xero if they want
   const me = await cchAccessOk(req, res); if (!me) return;
   const b = req.body || {}, month = String(b.month || ''), orgK = b.org === 'AU' ? 'AU' : 'UK', by = (me && me.email) || authUser(req) || 'admin';
   if (!cchMonthOk(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
   if (b.confirm !== true) return res.status(400).json({ error: 'confirm required' });
   let build; try { build = await cchBuildStore(month, by); } catch (e) { log500(e); return res.status(502).json({ error: 'Fulfil read failed: ' + String(e.message || e) }); }
-  try { const runs = await cchXeroRun(month, orgK, { push: true, kind: 'manual', by, build }); const emailed = await cchEmailIfNew(month, orgK, build, runs, by);
+  try { const runs = await cchXeroRun(month, orgK, { push: true, kind: 'manual', by, build, status: 'POSTED' }); const emailed = await cchEmailIfNew(month, orgK, build, runs, by);
     res.json({ ok: true, org: orgK, month, runs, emailed }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 502).json({ error: String(e.message || e) }); }
 });

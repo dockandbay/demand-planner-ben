@@ -16182,7 +16182,7 @@ function renderCogsCh(){ var p=document.getElementById('cogs-panel'); if(!p)retu
     h+='<div class="cch-steps">'
       +'<div class="cch-st'+cls(1)+'"><h4><span class="cch-n">'+(s.k==='none'?'1':'✓')+'</span>Create journals</h4>'
         +(s.k==='none'?'<div class="mut" style="margin-bottom:8px">Nothing in Xero '+org+' for '+cchMoLbl(CCH.month)+' yet. Reads Fulfil (about a minute), then creates COGS and SALES <b>drafts</b>, and emails the accountants.</div>'
-          :'<div class="mut" style="margin-bottom:8px">'+(lc?'Last run '+cchWho(lc):'In Xero')+'.'+(s.k==='posted'?' Re-creating <b>replaces</b> a posted journal that changed (voids it and creates the full journal as a draft to post); a held journal is left alone.':' Re-creating updates the drafts from Fulfil and Xero.')+'</div>')
+          :'<div class="mut" style="margin-bottom:8px">'+(lc?'Last run '+cchWho(lc):'In Xero')+'.'+(s.k==='posted'?' Re-creating <b>replaces</b> a posted journal that changed (voids it and posts the full journal again, approved); a held journal is left alone. The accountants are emailed and can revert it to draft in Xero.':' Re-creating posts the journals in Xero (approved) from Fulfil and Xero and emails the accountants; they can revert to draft in Xero.')+'</div>')
         +cchBtn('cch-create',CCH.busy==='create'?'Reading Fulfil, then Xero…':(s.k==='none'?'Create journals':'Re-create from Fulfil'),s.k==='none',busy,'Writes DRAFT journals to live Xero '+org)+'</div>'
       +'<div class="cch-st'+cls(2)+'"><h4><span class="cch-n">'+(s.k==='posted'?'✓':'2')+'</span>Review</h4>'
         +(s.k==='none'?'<div class="mut">After step 1.</div>':s.all.map(jl).join('')+(o?'<div style="margin-top:6px">'+cchChecks(o)+'</div>':'')+'<div class="mut" style="margin-top:6px">Breakdown and lines below.</div>')+'</div>'
@@ -16273,7 +16273,7 @@ function cchBind(){ var g=function(id){ return document.getElementById(id); }, o
   if(g('cch-log'))g('cch-log').onclick=function(){ CCH.logOpen=true; CCH.logOrg=org; renderCogsCh(); };
   if(g('cch-log-x'))g('cch-log-x').onclick=function(){ CCH.logOpen=false; renderCogsCh(); };
   document.querySelectorAll('.cch-ltab').forEach(function(t){ t.onclick=function(){ CCH.logOrg=t.dataset.org; renderCogsCh(); }; });
-  if(g('cch-create'))g('cch-create').onclick=function(){ if(!arm(this,'Confirm: create drafts in Xero '+org+' and email the accountants'))return;
+  if(g('cch-create'))g('cch-create').onclick=function(){ if(!arm(this,'Confirm: post in Xero '+org+' (approved) and email the accountants'))return;
     CCH.busy='create'; CCH.msg=''; CCH.plan={}; renderCogsCh();
     fetch('/api/supply/cogs-channel/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({month:CCH.month,org:org,confirm:true})}).then(cchJson)
       .then(function(j){ CCH.busy=''; var n=j.runs.filter(function(r){ return r.action!=='no_change'; });

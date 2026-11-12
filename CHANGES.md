@@ -1,3 +1,6 @@
+## v28.797 (12-Nov-26) COGS by channel: "Create journals" posts approved in Xero
+- Ben: "post approved to UK accountants not draft. they can revert to draft if they want". ACCOUNTS > COGS by channel > Create journals (by hand, UK and AU) now creates the journals POSTED in Xero, like the scheduled n8n run, and emails the accountants (the email already says posted). Re-creating a changed posted journal voids it and posts the full journal again. A held journal is still left alone. The Post button stays for older drafts. No migration, no new route or env var.
+
 ## v28.796 (12-Nov-26) PO / shipment ship date: Flexport first while unshipped, calculated date never in the past until shipped
 - Ben: "if no flexport and no override date, then the calculated ship date should never be in the past until we mark it as shipped" + "flexport should win".
 - NOT shipped (PO status not SHIPPING / SHIPPED TO MASTER / DELIVERED / COMPLETE and shipment status not Shipping / Active / Complete): ship date = Flexport departure, else the shipment's manual departure, else production end + 7 but never before today. Delivery, check-in, completion and payment due dates follow as before.
