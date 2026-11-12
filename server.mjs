@@ -15438,7 +15438,7 @@ app.get('/api/supply/sample-team-requests/skus', async (req, res) => {
     if (season) { p.push(season); w.push(`coalesce(p.release_window,'') = $${p.length}`); }
     if (cat) { p.push(cat); w.push(`coalesce(p.category,'') = $${p.length}`); }
     if (q) { p.push('%' + q + '%'); w.push(`(p.sku ILIKE $${p.length} OR coalesce(p.product_name_final,p.product_name,'') ILIKE $${p.length} OR coalesce(p.colour_long,'') ILIKE $${p.length} OR coalesce(p.main_supplier_final,p.supplier,'') ILIKE $${p.length})`); }
-    const rows = (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') product_name, coalesce(p.colour_long,'') colour, coalesce(p.size,'') size,
+    const rows = (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') product_name, coalesce(p.colour_long,'') colour, coalesce(nullif(btrim(p.size_long),''), nullif(btrim(p.size_short),''), p.size, '') size,   -- v28.800 (Ben): the size description (e.g. Extra Large (200x90cm)), not the size code
         coalesce(p.category,'') category, coalesce(p.release_window,'') season, coalesce(p.status,'') status,
         coalesce(nullif(btrim(p.main_supplier_final),''), nullif(btrim(p.supplier),''), '') supplier_name, s.id supplier_id, s.sample_lead_weeks lead_weeks
       FROM planner.products p LEFT JOIN planner.suppliers s ON lower(btrim(s.name)) = lower(btrim(coalesce(nullif(btrim(p.main_supplier_final),''), p.supplier)))

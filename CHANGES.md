@@ -1,3 +1,6 @@
+## v28.800 (12-Nov-26) Sample requests: SKU grid tidy
+- Ben: wider SKU column, no product title, size as the real size description. The add-SKUs grid now shows the full SKU (product name on hover), Size = the product's size description (e.g. Extra Large (200x90cm), else the short size), and the request form uses the full page width so Status, Supplier and Lead time are not cut off. No migration, no new route or env var.
+
 ## v28.799 (12-Nov-26) SUPPLY > Samples > Requests: team sample requests, approved into sample shipments
 - Ben: anyone on the team can ask for samples; an approver turns the request into sample shipments, one per supplier. SUPPLY > Samples now has two views, SAMPLE SHIPMENTS (the SR grid as before) and REQUESTS (#/supply/samples/requests, deep link #/supply/samples/requests/RQ-<id>).
 - A request (RQ-<id>): requested by (signed-in user), needed-by date, purpose (same list as sample shipments), deliver-to (past-address search, as on the sample form), notes, and lines. Lines are added in a SKU grid filtered by season (products.release_window), category and free text (closed products hidden unless ticked); typing a quantity adds the line. Supplier comes from the product (main supplier) and can be changed per line.
