@@ -21078,24 +21078,32 @@ const GENEVA_ACCT = { 'OUTBOUND-ORDER-D2C':'COGS - US - Shopify','OUTBOUND-UNIT-
   'STORAGE-PALLET':'Geneva USA - Storage Fees - Other','STORAGE-MED-BIN':'Geneva USA - Storage Fees - Other','STORAGE-LG-BIN':'Geneva USA - Storage Fees - Other' };
 const GENEVA_CODES = Object.keys(GENEVA_ACCT).concat(['SHIPPING']).sort((a, b) => b.length - a.length);   // longest-first: 'SHIPPING - RETURN LABELS' before 'SHIPPING'
 // Parse the G10/Geneva invoice PDF → [{code, amount}] per fee line. (Verified: reconciles to the invoice total.)
+// v28.803 (Ben 13-Nov-26: "make it flexible if file formats change a little, and say so when it fails"): a fee line is any line whose first
+// word (after an optional quantity, which G10 moved after the code in Oct-26) is a known fee code; the amount is the last $ figure on that line
+// or the next 3. The array also carries .printedTotal (the invoice's own TOTAL) and .unknown (code-like lines that are not known fee codes) so
+// the caller can prove the read reconciles and, if not, say the layout changed.
 async function _tplGenevaPdfItems(buf) {
   const { PDFParse } = await import('pdf-parse');
   const t = (await new PDFParse({ data: new Uint8Array(buf) }).getText()).text || '';
   const lines = t.split(/\n/).map(l => l.trim()).filter(Boolean);
   const num = s => parseFloat(String(s).replace(/[,$\s]/g, '')) || 0;
-  const items = [];
+  const items = []; const unknown = [];
+  const lastAmt = l => { const pm = [...String(l).matchAll(/\$\s?([\d,]+\.\d{2})/g)]; return pm.length ? num(pm[pm.length - 1][1]) : null; };
   for (let i = 0; i < lines.length; i++) {
-    // Up to Sep-26 each fee line began "<qty> <CODE> <description>". From Oct-26 G10 moved the quantity after the code
-    // ("<CODE> <description>" then "<qty> $price $amount"), so a line that starts with the upper-case code (case-sensitive,
-    // so the mixed-case description line under it never counts twice) is also a fee line. v28.801 (Ben 13-Nov-26).
-    const m = /^(\d[\d,]*)\s+(.+)$/.exec(lines[i]);
-    const code = m ? GENEVA_CODES.find(c => m[2].toUpperCase().startsWith(c.toUpperCase())) : GENEVA_CODES.find(c => lines[i].startsWith(c + ' '));
-    if (!code) continue;
-    let amt = null; for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) { const pm = [...lines[j].matchAll(/\$([\d,]+\.\d{2})/g)]; if (pm.length) { amt = num(pm[pm.length - 1][1]); break; } }
+    const m = /^(\d[\d,]*(?:\.\d+)?)\s+(.+)$/.exec(lines[i]);
+    const body = m ? m[2] : lines[i];
+    // with a leading quantity any case is fine (old layout); without one the code must be upper case, so the mixed-case description under it never counts twice
+    const code = GENEVA_CODES.find(c => m ? body.toUpperCase().startsWith(c.toUpperCase()) && !/[A-Z0-9]/i.test(body.charAt(c.length) || ' ') || false : body.startsWith(c + ' '));
+    if (!code) { if (/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b/.test(body) && unknown.length < 10) unknown.push(body.slice(0, 60)); continue; }
+    let amt = null; for (let j = i; j < Math.min(i + 4, lines.length); j++) { if (j === i && !/\$/.test(lines[j])) continue; const a = lastAmt(lines[j]); if (a != null) { amt = a; break; } }
     if (amt != null) items.push({ code, amount: amt });
   }
+  const ti = lines.findIndex(l => /\bTOTAL\b/.test(l)); let printed = null;
+  if (ti >= 0) for (let j = ti; j < Math.min(ti + 12, lines.length); j++) { const mm = /^\$\s?([\d,]+\.\d{2})$/.exec(lines[j]); if (mm) { printed = num(mm[1]); break; } }
+  items.printedTotal = printed; items.unknown = unknown;
   return items;
 }
+const GENEVA_FORMAT_MSG = 'The Geneva (G10) file layout looks different from the one HORIZON reads, so nothing was booked. ';
 // Per-order FREIGHT (Small Parcel) + B2B UNITS (Pick Detail) for the period → drives the SHIPPING per-CostCentre
 // split and the B2B Wholesale/Faire unit split.
 async function _tplGenevaPerOrder(buf, period) {
@@ -21188,8 +21196,18 @@ async function _tplGenevaAllocate(period) {
   if (!xlsx) return { ok: false, error: 'Upload the Geneva freight-expense .xlsx for this period first.' };
   if (!pdf) return { ok: false, error: 'Upload the Geneva invoice PDF for this period too — it holds the storage / admin / packaging / returns fee totals.' };
   const items = await _tplGenevaPdfItems(pdf.content);
-  if (!items.length) return { ok: false, error: 'Could not read any fee lines from the invoice PDF.' };
+  const fmt = (what, detail) => ({ ok: false, format_changed: true, error: GENEVA_FORMAT_MSG + what + ' Send both files to Ben to update the reader.' + (detail ? ' (' + detail + ')' : '') });
+  const usd = n => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!items.length) return fmt('No fee lines could be read from the invoice PDF.', items.unknown.length ? 'unrecognised lines: ' + items.unknown.join(', ') : '');
+  const readSum = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+  if (items.printedTotal != null && Math.abs(readSum - items.printedTotal) > 0.05)
+    return fmt('The fee lines read from the invoice PDF add up to ' + usd(readSum) + ' but the invoice total is ' + usd(items.printedTotal) + '.', items.unknown.length ? 'unrecognised fee codes: ' + items.unknown.join(', ') : items.length + ' lines read');
   const { freight, b2bUnits } = await _tplGenevaPerOrder(xlsx.content, period);
+  const pdfShip = items.filter(i => i.code === 'SHIPPING').reduce((s, i) => s + i.amount, 0), xlsShip = Object.values(freight).reduce((s, v) => s + v, 0);
+  if (pdfShip > 0 && !Object.keys(freight).length)
+    return fmt('No per-order freight was found in the freight spreadsheet for this month (HORIZON looks for a "' + (['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][Number(String(period).slice(5, 7)) - 1] || period) + ' … Small Parcel" sheet with "Order ID" and "Carrier Amount Due" columns).', '');
+  if (pdfShip > 0 && Math.abs(xlsShip - pdfShip) > Math.max(50, pdfShip * 0.02))
+    return fmt('Freight in the spreadsheet (' + usd(xlsShip) + ') does not match the invoice SHIPPING line (' + usd(pdfShip) + ').', '');
   const refs = [...new Set([...Object.keys(freight), ...Object.keys(b2bUnits)])];
   const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
   const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });

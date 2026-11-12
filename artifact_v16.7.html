@@ -19565,6 +19565,8 @@ function render3plInvoice(body){
   function fmt(n){ return (n==null)?'—':Number(n).toLocaleString('en-GB',{maximumFractionDigits:2}); }
   function renderMap(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:var(--faint);font-size:12px;padding:8px 0">Matching References to Cin7 sales orders…</div>';
     fetch('/api/supply/tpl/map/'+id,{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      // v28.803 (Ben 13-Nov-26): a 3PL file whose layout no longer reads (or does not reconcile to its own total) gets a clear "file format changed" box
+      if(d&&d.format_changed){ cont.innerHTML='<div style="border:2px solid var(--neg);border-radius:8px;padding:11px 13px;margin:8px 0;max-width:820px;text-align:left;color:var(--neg);font-size:12px"><div style="font-weight:800;font-size:13px;margin-bottom:4px">⚠ File format changed</div>'+e(d.error||'')+'</div>'; return; }
       if(!d||!d.ok){ cont.innerHTML='<div style="font-size:12px;color:var(--amber);padding:8px 0">'+e((d&&d.error)||'Mapping failed')+'</div>'; return; }
       var t=d.totals||{}, pct=t.orders?Math.round(t.matched/t.orders*100):0, TD='padding:3px 16px 3px 0;text-align:left';
       var missBanner=(d.missing&&d.missing.length)?('<div style="border:1px solid var(--prod);background:var(--amber-bg);border-radius:8px;padding:10px 12px;margin-top:12px;max-width:820px;text-align:left;color:var(--amber);font-size:12px"><b>⚠ Missing / unreadable files for this invoice</b><ul style="margin:6px 0 0 18px;padding:0">'+d.missing.map(function(m){return '<li style="margin:3px 0">'+e(String(m))+'</li>';}).join('')+'</ul></div>'):'';
