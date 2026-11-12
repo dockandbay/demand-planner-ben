@@ -1,3 +1,6 @@
+## v28.802 (13-Nov-26) Geneva freight: match "CS45606-45606" references to Fulfil shipments
+- The Oct-26 Geneva freight sheet writes Fulfil customer shipments as "CS<number>-<number>"; Fulfil's number is "CS<number>", so 50 orders ($11,302.77 freight) fell through to Geneva USA - Other fees. The shipment lookup now also tries the base CS number. All 50 resolve (34 dockandbay-us, 12 dockandbay-us-ws, 4 Amazon.com). Applies to every 3PL invoice that uses the Fulfil shipment lookup. No migration, no new route or env var.
+
 ## v28.801 (13-Nov-26) Geneva invoice PDF: read the new G10 layout
 - Reported 12-Nov-26: the Geneva Oct-26 bill would not create ("Could not read any fee lines from the invoice PDF."). From Oct-26 G10 prints the quantity after the item code instead of before it, so the fee-line reader skipped every line. It now also reads lines that start with the upper-case fee code. Checked on the live PDFs: Oct-26 reads 21 lines = $34,916.88 (invoice total), Sep-26 still 21 lines = $37,390.04. No migration, no new route or env var.
 

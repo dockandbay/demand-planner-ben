@@ -21608,8 +21608,12 @@ async function _tplCrossMonthDupes(tpl, period, current) {
 // morning sync. Returns { [ref]: { cc, ym, channel, warehouse, shipment_number, ship_date } } (cc null when the channel
 // has no account-map row, so the caller can still date the order).
 async function _tplFulfilShipLookup(refs) {
-  const uniq = Array.from(new Set((refs || []).map(r => String(r == null ? '' : r).trim()).filter(Boolean)));
-  if (!uniq.length) return {};
+  const uniq0 = Array.from(new Set((refs || []).map(r => String(r == null ? '' : r).trim()).filter(Boolean)));
+  if (!uniq0.length) return {};
+  // v28.802 (Ben 13-Nov-26): Geneva's Oct-26 freight sheet writes Fulfil customer shipments as "CS45606-45606"; Fulfil's number is "CS45606".
+  // Look up the base number too and hand the hit back under the reference as given.
+  const alias = {}; uniq0.forEach(r => { const m = /^(CS\d+)-\d+$/i.exec(r); if (m) alias[m[1].toUpperCase()] = r; });
+  const uniq = Array.from(new Set(uniq0.concat(Object.keys(alias))));
   let rows = [];
   try {
     rows = (await pool.query(`SELECT shipment_number, order_reference, sale_number, channel_name, warehouse_code, to_char(ship_date,'YYYY-MM-DD') ship_date, to_char(ship_date,'YYYY-MM') ym
@@ -21636,6 +21640,7 @@ async function _tplFulfilShipLookup(refs) {
       const hit = { cc, ym: r.d ? r.d.slice(0, 7) : null, channel: 'Internal shipment to ' + r.to_location, warehouse: r.from_location || null, shipment_number: r.number || null, ship_date: r.d || null, internal: true };
       [r.number, r.reference].map(x => String(x || '').trim()).forEach(k => { if (k && want.has(k) && !out[k]) out[k] = hit; }); });
   }
+  Object.keys(alias).forEach(b => { const hit = out[b] || out[Object.keys(out).find(k => k.toUpperCase() === b) || '']; if (hit && !out[alias[b]]) out[alias[b]] = hit; });   // v28.802: CS45606 hit -> "CS45606-45606"
   return out;
 }
 // v27.793 (Ben): push ACTUAL 3PL costs (ex-tax) onto Fulfil shipments as numeric metafields. Two shipment kinds:
