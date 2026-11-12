@@ -1687,6 +1687,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       var clientDocs=p.client_docs||[];
       function blRow(lbl,val){ return '<div style="display:flex;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line2)"><div style="flex:0 0 220px;color:var(--muted)">'+lbl+'</div><div>'+val+'</div></div>'; }
       var barcodesLabels='<div class="sect-h">Barcodes &amp; Labels</div><div style="max-width:640px;font-size:12px">'
+        +blRow('Packing requirements checklist 包装要求检查表','<a class="save-btn" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="/api/portal/po/'+encodeURIComponent(p.po)+'/packing-checklist?print=1">⤓ Download packing requirements checklist</a> <span class="mut tiny">A4, English + 中文, tick boxes for QC</span>')   /* v28.795 (Ben) */
         +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
         +(p.barcode_projects||[]).map(function(bp){ return blRow('Custom barcodes · '+esc(bp.name),'<button class="save-btn pp-dl-custom" data-po="'+po+'" data-pid="'+bp.id+'" data-name="'+esc(bp.name)+'" style="background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe">⤓ Download custom barcodes</button><div class="tiny mut" style="margin-top:3px">'+bp.n+' custom number'+(bp.n===1?'':'s')+(bp.batch?' · batch '+esc(bp.batch):'')+' · this project\'s custom numbers only (standard barcodes are under ⤓ Download barcodes for PO)</div>'); }).join('')   // v27.570
         +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'" data-po="'+po+'" title="all your SKUs in production '+esc(p.prod_no)+' — BATCH + date of production from this PO">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
@@ -1698,7 +1699,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
       // ---- Direct to Client details (read-only packing & labelling) + approve workflow ----
-      var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes,'pack_polybags','pack_polybags_notes'],['Dock & Bay Product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes,'pack_dnb_barcodes','pack_dnb_barcodes_notes'],['RFID Product Barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes,'pack_rfid_barcodes','pack_rfid_barcodes_notes'],['Dock & Bay Carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes,'pack_dnb_carton','pack_dnb_carton_notes'],['Client Specific Carton Labels',p.pack_client_carton,p.pack_client_carton_notes,'pack_client_carton','pack_client_carton_notes']];
+      var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes,'pack_polybags','pack_polybags_notes'],['Dock & Bay product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes,'pack_dnb_barcodes','pack_dnb_barcodes_notes'],['RFID product barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes,'pack_rfid_barcodes','pack_rfid_barcodes_notes'],['Dock & Bay carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes,'pack_dnb_carton','pack_dnb_carton_notes'],['Client carton labels',p.pack_client_carton,p.pack_client_carton_notes,'pack_client_carton','pack_client_carton_notes']];
       var dtcApplies=ppIsDtc(p);   // only Direct-to-Client POs with a client sales ref get the tab + approval
       var dtcAccepted=!!p.dtc_accepted_at;
       // What changed since the supplier last approved these DtC details — diff current vs the approval snapshot
@@ -1733,8 +1734,8 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
       var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay:</div>'
           +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
           +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2], dtcChg(x[3])||dtcChg(x[4]));}).join('')
-          +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes, dtcChg('pack_pallet_notes'))
-          +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes, dtcChg('pack_other_notes'))
+          +dtcNoteRow('Pallet packing requirements',p.pack_pallet_notes, dtcChg('pack_pallet_notes'))
+          +dtcNoteRow('Other packing & labelling requirements',p.pack_other_notes, dtcChg('pack_other_notes'))
           +'</tbody></table>';
       var dtc='<div class="dtc-wrap">'+dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
         +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl+'</div>';

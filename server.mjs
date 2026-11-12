@@ -27056,9 +27056,9 @@ async function buildPoPdf(p, lines, ship, opts) {
   packLine('Dock & Bay product barcodes', p.pack_dnb_barcodes, p.pack_dnb_barcodes_notes);
   packLine('RFID product barcodes', p.pack_rfid_barcodes, p.pack_rfid_barcodes_notes);
   packLine('Dock & Bay carton labels', p.pack_dnb_carton, p.pack_dnb_carton_notes);
-  packLine('Client-specific carton labels', p.pack_client_carton, p.pack_client_carton_notes);
+  packLine('Client carton labels', p.pack_client_carton, p.pack_client_carton_notes);
   if (p.pack_pallet_notes) lv('Pallet packing requirements', p.pack_pallet_notes);
-  if (p.pack_other_notes) lv('Other packing / labelling', p.pack_other_notes);
+  if (p.pack_other_notes) lv('Other packing & labelling requirements', p.pack_other_notes);
   lv('Supplier approval', p.dtc_accepted_at ? ('Approved ' + san(p.dtc_accepted_at) + (p.dtc_accepted_by ? (' by ' + san(p.dtc_accepted_by)) : '')) : 'Not approved');
   // Shipment details
   if (ship) { section('Shipment details (entered by supplier)');
@@ -27120,6 +27120,86 @@ app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
     if (!d.p) return res.status(404).json({ error: 'PO not found' });
     res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${_pdfName(po)}"`).send(await buildPoPdf(d.p, d.lines, d.ship, { portal: true }));
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// ── v28.795 (Ben 12-Nov-26): PACKING REQUIREMENTS CHECKLIST ───────────────────────────────────────────────────────────
+// One A4 page per PO for the factory QC: every packing / labelling requirement in English + Chinese, YES 是 / NO 否, a tick box, sign-off.
+// Served as a print-ready HTML page (system CJK fonts: the PDF library has no Chinese font), opened from the admin PO (Client / FBA) and the
+// supplier portal; it opens the print dialog so the user prints it or saves it as PDF. The English notes get a Chinese machine translation
+// (Claude Haiku), each distinct text translated once and cached in planner.zh_translations (migration 440); no key or a failure = English only.
+const PK_ROWS = [
+  ['pack_polybags', 'Polybags', '胶袋'],
+  ['pack_dnb_barcodes', 'Dock & Bay product barcodes', 'Dock & Bay 产品条码'],
+  ['pack_rfid_barcodes', 'RFID product barcodes', 'RFID 产品条码'],
+  ['pack_dnb_carton', 'Dock & Bay carton labels', 'Dock & Bay 箱唛'],
+  ['pack_client_carton', 'Client carton labels', '客户专用箱唛'],
+];
+const PK_NOTES = [['pack_pallet_notes', 'Pallet packing requirements', '托盘包装要求'], ['pack_other_notes', 'Other packing & labelling requirements', '其他包装及标签要求'], ['client_requirements', 'Client requirements', '客户要求']];
+const ZH_MODEL = 'claude-haiku-4-5-20251001';
+async function zhTranslate(texts) {
+  const uniq = [...new Set((texts || []).map(t => String(t || '').trim()).filter(Boolean))], out = new Map();
+  if (!uniq.length) return out;
+  const h = t => crypto.createHash('sha256').update(t).digest('hex');
+  try { (await pool.query(`SELECT src, zh FROM planner.zh_translations WHERE src_hash = ANY($1::text[])`, [uniq.map(h)])).rows.forEach(r => out.set(r.src, r.zh)); } catch (e) { return out; }   // table missing = English only
+  const miss = uniq.filter(t => !out.has(t)); if (!miss.length || !process.env.ANTHROPIC_API_KEY) return out;
+  try {
+    const headers = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
+    if (process.env.ANTHROPIC_WORKSPACE_ID) headers['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;
+    const r = await _fetchT('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model: ZH_MODEL, max_tokens: 2000,
+      system: 'You translate packing and labelling instructions for a textile factory in China into Simplified Chinese. Keep brand names, SKU codes, numbers and units exactly as written. Reply with ONLY a JSON array of strings, one translation per input, same order.',
+      messages: [{ role: 'user', content: JSON.stringify(miss) }] }) }, 25000);
+    const j = await r.json(); const txt = ((j.content || []).find(c => c.type === 'text') || {}).text || '';
+    const arr = JSON.parse(txt.slice(txt.indexOf('['), txt.lastIndexOf(']') + 1));
+    if (Array.isArray(arr) && arr.length === miss.length) for (let i = 0; i < miss.length; i++) { const zh = String(arr[i] || '').trim(); if (!zh) continue; out.set(miss[i], zh);
+      await pool.query(`INSERT INTO planner.zh_translations (src_hash, src, zh, model) VALUES ($1,$2,$3,$4) ON CONFLICT (src_hash) DO NOTHING`, [h(miss[i]), miss[i], zh, ZH_MODEL]); }
+  } catch (e) { console.warn('[zh translate] ' + (e && e.message)); }
+  return out;
+}
+async function pkChecklistHtml(po, opts) {
+  const p = (await pool.query(`SELECT p.*, (SELECT coalesce(sum(l.qty),0) FROM planner.purchase_order_lines l WHERE l.po=p.po) units, (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=p.po) skus
+    FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
+  if (!p) return null;
+  const notes = PK_ROWS.map(r => p[r[0] + '_notes']).concat(PK_NOTES.map(r => p[r[0]]));
+  const zh = await zhTranslate(notes); const E = escHtml;
+  const _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fd = d => { if (!d) return ''; const x = d instanceof Date ? d : new Date(String(d).slice(0, 10) + 'T00:00:00Z'); return isNaN(x) ? '' : String(x.getUTCDate()).padStart(2, '0') + '-' + _MON[x.getUTCMonth()] + '-' + String(x.getUTCFullYear()).slice(2); };
+  const note = t => { t = String(t || '').trim(); if (!t) return ''; let z = zh.get(t); if (z && z.trim() === t) z = ''; return '<div class="nt">' + E(t) + (z ? '<div class="zh">' + E(z) + ' <span class="mt">机器翻译 machine translation</span></div>' : '') + '</div>'; };
+  const yes = v => v === true || String(v) === 'true';
+  const rows = PK_ROWS.map(r => { const on = yes(p[r[0]]);
+    return '<tr class="' + (on ? 'on' : 'off') + '"><td class="lb"><div class="en">' + E(r[1]) + '</div><div class="cn">' + E(r[2]) + '</div>' + note(p[r[0] + '_notes']) + '</td>'
+      + '<td class="yn">' + (on ? 'YES<br>是' : 'NO<br>否') + '</td><td class="tk">' + (on ? '<span class="box"></span>' : '—') + '</td></tr>'; }).join('')
+    + PK_NOTES.filter(r => String(p[r[0]] || '').trim()).map(r => '<tr class="on"><td class="lb" colspan="2"><div class="en">' + E(r[1]) + '</div><div class="cn">' + E(r[2]) + '</div>' + note(p[r[0]]) + '</td><td class="tk"><span class="box"></span></td></tr>').join('');
+  const meta = [['PO', p.po], ['Client 客户', p.client], ['Supplier 供应商', opts && opts.portal ? '' : p.supplier_name], ['Client PO 客户订单号', p.client_po_ref], ['Deadline 截止日期', fd(p.client_deadline_date)],
+    ['SKUs', String(p.skus || 0)], ['Units 数量', Number(p.units || 0).toLocaleString('en-GB')]].filter(m => m[1]);
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Packing checklist ' + E(p.po) + '</title><style>'
+    + '@page{size:A4;margin:10mm}*{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#0f172a;font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Hiragino Sans GB",system-ui,sans-serif}'
+    + '.bar{padding:10px 16px;background:#0f172a;color:#fff;display:flex;gap:10px;align-items:center;font-size:14px}.bar button{font-size:14px;padding:6px 16px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}'
+    + '.pg{width:210mm;min-height:297mm;margin:12px auto;background:#fff;padding:10mm;display:flex;flex-direction:column}'
+    + 'h1{font-size:26pt;margin:0;line-height:1.15}h1 .cn{display:block;font-size:22pt}.hd{border-bottom:3px solid #0f172a;padding-bottom:8px;margin-bottom:8px}'
+    + '.meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5pt;margin-top:6px}.meta b{font-weight:700}'
+    + 'table{width:100%;border-collapse:collapse;flex:1}th{font-size:12pt;text-align:left;border-bottom:2px solid #0f172a;padding:6px}td{border-bottom:1.5px solid #94a3b8;padding:8px 6px;vertical-align:middle}'
+    + '.lb .en{font-size:18pt;font-weight:700}.lb .cn{font-size:17pt;font-weight:700;color:#334155}.nt{font-size:12.5pt;margin-top:4px;color:#0f172a}.zh{color:#334155}.mt{font-size:8pt;color:#94a3b8}'
+    + '.yn{width:28mm;text-align:center;font-size:18pt;font-weight:800;line-height:1.15}.on .yn{color:#15803d}.off .yn{color:#94a3b8}.off .lb{color:#94a3b8}.off .lb .cn{color:#94a3b8}'
+    + '.tk{width:24mm;text-align:center;font-size:18pt;color:#94a3b8}.box{display:inline-block;width:13mm;height:13mm;border:2.5px solid #0f172a;border-radius:2mm}'
+    + '.sg{margin-top:10mm;font-size:14pt;display:grid;grid-template-columns:1fr 1fr;gap:9mm 10mm}.sg div{border-bottom:1.5px solid #0f172a;padding-bottom:2mm}'
+    + '.ft{font-size:8pt;color:#94a3b8;margin-top:4mm}@media print{body{background:#fff}.bar{display:none}.pg{margin:0;padding:0;width:auto;min-height:277mm}}'
+    + '</style></head><body><div class="bar"><button onclick="window.print()">Print / Save as PDF 打印</button><span>A4, one page per PO</span></div>'
+    + '<div class="pg"><div class="hd"><h1>PACKING REQUIREMENTS CHECKLIST<span class="cn">包装要求检查表</span></h1><div class="meta">' + meta.map(m => '<span>' + E(m[0]) + ': <b>' + E(m[1]) + '</b></span>').join('') + '</div></div>'
+    + '<table><thead><tr><th>REQUIREMENT 要求</th><th style="text-align:center">YES / NO<br>是 / 否</th><th style="text-align:center">CHECKED<br>已检查</th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<div class="sg"><div>Checked by 检查人:</div><div>Date 日期:</div><div>Signature 签名:</div><div>Cartons 箱数:</div></div>'
+    + '<div class="ft">' + E(p.po) + ' · generated ' + E(fd(new Date())) + ' · Dock &amp; Bay</div></div>'
+    + '<script>if(/[?&]print=1/.test(location.search))window.addEventListener("load",function(){setTimeout(function(){window.print();},300);});</script></body></html>';
+}
+const _pkHeaders = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" };
+app.get('/api/supply/po/:po/packing-checklist', async (req, res) => {
+  try { const html = await pkChecklistHtml(req.params.po); if (!html) return res.status(404).send('PO not found'); res.set(_pkHeaders).send(html); }
+  catch (e) { log500(e); res.status(500).send('Could not build the checklist'); }
+});
+app.get('/api/portal/po/:po/packing-checklist', portalAuth, async (req, res) => {
+  const po = req.params.po;
+  try { if (!(await portalOwnsPO(req, po))) return res.status(403).send('not your PO');
+    const html = await pkChecklistHtml(po, { portal: true }); if (!html) return res.status(404).send('PO not found'); res.set(_pkHeaders).send(html); }
+  catch (e) { log500(e); res.status(500).send('Could not build the checklist'); }
 });
 // v28.083 (Ben, perf audit Sprint C): the 20 per-PO lookups of the PO drawer used to go out as 13 + 9 separate pool.query()
 // calls (two Promise.all rounds). On the small pool that is ~6 queue waves × a pooler round trip = 1.1–1.6 s per drawer open

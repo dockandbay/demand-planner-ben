@@ -5056,14 +5056,16 @@ function hzPortalHelp(el){
     function boolSel(field,val){ var c=val?'background:var(--pos-bg);color:var(--pos)':'background:var(--neg-bg);color:var(--neg)'; return '<select class="fci boolsel" data-ep="'+ep+'" data-field="'+field+'" style="width:78px;text-align:left;font-weight:700;'+c+'"><option value="false"'+(val?'':' selected')+'>No</option><option value="true"'+(val?' selected':'')+'>Yes</option></select>'; }
     function packField(boolField,boolVal,notesField,notesVal){ return boolSel(boolField,boolVal)+' <input class="fci txtin" style="width:250px;text-align:left" data-ep="'+ep+'" data-field="'+notesField+'" value="'+esc(notesVal||'')+'" placeholder="notes…">'; }
     var packH='<div class="sect-h">Packing and Labelling <span class="mut tiny">— shown to the supplier; they approve it as &ldquo;Direct to Client details&rdquo;</span></div>'
+      // v28.795 (Ben): A4 bilingual checklist for the factory QC (same page as the supplier portal)
+      +'<div style="margin:0 0 8px"><a class="save-btn" style="text-decoration:none;display:inline-block" target="_blank" rel="noopener" href="/api/supply/po/'+encodeURIComponent(r.po)+'/packing-checklist?print=1" title="A4 printable checklist of every packing &amp; labelling requirement, English + Chinese, with tick boxes and sign-off">⤓ Download packing requirements checklist</a></div>'
       +'<div class="cli-form">'
       +cliRow('Polybags',packField('pack_polybags',r.pack_polybags,'pack_polybags_notes',r.pack_polybags_notes))
-      +cliRow('Dock &amp; Bay Product barcodes',packField('pack_dnb_barcodes',r.pack_dnb_barcodes,'pack_dnb_barcodes_notes',r.pack_dnb_barcodes_notes))
-      +cliRow('RFID Product Barcodes',packField('pack_rfid_barcodes',r.pack_rfid_barcodes,'pack_rfid_barcodes_notes',r.pack_rfid_barcodes_notes))
-      +cliRow('Dock &amp; Bay Carton labels',packField('pack_dnb_carton',r.pack_dnb_carton,'pack_dnb_carton_notes',r.pack_dnb_carton_notes))
-      +cliRow('Client Specific Carton Labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
-      +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
-      +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
+      +cliRow('Dock &amp; Bay product barcodes',packField('pack_dnb_barcodes',r.pack_dnb_barcodes,'pack_dnb_barcodes_notes',r.pack_dnb_barcodes_notes))
+      +cliRow('RFID product barcodes',packField('pack_rfid_barcodes',r.pack_rfid_barcodes,'pack_rfid_barcodes_notes',r.pack_rfid_barcodes_notes))
+      +cliRow('Dock &amp; Bay carton labels',packField('pack_dnb_carton',r.pack_dnb_carton,'pack_dnb_carton_notes',r.pack_dnb_carton_notes))
+      +cliRow('Client carton labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
+      +cliRow('Pallet packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
+      +cliRow('Other packing &amp; labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
       +cliRow('Supplier approval',(!poIsDtc(r)?'<span class="tool-badge bg-neutral">Not applicable</span> <span class="mut tiny">(approval only applies to Direct-to-Client orders with a client sales ref)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':(!r.require_confirmation?'<span class="tool-badge bg-neutral">Not required</span> <span class="mut tiny">(supplier confirmation is off for this production — CONFIG ▸ Productions)</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'+(PO_ACTCOND.dtc_not_approved(r)?actMark(r.po,'dtc_not_approved'):'')))))
       +(poIsDtc(r)
         ? '<div class="sect-h" style="margin-top:12px">Shipment details <span class="mut tiny">— entered by the supplier in the portal</span></div>'
@@ -5096,7 +5098,7 @@ function hzPortalHelp(el){
       +cliRow('Consignee',txtIn(ep,'po_consignee',r.po_consignee,440))   // SUG-0041 (Ben) — delivery-contact details, under the final address
       +cliRow('Contact person',txtIn(ep,'po_contact_person',r.po_contact_person,300))
       +cliRow('Contact number',txtIn(ep,'po_contact_number',r.po_contact_number,220))
-      +cliRow('Freight forwarder details',txtIn(ep,'po_freight_forwarder',r.po_freight_forwarder,440,true))
+      +cliRow('Forwarder booking notes',txtIn(ep,'po_freight_forwarder',r.po_freight_forwarder,440,true))
       +cliRow('Crossdock SKUs <span class="mut tiny">(CROSSDOCK/PREORDER)</span>',crossdockPicker(r.po,xdList)+(PO_ACTCOND.crossdock_needed(r)?' '+actMark(r.po,'crossdock_needed'):''))
       // v28.187 (Ben): bright red "crossdock likely required" (client-bound PO on a shipment landing at a 3PL, no crossdock SKUs)
       +(PO_ACTCOND.crossdock_needed(r)?'<div class="cli-xd-need" style="margin:6px 0 4px;background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:8px 11px;font-size:12px;line-height:1.45"><b>⚠ '+esc(xdockMsg(r))+'</b><br>Add the crossdock SKUs above, or move this PO to a direct / FOB shipment.</div>':'')
@@ -7922,7 +7924,7 @@ function hzPortalHelp(el){
     var host=document.getElementById('supply-root')||document.body, ov=document.createElement('div'); ov.id='ka-drawer';
     ov.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,.35);display:flex;justify-content:flex-end';
     ov.innerHTML='<div style="width:min(900px,96vw);height:100%;overflow:auto;background:var(--bg,#fff);box-shadow:-8px 0 30px rgba(0,0,0,.2);padding:14px 18px;box-sizing:border-box;text-align:left">'
-      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><b style="font-size:15px">Edit client · '+esc(name)+'</b><span class="mut tiny">same form as CONFIG &rsaquo; Key accounts; changes apply to every PO for this client</span><button id="ka-dr-x" class="save-btn light" style="margin-left:auto">✕ Close</button></div>'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><b style="font-size:15px">Edit client · '+esc(name)+'</b><span class="mut tiny">same form as CONFIG &rsaquo; Key accounts. Carton label format, client carton qty and forwarder apply to every PO for this client at once; packing, requirements, address and contacts are copied onto a PO when the client is picked, so existing POs keep their own copy</span><button id="ka-dr-x" class="save-btn light" style="margin-left:auto">✕ Close</button></div>'
       +'<div id="ka-dr-body"></div></div>';
     host.appendChild(ov);
     var close=function(saved){ ov.remove(); document.removeEventListener('keydown',esc_); if(onDone)onDone(!!saved); }, esc_=function(e){ if(e.key==='Escape')close(false); };
@@ -7936,10 +7938,10 @@ function hzPortalHelp(el){
           // Key accounts have ~15 fields (address, requirements + 5 pack/label toggles each with notes) — a scannable
           // CARD LIST + a grouped full-width EDIT FORM (one row at a time), via the shared cardEditor().
           var PACK=[['pack_polybags','pack_polybags_notes','Polybags'],
-            ['pack_dnb_barcodes','pack_dnb_barcodes_notes','D&B barcodes'],
-            ['pack_rfid_barcodes','pack_rfid_barcodes_notes','RFID barcodes'],
-            ['pack_dnb_carton','pack_dnb_carton_notes','D&B carton'],
-            ['pack_client_carton','pack_client_carton_notes','Client carton']];
+            ['pack_dnb_barcodes','pack_dnb_barcodes_notes','Dock & Bay product barcodes'],
+            ['pack_rfid_barcodes','pack_rfid_barcodes_notes','RFID product barcodes'],
+            ['pack_dnb_carton','pack_dnb_carton_notes','Dock & Bay carton labels'],
+            ['pack_client_carton','pack_client_carton_notes','Client carton labels']];
           function isYes(v){ return v===true||String(v)==='true'; }
           function fieldOf(r,f){ return r[f]==null?'':r[f]; }
           function block(lbl,val){ val=String(val==null?'':val); return '<div style="margin:0 0 2px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700">'+esc(lbl)+'</div>'
@@ -7998,13 +8000,13 @@ function hzPortalHelp(el){
               +lblBlk('Contact person','', kaInp('contact_person', fieldOf(r,'contact_person'),'name…'))
               +lblBlk('Contact number','', kaInp('contact_number', fieldOf(r,'contact_number'),'+44 …','tel'))
               +'</div>'
-              +'<div style="margin-top:12px">'+lblBlk('Freight forwarder details','', ta('freight_forwarder', fieldOf(r,'freight_forwarder'),'forwarder company / contact / booking ref…'))+'</div>'
+              +'<div style="margin-top:12px">'+lblBlk('Forwarder booking notes','', ta('freight_forwarder', fieldOf(r,'freight_forwarder'),'forwarder company / contact / booking ref…'))+'</div>'
               +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:10px">Packing &amp; labelling</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px">'+PACK.map(function(p){return packBox(r,p);}).join('')+'</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'
-              +lblBlk('Pallet notes','', ta('pack_pallet_notes', fieldOf(r,'pack_pallet_notes'),'pallet height / wrap / stacking…'))
-              +lblBlk('Other packing notes','', ta('pack_other_notes', fieldOf(r,'pack_other_notes'),'anything else the factory must know…'))
+              +lblBlk('Pallet packing requirements','', ta('pack_pallet_notes', fieldOf(r,'pack_pallet_notes'),'pallet height / wrap / stacking…'))
+              +lblBlk('Other packing & labelling requirements','', ta('pack_other_notes', fieldOf(r,'pack_other_notes'),'anything else the factory must know…'))
               +'</div>'
               +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--line2)"><button id="ka-save" data-k="'+id+'" style="cursor:pointer;border:none;background:var(--blue);color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="ka-cancel" style="cursor:pointer;border:1px solid var(--line);background:var(--card);padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
