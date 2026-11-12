@@ -3355,6 +3355,13 @@ function hzPortalHelp(el){
     // Deposit reference not linked (master-data gap) — has a start deposit but no deposit_ref assigned (blank; the
     // "NO DEPOSIT" sentinel counts as decided). Separate from unpaid_payment (money): this is the config/linking task.
     // Not raised on FUTURE POs (Ben) or completed ones.
+    // v28.805 (Ben 13-Nov-26): once the FINAL INVOICE AMOUNT and its Final payment due date are in, a starting deposit (start % > 0) must be
+    // ASSIGNED (amount drawn from the pool / paid) so the balance is right. Pool POs too (unpaid_payment skips them). No action at 0 % or
+    // "NO DEPOSIT". Completed POs only while the final payment is due from 30 days ago onwards (older history stays quiet).
+    start_deposit_assign:function(r){ if(!r.is_final||!r.final_payment_due)return false; if(!(Number(r.start_calc)>0.009)||r.start_assigned!=null)return false;
+      if(String(r.deposit_ref||'').trim().toUpperCase()==='NO DEPOSIT'||/cancel/i.test(r.status||''))return false;
+      if(r.progress==='complete'){ var c=new Date(); c.setDate(c.getDate()-30); if(String(r.final_payment_due).slice(0,10)<c.toISOString().slice(0,10))return false; }
+      return true; },
     deposit_unassigned:function(r){ return r.progress!=='complete' && String(r.status||'').toUpperCase()!=='FUTURE' && Number(r.start_pct)>0 && !String(r.deposit_ref||'').trim(); },
     // v28.187 (Ben): Crossdock likely required. A client-bound PO (Direct to Client / B2B / key account) on a shipment that
     // lands at a 3PL (server xdock_3pl: the shipment's 3PL branch, or a 3PL rider PO when the shipment branch is blank; NULL
@@ -3370,8 +3377,8 @@ function hzPortalHelp(el){
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_start:'Production start date missing',missing_prod_end:'Production end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)',crossdock_needed:'Crossdock likely required',fulfil_link:'Link Fulfil PO',dtc_client_missing:'Direct to Client: client name missing'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_start:'dates',missing_prod_end:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata',crossdock_needed:'client',fulfil_link:'masterdata',dtc_client_missing:'client'};
+  var PO_ACT_LABEL={start_deposit_assign:'Assign starting deposit',payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_start:'Production start date missing',missing_prod_end:'Production end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)',crossdock_needed:'Crossdock likely required',fulfil_link:'Link Fulfil PO',dtc_client_missing:'Direct to Client: client name missing'};
+  var PO_ACT_TAB={start_deposit_assign:'pay',payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_start:'dates',missing_prod_end:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata',crossdock_needed:'client',fulfil_link:'masterdata',dtc_client_missing:'client'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false, _hidePayDue=false, _hideTimelineUnread=false, _hideSupApproval=false;   // PO-grid ACTION ITEMS hide toggles (v28.528: + waiting for supplier approval)
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -3424,6 +3431,7 @@ function hzPortalHelp(el){
     // an OVERDUE payment is inherently unpaid — count it once (matches the PAYMENTS tab, which lists the
     // overdue milestone and snoozes both as a single unit) rather than double-counting on the PO badge
     if(out.indexOf('payment_overdue')>=0) out=out.filter(function(k){return k!=='unpaid_payment';});
+    if(out.indexOf('start_deposit_assign')>=0) out=out.filter(function(k){return k!=='unpaid_payment';});   // v28.805: the same start deposit, counted once
     if(Number(r.unread_notes)>0) out.push('timeline_unread');   // unread supplier note(s) count as an action item (hide via the "timeline unread" toggle)
     return out; }
   // poActions = the ACTION ITEMS set, honouring the hide toggles: snoozed (unless "show"), payment-due (pay-tab), timeline-unread.
@@ -3493,6 +3501,7 @@ function hzPortalHelp(el){
     missing_prod_start:'Production start date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the Start cell.',
     missing_prod_end:'Production end date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the End cell.',
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
+    start_deposit_assign:'Assign starting deposit: the final invoice amount and Final payment due date are in, but the starting deposit (start % above 0) has not been assigned. Assign the deposit amount on the PAYMENTS tab (drawn from the deposit pool, or paid). Not raised at 0 % or NO DEPOSIT.',
     unpaid_payment:'Unpaid payment — a start deposit is owed (not assigned and not covered by a deposit pool). A not-yet-due invoice balance is not flagged here; once its due date passes it shows as Payment overdue. Excludes completed POs.',
     deposit_unassigned:'Deposit not assigned — this PO has a start deposit but no production-deposit reference linked (a master-data gap, separate from whether it’s paid). Assign a deposit reference, or mark No Deposit, on the MASTER DATA tab. Not raised on FUTURE or completed POs.',
     late:'Late — should be completed: the completion date (delivery + 7, or + 0 for FOB / Direct to Client; the Fulfil/Cin7 check-in) has passed but the PO isn’t marked complete.',
@@ -3561,7 +3570,7 @@ function hzPortalHelp(el){
     function statusMatch(r){ var f=state.f||{}; var any=false; for(var k in f){ if(f[k]){any=true;break;} }
       if(!any)return true;   // nothing selected = all statuses
       return !!f[stGroup(r.status)]; }
-    var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved'],['crossdock_needed','Crossdock likely required']];
+    var ACTP=[['payment_overdue','Payment overdue'],['start_deposit_assign','Assign starting deposit'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved'],['crossdock_needed','Crossdock likely required']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['OTHER','OTHER']];
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',OTHER:'📦'};
     // ── v28.056: two-tier tabbed filter bar (Ben's redesign) — status TABS (single-select) + region PILLS + saved views.

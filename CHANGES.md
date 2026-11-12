@@ -1,3 +1,6 @@
+## v28.805 (13-Nov-26) PO action: Assign starting deposit
+- Ben: a PO with a starting deposit (start % above 0) whose Final invoice amount AND Final payment due date are in, but whose start deposit has not been assigned, now raises the open action "Assign starting deposit" (PAYMENTS tab, PO badge, Action items filter). Pool POs included (the old Unpaid payment skipped them); no action at 0 % or NO DEPOSIT; completed POs only while the final payment is due from 30 days ago on. Counted once with Unpaid payment. Live today: 10 POs (e.g. PO-57DILLARDS-LXJULY, PO-57EUBL1, PO-56USLX3-BUNDLE). No migration, route or env var.
+
 ## v28.804 (13-Nov-26) Emergency sign-in without Google (authenticator code) + session grace (migration 444)
 - Ben: a temporary way in if Google sign-in is down; email may be down too, so no magic link. Options chosen: authenticator-app code (always available) + session grace switch.
 - Profile menu (top right) > Emergency login code: scan a QR code with Google Authenticator / 1Password / Authy etc and confirm one code. A nudge banner asks anyone not set up (Later = 30 days). The secret is sealed (AES-256-GCM, GMAIL_SEAL_KEY).
