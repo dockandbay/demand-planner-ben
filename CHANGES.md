@@ -1,3 +1,8 @@
+## v28.798 (12-Nov-26) ACCOUNTS > Prepayments: groups All open / Linked / Unlinked / Done, and Dismiss
+- Ben: the page should show linked prepayments too, with groups ALL OPEN, LINKED, UNLINKED, DONE (linked + unlinked = open), and a dismiss option.
+- Done = fully allocated in Xero, or dismissed. Dismiss (in the expanded row, optional reason) moves a prepayment to Done without touching Xero, and the hourly allocation skips it; Restore puts it back. Who / when / why is shown on the row.
+- **Migration 442** (dismissed_at / dismissed_by / dismiss_note on planner.prepayments). No new cron route or env var.
+
 ## v28.797 (12-Nov-26) COGS by channel: "Create journals" posts approved in Xero
 - Ben: "post approved to UK accountants not draft. they can revert to draft if they want". ACCOUNTS > COGS by channel > Create journals (by hand, UK and AU) now creates the journals POSTED in Xero, like the scheduled n8n run, and emails the accountants (the email already says posted). Re-creating a changed posted journal voids it and posts the full journal again. A held journal is still left alone. The Post button stays for older drafts. No migration, no new route or env var.
 

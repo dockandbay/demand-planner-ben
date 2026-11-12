@@ -3505,7 +3505,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note|ka-receipts\/check|ka-receipts\/post|prepayments\/[^/]+\/(link|unlink)|prepayments\/(sync|run))\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note|ka-receipts\/check|ka-receipts\/post|prepayments\/[^/]+\/(link|unlink|dismiss|undismiss)|prepayments\/(sync|run))\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3556,7 +3556,7 @@ async function ppEmail(subject, html) {
 async function ppRun(opts) {
   opts = opts || {}; const by = opts.by || 'auto', res = { checked: 0, allocated: [], flagged: [], waiting: [], errors: [] }, E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const links = (await pool.query(`SELECT l.*, p.contact_id, p.contact_name, p.currency, p.remaining, p.status, p.pay_date FROM planner.prepayment_links l JOIN planner.prepayments p ON p.overpayment_id = l.overpayment_id
-      WHERE upper(coalesce(p.status,'')) = 'AUTHORISED' AND coalesce(p.remaining,0) > 0 ORDER BY p.pay_date, l.linked_at`)).rows;
+      WHERE upper(coalesce(p.status,'')) = 'AUTHORISED' AND coalesce(p.remaining,0) > 0 AND p.dismissed_at IS NULL ORDER BY p.pay_date, l.linked_at`)).rows;   // v28.798: dismissed = skipped
   if (!links.length) return res;
   const cfg = fulfilConfigFor('live'), fb = ppFulfilBase();
   const done = new Set((await pool.query(`SELECT overpayment_id || '|' || invoice_number k FROM planner.prepayment_allocations WHERE status IN ('allocated','flagged')`)).rows.map(r => r.k));
@@ -3638,6 +3638,16 @@ app.post('/api/accounts/prepayments/:id/link', async (req, res) => {
 });
 app.post('/api/accounts/prepayments/:id/unlink', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.prepayment_links WHERE overpayment_id=$1 AND sale_id=$2`, [String(req.params.id), Number((req.body || {}).sale_id)]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/accounts/prepayments/:id/dismiss', async (req, res) => {   // v28.798 (Ben): Done without allocating (residual / refund); hourly run skips it
+  try { const r = await pool.query(`UPDATE planner.prepayments SET dismissed_at=now(), dismissed_by=$2, dismiss_note=$3 WHERE overpayment_id=$1 RETURNING overpayment_id`,
+      [String(req.params.id), authUser(req) || null, String((req.body || {}).note || '').trim().slice(0, 300) || null]);
+    if (!r.rowCount) return res.status(404).json({ error: 'prepayment not found' }); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/accounts/prepayments/:id/undismiss', async (req, res) => {
+  try { await pool.query(`UPDATE planner.prepayments SET dismissed_at=NULL, dismissed_by=NULL, dismiss_note=NULL WHERE overpayment_id=$1`, [String(req.params.id)]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/accounts/prepayments/sync', async (req, res) => { try { res.json({ ok: true, sync: await ppSyncXero(true) }); } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); } });
