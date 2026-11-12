@@ -21085,8 +21085,12 @@ async function _tplGenevaPdfItems(buf) {
   const num = s => parseFloat(String(s).replace(/[,$\s]/g, '')) || 0;
   const items = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^(\d[\d,]*)\s+(.+)$/.exec(lines[i]); if (!m) continue;
-    const rest = m[2].toUpperCase(); const code = GENEVA_CODES.find(c => rest.startsWith(c.toUpperCase())); if (!code) continue;
+    // Up to Sep-26 each fee line began "<qty> <CODE> <description>". From Oct-26 G10 moved the quantity after the code
+    // ("<CODE> <description>" then "<qty> $price $amount"), so a line that starts with the upper-case code (case-sensitive,
+    // so the mixed-case description line under it never counts twice) is also a fee line. v28.801 (Ben 13-Nov-26).
+    const m = /^(\d[\d,]*)\s+(.+)$/.exec(lines[i]);
+    const code = m ? GENEVA_CODES.find(c => m[2].toUpperCase().startsWith(c.toUpperCase())) : GENEVA_CODES.find(c => lines[i].startsWith(c + ' '));
+    if (!code) continue;
     let amt = null; for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) { const pm = [...lines[j].matchAll(/\$([\d,]+\.\d{2})/g)]; if (pm.length) { amt = num(pm[pm.length - 1][1]); break; } }
     if (amt != null) items.push({ code, amount: amt });
   }
