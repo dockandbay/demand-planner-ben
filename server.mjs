@@ -23890,8 +23890,15 @@ app.post('/api/auth/totp/confirm', async (req, res) => {
   try { const me = await _emergMe(req, res); if (!me) return;
     const r = (await pool.query(`SELECT secret_enc FROM planner.emergency_totp WHERE email=$1`, [me])).rows[0];
     if (!r) return res.status(400).json({ error: 'start the set-up first' });
-    const step = totpMatch(gmailUnseal(r.secret_enc), req.body && req.body.code, null);
-    if (step == null) return res.status(400).json({ error: 'That code did not match. Check the app shows HORIZON and try the current code.' });
+    const sec = gmailUnseal(r.secret_enc), code = String(req.body && req.body.code || '').replace(/\D/g, '');
+    let step = totpMatch(sec, code, null);
+    // v28.812 (Ben 13-Nov-26, set-up kept failing): look up to 10 minutes either side so a phone clock that is off is named, not a mystery.
+    // Within 2 minutes it is accepted (set-up only; sign-in keeps the strict 30 s window); further out, say how far and how to fix it.
+    let drift = null; if (step == null && code.length === 6) { const now = Math.floor(Date.now() / 30000);
+      for (let k = 2; k <= 20 && drift == null; k++) for (const sgn of [-1, 1]) { const st = now + sgn * k; if (totpAt(sec, st) === code) { drift = sgn * k * 30; if (k <= 4) step = st; break; } } }
+    pool.query(`INSERT INTO planner.emergency_login_log (email, ip, ok, reason) VALUES ($1,$2,$3,$4)`, [me, _emergIp(req), step != null, 'set-up: ' + (step != null ? (drift ? 'ok, clock ' + drift + 's' : 'ok') : (drift ? 'clock ' + drift + 's' : (r.setup_age_s != null ? 'no match' : 'no match')))]).catch(() => {});
+    if (step == null) { if (drift != null) { const m = Math.round(Math.abs(drift) / 60); return res.status(400).json({ error: 'Your phone\'s clock is about ' + (m ? m + ' minute' + (m === 1 ? '' : 's') : Math.abs(drift) + ' seconds') + (drift > 0 ? ' fast' : ' slow') + '. Set the phone\'s date and time to automatic, then try the current code.' }); }
+      return res.status(400).json({ error: 'That code did not match. Delete any older HORIZON entries in your authenticator app, scan this QR code again, and type the code it shows now.' }); }
     await pool.query(`UPDATE planner.emergency_totp SET confirmed_at=now(), last_step=$2 WHERE email=$1`, [me, step]);
     try { await pool.query(`UPDATE planner.user_todos SET done_at=now(), updated_at=now() WHERE email=$1 AND done_at IS NULL AND title=$2`, [me, EMERG_TODO_TITLE]); } catch (_) {}   // v28.807: ticks the To do
     res.json({ ok: true });
