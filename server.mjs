@@ -11709,7 +11709,7 @@ async function _computeXeroExceptions() {
   const linked = (await pool.query(
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
             coalesce(nullif(p.supplier_invoice_total,0), p.order_value_estimation, 0) total_h,
-            (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)+${balxSumSql('p.po')}) paid_h,
+            (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_start_deposit_2_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)+${balxSumSql('p.po')}) paid_h,
             to_char(coalesce(p.balance_due_date_overide, p.pay_balance_1_date, p.pay_completion_date),'YYYY-MM-DD') due_h,
             l.external_id bill_id, l.external_ref bill_ref,
             b.total b_total, b.amount_paid b_paid, b.amount_due b_due, b.currency_code b_ccy, b.status b_status,
@@ -11860,7 +11860,7 @@ async function xeroBillPaysMap(force) {
 async function poXeroPayCheck(poList) {
   const m = await xeroBillPaysMap(), byBill = (m && m.by_bill) || {};
   const rows = (await pool.query(`SELECT p.po, l.external_id bill_id, l.external_ref bill_ref, coalesce(p.deposit_ref,'') deposit_ref,
-      to_char(p.pay_start_deposit_date,'YYYY-MM-DD') sd, p.pay_start_deposit_assigned sa, to_char(p.pay_completion_date,'YYYY-MM-DD') cd, p.pay_completion_assigned ca,
+      to_char(p.pay_start_deposit_date,'YYYY-MM-DD') sd, p.pay_start_deposit_assigned sa, to_char(p.pay_start_deposit_2_date,'YYYY-MM-DD') sd2, p.pay_start_deposit_2_assigned sa2, to_char(p.pay_completion_date,'YYYY-MM-DD') cd, p.pay_completion_assigned ca,
       to_char(p.pay_balance_1_date,'YYYY-MM-DD') b1d, p.pay_balance_1_amount b1, to_char(p.pay_balance_2_date,'YYYY-MM-DD') b2d, p.pay_balance_2_amount b2,
       coalesce((SELECT json_agg(json_build_object('seq', bx.seq, 'd', to_char(bx.paid_date,'YYYY-MM-DD'), 'a', bx.amount) ORDER BY bx.seq) FROM planner.po_balance_payments bx
         WHERE bx.po=p.po AND bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0), '[]'::json) bx
@@ -11870,6 +11870,7 @@ async function poXeroPayCheck(poList) {
   rows.forEach(r => {
     const hz = [];
     if (Number(r.sa) > 0 && r.sd) hz.push({ type: 'Start deposit', date: r.sd, amount: Number(r.sa) });
+    if (Number(r.sa2) > 0 && r.sd2) hz.push({ type: 'Start deposit 2', date: r.sd2, amount: Number(r.sa2) });   // v28.809
     if (Number(r.ca) > 0 && r.cd) hz.push({ type: 'Completion', date: r.cd, amount: Number(r.ca) });
     if (Number(r.b1) > 0 && r.b1d) hz.push({ type: 'Balance', date: r.b1d, amount: Number(r.b1) });
     if (Number(r.b2) > 0 && r.b2d) hz.push({ type: 'Balance 2', date: r.b2d, amount: Number(r.b2) });
@@ -13413,8 +13414,8 @@ async function buildActionsRows() {
             ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
             FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
                   WHERE is_deposit AND reference IS NOT NULL AND coalesce(status,'')<>'closed' GROUP BY reference) d
-            JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
-                  FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
+            JOIN (SELECT deposit_ref, sum(amount) used
+                  FROM planner.v_po_deposit_draws GROUP BY deposit_ref   -- v28.809: both start-deposit lines
             ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool + 0.01
           UNION ALL
           -- deposit still has money left, but its open POs have no start deposit left to allocate → review
@@ -13423,7 +13424,7 @@ async function buildActionsRows() {
             FROM (
               SELECT dref.reference,
                 (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
-                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                  - coalesce((SELECT sum(po.amount) FROM planner.v_po_deposit_draws po WHERE po.deposit_ref=dref.reference),0) rem,
                 coalesce((SELECT sum(round(coalesce(po.supplier_invoice_total,
                            (SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),
                            po.order_value_estimation,0)*coalesce(po.start_deposit_pct_override,s.start_deposit_pct,0)/100,2))
@@ -13441,7 +13442,7 @@ async function buildActionsRows() {
             FROM (
               SELECT dref.reference,
                 (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
-                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                  - coalesce((SELECT sum(po.amount) FROM planner.v_po_deposit_draws po WHERE po.deposit_ref=dref.reference),0) rem,
                 (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
               FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
             ) x2
@@ -14046,10 +14047,10 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
              OR (regexp_replace(coalesce(d.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$'
                  AND regexp_replace(d.prod_no,'[^0-9]','','g')::int >= 48))`)).rows;
     const draws = (await pool.query(`
-      SELECT deposit_ref ref, po, round(coalesce(pay_start_deposit_assigned,0),2) amt,
-             to_char(pay_start_deposit_date,'YYYY-MM') mth, to_char(pay_start_deposit_date,'YYYY-MM-DD') dt
-      FROM planner.purchase_orders
-      WHERE coalesce(deposit_ref,'')<>'' AND pay_start_deposit_assigned IS NOT NULL AND pay_start_deposit_assigned<>0`)).rows;
+      SELECT deposit_ref ref, po, round(amount,2) amt,
+             to_char(paid_date,'YYYY-MM') mth, to_char(paid_date,'YYYY-MM-DD') dt
+      FROM planner.v_po_deposit_draws   -- v28.809: both start-deposit lines
+      WHERE amount<>0`)).rows;
     // Currency: each deposit is in its supplier's currency (mostly USD). Normalise everything to USD using the
     // CONFIG blended rates (fx_rates, GBP→ccy per FY) + the GBP→USD blended rate. The client toggles USD↔GBP.
     const rUSD = await gbpRate();                       // USD per GBP (~1.34)
@@ -14633,8 +14634,8 @@ supplySectionHandler = async (req, res, next) => {
             SELECT DISTINCT lower(region) rg, upper(trim(split_part(invoice_number,' / ',1))) k FROM planner.xero_bills
             WHERE upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND coalesce(invoice_number,'')<>''
           ), draw AS (
-            SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
-            FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL
+            SELECT po.deposit_ref, sum(po.amount) used
+            FROM planner.v_po_deposit_draws po   -- v28.809: both start-deposit lines
             GROUP BY po.deposit_ref
           ), pool AS (
             SELECT reference, sum(coalesce(amount,0)) pool_amount
@@ -15773,7 +15774,7 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
     const ref = meRow.ref;
     const remaining = Number((await pool.query(`
       SELECT coalesce((SELECT sum(coalesce(amount,0)) FROM planner.deposits WHERE reference=$1 AND is_deposit),0)
-           - coalesce((SELECT sum(coalesce(pay_start_deposit_assigned,0)) FROM planner.purchase_orders WHERE deposit_ref=$1),0) rem`, [ref])).rows[0].rem || 0);
+           - coalesce((SELECT sum(amount) FROM planner.v_po_deposit_draws WHERE deposit_ref=$1),0) rem`, [ref])).rows[0].rem || 0);
     // open POs on this ref with no start deposit assigned yet — order value + estimated start deposit
     const rows = (await pool.query(`
       SELECT po.po,
@@ -23025,7 +23026,7 @@ const MPO_CHILD_SQL = `SELECT p.po, f.supplier_name, coalesce(p.branch,'') branc
     coalesce(f.value_est,0)::numeric value_est, coalesce(p.status,'') status
   FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po`;
 // Transactional/identity columns NOT inherited from the biggest child — the master starts a fresh order.
-const MPO_RESET_NULL = new Set(['erp_po','deposit_ref','shipment_ref','crossdock_skus','asn_numbers',
+const MPO_RESET_NULL = new Set(['erp_po','deposit_ref','deposit_ref_2','pay_start_deposit_2_assigned','pay_start_deposit_2_date','shipment_ref','crossdock_skus','asn_numbers',
   'pay_start_deposit_assigned','pay_start_deposit_date','pay_completion_assigned','pay_completion_date',
   'pay_balance_1_amount','pay_balance_1_date','pay_balance_2_amount','pay_balance_2_date','credit_fee_assigned',
   'dtc_accepted_at','dtc_accepted_by','dtc_approved_snapshot','supplier_confirmed_at','supplier_confirmed_by',
@@ -26938,6 +26939,37 @@ app.post('/api/supply/shipment/:ref/rename', async (req, res) => {
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
+// v28.809 (Ben 13-Nov-26): ALLOCATE ADDITIONAL STARTING DEPOSIT. A second start-deposit line from another deposit ref of the SAME supplier
+// (region must match: AU deposits only on AU POs), max 2 lines per PO. It reduces the balance owed (start_paid = line 1 + line 2, migration 445)
+// and draws on that deposit's remaining. Body { deposit_ref, amount, date } to set, { clear: true } to remove. Logged like a PO field edit.
+app.post('/api/supply/po/:po/start-deposit-2', async (req, res) => {
+  try { const po = String(req.params.po), b = req.body || {}, by = authUser(req) || null;
+    const old = (await pool.query(`SELECT po, supplier_name, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(deposit_ref,'') deposit_ref, deposit_ref_2, pay_start_deposit_2_assigned, pay_start_deposit_2_date FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!old) return res.status(404).json({ error: 'PO not found' });
+    if (b.clear) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref_2=NULL, pay_start_deposit_2_assigned=NULL, pay_start_deposit_2_date=NULL WHERE po=$1`, [po]);
+      try { await logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: null, pay_start_deposit_2_assigned: null, pay_start_deposit_2_date: null }, by); } catch (_) {}
+      try { invalidateSupplyCaches(); await bumpSupplyEpoch(); } catch (_) {}
+      return res.json({ ok: true, cleared: true }); }
+    const ref = String(b.deposit_ref || '').trim(), amount = Math.round(Number(b.amount) * 100) / 100, date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? String(b.date) : null;
+    if (!old.deposit_ref || old.deposit_ref.toUpperCase() === 'NO DEPOSIT') return res.status(400).json({ error: 'Assign the first starting deposit before adding another.' });
+    if (!ref || ref.toUpperCase() === 'NO DEPOSIT') return res.status(400).json({ error: 'Choose a deposit reference.' });
+    if (ref.toUpperCase() === old.deposit_ref.toUpperCase()) return res.status(400).json({ error: ref + ' is already this PO\'s first starting deposit: change that line\'s amount instead.' });
+    if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount above 0.' });
+    if (!date) return res.status(400).json({ error: 'Enter the date.' });
+    const dep = (await pool.query(`SELECT max(supplier_name) supplier_name, upper(coalesce(max(country),'')) country, sum(coalesce(amount,0)) pool, bool_or(coalesce(status,'')='closed') closed FROM planner.deposits WHERE is_deposit AND reference=$1`, [ref])).rows[0];
+    if (!dep || dep.pool == null) return res.status(400).json({ error: 'Deposit ' + ref + ' not found in the Deposits register.' });
+    if (dep.closed) return res.status(400).json({ error: ref + ' is closed: reopen it in the Deposits register first.' });
+    if (String(dep.supplier_name || '').trim().toLowerCase() !== String(old.supplier_name || '').trim().toLowerCase()) return res.status(400).json({ error: 'Supplier mismatch: ' + ref + ' is a ' + (dep.supplier_name || 'different supplier') + ' deposit.' });
+    if (dep.country && old.cc && (dep.country === 'AU') !== (old.cc === 'AU')) return res.status(400).json({ error: 'Region mismatch: an AU deposit can only go on an AU PO (and vice versa).' });
+    const used = Number((await pool.query(`SELECT coalesce(sum(amount),0) u FROM planner.v_po_deposit_draws WHERE deposit_ref=$1 AND NOT (po=$2 AND line=2)`, [ref, po])).rows[0].u) || 0;
+    const left = Math.round((Number(dep.pool) - used) * 100) / 100;
+    if (amount > left + 0.01) return res.status(400).json({ error: 'Only ' + left.toFixed(2) + ' is left on ' + ref + '.' });
+    await pool.query(`UPDATE planner.purchase_orders SET deposit_ref_2=$2, pay_start_deposit_2_assigned=$3, pay_start_deposit_2_date=$4 WHERE po=$1`, [po, ref, amount, date]);
+    try { await logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: ref, pay_start_deposit_2_assigned: amount, pay_start_deposit_2_date: date }, by); } catch (_) {}
+    try { invalidateSupplyCaches(); await bumpSupplyEpoch(); } catch (_) {}
+    res.json({ ok: true, deposit_ref_2: ref, amount, date, left_after: Math.round((left - amount) * 100) / 100 });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
 app.post('/api/supply/po/:po', async (req, res) => {
   const body = req.body || {};
   // editing anything shown in the "Direct to Client details" (packing/labelling OR the client sales ref /
@@ -27000,6 +27032,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     // payment-plan overrides (PLAN panel): % terms, assigned amounts, payment dates
     start_deposit_pct_override: 'numeric', completion_pct_override: 'numeric',
     pay_start_deposit_assigned: 'numeric', pay_start_deposit_date: 'date',
+    deposit_ref_2: 'text', pay_start_deposit_2_assigned: 'numeric', pay_start_deposit_2_date: 'date',   // v28.809 second starting deposit line (migration 445)
     pay_completion_assigned: 'numeric', pay_completion_date: 'date',
     pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
@@ -33128,7 +33161,7 @@ const POS_SQL_PORTAL = `
     CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
     CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
     round(coalesce(credit_amount,0),2) credit_amount,   -- additional charge added to the invoice/amount due (portal shows it as a line)
-    round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+    round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date, (SELECT coalesce(x2.deposit_ref_2,'') FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) deposit_ref_2, (SELECT round(x2.pay_start_deposit_2_assigned,2) FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) start2_assigned, (SELECT to_char(x2.pay_start_deposit_2_date,'YYYY-MM-DD') FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) start2_date,
     round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
     to_char(bal_due_date,'YYYY-MM-DD') balance_due,
@@ -33844,7 +33877,7 @@ const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_deliv
 const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
   deposit_ref: 'Deposit assignment',
   supplier_invoice_total: 'Final invoice amount', balance_due_date_overide: 'Final invoice due date',
-  pay_start_deposit_assigned: 'Start deposit paid', pay_start_deposit_date: 'Start deposit date',
+  pay_start_deposit_assigned: 'Start deposit paid', pay_start_deposit_date: 'Start deposit date', deposit_ref_2: 'Additional start deposit ref', pay_start_deposit_2_assigned: 'Additional start deposit', pay_start_deposit_2_date: 'Additional start deposit date',
   pay_completion_assigned: 'Completion paid', pay_completion_date: 'Completion date',
   pay_balance_1_amount: 'Balance 1 paid', pay_balance_1_date: 'Balance 1 date',
   pay_balance_2_amount: 'Balance 2 paid', pay_balance_2_date: 'Balance 2 date',
@@ -33915,7 +33948,7 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
     FROM planner.purchase_orders o LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(o.supplier_name)) WHERE o.po=$1`, [po])).rows[0]?.c || 'USD'; } catch (e) { _ccy = 'USD'; } return _ccy; };
   const money2 = (v, c) => Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + c;
   const MONEY_FIELDS = new Set(['supplier_invoice_total', 'order_value_estimation', 'credit_amount',
-    'pay_start_deposit_assigned', 'pay_completion_assigned', 'pay_balance_1_amount', 'pay_balance_2_amount']);
+    'pay_start_deposit_assigned', 'pay_start_deposit_2_assigned', 'pay_completion_assigned', 'pay_balance_1_amount', 'pay_balance_2_amount']);
   for (const k of keys) {
     let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
     let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
@@ -34112,7 +34145,7 @@ const PO_ROWS_SQL = `
             CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
             round(coalesce(credit_amount,0),2) credit_amount,
             -- PLAN-panel detail: per-milestone calc, override amount, override date
-            start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+            start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date, (SELECT coalesce(x2.deposit_ref_2,'') FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) deposit_ref_2, (SELECT round(x2.pay_start_deposit_2_assigned,2) FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) start2_assigned, (SELECT to_char(x2.pay_start_deposit_2_date,'YYYY-MM-DD') FROM planner.purchase_orders x2 WHERE x2.po=calc4.po) start2_date,
             completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
             round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
             round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
@@ -40713,8 +40746,8 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     // ── Round A: everything keyed only by supplier names / ids — fired together, awaited after the PO rows.
     const pCutoff = poArchiveCutoff();
     const pDeps = names.length ? q(`
-            WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
-              FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL GROUP BY po.deposit_ref),
+            WITH draw AS (SELECT po.deposit_ref, sum(po.amount) used
+              FROM planner.v_po_deposit_draws po GROUP BY po.deposit_ref),   -- v28.809: both start-deposit lines
             pool AS (SELECT reference, sum(coalesce(amount,0)) pool_amount
               FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference)
             SELECT d.reference, d.amount, d.is_deposit, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
