@@ -1,3 +1,7 @@
+## v28.811 (13-Nov-26) PO PAYMENTS: no NaN supplier invoice while loading; never assign a start deposit beyond what the deposit has left
+- Ben (PO-57UKWK1, sandbox): the first start-deposit line offered "assign 90.73" from P57-UK-WK1, which has 0.00 available. Cause (v28.809): the line used the PO's total start paid, which now includes the additional line. Line 1 now uses its own drawn amount, the assign button is hidden when nothing is available, and the server refuses any INCREASE of the start deposit beyond what that deposit has left (both lines of every PO counted); lowering stays allowed.
+- Spotted on PO-55UKWK3: the PO panel paints instantly from the grid row while the full detail loads, using a placeholder detail whose supplier invoice was an empty object. That counted as a submission, so for a few seconds every PO showed "Supplier Submitted Invoice Total NaN" with a live "Apply → final" button (clicking it then could have written a bad value). The placeholder now has no submission, and the row only shows with a real numeric value. No migration, route or env var.
+
 ## v28.810 (13-Nov-26) Additional starting deposit: editable, faster feedback
 - Ben: Amount and Date in the picker are now clear editable boxes, Date on its own row under Amount; picking a deposit selects the amount ready to type over. On the payment line the amount and date are editable too (save on change, same checks). "Adding…" shows at once and a toast confirms; the save answers faster (change log and cache refresh no longer awaited). No migration, route or env var.
 

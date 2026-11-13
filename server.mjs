@@ -27002,6 +27002,19 @@ app.post('/api/supply/po/:po', async (req, res) => {
       }
     } catch (e) { /* non-fatal — fall through */ }
   }
+  // v28.811 (Ben 13-Nov-26, PO-57UKWK1: "should prevent deposit being assigned when 0.00 available"): a start deposit drawn from a deposit
+  // ref may not exceed what that deposit has left (other POs' draws, both lines). Only an INCREASE is checked, so a PO on an already
+  // over-drawn pool can still be lowered or left as it is.
+  if (body.pay_start_deposit_assigned !== undefined && body.pay_start_deposit_assigned !== null && String(body.pay_start_deposit_assigned).trim() !== '') {
+    try { const nv = Number(String(body.pay_start_deposit_assigned).replace(/,/g, ''));
+      const cur = (await pool.query(`SELECT coalesce(deposit_ref,'') ref, coalesce(pay_start_deposit_assigned,0)::float8 old FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0];
+      const ref = String((body.deposit_ref !== undefined ? body.deposit_ref : cur && cur.ref) || '').trim();
+      if (cur && ref && ref.toUpperCase() !== 'NO DEPOSIT' && isFinite(nv) && nv > cur.old + 0.009) {
+        const left = Number((await pool.query(`SELECT coalesce((SELECT sum(coalesce(amount,0)) FROM planner.deposits WHERE is_deposit AND reference=$1),0)
+            - coalesce((SELECT sum(amount) FROM planner.v_po_deposit_draws WHERE deposit_ref=$1 AND NOT (po=$2 AND line=1)),0) l`, [ref, req.params.po])).rows[0].l) || 0;
+        if (nv > left + 0.01) return res.status(400).json({ error: (left > 0.009 ? 'Only ' + left.toFixed(2) + ' is' : 'Nothing is') + ' available on deposit ' + ref + '. Lower the amount' + (left > 0.009 ? '' : ', or add the deposit payment in the Deposits register first') + '.' }); }
+    } catch (e) { /* non-fatal — fall through */ }
+  }
   // Audit log: snapshot the prior values of any tracked fields in this edit, so the post-update callback can
   // record exactly what changed (old → new) on the PO timeline.
   const _trackKeys = Object.keys(body).filter(k => PO_TRACK[k]);

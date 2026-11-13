@@ -5238,7 +5238,7 @@ function hzPortalHelp(el){
       // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
       // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
       +(function(){ var si=d&&d.sup_invoice, docs=((d&&d.sup_docs)||[]).filter(function(x){return PO_DOC_INVOICE.indexOf(String(x.category||''))>=0;}); var out='';   // Invoice tab = actual invoice docs only (set a doc's Type in the DOCUMENTS tab)
-        if(si && si.status!=='dismissed'){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
+        if(si && si.value!=null && isFinite(Number(si.value)) && si.status!=='dismissed'){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
           var pend=(si.status==='pending'), applied=(si.status==='applied'), differs=(fv!=null&&Math.abs(sv-fv)>0.01), canApply=(fv==null||differs);
           var tag= pend?'<span class="tool-badge bg-amber">⏳ new — awaiting review</span>'
                  : applied?(differs?'<span class="tool-badge bg-amber">applied · final changed since (Δ '+money(Math.abs(sv-fv))+')</span>':'<span class="tool-badge bg-green">applied to final</span>'):'';
@@ -5261,13 +5261,13 @@ function hzPortalHelp(el){
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw" style="max-width:1320px"><table class="pay-tbl"><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">capped at ref avail</div></td>'
-      +(function(){ var term=Number(r.start_calc)||0, drawn=Number(r.start_dep)||0, rolled=Math.round((term-drawn)*100)/100;
+      +(function(){ var term=Number(r.start_calc)||0, drawn=Math.round(((Number(r.start_dep)||0)-(Number(r.start2_assigned)||0))*100)/100, rolled=Math.round((term-drawn)*100)/100;   // v28.811: start_dep includes the additional line → line 1 only here
           var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term (NO DEPOSIT, or a ref that ran short) → rest rolls on
           var dest=(Number(r.completion_pct)>0?'completion':'balance');   // rolls into completion if the supplier has one, else the balance
           var noDep=(String(r.deposit_ref||'').toUpperCase()==='NO DEPOSIT');
           var _note=(capped?'<span class="mut tiny" style="color:var(--neg)" title="'+(noDep?'no deposit taken':'capped at the deposit ref&rsquo;s remaining availability')+' — the rest rolls into the '+dest+'">'+(noDep?'no deposit · ':'of '+money(term)+' term · ')+money(rolled)+' → '+dest+'</span>':'');
           var _btn=((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
-              :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0))?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool
+              :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0) && (capped?drawn:Number(r.start_calc))>0.009)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool (v28.811: never when nothing is available)
               :'');
           // amount + the (normal) draw/assign button on line 1; the "of X term · Y → dest" note on line 2; a
           // .dep-atrisk-slot below for the async "deposit at risk · assign X" extra-allocation button (bindPay fills it)
@@ -9135,7 +9135,7 @@ function hzPortalHelp(el){
   // doesn't flash; skipped for thin (complete) rows since loadPoDetail refetches their full po-row first.
   // Wrapped in try/catch → if the empty-detail render ever throws it silently falls back to "Loading…".
   function __emptyPoDetail(){ return { lines:[], deposit:[], payments:[], flexport:{}, dtc:{}, crossdock_lines:[],
-    sup_invoice:{}, sup_docs:[], client_docs:[], all_docs:[], notes:[], subs:[], line_costs:{}, sup_completion:{},
+    sup_invoice:null, sup_docs:[], client_docs:[], all_docs:[], notes:[], subs:[], line_costs:{}, sup_completion:{},   // v28.811: null, not {} (an empty object drew 'Supplier Submitted Invoice Total NaN · Apply' while the detail loaded)
     crossdock_shipped:[], additional_costs:[], erp_complete:false, __fast:true }; }
   function poFastPaint(po,i,tab){ try{
     var pd=document.getElementById('podet-'+i); if(!pd||!poBy[po]||poBy[po]._thin)return;
