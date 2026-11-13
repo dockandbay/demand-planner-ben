@@ -26947,8 +26947,8 @@ app.post('/api/supply/po/:po/start-deposit-2', async (req, res) => {
     const old = (await pool.query(`SELECT po, supplier_name, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(deposit_ref,'') deposit_ref, deposit_ref_2, pay_start_deposit_2_assigned, pay_start_deposit_2_date FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
     if (!old) return res.status(404).json({ error: 'PO not found' });
     if (b.clear) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref_2=NULL, pay_start_deposit_2_assigned=NULL, pay_start_deposit_2_date=NULL WHERE po=$1`, [po]);
-      try { await logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: null, pay_start_deposit_2_assigned: null, pay_start_deposit_2_date: null }, by); } catch (_) {}
-      try { invalidateSupplyCaches(); await bumpSupplyEpoch(); } catch (_) {}
+      logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: null, pay_start_deposit_2_assigned: null, pay_start_deposit_2_date: null }, by).catch(() => {});
+      try { invalidateSupplyCaches(); bumpSupplyEpoch().catch(() => {}); } catch (_) {}
       return res.json({ ok: true, cleared: true }); }
     const ref = String(b.deposit_ref || '').trim(), amount = Math.round(Number(b.amount) * 100) / 100, date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? String(b.date) : null;
     if (!old.deposit_ref || old.deposit_ref.toUpperCase() === 'NO DEPOSIT') return res.status(400).json({ error: 'Assign the first starting deposit before adding another.' });
@@ -26961,12 +26961,14 @@ app.post('/api/supply/po/:po/start-deposit-2', async (req, res) => {
     if (dep.closed) return res.status(400).json({ error: ref + ' is closed: reopen it in the Deposits register first.' });
     if (String(dep.supplier_name || '').trim().toLowerCase() !== String(old.supplier_name || '').trim().toLowerCase()) return res.status(400).json({ error: 'Supplier mismatch: ' + ref + ' is a ' + (dep.supplier_name || 'different supplier') + ' deposit.' });
     if (dep.country && old.cc && (dep.country === 'AU') !== (old.cc === 'AU')) return res.status(400).json({ error: 'Region mismatch: an AU deposit can only go on an AU PO (and vice versa).' });
-    const used = Number((await pool.query(`SELECT coalesce(sum(amount),0) u FROM planner.v_po_deposit_draws WHERE deposit_ref=$1 AND NOT (po=$2 AND line=2)`, [ref, po])).rows[0].u) || 0;
+    const used = Number((await pool.query(`SELECT coalesce(sum(CASE WHEN line=1 THEN coalesce(pay_start_deposit_assigned,0) ELSE coalesce(pay_start_deposit_2_assigned,0) END),0) u FROM (
+        SELECT po, 1 line, pay_start_deposit_assigned, NULL::numeric pay_start_deposit_2_assigned FROM planner.purchase_orders WHERE deposit_ref=$1
+        UNION ALL SELECT po, 2, NULL, pay_start_deposit_2_assigned FROM planner.purchase_orders WHERE deposit_ref_2=$1 AND po<>$2) x`, [ref, po])).rows[0].u) || 0;
     const left = Math.round((Number(dep.pool) - used) * 100) / 100;
     if (amount > left + 0.01) return res.status(400).json({ error: 'Only ' + left.toFixed(2) + ' is left on ' + ref + '.' });
     await pool.query(`UPDATE planner.purchase_orders SET deposit_ref_2=$2, pay_start_deposit_2_assigned=$3, pay_start_deposit_2_date=$4 WHERE po=$1`, [po, ref, amount, date]);
-    try { await logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: ref, pay_start_deposit_2_assigned: amount, pay_start_deposit_2_date: date }, by); } catch (_) {}
-    try { invalidateSupplyCaches(); await bumpSupplyEpoch(); } catch (_) {}
+    logPoFieldChanges(po, ['deposit_ref_2', 'pay_start_deposit_2_assigned', 'pay_start_deposit_2_date'], old, { deposit_ref_2: ref, pay_start_deposit_2_assigned: amount, pay_start_deposit_2_date: date }, by).catch(() => {});   // v28.810: not awaited (faster answer)
+    try { invalidateSupplyCaches(); bumpSupplyEpoch().catch(() => {}); } catch (_) {}
     res.json({ ok: true, deposit_ref_2: ref, amount, date, left_after: Math.round((left - amount) * 100) / 100 });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });

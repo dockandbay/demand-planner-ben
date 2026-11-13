@@ -3056,16 +3056,31 @@ function hzPortalHelp(el){
       if(!ok.length){ list.innerHTML='<div class="count" style="padding:8px 10px">No other '+esc(r.supplier_name||'')+' deposit has money left.</div>'; return; }
       var bal=Number(r.balance_owing)||0;
       list.innerHTML=ok.map(function(d){ return '<label class="shpop-opt" style="display:flex;gap:6px;align-items:center"><input type="radio" name="dep2" value="'+esc(d.reference)+'" data-left="'+esc(d.deposit_remaining)+'"> '+esc(d.reference)+' <span class="mut tiny">'+money(d.deposit_remaining)+' left</span></label>'; }).join('')
-        +'<div style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line)"><span class="tiny mut">Amount</span><input id="dep2-amt" class="fci" style="width:90px;text-align:right"><span class="tiny mut">Date</span><input id="dep2-dt" type="date" class="fci" value="'+localToday()+'"><button class="save-btn" id="dep2-go">Add</button></div><div id="dep2-err" class="tiny" style="color:var(--neg);padding:0 10px 8px"></div>';
-      list.querySelectorAll('input[name="dep2"]').forEach(function(rb){ rb.onchange=function(){ var left=Number(rb.dataset.left)||0; var a=(bal>0.009)?Math.min(left,bal):left; document.getElementById('dep2-amt').value=(Math.round(a*100)/100).toFixed(2); }; });
+        +'<div style="padding:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center">'
+          +'<label for="dep2-amt" style="font-size:12px;font-weight:600">Amount</label><input id="dep2-amt" inputmode="decimal" placeholder="0.00" title="Type the amount to draw (defaults to what is left, capped at the balance owed)" style="width:130px;text-align:right;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line2,#94a3b8);border-radius:6px;background:var(--card,#fff);color:inherit">'
+          +'<label for="dep2-dt" style="font-size:12px;font-weight:600">Date</label><input id="dep2-dt" type="date" value="'+localToday()+'" title="Date of the draw" style="width:150px;font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line2,#94a3b8);border-radius:6px;background:var(--card,#fff);color:inherit">'
+          +'<span></span><button class="save-btn" id="dep2-go" style="justify-self:start">Add</button>'
+          +'<span></span><div class="tiny mut">Both can be changed here, and later on the payment line.</div></div><div id="dep2-err" class="tiny" style="color:var(--neg);padding:0 10px 8px"></div>';
+      list.querySelectorAll('input[name="dep2"]').forEach(function(rb){ rb.onchange=function(){ var left=Number(rb.dataset.left)||0; var a=(bal>0.009)?Math.min(left,bal):left; var ai=document.getElementById('dep2-amt'); ai.value=(Math.round(a*100)/100).toFixed(2); try{ ai.focus(); ai.select(); }catch(e){} }; });
       var first=list.querySelector('input[name="dep2"]'); if(first&&ok.length===1){ first.checked=true; first.onchange(); }
-      document.getElementById('dep2-go').onclick=function(){ var sel=list.querySelector('input[name="dep2"]:checked'), err=document.getElementById('dep2-err');
+      document.getElementById('dep2-go').onclick=function(){ var sel=list.querySelector('input[name="dep2"]:checked'), err=document.getElementById('dep2-err'), go=document.getElementById('dep2-go');
         if(!sel){ err.textContent='Choose a deposit.'; return; }
+        if(go.disabled)return; go.disabled=true; go.textContent='Adding…'; err.style.color='var(--faint)'; err.textContent='Saving, the payment plan refreshes in a moment…';
         var amt=Number(String(document.getElementById('dep2-amt').value).replace(/,/g,'')), dt=document.getElementById('dep2-dt').value;
         fetch('/api/supply/po/'+encodeURIComponent(po)+'/start-deposit-2',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:sel.value,amount:amt,date:dt})})
-          .then(function(x){ return x.json(); }).then(function(j){ if(!j||j.error){ err.textContent=(j&&j.error)||'Failed'; return; } closeShPop(); depFull=null; (window.__hzPatchPoRow||window.__hzPoChanged||function(){})(po); })
-          .catch(function(e){ err.textContent='Failed: '+(e.message||e); }); };
+          .then(function(x){ return x.json(); }).then(function(j){ if(!j||j.error){ go.disabled=false; go.textContent='Add'; err.style.color='var(--neg)'; err.textContent=(j&&j.error)||'Failed'; return; }
+            closeShPop(); depFull=null; dep2Flash(po,'Added '+money(j.amount)+' from '+j.deposit_ref_2+', refreshing…'); (window.__hzPatchPoRow||window.__hzPoChanged||function(){})(po); })
+          .catch(function(e){ go.disabled=false; go.textContent='Add'; err.style.color='var(--neg)'; err.textContent='Failed: '+(e.message||e); }); };
     }); }
+  function dep2Flash(po,msg){ try{ var t=document.createElement('div'); t.textContent=msg; t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10060;background:#0f172a;color:#fff;padding:8px 14px;border-radius:8px;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.2)'; document.body.appendChild(t); setTimeout(function(){ t.remove(); },3500); }catch(e){} }
+  // v28.810 (Ben 13-Nov-26: "the amount should be editable"): the additional line's amount and date save on change (same validation server side).
+  document.addEventListener('change',function(e){ var el=e.target; if(!el||!el.classList||!el.classList.contains('dep2-in'))return; var po=el.dataset.po, row=el.closest('tr'); if(!row)return;
+    var amtEl=row.querySelector('.dep2-in[data-k="amount"]'), dtEl=row.querySelector('.dep2-in[data-k="date"]'), amt=Number(String(amtEl.value).replace(/,/g,'')), dtIso=parseDateLoose(dtEl.value)||'';
+    el.classList.remove('err'); el.classList.add('saving');
+    fetch('/api/supply/po/'+encodeURIComponent(po)+'/start-deposit-2',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:el.dataset.ref,amount:amt,date:dtIso})})
+      .then(function(x){ return x.json(); }).then(function(j){ el.classList.remove('saving'); if(!j||j.error){ el.classList.add('err'); el.title=(j&&j.error)||'Failed'; dep2Flash(po,(j&&j.error)||'Failed'); return; }
+        el.classList.add('saved'); depFull=null; dep2Flash(po,'Saved '+money(j.amount)+' from '+j.deposit_ref_2); (window.__hzPatchPoRow||window.__hzPoChanged||function(){})(po); })
+      .catch(function(){ el.classList.remove('saving'); el.classList.add('err'); }); },true);
   document.addEventListener('click',function(e){ var a=e.target.closest&&e.target.closest('#supply-root .dep2-add, #supply-root .dep2-del'); if(!a)return; e.stopPropagation(); e.preventDefault(); var po=a.dataset.po;
     if(a.classList.contains('dep2-add')){ openDep2Pick(po,a); return; }
     if(!confirm('Remove the additional starting deposit from '+po+'? The amount goes back to its deposit.'))return;
@@ -5266,7 +5281,8 @@ function hzPortalHelp(el){
         +((r.deposit_ref&&String(r.deposit_ref).toUpperCase()!=='NO DEPOSIT'&&!r.deposit_ref_2)?'<div style="margin-top:3px"><button class="lnk-btn dep2-add" data-po="'+esc(r.po)+'" style="font-size:10px;color:var(--blue);padding:0" title="Draw a second starting deposit from another deposit of this supplier. It comes off the balance owed.">+ Allocate additional starting deposit</button></div>':'')+'</td>'
       +mkPay(dueCell(r.start_due,startUnpaid,'',startOwed),_startOver)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     if(r.deposit_ref_2) h+=tr('<td class="l"><b>+ Additional start deposit</b><div class="mut tiny" style="margin-top:2px">reduces the balance owed</div></td><td></td>'
-      +'<td class="l"><b>'+money(r.start2_assigned)+'</b></td><td class="l">'+esc(fd(r.start2_date))+'</td>'
+      +'<td class="l"><input class="fci dep2-in" data-k="amount" data-po="'+esc(r.po)+'" data-ref="'+esc(r.deposit_ref_2)+'" value="'+esc(r.start2_assigned==null?'':r.start2_assigned)+'" style="width:90px;text-align:right" title="Edit the amount drawn from '+esc(r.deposit_ref_2)+' (saves on change)"></td>'
+      +'<td class="l" style="white-space:nowrap">'+dateField(r.start2_date,{attrs:'data-k="date" data-po="'+esc(r.po)+'" data-ref="'+esc(r.deposit_ref_2)+'"',cls:'dep2-in',width:'100px'})+'</td>'
       +'<td class="l" style="white-space:normal"><span style="color:var(--blue);font-size:11px">'+esc(r.deposit_ref_2)+'</span> <button class="lnk-btn dep2-del" data-po="'+esc(r.po)+'" title="Remove this additional starting deposit (the amount goes back to '+esc(r.deposit_ref_2)+')" style="color:var(--neg);font-weight:700">×</button></td>'
       +'<td class="l"></td><td class="l"></td><td class="l">'+payBadge('drawn','bg-green')+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">+ catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</div></td>'
