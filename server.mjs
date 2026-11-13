@@ -11343,7 +11343,7 @@ async function payRunPlan(run) {
     catch (e) { checks.push({ level: 'error', msg: 'Could not read the bills in Xero ' + _bo.toUpperCase() + ': ' + e.message }); } }
   }
   bills.forEach(b => { if (b.org !== org && !b.problem) b.note = 'bill in Xero ' + b.org.toUpperCase() + ': paid there from the 901 loan, with a Spend Money from the bank to the 901 loan'; });
-  const done = (await pool.query(`SELECT invoice_id, invoice_number, amount, currency, bank_name, to_char(payment_date,'YYYY-MM-DD') payment_date, xero_payment_id, status, error FROM planner.xero_run_payments WHERE run_key=$1 AND status IN ('created','creating') ORDER BY id`, [rk]).catch(() => ({ rows: [] }))).rows;
+  const done = (await pool.query(`SELECT invoice_id, invoice_number, amount, currency, bank_name, to_char(payment_date,'YYYY-MM-DD') payment_date, xero_payment_id, status, error, created_by, to_char(created_at,'YYYY-MM-DD') created_on FROM planner.xero_run_payments WHERE run_key=$1 AND status IN ('created','creating') ORDER BY id`, [rk]).catch(() => ({ rows: [] }))).rows;
   // v28.755: linked supplier credit notes. Live state, then allocate each against the run's bills (supplier payment bill first, then each
   // Other bill), never more than a bill's payment; each allocation lowers that bill's payment, so the bank amount = bills less credits.
   // An allocation already made from HORIZON (xero_run_payments invoice_id 'credit:<cn>><bill>') still lowers the payment but is not redone.
@@ -11383,6 +11383,7 @@ async function payRunPlan(run) {
     if (b.status === 'DRAFT' || b.status === 'SUBMITTED') b.approve = true; });
   const ccys = [...new Set(bills.map(b => b.ccy))];
   if (ccys.length > 1) checks.push({ level: 'error', msg: 'The bills are in different currencies (' + ccys.join(', ') + '): pay them separately in Xero' });
+  bills.forEach(b => { if (b.invoice_id) b.xero_url = ppXeroUrl(b.org || org, '/AccountsPayable/View.aspx?InvoiceID=' + b.invoice_id); });   // v28.818: link per bill (its own org)
   const total = Math.round(bills.filter(b => !b.paid).reduce((a, b) => a + b.pay_amount, 0) * 100) / 100;
   return { ok: true, run_key: rk, org, base_ccy: base, bill_ccy: ccys[0] || 'USD', reference: ref, banks, favourites, last_bank: last && last.bank_account_id ? { id: last.bank_account_id, name: last.bank_name } : null,
     bills, credits, total, already_paid: done, checks };
@@ -14977,7 +14978,16 @@ supplySectionHandler = async (req, res, next) => {
         let _pxb = []; try { _pxb = (await pool.query(`SELECT run_key, bill_number, bill_url, status, source FROM planner.payment_xero_bills
           WHERE coalesce(status,'') NOT IN ('DELETED','VOIDED') ORDER BY created_at`)).rows; } catch (e) { /* migration 324 not applied yet → no links */ }
         const _pxbBy = {}; _pxb.forEach(b => { (_pxbBy[b.run_key] = _pxbBy[b.run_key] || []).push({ number: b.bill_number, url: b.bill_url, status: b.status, source: b.source }); });
-        out.forEach(r => { r.xero_bills = _pxbBy[r.run_key] || []; r.xero_done = r.xero_bills.length > 0 || String(r.dt || '') < XERO_DONE_BEFORE; });
+        // v28.818 (Ben 13-Nov-26): a run with only Other lines (e.g. Lixin 10-Nov freight bills) never gets a SUPPLIER-PAYMENT bill, so it is
+        // also done when the Xero payments HORIZON made for it (xero_run_payments) cover the run total; each paid bill links to Xero.
+        let _xrp = []; try { _xrp = (await pool.query(`SELECT run_key, invoice_id, invoice_number, amount, region FROM planner.xero_run_payments
+          WHERE status='created' AND invoice_id NOT LIKE 'credit:%' AND invoice_id NOT LIKE 'intercompany:%' ORDER BY id`)).rows; } catch (e) { /* table missing: no change */ }
+        const _xrpBy = {}; _xrp.forEach(x => { (_xrpBy[x.run_key] = _xrpBy[x.run_key] || []).push(x); });
+        out.forEach(r => { r.xero_bills = _pxbBy[r.run_key] || []; r.xero_done = r.xero_bills.length > 0 || String(r.dt || '') < XERO_DONE_BEFORE;
+          const xp = _xrpBy[r.run_key] || [];
+          if (!r.xero_done && xp.length && (r.lines || []).every(l => l.source === 'other') && xp.reduce((t, x) => t + (Number(x.amount) || 0), 0) >= r.total - 0.01) {
+            r.xero_done = true; r.xero_paid_direct = true;
+            r.xero_bills = xp.map(x => ({ number: String(x.invoice_number || '').split(' / ')[0], url: ppXeroUrl(String(x.region || 'uk').toLowerCase(), '/AccountsPayable/View.aspx?InvoiceID=' + x.invoice_id), status: 'paid from HORIZON', source: 'payment' })); } });
         return res.json(out);
       }
       case 'payments-by-supplier': {

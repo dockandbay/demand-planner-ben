@@ -1,3 +1,8 @@
+## v28.818 (13-Nov-26) Payments Report: runs paid in Xero with no supplier-payment bill show as done (Ben)
+- A run with only Other lines (e.g. Lixin 10-Nov DHL freight bills) never gets a SUPPLIER-PAYMENT bill, so it kept the green Paid > Xero button after it was paid. It now counts as done when the Xero payments HORIZON made for it cover the run total, and shows Xero ✓ with a link per bill.
+- Paid > Xero on a run whose bills are all paid opens an "Already paid in Xero" summary (bill links, amount, bank, date, who) instead of the bank step and a false "bank differs".
+- No migration, no new env vars, no new cron routes.
+
 ## v28.817 (13-Nov-26) Payments Report: AU-org Other bills join the UK payment (Ben)
 - Ben: "We can pay au bills from uk, they don't have to be paid from AU. Only au deposits must be paid from au." From 11-Nov-26 an Other payment stays in the supplier's UK run even when its Xero bill is in the AU org (constant OTHER_AU_MERGE_FROM; written into the two SQL CASEs that set an Other line's run region). Earlier AU Other runs keep their own run (already paid that way). AU deposits unchanged (still their own AU run).
 - Paid > Xero now decides per bill: a bill in the bank's org is paid from the bank; a bill in the other org is paid there from its 901 intercompany loan, and one Spend Money in the bank's org (coded to its 901 loan) covers those bills. Same route as the existing cross-org bank (v28.292). A base-currency bank cannot pay cross-org bills (blocked). Approvals and payments go to each bill's own org.

@@ -13289,6 +13289,14 @@ function hzPortalHelp(el){
     H+='<div style="display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--bg,#f6f7f9)">'+names.map(function(n,i){ var s=i+1; return '<button class="px-st'+(s===PX.step?' on':(s<PX.step?' ok':''))+'" data-st="'+s+'">'+(s<PX.step?'✓ ':s+'. ')+esc(n)+'</button>'; }).join('')+'</div><div style="padding:16px 18px;display:grid;gap:14px">';
     if(PX.err&&!p){ bg.innerHTML=H+'<div style="color:var(--neg)">'+esc(PX.err)+'</div></div></div>'; pxWire(); return; }
     if(!p){ bg.innerHTML=H+'<div class="mut">Reading the bills in Xero…</div></div></div>'; pxWire(); return; }
+    // v28.818 (Ben 13-Nov-26): every bill already paid from HORIZON: say so (who, when, bank, links) instead of the bank step and a false "bank differs"
+    if(!PX.busy&&(p.bills||[]).length&&p.bills.every(function(b){ return b.paid; })){
+      var _who=[]; p.bills.forEach(function(b){ var u=String(b.paid.created_by||'').split('@')[0]; if(u&&_who.indexOf(u)<0)_who.push(u); });
+      H+='<div style="border:1px solid var(--pos);border-radius:8px;padding:12px 14px"><b style="color:var(--pos)">✓ Already paid in Xero '+esc(p.org.toUpperCase())+'</b><div class="mut tiny" style="margin-top:2px">Paid from HORIZON'+(_who.length?' by '+esc(_who.join(', ')):'')+'. Nothing left to pay in this run.</div></div>'
+        +'<table><thead><tr><th>Bill</th><th>Amount</th><th>Bank</th><th>Paid</th><th>By</th></tr></thead><tbody>'
+        +p.bills.map(function(b){ var d=b.paid; return '<tr><td>'+(b.xero_url?'<a href="'+esc(b.xero_url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700">'+esc(b.number)+' ↗</a>':esc(b.number))+'</td><td>'+esc(d.currency||b.ccy)+' '+money(Number(d.amount)||0)+'</td><td>'+esc(d.bank_name||'')+'</td><td>'+esc(fd(d.payment_date))+'</td><td>'+esc(String(d.created_by||'').split('@')[0])+(d.created_on?' <span class="mut">'+esc(fd(d.created_on))+'</span>':'')+'</td></tr>'; }).join('')
+        +'</tbody></table>';
+      bg.innerHTML=H+'</div></div>'; pxWire(); return; }
     var probs=pxProblems(), ccy=bk?bk.ccy:p.bill_ccy, baseBank=bk&&bk.ccy!==p.bill_ccy, nav='';
     if(PX.step===1){
       var others=(p.banks||[]).filter(function(b){ return !(p.favourites||[]).some(function(f){ return f.bank_id===b.id; }); }), q=PX.q.toLowerCase();
