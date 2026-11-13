@@ -40028,7 +40028,7 @@ async function portalHomeData(names, sid) {
 // 'skipped'). planner.supplier_weekly_log keeps one row per supplier per week, so a re-run never sends twice.
 const SUPWK_BCC = (process.env.SUPPLIER_WEEKLY_BCC || 'ben@dockandbay.com').split(',').map(x => x.trim()).filter(Boolean);
 async function supplierWeeklyBuild(name) {
-  const { supplierWeekly, supplierWeeklyHtml } = await import('./lib/supplier-weekly.mjs');
+  const { supplierWeekly, supplierWeeklyHtml, supplierWeeklyDoc } = await import('./lib/supplier-weekly.mjs');
   const sup = (await pool.query(`SELECT id, name, upper(coalesce(nullif(default_currency,''),'USD')) ccy, (coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR coalesce(country,'') LIKE '%中国%') zh, weekly_email_enabled FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)) LIMIT 1`, [name])).rows[0];
   if (!sup) throw new Error('supplier not found: ' + name);
   const D = await portalBootstrapBuild([sup.name], [sup.id], false), H = await portalHomeData([sup.name], sup.id);
@@ -40037,7 +40037,8 @@ async function supplierWeeklyBuild(name) {
   const W = supplierWeekly(D, H, { today, since });
   const users = (await pool.query(`SELECT DISTINCT lower(trim(email)) e FROM planner.supplier_portal_users WHERE coalesce(active,true) AND (supplier_id=$1 OR lower(trim(supplier_name))=lower(trim($2))) AND coalesce(email,'')<>''`, [sup.id, sup.name])).rows.map(r => r.e).filter(emailOk);
   const html = supplierWeeklyHtml(sup.name, W, { zh: sup.zh, currency: sup.ccy, portalUrl: PORTAL_URL, weekEnding: today });
-  return { supplier: sup.name, enabled: !!sup.weekly_email_enabled, users, week_ending: today, W, html, subject: 'Dock & Bay weekly update: ' + sup.name + ', week ending ' + ddMonYy(today) };
+  const doc = (banner) => supplierWeeklyDoc(html, banner);   // v28.815: full light-only document (dark mode safe)
+  return { supplier: sup.name, enabled: !!sup.weekly_email_enabled, users, week_ending: today, W, html, doc, subject: 'HORIZON Supplier Portal weekly update: ' + sup.name + ', week ending ' + ddMonYy(today) };   // v28.815: subject names the portal
 }
 app.post('/api/cron/supplier-weekly', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
@@ -40049,7 +40050,7 @@ app.post('/api/cron/supplier-weekly', async (req, res) => {
         const row = { supplier: B.supplier, recipients: B.users.join(', '), actions: B.W.actions, payments: B.W.payments.length, new_pos: B.W.new_pos.length };
         if (B.W.empty || !B.users.length) { row.status = 'skipped'; row.error = B.W.empty ? 'nothing to report' : 'no active portal users'; }
         else if (dry) row.status = 'would send';
-        else { const r = await sendResendEmail({ to: B.users, bcc: SUPWK_BCC, subject: B.subject, html: B.html, kind: 'supplier_weekly', ref: B.supplier, by: 'cron', channel: 'supplier' });
+        else { const r = await sendResendEmail({ to: B.users, bcc: SUPWK_BCC, subject: B.subject, html: B.doc(), kind: 'supplier_weekly', ref: B.supplier, by: 'cron', channel: 'supplier' });
           row.status = r && r.sent ? 'sent' : 'error'; if (r && r.error) row.error = String(r.error).slice(0, 300); }
         if (!dry) await pool.query(`INSERT INTO planner.supplier_weekly_log (supplier, week_ending, status, recipients, actions, payments, new_pos, error, by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'cron')`,
           [B.supplier, B.week_ending, row.status, row.recipients, row.actions, row.payments, row.new_pos, row.error || null]);
@@ -40063,14 +40064,14 @@ app.get('/api/supply/supplier-weekly/preview', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' });
     const B = await supplierWeeklyBuild(String(req.query.supplier || ''));
     if (req.query.json) return res.json({ supplier: B.supplier, enabled: B.enabled, recipients: B.users, bcc: SUPWK_BCC, week_ending: B.week_ending, would_send: !B.W.empty && B.users.length > 0, actions: B.W.actions, groups: B.W.groups, payments: B.W.payments, new_pos: B.W.new_pos });
-    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send('<!doctype html><meta charset="utf-8"><title>' + B.subject.replace(/[<&]/g, '') + '</title><div style="background:#f2f4f7;padding:16px;font-family:Arial,sans-serif;font-size:12px;color:#475467">To: ' + (B.users.join(', ') || '(no active portal users)') + ' · Bcc: ' + SUPWK_BCC.join(', ') + ' · ' + (B.enabled ? 'weekly email ON' : 'weekly email OFF for this supplier') + (B.W.empty ? ' · nothing to report: would NOT be sent' : '') + '</div>' + B.html);
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(B.doc('<div style="background:#f2f4f7;padding:16px;font-family:Arial,sans-serif;font-size:12px;color:#475467">To: ' + (B.users.join(', ') || '(no active portal users)') + ' · Bcc: ' + SUPWK_BCC.join(', ') + ' · ' + (B.enabled ? 'weekly email ON' : 'weekly email OFF for this supplier') + (B.W.empty ? ' · nothing to report: would NOT be sent' : '') + '</div>').replace('<head>', '<head><title>' + B.subject.replace(/[<&]/g, '') + '</title>'));
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/supplier-weekly/test', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' });
     const to = String(me.email || authUser(req) || '').trim(); if (!emailOk(to)) return res.status(400).json({ error: 'no email for you' });
     const B = await supplierWeeklyBuild(String((req.body && req.body.supplier) || ''));
-    const r = await sendResendEmail({ to, subject: '[TEST] ' + B.subject, html: '<p style="font-family:Arial,sans-serif;font-size:12px;color:#92400e">Test copy. The real one goes to: ' + (B.users.join(', ') || '(no active portal users)') + '</p>' + B.html, kind: 'supplier_weekly_test', ref: B.supplier, by: to, channel: 'supplier' });
+    const r = await sendResendEmail({ to, subject: '[TEST] ' + B.subject, html: B.doc('<p style="font-family:Arial,sans-serif;font-size:12px;color:#92400e;margin:8px">Test copy. The real one goes to: ' + (B.users.join(', ') || '(no active portal users)') + '</p>'), kind: 'supplier_weekly_test', ref: B.supplier, by: to, channel: 'supplier' });
     await pool.query(`INSERT INTO planner.supplier_weekly_log (supplier, week_ending, status, recipients, actions, payments, new_pos, by) VALUES ($1,$2,'test',$3,$4,$5,$6,$7)`, [B.supplier, B.week_ending, to, B.W.actions, B.W.payments.length, B.W.new_pos.length, to]);
     res.json({ ok: !!(r && r.sent), to, error: r && r.error });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }

@@ -1,3 +1,9 @@
+## v28.815 (13-Nov-26) Supplier weekly email: dark mode + clear sender
+- Dark-mode safe: every coloured block has explicit background and text colours, no opacity, light-only colour scheme meta + dark-mode CSS restating the light colours, table-based button (bgcolor on the cell).
+- Header now reads "HORIZON SUPPLIER PORTAL / Dock & Bay", subject "HORIZON Supplier Portal weekly update: <supplier>, week ending dd-mmm-yy", button "Open the HORIZON Supplier Portal" + plain link under it.
+- New export supplierWeeklyDoc() wraps the email as a full document; send, test and preview all use it.
+- No new env vars, no migrations, no new cron routes.
+
 ## v28.814 (13-Nov-26) Supplier weekly wrap-up email (migration 446)
 - Ben: every Sunday 08:00 Australia/Sydney each supplier with "Enable weekly email wrap" on (CONFIG > Suppliers > edit, new Weekly email block, default No) gets ONE email to all its active supplier portal users, BCC ben@ (env SUPPLIER_WEEKLY_BCC overrides). Sections: Needs your attention (the portal home page + menu badge rules, ported 1:1 in lib/supplier-weekly.mjs: PO actions, shipments, samples, product development, profile prompts), payments in the last 7 days, new purchase orders in the last 7 days; Chinese headings for China-based suppliers; every item links into the portal. Not sent when there is nothing to report. One send per supplier per week (planner.supplier_weekly_log). Checked on the sandbox: XR Textile email = portal badges (POs 34, shipments 6, samples 0) + 2 profile prompts.
 - Supplier edit form: Preview this week (opens the exact email, shows To / Bcc / would-send) and Send me a test (to the signed-in admin only).
