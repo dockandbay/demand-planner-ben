@@ -1,3 +1,8 @@
+## v28.808 (13-Nov-26) Payments Report Xero ticks: combined payments, links, left aligned; AU badge explains why
+- Ben (PO-1678113, bill 344c620f, "all payments are applied but the payments report says not"): Paid > Xero pays several milestones of one bill on the same day as ONE Xero payment (855.74 + 2,139.35 = 2,995.09; PO-1845586 1,688 + 4,220 = 5,908). The tick check matched one payment per milestone, so both showed the amber warning. Same-day HORIZON payments whose sum equals one Xero payment on the bill (within 1, dated within 3 days) now count as recorded. Also feeds the Xero exceptions check.
+- Every green tick links to the PO's Xero bill (as the warning already did); the Xero column is left aligned.
+- A run flagged AU because an Other payment is linked to a bill in the AU Xero org now shows "AU Xero bill" (not "must pay AU", which stays for AU deposits / orders), with a tooltip: to pay it from the UK the bill must be in the UK org. No migration, route or env var.
+
 ## v28.807 (13-Nov-26) Emergency login code: To do + email for everyone not set up
 - Ben: CONFIG > Admin > Emergency login has "Add To do + email to everyone not set up". It adds a To do "Set up your HORIZON emergency login code (1 minute)" (due in 7 days) to each @dockandbay.com HORIZON user without a confirmed code (skips anyone who already has it open) and emails each person the set-up steps. The link https://horizon.dockandbay.com/#/emergency-code opens the set-up screen. The To do ticks itself when the person confirms their code. Links in To do notes are now clickable. New route POST /api/auth/emergency/todos (admin, dry run counts only). No migration or env var.
 

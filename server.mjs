@@ -11878,6 +11878,13 @@ async function poXeroPayCheck(poList) {
     hz.sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(h => {
       let best = null; xs.forEach(x => { if (!x.used && Math.abs(x.amount - h.amount) <= 1 && (!best || days(x.date, h.date) < days(best.date, h.date))) best = x; });
       if (best) { best.used = true; h.in_xero = true; h.xero_date = best.date; h.xero_kind = best.kind; } else h.in_xero = false; });
+    // v28.808 (Ben 13-Nov-26, PO-1678113): Paid > Xero pays several milestones of one bill on the same day as ONE Xero payment (completion 855.74 +
+    // balance 2,139.35 = 2,995.09). Unmatched HORIZON payments of the same day whose SUM equals one unused Xero payment (within 1, dated within
+    // 3 days) are recorded on the bill too.
+    const left = hz.filter(h => !h.in_xero), byDay = {}; left.forEach(h => { (byDay[h.date] = byDay[h.date] || []).push(h); });
+    Object.keys(byDay).forEach(d => { const g = byDay[d]; if (g.length < 2) return; const sum = g.reduce((a, h) => a + h.amount, 0);
+      const x = xs.find(x => !x.used && Math.abs(x.amount - sum) <= 1 && days(x.date, d) <= 3);
+      if (x) { x.used = true; g.forEach(h => { h.in_xero = true; h.xero_date = x.date; h.xero_kind = 'combined payment ' + x.amount.toFixed(2); }); } });
     out[r.po] = { bill_id: r.bill_id, bill_ref: r.bill_ref, deposit_ref: r.deposit_ref, payments: hz, xero_unmatched: xs.filter(x => !x.used).map(({ used, ...x }) => x) };
   });
   return { at: m && m.at, by_po: out };
