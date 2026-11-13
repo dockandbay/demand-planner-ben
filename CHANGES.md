@@ -1,3 +1,10 @@
+## v28.816 (13-Nov-26) WSSI: release window filter + hold stock until a date (Kathryn)
+- New Release window filter on DEMAND > WSSI (products.release_window; blank = Unassigned).
+- "Hold stock until" rules (shared, demand edit rights to change): stock of SKUs in a release window is left out of opening, closing, intake, transfers and write-offs until the month of the date, and arrives as intake in that month. Sales are not changed. Stored in planner.app_settings key wssi_hold_rules (no migration). Routes GET/POST /api/demand/wssi-hold (added to the auth gate list like the other wssi-* routes).
+- WSSI rows gain the release window as their LAST element (existing offsets unchanged). Notes are not split by release window.
+- Checked on the sandbox: SS27 until 01-Jan-27 moves 145,934 units out of Nov-26 and Dec-26 stock and into Jan-27 intake; Jan-27 closing unchanged.
+- No new env vars, no migrations, no new cron routes.
+
 ## v28.815 (13-Nov-26) Supplier weekly email: dark mode + clear sender
 - Dark-mode safe: every coloured block has explicit background and text colours, no opacity, light-only colour scheme meta + dark-mode CSS restating the light colours, table-based button (bgcolor on the cell).
 - Header now reads "HORIZON SUPPLIER PORTAL / Dock & Bay", subject "HORIZON Supplier Portal weekly update: <supplier>, week ending dd-mmm-yy", button "Open the HORIZON Supplier Portal" + plain link under it.

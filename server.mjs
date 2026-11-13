@@ -12,7 +12,7 @@ import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
-import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory, wssiEff } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
+import { wssiLoad, wssiBuild, catGroup, WSSI_CGROUPS, wssiExcludedCategory, wssiEff, wssiHoldClean } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI · v28.547 category groups
 import { B2B_TYPES, B2B_CURRENCIES, B2B_STATUSES, B2B_COGS_DEFAULT, b2bRate, b2bCalc, b2bChecks, b2bSummary, b2bParseSheet, b2bSplitText, b2bParseDate, b2bDateSuspect, b2bNum, b2bPct, b2bFy, b2bCsv } from './lib/b2b_forecast.mjs';   // v28.603 CLIENT > B2B forecast
 import { ILG_POOLS, ILG_SITES, ilgPoolsOf, ILG_FILE_RE, ILG_GMAIL_Q, GENEVA_FILE_RE, GENEVA_GMAIL_Q, ilgReportAt, parseIlgReport, parseGenevaReport, ilgPoolReport, ilgFulfilSnapshot, ilgCompare } from './lib/ilg-stock.mjs';   // v28.553 ILG daily stock report + rebaseline; v28.682 + US Geneva
 
@@ -1473,6 +1473,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/demand/wssi-otb')   // v28.487 DEMAND ▸ Inputs ▸ Open to buy (handler re-checks demand_edit)
       || p.startsWith('/api/demand/wssi-plan') || p.startsWith('/api/demand/wssi-overrides')   // v28.559: were unlisted, so admin only; handlers re-check (lock = admin)
       || p.startsWith('/api/demand/wssi-notes')   // v28.559 WSSI cell notes (handler re-checks demand_edit; delete = own or admin)
+      || p.startsWith('/api/demand/wssi-hold')   // v28.816 WSSI hold-stock rules (handler re-checks demand_edit)
       || p.startsWith('/api/demand/wssi-views')   // v28.745 WSSI saved views (handler re-checks demand_edit; delete = own or admin)
       || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
       || p.startsWith('/api/demand/preorders')   // v28.245 Sync from Fulfil writes preorders + preorder_lines (Diviyaj review)
@@ -29755,6 +29756,25 @@ app.get('/api/demand/wssi-views', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ views: rows });
   } catch (e) { if (_viewsMissing(e)) return res.json({ views: [], missing: 'migration 424' }); log500(e); res.status(500).json({ error: 'Could not load WSSI views' }); }
 });
+// v28.816 (Kathryn 13-Nov-26): WSSI hold rules, shared. Stock of a release window counts only from the month of its date (arrives as intake then).
+app.get('/api/demand/wssi-hold', async (req, res) => {
+  try { const r = (await pool.query(`SELECT value, coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.app_settings WHERE key='wssi_hold_rules'`)).rows[0];
+    let v = {}; try { v = r && r.value ? JSON.parse(r.value) : {}; } catch { v = {}; }
+    const rws = (await pool.query(`SELECT DISTINCT trim(release_window) rw FROM planner.products WHERE coalesce(trim(release_window),'') <> '' ORDER BY 1`)).rows.map(x => x.rw);
+    res.json({ rules: wssiHoldClean(v.rules), updated_by: (r && r.updated_by) || '', updated_at: (r && r.updated_at) || '', release_windows: rws });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/demand/wssi-hold', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to change hold rules' });
+    const rules = wssiHoldClean((req.body || {}).rules); if (rules.length > 40) return res.status(400).json({ error: 'Too many rules' });
+    await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('wssi_hold_rules', $1, $2, now())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`, [JSON.stringify({ rules }), me.email || null]);
+    _wssiCache.clear();
+    res.json({ ok: true, rules });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+
 app.post('/api/demand/wssi-views', async (req, res) => {
   try {
     const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save a view' });

@@ -14363,10 +14363,10 @@ function renderShipBagView(body){
 // "WSSI OTB Format" sheet. Replaces REPORTS ▸ Open-to-Buy. Read only for now (a worksheet version with editable OTB and target
 // inputs may follow). Data: GET /api/demand/wssi (lib/wssi.mjs): month × market × channel (sales) / stock pool (stock) ×
 // category × seasonality × product status. This view filters, sums and derives the ratios. Logic: lib/ai-logic/wssi.md.
-var WSSI={fy:null,data:{},otb:{},plan:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{fp:true},rowsOn:null,viewId:null,views:null,ws:false,wq:Promise.resolve(),wundo:[],wsaving:0,wmsg:null,bulkOk:false,notes:{}};
+var WSSI={fy:null,data:{},otb:{},plan:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[],rw:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{fp:true},rowsOn:null,viewId:null,views:null,ws:false,wq:Promise.resolve(),wundo:[],wsaving:0,wmsg:null,bulkOk:false,notes:{}};
 try{ WSSI.show.sum=localStorage.getItem('hz_wssi_sum')==='1'; WSSI.ws=localStorage.getItem('hz_wssi_ws')==='1'; var _wr=JSON.parse(localStorage.getItem('hz_wssi_rows')||'null'); if(_wr){ WSSI.rowsOn=Array.isArray(_wr.rows)?_wr.rows:null; WSSI.viewId=_wr.view||null; if(_wr.closed)WSSI.closed=_wr.closed; } }catch(e){}   // v28.745 rows shown / saved view, per browser
 // v28.557 worksheet mode: inputs are stored per market × channel × category group, so editing needs exactly one of each (and no seasonality / status filter)
-function wssiWsCombo(){ var S=WSSI.sel; if(S.mkt.length!==1||S.ch.length!==1||S.cat.length!==1||S.sea.length||S.st.length)return null; return {mk:S.mkt[0],ch:S.ch[0],cg:S.cat[0]}; }   // v28.486 Summary numbers (k / m), remembered per browser
+function wssiWsCombo(){ var S=WSSI.sel; if(S.mkt.length!==1||S.ch.length!==1||S.cat.length!==1||S.sea.length||S.st.length||(S.rw&&S.rw.length))return null; return {mk:S.mkt[0],ch:S.ch[0],cg:S.cat[0]}; }   // v28.486 Summary numbers (k / m), remembered per browser
 var WSSI_CH_POOL={DTC:'3PL',B2B:'3PL',ZAL:'3PL',TIK:'3PL',FBA:'FBA'};
 function wssiH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function wssiMon(k){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+k.slice(5,7)-1]+'-'+k.slice(2,4); }
@@ -14409,12 +14409,13 @@ function wssiPriceOv(fy){ var ov=(WSSI.plan[fy]||{}).overrides||[]; if(_WPOV.a==
 // Sum the filtered facts into one column object per month (24: last year then this year).
 function wssiCompute(D){
   var S=WSSI.sel, dict=D.dict, n=D.months.length;
-  function keep(d,i){ var a=S[d]; return !a.length||a.indexOf(dict[d][i])>=0; }
+  function keep(d,i){ var a=S[d]||[]; return !a.length||a.indexOf((dict[d]||[])[i])>=0; }
+  function keepRw(r){ return keep('rw',r[r.length-1]); }   // v28.816 release window = last element of each row
   var pools={}; if(S.ch.length){ S.ch.forEach(function(c){ pools[WSSI_CH_POOL[c]||'3PL']=1; }); } else { pools['3PL']=pools.FBA=1; }
   var onlyB2B=S.ch.length===1&&S.ch[0]==='B2B';
   var sc=D.sales_cols, kc=D.stock_cols, sales=[], stock=[], i, j;
   for(i=0;i<n;i++){ sales.push(new Array(sc.length).fill(0)); stock.push(new Array(kc.length).fill(0)); }
-  D.sales.forEach(function(r){ if(!keep('mkt',r[1])||!keep('ch',r[2])||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5]))return; var a=sales[r[0]]; for(j=0;j<sc.length;j++)a[j]+=r[6+j]; });
+  D.sales.forEach(function(r){ if(!keep('mkt',r[1])||!keep('ch',r[2])||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5])||!keepRw(r))return; var a=sales[r[0]]; for(j=0;j<sc.length;j++)a[j]+=r[6+j]; });
   var SI={}, KI={}; sc.forEach(function(c,x){ SI[c]=x; }); kc.forEach(function(c,x){ KI[c]=x; });
   // v28.745 (Kathryn round 2, point 13): target closing stock = forward cover weeks × the next 3 months' weekly demand. The server builds it at
   // the 12-week default; a cover typed for month × market × channel × category group (DTC = the 3PL pool, FBA = Amazon) scales that pool's target.
@@ -14422,7 +14423,7 @@ function wssiCompute(D){
   (PL0.overrides||[]).forEach(function(x){ if(x.measure==='cover_wks'&&(x.channel==='DTC'||x.channel==='FBA'))covK[x.month+'|'+x.market+'|'+(x.channel==='FBA'?'FBA':'3PL')+'|'+x.cgroup]=Number(x.value)||0; });
   // v28.746 (release 2): a price overtype revalues that pool's £ retail (or £ full) stock rows for the month: × typed price ÷ system price
   var POV=wssiPriceOv(D.fy), SYS0=wssiSys(D), rJ=['opR','clR','inR','trR','woR','tgR','sfR'].map(function(c){ return KI[c]; }), fJ=[KI.opF,KI.clF,KI.clFb], prOn={};
-  D.stock.forEach(function(r){ if(!keep('mkt',r[1])||!pools[dict.pool[r[2]]]||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5]))return; var a=stock[r[0]];
+  D.stock.forEach(function(r){ if(!keep('mkt',r[1])||!pools[dict.pool[r[2]]]||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5])||!keepRw(r))return; var a=stock[r[0]];
     var ck=D.months[r[0]]+'|'+dict.mkt[r[1]]+'|'+dict.pool[r[2]]+'|'+dict.cat[r[3]], cw=covK[ck], f=cw!=null?cw/defW:1; if(cw!=null)covOn[r[0]]=true;
     var pv=POV[ck], sp=pv&&SYS0.sp[ck], fr=1, ff=1; if(pv&&sp&&sp[0]>0){ if(pv.price>0&&sp[1]>0){ fr=pv.price/(sp[1]/sp[0]); prOn[r[0]]=1; } if(pv.full>0&&sp[2]>0){ ff=pv.full/(sp[2]/sp[0]); prOn[r[0]]=1; } }
     for(j=0;j<kc.length;j++){ var v=r[6+j]; if(f!==1&&tgJ.indexOf(j)>=0)v*=f; if(fr!==1&&rJ.indexOf(j)>=0)v*=fr; if(ff!==1&&fJ.indexOf(j)>=0)v*=ff; a[j]+=v; } });
@@ -14449,7 +14450,7 @@ function wssiCompute(D){
   // the live overrides. Forecast override (sales units, open months) replaces the system forecast for that market × channel × group: sales £ moves
   // at the cell's ASP and the difference runs through projected closing stock. Target closing override replaces the pool's target units.
   // Plan intake units = plan closing − plan opening (last month's plan closing; the first month opens on actual stock) + plan sales units.
-  var PL=WSSI.plan[D.fy]||{}, sys=wssiSys(D), cut=!!(S.sea.length||S.st.length), inF=function(mk,ch,cg){ return !(S.mkt.length&&S.mkt.indexOf(mk)<0)&&!(S.ch.length&&S.ch.indexOf(ch)<0)&&!(S.cat.length&&S.cat.indexOf(cg)<0); };
+  var PL=WSSI.plan[D.fy]||{}, sys=wssiSys(D), cut=!!(S.sea.length||S.st.length||(S.rw&&S.rw.length)), inF=function(mk,ch,cg){ return !(S.mkt.length&&S.mkt.indexOf(mk)<0)&&!(S.ch.length&&S.ch.indexOf(ch)<0)&&!(S.cat.length&&S.cat.indexOf(cg)<0); };
   var byM={}; cols.forEach(function(o){ byM[o.m]=o; o.pnR=o.pnU=o.pnClU=o.pnClR=o.pnClC=o.fsR=o.fsU=o.cutoff=null; o.ovF=o.ovT=false; });
   // v28.745 (point 14): Cut off Stock Target, fully manual, any month; the sum of what was typed for the markets, channels and groups picked
   (PL.overrides||[]).forEach(function(x){ if(x.measure!=='cutoff')return; var o=byM[x.month]; if(!o||!inF(x.market,x.channel,x.cgroup))return; o.cutoff=(o.cutoff||0)+(Number(x.value)||0); });
@@ -14477,7 +14478,7 @@ function wssiCompute(D){
     var pr=o._p, pf=o._pf||o._p, n0=cumWU-cumDU;   // v28.746: carried-in units valued at this month's price
     o.opU+=n0; o.opR+=n0*pr; o.opC+=cumWC-cumDC; o.opF+=n0*pf; cumDU+=du; cumDR+=dr; cumDC+=dc; cumWU+=wu; cumWR+=wr; cumWC+=wc;
     var n1=cumWU-cumDU; o.clU+=n1; o.clR+=n1*pr; o.clC+=cumWC-cumDC; o.clF+=n1*pf; });
-  return {cols:cols, planV:PL.locked_version||null, ovrCut:cut&&ovr.length>0, otbSplitOnly:otbRows.length>0&&(S.sea.length||S.st.length), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
+  return {cols:cols, planV:PL.locked_version||null, ovrCut:cut&&ovr.length>0, otbSplitOnly:otbRows.length>0&&(S.sea.length||S.st.length||(S.rw&&S.rw.length)), partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
 }
 function wssiDerive(o,ly){
   var d=function(a,b){ return b?a/b:null; };
@@ -14811,7 +14812,33 @@ function wssiWsBind(body,root,D,cols,ROWK,edCfg,WS){
 // (month, period, or '' = the whole row) in the filter view it was written in. It shows in that view and in every view above it (each dimension
 // either All, or containing all the note's values); notes from a narrower view carry a tag saying where they came from. A bar left of each row
 // name shows the row's note count (+ on hover to add); a cell with notes gets a corner marker; right-click any cell to add one.
-var WSSI_NDIMS=['mkt','ch','cat','sea','st'];
+// v28.816 (Kathryn 13-Nov-26): hold rules. Stock of a release window (e.g. SS27 bought early) is left out of opening, closing and intake until
+// the month of the date, and arrives as intake in that month. Shared by everyone (app_settings wssi_hold_rules); demand edit rights to change.
+function wssiHoldBar(D){ var R=D.hold_rules||[], fd=function(d){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d?d.slice(8,10)+'-'+M[+d.slice(5,7)-1]+'-'+d.slice(2,4):''; };
+  return '<div class="w-note" id="wssi-hold" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px"><b>Hold stock until</b>'
+    +(R.length?R.map(function(r){ return '<span style="background:var(--amber-bg,#fef3c7);color:var(--ink);border-radius:5px;padding:1px 7px">'+wssiH(r.rw)+' until '+fd(r.until)+'</span>'; }).join(''):'<span style="color:var(--muted)">none: all stock counts as on hand</span>')
+    +'<button type="button" class="w-pick" id="wssi-hold-edit" title="Leave a release window\u2019s stock out of on hand (opening, closing, intake) until a date; it arrives as intake in that month">Edit rules</button></div>'; }
+function wssiHoldEdit(body){ var old=document.getElementById('wssi-hold-pop'); if(old){ old.remove(); return; }
+  var host=document.getElementById('wssi-hold'); if(!host)return; var p=document.createElement('div'); p.id='wssi-hold-pop';
+  p.style.cssText='flex-basis:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:4px;font-size:12px';
+  p.innerHTML='Loading\u2026'; host.appendChild(p);
+  fetch('/api/demand/wssi-hold').then(function(r){ return r.json(); }).then(function(d){ if(d.error)throw new Error(d.error);
+    var rws=d.release_windows||[], rows=(d.rules||[]).slice();
+    var draw=function(){ p.innerHTML='<div style="color:var(--muted);margin-bottom:6px">Stock of SKUs in the release window counts as on hand from the month of the date. Before it: not in opening, closing or intake. In that month: it arrives as intake. Sales are not changed. Applies to all markets and to everyone.</div>'
+      +rows.map(function(r,i){ return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><span>Release window</span><select data-i="'+i+'" data-k="rw" class="w-pick">'+rws.map(function(x){ return '<option'+(x===r.rw?' selected':'')+'>'+wssiH(x)+'</option>'; }).join('')+'</select><span>until</span><input type="date" data-i="'+i+'" data-k="until" class="w-pick" value="'+wssiH(r.until||'')+'"><button type="button" class="w-pick" data-del="'+i+'" title="Remove this rule">\u2715</button></div>'; }).join('')
+      +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button type="button" class="w-pick" id="wssi-hold-add">+ Add rule</button><button type="button" class="w-pill on" id="wssi-hold-save">Save</button><button type="button" class="w-pick" id="wssi-hold-cancel">Cancel</button><span id="wssi-hold-msg" style="color:var(--muted)">'+(d.updated_by?'Last changed by '+wssiH(String(d.updated_by).split('@')[0])+' '+(function(t){ t=String(t||''); var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return /^\d{4}-\d{2}-\d{2}/.test(t)?t.slice(8,10)+'-'+M[+t.slice(5,7)-1]+'-'+t.slice(2,4)+t.slice(10):wssiH(t); })(d.updated_at):'')+'</span></div>';
+      p.querySelectorAll('[data-k]').forEach(function(el){ el.onchange=function(){ rows[+el.dataset.i][el.dataset.k]=el.value; }; });
+      p.querySelectorAll('[data-del]').forEach(function(el){ el.onclick=function(){ rows.splice(+el.dataset.del,1); draw(); }; });
+      p.querySelector('#wssi-hold-add').onclick=function(){ rows.push({rw:rws.indexOf('SS27')>=0?'SS27':(rws[0]||''),until:''}); draw(); };
+      p.querySelector('#wssi-hold-cancel').onclick=function(){ p.remove(); };
+      p.querySelector('#wssi-hold-save').onclick=function(){ var bad=rows.filter(function(r){ return !r.rw||!/^\d{4}-\d{2}-\d{2}$/.test(r.until||''); }); var m=p.querySelector('#wssi-hold-msg');
+        if(bad.length){ m.textContent='Every rule needs a release window and a date'; m.style.color='var(--neg)'; return; }
+        m.textContent='Saving and rebuilding\u2026'; m.style.color='var(--muted)'; this.disabled=true;
+        fetch('/api/demand/wssi-hold',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rules:rows})}).then(function(r){ return r.json(); }).then(function(x){ if(x.error)throw new Error(x.error);
+          p.remove(); wssiLoad(WSSI.fy,true); }).catch(function(e){ m.textContent=String(e.message||e); m.style.color='var(--neg)'; p.querySelector('#wssi-hold-save').disabled=false; }); };
+    }; draw();
+  }).catch(function(e){ p.textContent='Could not load the rules: '+String(e.message||e); }); }
+var WSSI_NDIMS=['mkt','ch','cat','sea','st'];   // v28.816: notes are not split by release window (no column for it)
 function wssiNotesLoad(fy){ WSSI.notes[fy]={list:[],loading:true};
   fetch('/api/demand/wssi-notes?fy='+fy).then(function(r){ return r.json(); }).then(function(d){ WSSI.notes[fy]={list:d.notes||[],missing:d.missing||''}; }).catch(function(e){ WSSI.notes[fy]={list:[],err:String(e&&e.message||e)}; })
     .then(function(){ if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'&&!WSSI._ed){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } }); }
@@ -14947,7 +14974,7 @@ function renderWssiView(body){
   var h='<div id="wssi-root"><div class="w-head"><div><h2>WSSI</h2><div class="w-sub">Weekly sales, stock and intake with open to buy. '+fyLbl+' runs '+wssiMon(D.months[ly])+' to '+wssiMon(D.months[D.months.length-1])+'; H1 Mar to Aug, H2 Sep to Feb. '+(WS?'Worksheet: bordered cells are editable.':'Read only; pick one market, channel and category group to use the worksheet.')+'</div></div>'
     +'<div class="w-acts"><span class="w-meta">Actuals to '+wssiMon(D.actual_to)+' · built '+(D.built_at?new Date(D.built_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/ /g,'-').replace(',-',' '):'')+'</span>'
     +'<button class="w-pill'+(WS?' on':'')+'" id="wssi-ws"'+(combo?' title="Edit the plan, open to buy and overrides for '+wssiH(combo.mk+' · '+combo.ch+' · '+combo.cg)+'"':' disabled title="Pick one market, one channel and one category group (seasonality and product status All) to edit the plan and open to buy"')+'>✎ Worksheet</button><button class="w-btn" id="wssi-refresh" title="Rebuild from live data (cached 10 minutes)">Refresh</button><button class="w-btn" id="wssi-dl">Download .xlsx</button></div></div>'
-    +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category group')+pick('sea','Seasonality')+pick('st','Product status')
+    +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category group')+pick('sea','Seasonality')+pick('rw','Release window')+pick('st','Product status')
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="wssi-fy">'+(D.fy_options||[curFy]).map(function(y){ return '<option value="'+y+'"'+(y===D.fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Show</span>'
     +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span>'
@@ -14955,8 +14982,9 @@ function renderWssiView(body){
     +'<span class="w-sep"></span><span class="w-fg" id="wssi-rowsg"><span class="w-fl">View</span><select class="w-pick" id="wssi-view" title="Saved row layouts, shared with the team">'
     +'<option value="">Default (template)</option>'+(WSSI.views||[]).map(function(v){ return '<option value="'+v.id+'"'+(WSSI.viewId===v.id?' selected':'')+'>'+wssiH(v.name)+'</option>'; }).join('')
     +(WSSI.rowsOn&&!WSSI.viewId?'<option value="_c" selected>Custom (not saved)</option>':'')+'</select><button type="button" class="w-pick" id="wssi-rows" title="Tick the rows to show; save the layout as a named view">Rows ▾</button></span></div>';
-  if(C.otbSplitOnly)h+='<div class="w-note">Open to buy is entered by market, channel and category group, so the seasonality and product status filters do not split it: the Proposed rows show the full amount for the markets, channels and category groups picked.</div>';
-  if(C.ovrCut)h+='<div class="w-note">Forecast and target overrides are set by market, channel and category group, so they are not applied while a seasonality or product status filter is on.</div>';
+  h+=wssiHoldBar(D);   // v28.816 hold-stock rules
+  if(C.otbSplitOnly)h+='<div class="w-note">Open to buy is entered by market, channel and category group, so the seasonality, release window and product status filters do not split it: the Proposed rows show the full amount for the markets, channels and category groups picked.</div>';
+  if(C.ovrCut)h+='<div class="w-note">Forecast and target overrides are set by market, channel and category group, so they are not applied while a seasonality, release window or product status filter is on.</div>';
   if(C.partialPool)h+='<div class="w-note">Stock is held by pool (3PL for DTC, B2B and Zalando; FBA for Amazon), not by channel. With this channel filter the stock rows show the whole 3PL pool, while the sales rows show only the channels picked.</div>';
   var fyT=tots[tots.length-1], last=ty[ty.length-1], ytg=tots.filter(function(t){ return t.name==='YTG'; })[0];
   var vp=fyT.vSalesP, over=last.vsT>0;
@@ -15019,9 +15047,10 @@ function renderWssiView(body){
     var bytes=buildXlsx('WSSI',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download='wssi_'+fyLbl+'_'+D.actual_to+'.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); };
   var closePop=function(){ root.querySelectorAll('.w-pop').forEach(function(p){ p.remove(); }); };
+  var hb=root.querySelector('#wssi-hold-edit'); if(hb)hb.onclick=function(e){ e.stopPropagation(); wssiHoldEdit(body); };   // v28.816
   root.querySelectorAll('.w-fg[data-f] .w-pick').forEach(function(b){ b.onclick=function(e){
     e.stopPropagation(); var g=b.parentNode, d=g.dataset.f, had=g.querySelector('.w-pop'); closePop(); if(had)return;
-    var opts=dict[d].slice().sort(function(a,b2){ return String(a).localeCompare(String(b2)); }), p=document.createElement('div'); p.className='w-pop';
+    var opts=(dict[d]||[]).slice().sort(function(a,b2){ return String(a).localeCompare(String(b2)); }), p=document.createElement('div'); p.className='w-pop';
     p.innerHTML='<div class="w-pa"><a data-a="all">All</a><a data-a="none">Clear</a></div>'+opts.map(function(o,ix){ return '<label><input type="checkbox" id="wssi-'+d+'-'+ix+'" value="'+wssiH(o)+'"'+(WSSI.sel[d].indexOf(o)>=0?' checked':'')+'> '+wssiH(o||'(blank)')+'</label>'; }).join('');
     p.onclick=function(ev){ ev.stopPropagation(); var a=ev.target.closest('[data-a]'); if(a){ WSSI.sel[d]=[]; renderWssiView(body); } };
     p.onchange=function(){ WSSI.sel[d]=[].slice.call(p.querySelectorAll('input:checked')).map(function(x){ return x.value; }); if(WSSI.sel[d].length===opts.length)WSSI.sel[d]=[]; var keep=d; renderWssiView(body); var nb=document.querySelector('#wssi-root .w-fg[data-f="'+keep+'"] .w-pick'); if(nb)nb.click(); };
