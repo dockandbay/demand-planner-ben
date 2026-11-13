@@ -13834,7 +13834,7 @@ function hzPortalHelp(el){
   // (Reference, Amount, Type, Production ref, Deposit ref) — ALL lines incl. "other". Pastes into Sheets.
   // v28.625 (Ben): AU deposits MUST be paid from the AU bank (their own run, region AU). Ordinary AU order payments (620.00 AU) can be paid
   // together with the UK ones, so a UK run that holds some is only tagged "includes AU".
-  function payInclAu(run){ return (run.lines||[]).some(function(l){ return String(l.account_code||'').toUpperCase()==='620.00 AU'; }); }
+  function payInclAu(run){ return (run.lines||[]).some(function(l){ return String(l.account_code||'').toUpperCase()==='620.00 AU'||(l.xero_doc&&l.xero_doc.region==='au'); }); }   // v28.817: + an Other line whose Xero bill is in the AU org (paid from the UK via the 901 loan)
   function payMustAu(run){ return run.region==='AU' || !!run.au_deposit; }
   var PAY_AU_MSG='This payment includes an AU deposit. It MUST be paid from the AU bank account.';
   function xbSummaryTsv(run, ccy, amt){

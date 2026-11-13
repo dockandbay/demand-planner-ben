@@ -1,3 +1,11 @@
+## v28.817 (13-Nov-26) Payments Report: AU-org Other bills join the UK payment (Ben)
+- Ben: "We can pay au bills from uk, they don't have to be paid from AU. Only au deposits must be paid from au." From 11-Nov-26 an Other payment stays in the supplier's UK run even when its Xero bill is in the AU org (constant OTHER_AU_MERGE_FROM; written into the two SQL CASEs that set an Other line's run region). Earlier AU Other runs keep their own run (already paid that way). AU deposits unchanged (still their own AU run).
+- Paid > Xero now decides per bill: a bill in the bank's org is paid from the bank; a bill in the other org is paid there from its 901 intercompany loan, and one Spend Money in the bank's org (coded to its 901 loan) covers those bills. Same route as the existing cross-org bank (v28.292). A base-currency bank cannot pay cross-org bills (blocked). Approvals and payments go to each bill's own org.
+- A run holding such a bill shows "includes AU". The in-Xero check looks in both orgs for these runs.
+- Fixed in passing: "Enter the amount that left the bank" referenced payTodo before it was declared (would throw on a zero amount).
+- Checked on the sandbox (dry run, no Xero writes): XR Textile 11-Nov run with the Sample sale donation (Xero AU bill) is one UK run; the dry post pays the AU bill from the AU 901 loan and adds a Spend Money of 1,835.60 from the UK USD bank coded to 901.
+- No new env vars, no migrations, no new cron routes.
+
 ## v28.816 (13-Nov-26) WSSI: release window filter + hold stock until a date (Kathryn)
 - New Release window filter on DEMAND > WSSI (products.release_window; blank = Unassigned).
 - "Hold stock until" rules (shared, demand edit rights to change): stock of SKUs in a release window is left out of opening, closing, intake, transfers and write-offs until the month of the date, and arrives as intake in that month. Sales are not changed. Stored in planner.app_settings key wssi_hold_rules (no migration). Routes GET/POST /api/demand/wssi-hold (added to the auth gate list like the other wssi-* routes).
