@@ -24,7 +24,7 @@ Each person links an authenticator app once, while Google works. If Google is do
 - Only @dockandbay.com addresses with a confirmed code; suspended people (Connect directory / block list) are refused.
 - A code session lasts 24 hours (Google sessions last 7 days), and an amber banner shows it is an emergency session.
 - Each code works once (replay refused); 30 seconds of clock drift allowed either side.
-- 5 wrong codes for one person, or 20 from one IP address, within 15 minutes lock code sign-in for 15 minutes.
+- More than 2 wrong codes for one email within 2 minutes make that email wait 5 minutes; 20 wrong attempts from one IP address within 15 minutes lock that connection for 15 minutes.
 - Every attempt (success or failure, with reason and IP) is logged and visible to admins.
 - Secrets are encrypted at rest (AES-256-GCM with the server-side sealing key); they are never shown again after set-up.
 - Wrong email and wrong code get the same answer, so the page does not reveal who has a code.

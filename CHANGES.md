@@ -1,3 +1,6 @@
+## v28.806 (13-Nov-26) Emergency sign-in lockout: 3 wrong codes in 2 minutes = 5-minute wait
+- Ben: more than 2 wrong attempts for one email within 2 minutes now make that email wait 5 minutes (counted from the 3rd wrong attempt; attempts refused while locked do not extend it). The message says how many minutes are left. The per-IP net stays (20 wrong in 15 minutes = 15 minutes). Replaces 5 wrong in 15 minutes. No migration, route or env var.
+
 ## v28.805 (13-Nov-26) PO action: Assign starting deposit
 - Ben: a PO with a starting deposit (start % above 0) whose Final invoice amount AND Final payment due date are in, but whose start deposit has not been assigned, now raises the open action "Assign starting deposit" (PAYMENTS tab, PO badge, Action items filter). Pool POs included (the old Unpaid payment skipped them); no action at 0 % or NO DEPOSIT; completed POs only while the final payment is due from 30 days ago on. Counted once with Unpaid payment. Live today: 10 POs (e.g. PO-57DILLARDS-LXJULY, PO-57EUBL1, PO-56USLX3-BUNDLE). No migration, route or env var.
 

@@ -23835,8 +23835,8 @@ app.post('/api/demand/sales-source', async (req, res) => {
 // ── EMERGENCY SIGN-IN (v28.804, Ben 13-Nov-26) ─────────────────────────────────────────────────────────────────────────────
 // A second way in that needs neither Google nor email: each person links an authenticator app (TOTP, RFC 6238, 6 digits / 30 s)
 // once while Google works (Profile > Emergency login code). The login page always offers "Sign in with code" (email + code) under
-// the Google button. A code sign-in lasts 24 hours (not 7 days), a code works once, 5 wrong codes per person (or 20 per address)
-// in 15 minutes lock that route for 15 minutes, every attempt is logged (planner.emergency_login_log), suspended people are refused.
+// the Google button. A code sign-in lasts 24 hours (not 7 days), a code works once, 3 wrong codes for one email within 2 minutes lock
+// that email for 5 minutes (20 wrong per IP address in 15 minutes lock it for 15), every attempt is logged (planner.emergency_login_log), suspended people are refused.
 // SESSION GRACE (admin switch, CONFIG > Admin > Emergency login, auto-off after at most 72 h): while on, the Google exchange skips
 // its 7-day "sign in with Google again" limit, so anyone with a live Supabase session re-enters without Google.
 // The cookie minting (signedIdentity) and the login page are the prod auth harness's; this file only adds the routes.
@@ -23926,8 +23926,14 @@ app.post('/api/auth/code-login', async (req, res) => {
   try {
     if (!GATE || typeof signedIdentity !== 'function') return res.status(404).json({ error: 'not available here' });
     if (!email.endsWith('@' + EMERG_DOMAIN)) { await logIt(false, 'domain'); return res.status(401).json({ error: 'Email or code not recognised.' }); }
-    const fails = (await pool.query(`SELECT count(*) FILTER (WHERE email=$1)::int e, count(*) FILTER (WHERE ip=$2)::int i FROM planner.emergency_login_log WHERE NOT ok AND at > now() - interval '15 minutes' AND (email=$1 OR ip=$2)`, [email, ip])).rows[0];
-    if (fails.e >= 5 || fails.i >= 20) { await logIt(false, 'locked'); return res.status(429).json({ error: 'Too many attempts. Wait 15 minutes and try again.' }); }
+    // v28.806 (Ben 13-Nov-26): more than 2 wrong attempts for one email within 2 minutes = that email waits 5 minutes (from the 3rd wrong
+    // attempt; refused 'locked' attempts do not extend it). Plus a wider net per IP address: 20 wrong in 15 minutes = 15-minute wait.
+    const lk = (await pool.query(`SELECT max(a.at) + interval '5 minutes' AS until FROM planner.emergency_login_log a
+        WHERE a.email=$1 AND NOT a.ok AND a.reason <> 'locked' AND a.at > now() - interval '5 minutes'
+          AND (SELECT count(*) FROM planner.emergency_login_log b WHERE b.email=a.email AND NOT b.ok AND b.reason <> 'locked' AND b.at BETWEEN a.at - interval '2 minutes' AND a.at) >= 3`, [email])).rows[0];
+    if (lk && lk.until) { await logIt(false, 'locked'); const mins = Math.max(1, Math.ceil((new Date(lk.until).getTime() - Date.now()) / 60000)); return res.status(429).json({ error: 'Too many wrong codes. Wait ' + mins + ' minute' + (mins === 1 ? '' : 's') + ' and try again.' }); }
+    const ipFails = (await pool.query(`SELECT count(*)::int n FROM planner.emergency_login_log WHERE ip=$1 AND NOT ok AND reason <> 'locked' AND at > now() - interval '15 minutes'`, [ip])).rows[0].n;
+    if (ipFails >= 20) { await logIt(false, 'locked'); return res.status(429).json({ error: 'Too many attempts from this connection. Wait 15 minutes and try again.' }); }
     if (await identityBlockedNow(email, true)) { await logIt(false, 'blocked'); return res.status(403).json({ error: 'Your HORIZON access is suspended.' }); }
     const r = (await pool.query(`SELECT secret_enc, last_step FROM planner.emergency_totp WHERE email=$1 AND confirmed_at IS NOT NULL`, [email])).rows[0];
     const step = r ? totpMatch(gmailUnseal(r.secret_enc), req.body && req.body.code, r.last_step) : null;
