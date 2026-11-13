@@ -9936,6 +9936,8 @@ function hzPortalHelp(el){
         };
         document.getElementById('bg-dl').onclick=function(){ if(!_bg.length)return; var blob=makeZipStore(_bg); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ean_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); };
       };
+      if(!window.__supWkBound){ window.__supWkBound=1; document.addEventListener('click',function(e){ var pv=e.target.closest&&e.target.closest('.sup-wk-prev'); if(pv){ window.open('/api/supply/supplier-weekly/preview?supplier='+encodeURIComponent(pv.dataset.name),'_blank'); return; } var t=e.target.closest&&e.target.closest('.sup-wk-test'); if(!t)return; var m=t.parentNode.querySelector('.sup-wk-msg'); t.disabled=true; if(m)m.textContent='Sending…';
+        fetch('/api/supply/supplier-weekly/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier:t.dataset.name})}).then(function(r){return r.json();}).then(function(j){ t.disabled=false; if(m)m.textContent=(j&&j.ok)?('Sent to '+shortUser(j.to)):((j&&j.error)||'Failed'); }).catch(function(){ t.disabled=false; if(m)m.textContent='Failed'; }); }); }   // v28.814
       SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>'; var _supShowArch=false;   // v27.522 archive toggle (per visit)
         Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(_sr){ var rows=_sr[0], PUSERS=_sr[1]||[];
           function puFor(r){ return (PUSERS||[]).filter(function(u){ return String(u.supplier_id||'')===String(r.id) || (u.supplier_name&&r.name&&String(u.supplier_name).toLowerCase().trim()===String(r.name).toLowerCase().trim()); }); }
@@ -10061,6 +10063,15 @@ function hzPortalHelp(el){
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
               +lblBlk('Include for product development','shows the Product tab in this supplier’s portal',
                  '<select class="sup-in" data-f="include_product_dev" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:90px"><option value="false"'+(fieldOf(r,'include_product_dev')?'':' selected')+'>No</option><option value="true"'+(fieldOf(r,'include_product_dev')?' selected':'')+'>Yes</option></select>')
+              +'</div>'
+              // v28.814 (Ben 13-Nov-26): weekly email wrap-up (Sunday 08:00 Sydney to all this supplier's portal users, BCC ben@; skipped when there is nothing to report)
+              +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:10px">Weekly email</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:end">'
+              +lblBlk('Enable weekly email wrap','Sunday 08:00 Sydney to all this supplier\u2019s portal users: what needs their attention, payments and new POs from the last 7 days. Not sent when there is nothing to report.',
+                 '<select class="sup-in" data-f="weekly_email_enabled" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:90px"><option value="false"'+(fieldOf(r,'weekly_email_enabled')?'':' selected')+'>No</option><option value="true"'+(fieldOf(r,'weekly_email_enabled')?' selected':'')+'>Yes</option></select>')
+              +'<div style="margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="save-btn light sup-wk-prev" data-name="'+esc(fieldOf(r,'name')||'')+'">Preview this week</button>'
+                +'<button type="button" class="save-btn light sup-wk-test" data-name="'+esc(fieldOf(r,'name')||'')+'">Send me a test</button><span class="mut tiny sup-wk-msg"></span></div>'
               +'</div>'
               +supPuBlock(r)
               +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--line2)"><button id="sup-save" data-k="'+id+'" style="cursor:pointer;border:none;background:var(--blue);color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'

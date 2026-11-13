@@ -1334,6 +1334,7 @@ app.use((req, res, next) => {
       || req.path.startsWith('/invoice/') || req.path === '/api/invoice-links/ensure'   // v28.730 (Ben): PUBLIC wholesale invoice pages (unguessable token, rate limited) + n8n ensure (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/api/cron/prepayments'   // v28.792 (Ben): n8n hourly prepayment allocation (x-webhook-secret checked in the handler with safeEq, fails closed)
+      || req.path === '/api/cron/supplier-weekly'   // v28.814 (Ben): n8n Sunday 08:00 Sydney supplier weekly wrap-up (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/b2b-chase'   // v28.593 (Ben): n8n B2B request chaser (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/campaign-eta'   // v28.597 (Ben): n8n daily campaign ETA-past-intake alert (x-webhook-secret checked in the handler with safeEq, fails closed)
       || req.path === '/api/cron/b2b-forecast' || req.path === '/api/feed/chief/b2b-forecast' || req.path === '/api/feed/b2b-forecast.csv'   // v28.603 (Ben): B2B forecast nightly Fulfil refresh (x-webhook-secret) + Chief feed (Bearer CHIEF_FEED_TOKEN) + workbook CSV (?token=B2B_CSV_TOKEN); all checked in the handlers with safeEq, fail closed
@@ -14317,7 +14318,7 @@ supplySectionHandler = async (req, res, next) => {
           credit_fee_on_balance_pct,production_days,country,contact_name,email,
           business_name,address_1,address_2,city,state,postcode,phone,
           te_id,incoterm,cin7_member_id,fulfil_id,export_port,
-          coalesce(include_product_dev,false) include_product_dev
+          coalesce(include_product_dev,false) include_product_dev, coalesce(weekly_email_enabled,false) weekly_email_enabled
           FROM planner.suppliers ORDER BY kind,name`);
         // expedited_production_weeks (migration 161) read separately + defensively so the page still works pre-migration
         const ew = {}; try { (await q(`SELECT id, expedited_production_weeks FROM planner.suppliers`)).forEach(x => { ew[x.id] = x.expedited_production_weeks; }); } catch (e) {}
@@ -15819,7 +15820,7 @@ app.post('/api/supply/supplier/:id', async (req, res) => {
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
       te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
       include_product_dev: 'boolean', active: 'boolean', xero_contact_uk: 'text', xero_contact_au: 'text',
-      sample_lead_weeks: 'int' }, body, 'bigint');   // v28.799 (Ben 12-Nov-26): sample lead time per supplier (migration 443)   // active=false → archived (v27.522)
+      sample_lead_weeks: 'int', weekly_email_enabled: 'boolean' }, body, 'bigint');   // v28.814 weekly email wrap (migration 446)   // v28.799 (Ben 12-Nov-26): sample lead time per supplier (migration 443)   // active=false → archived (v27.522)
 });
 // v28.176 (Ben): READ-ONLY check that a Xero contact exists (exact name, active) in one org: the "check" buttons beside the
 // supplier's Xero contact fields. GET only to Xero; skips the cache. ?region=uk|au&name=<contact> (or &supplier=<name>
@@ -16220,7 +16221,7 @@ function emailSender(channel) {
   return { from: (process.env['EMAIL_FROM_' + K] || EMAIL_CHANNELS[ch].from || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
     reply_to: (process.env['EMAIL_REPLY_TO_' + K] || EMAIL_CHANNELS[ch].reply).trim() };
 }
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel, reply, from }) {
+async function sendResendEmail({ to, subject, html, cc, bcc, kind, ref, by, replyTo, attachments, channel, reply, from }) {   // v28.814: + bcc
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
@@ -16229,6 +16230,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
     const payload = { ...emailSender(channel), to: list, subject, html }; if (from) payload.from = from;   // v28.709: a caller-chosen From (commission statements)   // v28.295: channel = admin (default) | supplier | client
     if (emailOk(reply)) payload.reply_to = String(reply).trim();   // v28.508: explicit reply-to (client owner mailbox)
     if (cclist.length) payload.cc = cclist;
+    const bcclist = bcc ? (Array.isArray(bcc) ? bcc : [bcc]).filter(emailOk) : []; if (bcclist.length) payload.bcc = bcclist;
     // v28.137/v28.295: reply-to is the channel's ops@ alias (emailSender), set in the payload above. Was the person who triggered the email (replyTo
     // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
     if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
@@ -39996,8 +39998,13 @@ app.all(/^\/api\/supply\/custom-portal\/([^/]+)\/(.+)$/, staffOnly, (req, res) =
 // (the page keeps only the ones the portal shows) and the profile prompts (onboarding not approved / returned, warehouse rules to
 // acknowledge, certificates expiring within 60 days or expired). Open actions, unread messages and payments come from the bootstrap.
 app.get('/api/portal/home', portalAuth, async (req, res) => {
-  try {
-    const names = req.portal.suppliers || [], sid = (req.portal.supplierIds || [])[0] || null, out = { new_pos: [], profile: [] };
+  try { res.set('Cache-Control', 'no-store').json(await portalHomeData(req.portal.suppliers || [], (req.portal.supplierIds || [])[0] || null)); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// v28.814: the portal home page extras (new POs in the last 14 days, profile prompts) as a function, so the Sunday supplier wrap-up uses exactly the same.
+async function portalHomeData(names, sid) {
+  {
+    const out = { new_pos: [], profile: [] };
     if (names.length) out.new_pos = (await pool.query(`SELECT po, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD') created
         FROM planner.purchase_orders WHERE supplier_name = ANY($1) AND created_at > now() - interval '14 days' ORDER BY created_at DESC LIMIT 50`, [names])).rows;
     if (sid) { try { const L = await onbPortalLoad(sid);
@@ -40011,7 +40018,61 @@ app.get('/api/portal/home', portalAuth, async (req, res) => {
         (L.profile.certificates || []).forEach(c => { if (!c.valid_to) return; const v = String(c.valid_to).slice(0, 10);
           if (v < today) P.push({ kind: 'cert_expired', cert: c.kind, valid_to: v }); else if (v <= soon) P.push({ kind: 'cert_expiring', cert: c.kind, valid_to: v }); });
         out.profile = P; } } catch (e) { out.profile = []; } }
-    res.set('Cache-Control', 'no-store').json(out);
+    return out;
+  }
+}
+// ── v28.814 (Ben 13-Nov-26): SUPPLIER WEEKLY WRAP-UP ─────────────────────────────────────────────────────────────────────────────────────
+// Every Sunday 08:00 Australia/Sydney (n8n -> POST /api/cron/supplier-weekly): each supplier with "Enable weekly email wrap" on (suppliers.
+// weekly_email_enabled, default off) gets ONE email to all its active supplier portal users, BCC ben@: what needs their attention (the portal home
+// page + menu badge rules, lib/supplier-weekly.mjs), payments in the last 7 days, new POs in the last 7 days. Nothing to say = not sent (logged
+// 'skipped'). planner.supplier_weekly_log keeps one row per supplier per week, so a re-run never sends twice.
+const SUPWK_BCC = (process.env.SUPPLIER_WEEKLY_BCC || 'ben@dockandbay.com').split(',').map(x => x.trim()).filter(Boolean);
+async function supplierWeeklyBuild(name) {
+  const { supplierWeekly, supplierWeeklyHtml } = await import('./lib/supplier-weekly.mjs');
+  const sup = (await pool.query(`SELECT id, name, upper(coalesce(nullif(default_currency,''),'USD')) ccy, (coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR coalesce(country,'') LIKE '%中国%') zh, weekly_email_enabled FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)) LIMIT 1`, [name])).rows[0];
+  if (!sup) throw new Error('supplier not found: ' + name);
+  const D = await portalBootstrapBuild([sup.name], [sup.id], false), H = await portalHomeData([sup.name], sup.id);
+  const now = new Date(), fmt = d => d.toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+  const today = fmt(now), since = fmt(new Date(now.getTime() - 7 * 864e5));
+  const W = supplierWeekly(D, H, { today, since });
+  const users = (await pool.query(`SELECT DISTINCT lower(trim(email)) e FROM planner.supplier_portal_users WHERE coalesce(active,true) AND (supplier_id=$1 OR lower(trim(supplier_name))=lower(trim($2))) AND coalesce(email,'')<>''`, [sup.id, sup.name])).rows.map(r => r.e).filter(emailOk);
+  const html = supplierWeeklyHtml(sup.name, W, { zh: sup.zh, currency: sup.ccy, portalUrl: PORTAL_URL, weekEnding: today });
+  return { supplier: sup.name, enabled: !!sup.weekly_email_enabled, users, week_ending: today, W, html, subject: 'Dock & Bay weekly update: ' + sup.name + ', week ending ' + ddMonYy(today) };
+}
+app.post('/api/cron/supplier-weekly', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const dry = !!(req.body && req.body.dry), out = [];
+  try { const sups = (await pool.query(`SELECT name FROM planner.suppliers WHERE weekly_email_enabled ORDER BY name`)).rows.map(r => r.name);
+    for (const name of sups) { try {
+        const B = await supplierWeeklyBuild(name);
+        if (!dry && (await pool.query(`SELECT 1 FROM planner.supplier_weekly_log WHERE supplier=$1 AND week_ending=$2 AND status IN ('sent','skipped')`, [B.supplier, B.week_ending])).rows.length) { out.push({ supplier: B.supplier, status: 'already done this week' }); continue; }
+        const row = { supplier: B.supplier, recipients: B.users.join(', '), actions: B.W.actions, payments: B.W.payments.length, new_pos: B.W.new_pos.length };
+        if (B.W.empty || !B.users.length) { row.status = 'skipped'; row.error = B.W.empty ? 'nothing to report' : 'no active portal users'; }
+        else if (dry) row.status = 'would send';
+        else { const r = await sendResendEmail({ to: B.users, bcc: SUPWK_BCC, subject: B.subject, html: B.html, kind: 'supplier_weekly', ref: B.supplier, by: 'cron', channel: 'supplier' });
+          row.status = r && r.sent ? 'sent' : 'error'; if (r && r.error) row.error = String(r.error).slice(0, 300); }
+        if (!dry) await pool.query(`INSERT INTO planner.supplier_weekly_log (supplier, week_ending, status, recipients, actions, payments, new_pos, error, by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'cron')`,
+          [B.supplier, B.week_ending, row.status, row.recipients, row.actions, row.payments, row.new_pos, row.error || null]);
+        out.push(row);
+      } catch (e) { out.push({ supplier: name, status: 'error', error: String(e.message || e).slice(0, 300) }); } }
+    res.json({ ok: true, dry, suppliers: out.length, sent: out.filter(x => x.status === 'sent').length, results: out });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// Preview (admin): the email exactly as the supplier would get it this Sunday (HTML), or JSON with ?json=1. Test: sends it to the caller only.
+app.get('/api/supply/supplier-weekly/preview', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' });
+    const B = await supplierWeeklyBuild(String(req.query.supplier || ''));
+    if (req.query.json) return res.json({ supplier: B.supplier, enabled: B.enabled, recipients: B.users, bcc: SUPWK_BCC, week_ending: B.week_ending, would_send: !B.W.empty && B.users.length > 0, actions: B.W.actions, groups: B.W.groups, payments: B.W.payments, new_pos: B.W.new_pos });
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send('<!doctype html><meta charset="utf-8"><title>' + B.subject.replace(/[<&]/g, '') + '</title><div style="background:#f2f4f7;padding:16px;font-family:Arial,sans-serif;font-size:12px;color:#475467">To: ' + (B.users.join(', ') || '(no active portal users)') + ' · Bcc: ' + SUPWK_BCC.join(', ') + ' · ' + (B.enabled ? 'weekly email ON' : 'weekly email OFF for this supplier') + (B.W.empty ? ' · nothing to report: would NOT be sent' : '') + '</div>' + B.html);
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+app.post('/api/supply/supplier-weekly/test', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' });
+    const to = String(me.email || authUser(req) || '').trim(); if (!emailOk(to)) return res.status(400).json({ error: 'no email for you' });
+    const B = await supplierWeeklyBuild(String((req.body && req.body.supplier) || ''));
+    const r = await sendResendEmail({ to, subject: '[TEST] ' + B.subject, html: '<p style="font-family:Arial,sans-serif;font-size:12px;color:#92400e">Test copy. The real one goes to: ' + (B.users.join(', ') || '(no active portal users)') + '</p>' + B.html, kind: 'supplier_weekly_test', ref: B.supplier, by: to, channel: 'supplier' });
+    await pool.query(`INSERT INTO planner.supplier_weekly_log (supplier, week_ending, status, recipients, actions, payments, new_pos, by) VALUES ($1,$2,'test',$3,$4,$5,$6,$7)`, [B.supplier, B.week_ending, to, B.W.actions, B.W.payments.length, B.W.new_pos.length, to]);
+    res.json({ ok: !!(r && r.sent), to, error: r && r.error });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.get('/api/portal/me', portalAuth, async (req, res) => {
