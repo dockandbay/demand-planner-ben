@@ -1,3 +1,6 @@
+## v28.807 (13-Nov-26) Emergency login code: To do + email for everyone not set up
+- Ben: CONFIG > Admin > Emergency login has "Add To do + email to everyone not set up". It adds a To do "Set up your HORIZON emergency login code (1 minute)" (due in 7 days) to each @dockandbay.com HORIZON user without a confirmed code (skips anyone who already has it open) and emails each person the set-up steps. The link https://horizon.dockandbay.com/#/emergency-code opens the set-up screen. The To do ticks itself when the person confirms their code. Links in To do notes are now clickable. New route POST /api/auth/emergency/todos (admin, dry run counts only). No migration or env var.
+
 ## v28.806 (13-Nov-26) Emergency sign-in lockout: 3 wrong codes in 2 minutes = 5-minute wait
 - Ben: more than 2 wrong attempts for one email within 2 minutes now make that email wait 5 minutes (counted from the 3rd wrong attempt; attempts refused while locked do not extend it). The message says how many minutes are left. The per-IP net stays (20 wrong in 15 minutes = 15 minutes). Replaces 5 wrong in 15 minutes. No migration, route or env var.
 

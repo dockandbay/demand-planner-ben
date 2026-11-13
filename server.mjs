@@ -23885,6 +23885,7 @@ app.post('/api/auth/totp/confirm', async (req, res) => {
     const step = totpMatch(gmailUnseal(r.secret_enc), req.body && req.body.code, null);
     if (step == null) return res.status(400).json({ error: 'That code did not match. Check the app shows HORIZON and try the current code.' });
     await pool.query(`UPDATE planner.emergency_totp SET confirmed_at=now(), last_step=$2 WHERE email=$1`, [me, step]);
+    try { await pool.query(`UPDATE planner.user_todos SET done_at=now(), updated_at=now() WHERE email=$1 AND done_at IS NULL AND title=$2`, [me, EMERG_TODO_TITLE]); } catch (_) {}   // v28.807: ticks the To do
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
@@ -23917,6 +23918,29 @@ app.post('/api/auth/emergency/reset-user', async (req, res) => {
     const em = String(req.body && req.body.email || '').trim().toLowerCase(); if (!em) return res.status(400).json({ error: 'email required' });
     await pool.query(`DELETE FROM planner.emergency_totp WHERE email=$1`, [em]); console.log('[auth] emergency code reset for ' + em + ' by ' + p.email);
     res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// v28.807 (Ben 13-Nov-26): a To do (with the set-up link) for every @dockandbay.com HORIZON user who has not set up a code, plus a notification
+// email. Skips anyone who already has the open To do. dry=true only counts. The To do ticks itself when the person confirms their code.
+const EMERG_TODO_TITLE = 'Set up your HORIZON emergency login code (1 minute)';
+app.post('/api/auth/emergency/todos', async (req, res) => {
+  try { const p = await permsFor(req); if (!p.is_admin) return res.status(403).json({ error: 'admin only' });
+    const dry = !!(req.body && req.body.dry), sendMail = !(req.body && req.body.email === false);
+    const link = (process.env.APP_BASE_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '') + '/#/emergency-code';
+    const who = (await pool.query(`SELECT lower(a.email) email FROM planner.app_permissions a
+        WHERE lower(a.email) LIKE '%@' || $1 AND NOT EXISTS (SELECT 1 FROM planner.emergency_totp t WHERE t.email = lower(a.email) AND t.confirmed_at IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM planner.user_todos u WHERE u.email = lower(a.email) AND u.done_at IS NULL AND u.title = $2) ORDER BY 1`, [EMERG_DOMAIN, EMERG_TODO_TITLE])).rows.map(r => r.email);
+    if (dry) return res.json({ ok: true, dry: true, count: who.length, emails: who, link });
+    const notes = 'If Google sign-in is ever down you can still get into HORIZON with a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy). Set it up once, while Google works: ' + link + ' (or profile menu, top right > Emergency login code). This ticks itself when done.';
+    for (const em of who) await pool.query(`INSERT INTO planner.user_todos (email, title, notes, due_date) VALUES ($1,$2,$3,current_date + 7)`, [em, EMERG_TODO_TITLE, notes]);
+    let emailed = 0, mailErr = null;
+    if (sendMail && who.length) for (const em of who) { try { await sendResendEmail({ to: em, subject: 'HORIZON: set up your emergency login code (1 minute)', kind: 'emergency_code', by: p.email,
+        html: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#101828;line-height:1.5"><p>If Google sign-in is ever down, you can still get into HORIZON with a 6-digit code from an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, 1Password or Authy).</p>'
+          + '<p><b>Set it up once, now, while Google works (about 1 minute):</b></p><ol><li>Open <a href="' + link + '">' + link + '</a></li><li>Scan the QR code with your authenticator app</li><li>Type the 6-digit code it shows and press Confirm</li></ol>'
+          + '<p>It is also on your HORIZON To do list and ticks itself when done. If Google is down, choose <b>or sign in with your emergency code</b> on the sign-in page.</p></div>' }); emailed++; }
+      catch (e) { mailErr = String(e && e.message || e).slice(0, 200); console.warn('[emergency] todo email ' + mailErr); } }
+    console.log('[emergency] set-up To do added for ' + who.length + ' by ' + p.email);
+    res.json({ ok: true, added: who.length, emailed, mail_error: mailErr, emails: who });
   } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 // PUBLIC (exempt from the gate): email + 6-digit code → a 24-hour session. Same answer for unknown email / no code / wrong code.

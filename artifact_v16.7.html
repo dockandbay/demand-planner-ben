@@ -23697,6 +23697,9 @@ function hzEmcNudge(){ try{
     document.getElementById('hz-emc-n-x').onclick=function(){ try{ localStorage.setItem('hz_emc_nudge', String(Date.now()+30*86400000)); }catch(e){} b.remove(); };
   }).catch(function(){}); }catch(e){} }
 try{ window.hzEmergencyCode=hzEmergencyCode; setTimeout(hzEmcNudge, 8000); }catch(e){}
+/* v28.807: #/emergency-code (the To do / email link) opens the set-up screen over HOME. */
+(function(){ function chk(){ if(location.hash==='#/emergency-code'){ try{ history.replaceState(null,'',location.pathname+location.search+'#/'); }catch(e){} setTimeout(function(){ try{ if(typeof applyRoute==='function')applyRoute(); }catch(e){} hzEmergencyCode(); },600); } }
+  try{ window.addEventListener('hashchange',chk); if(document.readyState==='complete')chk(); else window.addEventListener('load',chk); }catch(e){} })();
 try{ window.hzAccountMenu=hzAccountMenu; window.hzSetAvatar=hzSetAvatar; }catch(e){}
 try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventListener('DOMContentLoaded',hzSetAvatar); }catch(e){}
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────
