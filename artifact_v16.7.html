@@ -23857,6 +23857,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     if(msgN>0){ var bdg=document.createElement('span'); bdg.className='hz-badge'; bdg.textContent=msgN>99?'99+':String(msgN); msg.appendChild(bdg); }
     drawer.appendChild(msg);
     if(window.HZ_SUGGEST&&window.HZ_SUGGEST.open) drawer.appendChild(item('💡  Suggestion box', false, function(){ close(); window.HZ_SUGGEST.open(); }));
+    if(window.HZ_BUG&&window.HZ_BUG.open) drawer.appendChild(item('🐞  Report a bug', false, function(){ close(); setTimeout(function(){ window.HZ_BUG.open(); },250); }));   // v28.819: after the drawer closes, so it isn't in the snapshot
     drawer.appendChild(item('⎋  Sign out', false, function(){ close(); hzLogout(); }));   // v27.575
     if(_st)drawer.scrollTop=_st;
   }

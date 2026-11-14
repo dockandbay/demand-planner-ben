@@ -1,3 +1,10 @@
+## v28.819 (14-Nov-26) Report a bug: screenshot + context straight into the Suggestion Box (Ben)
+- New 🐞 top-bar button (and mobile menu item). One click snaps the page as it is, open popup included, with no browser prompt (html2canvas 1.4.1 from cdnjs, loaded on first use). The person crops by dragging or with one click on the open popup, draws red highlights, and can add up to 3 snapshots or paste / drop their own.
+- Each bug is saved in planner.suggestions with kind = bug and its own BUG-0001 numbering, a severity (blocking / annoying / cosmetic), what they expected, the screenshots (private Storage under bugs/<ref>/) and the context captured: page, tabs, open popup and the records in it, filters in use, version, user, browser, viewport, and the last 25 JS errors and failed API calls from that tab.
+- CONFIG > Suggestions: Bugs / Suggestions filter, severity, screenshot thumbnails and an "All captured details" link. Completing a bug emails "Your bug is fixed". Deleting a bug removes its screenshots.
+- New routes: POST /api/supply/bug, GET /api/supply/bug/:ref (everything, with short-lived screenshot links), GET /api/supply/bug/:ref/shot/:n (302 to a signed URL).
+- Migration 447_bug_reports.sql (adds kind, severity, expected, screenshots, context; sequence bugs_ref_seq). No new env vars (uses the existing Storage settings), no new cron routes.
+
 ## v28.818 (13-Nov-26) Payments Report: runs paid in Xero with no supplier-payment bill show as done (Ben)
 - A run with only Other lines (e.g. Lixin 10-Nov DHL freight bills) never gets a SUPPLIER-PAYMENT bill, so it kept the green Paid > Xero button after it was paid. It now counts as done when the Xero payments HORIZON made for it cover the run total, and shows Xero ✓ with a link per bill.
 - Paid > Xero on a run whose bills are all paid opens an "Already paid in Xero" summary (bill links, amount, bank, date, who) instead of the bank step and a false "bank differs".

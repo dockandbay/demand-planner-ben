@@ -9807,17 +9807,27 @@ function hzPortalHelp(el){
       SUBS['suggestions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         var SS=[['new','New','var(--blue)','var(--blue-soft)'],['complete','Complete','var(--pos)','var(--pos-bg)'],['future','Future','var(--violet)','var(--violet-bg)'],['deferred','Deferred','var(--amber)','var(--amber-bg)']];
         var SMAP={}; SS.forEach(function(s){SMAP[s[0]]=s;});
-        var stFilt='all', _sugStake='';
+        var stFilt='all', _sugStake='', kdFilt='all';   // v28.819: kdFilt = all | bug | suggestion
         function draw(rows,flash){
           var counts={all:rows.length}; SS.forEach(function(s){counts[s[0]]=0;}); rows.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1;});
           var f=(stFilt==='all')?rows:rows.filter(function(r){return r.status===stFilt;});
+          var kc={all:rows.length,bug:0,suggestion:0}; rows.forEach(function(r){ kc[r.kind==='bug'?'bug':'suggestion']++; });
+          if(kdFilt!=='all')f=f.filter(function(r){ return (r.kind==='bug'?'bug':'suggestion')===kdFilt; });
+          var kpills='<div class="bar" style="gap:6px"><span class="pill-lbl">Type</span>'+[['all','All'],['bug','🐞 Bugs'],['suggestion','💡 Suggestions']].map(function(p){ return '<button class="rtab sug-kind'+(p[0]===kdFilt?' active':'')+'" data-k="'+p[0]+'">'+esc(p[1])+' <span class="mut">'+(kc[p[0]]||0)+'</span></button>'; }).join('')+'</div>';
+          var SEVC={blocking:'var(--neg)',annoying:'var(--amber)',cosmetic:'var(--muted)'};
+          function bugCell(r){ if(r.kind!=='bug')return ''; var c=r.context||{}, h='';
+            if(r.expected)h+='<div style="margin-top:4px"><span class="mut">Expected:</span> '+esc(r.expected)+'</div>';
+            if(c.page_label||c.route)h+='<div class="mut tiny" style="margin-top:4px">'+esc(c.page_label||c.route)+(c.popup?' · popup "'+esc(String(c.popup).slice(0,60))+'"':'')+' · '+esc(c.version||'')+((c.errors||[]).length?' · <span style="color:var(--neg)">'+(c.errors||[]).length+' error'+((c.errors||[]).length>1?'s':'')+'</span>':'')+'</div>';
+            var n=Number(r.shots)||0; if(n){ h+='<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">'; for(var i=1;i<=n;i++)h+='<a href="/api/supply/bug/'+encodeURIComponent(r.ref)+'/shot/'+i+'" target="_blank" rel="noopener" title="open screenshot '+i+'"><img src="/api/supply/bug/'+encodeURIComponent(r.ref)+'/shot/'+i+'" loading="lazy" style="height:64px;max-width:180px;border:1px solid var(--line);border-radius:5px;display:block"></a>'; h+='</div>'; }
+            h+='<div class="tiny" style="margin-top:4px"><a href="/api/supply/bug/'+encodeURIComponent(r.ref)+'" target="_blank" rel="noopener" style="color:var(--blue)">All captured details ↗</a></div>';
+            return h; }
           var pills='<div class="bar" style="gap:6px"><span class="pill-lbl">Status</span>'
             +[['all','All']].concat(SS.map(function(s){return [s[0],s[1]];})).map(function(p){ return '<button class="rtab sug-filt'+(p[0]===stFilt?' active':'')+'" data-s="'+p[0]+'">'+esc(p[1])+' <span class="mut">'+(counts[p[0]]||0)+'</span></button>'; }).join('')+'</div>';
           function statusSel(r){ return '<select class="fci sug-st" data-id="'+r.id+'" style="font-size:11px;padding:3px 4px;width:100%;box-sizing:border-box">'+SS.map(function(s){return '<option value="'+s[0]+'"'+(s[0]===r.status?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select>'; }
           function chip(st){ var s=SMAP[st]||SMAP['new']; return '<span style="display:inline-block;font-size:10px;font-weight:700;color:'+s[2]+';background:'+s[3]+';border:1px solid '+s[2]+'33;border-radius:5px;padding:1px 7px">'+esc(s[1])+'</span>'; }
           var body=f.map(function(r){ return '<tr'+(r.status==='new'?' style="background:#fbfdff"':'')+'>'
-            +'<td class="l" style="font-weight:700;font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis">'+esc(r.ref)+'</td>'
-            +'<td class="l" style="white-space:pre-wrap;word-break:break-word">'+esc(r.body)+'</td>'
+            +'<td class="l" style="font-weight:700;font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis">'+(r.kind==='bug'?'🐞 ':'')+esc(r.ref)+(r.kind==='bug'&&r.severity?'<div style="font-family:inherit;font-size:10px;font-weight:700;color:'+(SEVC[r.severity]||'var(--muted)')+'">'+esc(r.severity)+'</div>':'')+'</td>'
+            +'<td class="l" style="white-space:pre-wrap;word-break:break-word">'+esc(r.body)+bugCell(r)+'</td>'
             +'<td class="l" style="overflow:hidden;text-overflow:ellipsis">'+(r.area?esc(r.area):'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="overflow:hidden;text-overflow:ellipsis">'+(r.created_by?esc(shortUser(r.created_by)):'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="white-space:normal">'+esc(r.created_at)+'</td>'
@@ -9825,11 +9835,12 @@ function hzPortalHelp(el){
             +'<td class="l"><textarea class="fci sug-stk" data-id="'+r.id+'" rows="2" placeholder="email, email…" style="font-size:11px;width:100%;box-sizing:border-box;text-align:left;resize:vertical;font-family:inherit" title="emailed on THIS suggestion&rsquo;s status changes (in addition to the global list)">'+esc(r.stakeholders||'')+'</textarea></td>'
             +'<td class="l"><a class="sug-del mut" data-id="'+r.id+'" title="delete" style="color:var(--neg);cursor:pointer">×</a></td></tr>'; }).join('')
             ||'<tr><td colspan="8" class="count">No '+(stFilt==='all'?'':stFilt+' ')+'suggestions.</td></tr>';
-          b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b>. Each has a reference (<b>SUG-nnnn</b>) you can quote in chat. Set a status: <b>Complete</b> when done (emails the submitter "this feature is going live", cc sarah/ben/diviyaj), <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b> and 🐞 <b>Report a bug</b>. Each has a reference (<b>SUG-nnnn</b> / <b>BUG-nnnn</b>) you can quote in chat; bugs carry their screenshots and the page details captured when they were raised. Set a status: <b>Complete</b> when done (emails the submitter "this feature is going live", cc sarah/ben/diviyaj), <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
             +'<div class="bar" style="gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Global stakeholders <span class="mut tiny">(emailed on <b>every</b> new suggestion + status change)</span></span><input class="flt" id="sug-stake" value="'+esc(_sugStake)+'" placeholder="email, email…" style="width:340px"><button class="save-btn" id="sug-stake-save">Save</button><span class="mut tiny" id="sug-stake-msg"></span> <span class="mut tiny">· per-suggestion followers are set in the <b>Stakeholders</b> column below</span></div>'
             +(flash?'<div style="background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-size:12px;border-radius:6px;padding:7px 11px;margin-bottom:10px">'+esc(flash)+'</div>':'')
-            +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:8%"><col style="width:40%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:2%"></colgroup><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Stakeholders</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+            +kpills+pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:8%"><col style="width:40%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:2%"></colgroup><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Stakeholders</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
           b.querySelectorAll('.sug-filt').forEach(function(p){ p.onclick=function(){ stFilt=p.dataset.s; draw(rows); }; });
+          b.querySelectorAll('.sug-kind').forEach(function(p){ p.onclick=function(){ kdFilt=p.dataset.k; draw(rows); }; });
           b.querySelectorAll('.sug-st').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, ns=sel.value;
             shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;
               var fl=(ns==='complete'&&j&&j.emailed&&r&&r.created_by)?('📧 "This feature is going live" emailed to '+shortUser(r.created_by)+' (cc sarah@, ben@, diviyaj@)'):''; draw(rows,fl); }); }; });
@@ -17029,10 +17040,150 @@ function hzPortalHelp(el){
           ta.value=''; bg.querySelector('#sug-area').value=''; bg.querySelector('#sug-stk').value=''; ta.disabled=false; bg.querySelector('#sug-area').disabled=false; btn.disabled=false; ta.focus(); bg.querySelector('#sug-cancel').textContent='Close'; })   // SUG-0004: reset so another can be added without refreshing
         .catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
   try{ window.HZ_SUGGEST={ open:openSuggestBox }; }catch(e){}
+  // ── Bug reports (v28.819, Ben 14-Nov-26) ───────────────────────────────────
+  // 🐞 top-bar button: snaps the page as it is (open popup included, no browser prompt), lets the person crop
+  // (drag, or one click on a popup) and draw red highlights, then posts a BUG-nnnn into the Suggestion Box table
+  // with the context Claude needs to fix it: page, popup, filters, version, user, browser, recent JS errors and
+  // failed API calls (recorded below from page load), and the records shown in the popup. Paste / drop also works.
+  (function(){ if(window.__hzBugLog)return; var L=window.__hzBugLog=[];
+    function add(e){ try{ e.t=new Date().toISOString().slice(11,19); L.push(e); if(L.length>25)L.shift(); }catch(_){} }
+    function clean(u){ try{ var x=new URL(u,location.href); ['key','token','sig','code','access_token'].forEach(function(k){ if(x.searchParams.has(k))x.searchParams.set(k,'***'); }); return (x.host===location.host?'':x.host)+x.pathname+x.search; }catch(_){ return String(u).slice(0,200); } }
+    window.__hzBugClean=clean;
+    window.addEventListener('error',function(ev){ if(ev&&ev.message)add({type:'js',msg:String(ev.message).slice(0,300),at:(ev.filename?clean(ev.filename):'')+':'+(ev.lineno||'')}); });
+    window.addEventListener('unhandledrejection',function(ev){ var r=ev&&ev.reason; add({type:'promise',msg:String((r&&r.message)||r).slice(0,300)}); });
+    var ce=console.error; console.error=function(){ try{ add({type:'console',msg:[].slice.call(arguments).map(function(a){ return (a&&a.message)?a.message:(typeof a==='object'?(function(){ try{return JSON.stringify(a);}catch(_){return String(a);} })():String(a)); }).join(' ').slice(0,300)}); }catch(_){} return ce.apply(console,arguments); };
+    var of=window.fetch; if(of)window.fetch=function(input,init){ var t0=Date.now(), url=typeof input==='string'?input:((input&&input.url)||''), m=(init&&init.method)||(input&&input.method)||'GET', p=of.apply(this,arguments);
+      if(!/\/api\/supply\/bug\b/.test(url))p.then(function(r){ if(r&&!r.ok){ var e={type:'api',method:m,url:clean(url),status:r.status,ms:Date.now()-t0}; add(e); try{ r.clone().text().then(function(tx){ e.body=String(tx).slice(0,300); }).catch(function(){}); }catch(_){} } },
+        function(err){ add({type:'api',method:m,url:clean(url),status:0,msg:String((err&&err.message)||err).slice(0,200),ms:Date.now()-t0}); });
+      return p; };
+  })();
+  var _bug={ imgs:[] };
+  function bugVisible(el){ var r=el.getBoundingClientRect(); return r.width>0&&r.height>0&&getComputedStyle(el).visibility!=='hidden'; }
+  function bugPopups(){ var out=[];   // open popups / modals: fixed overlays (or their dialog box) with a high z-index, top-most first
+    document.querySelectorAll('body *').forEach(function(el){ if(el.id==='hzbug-root'||el.closest('#hzbug-root'))return; var cs=getComputedStyle(el); if(cs.position!=='fixed')return;
+      var z=parseInt(cs.zIndex,10)||0, r=el.getBoundingClientRect(); if(z<1000||r.width<160||r.height<80||!bugVisible(el))return;
+      var box=el; if(r.width>=innerWidth*0.95&&r.height>=innerHeight*0.9){ var kids=[].filter.call(el.children,function(c){ var cr=c.getBoundingClientRect(); return cr.width>120&&cr.height>60; }); if(!kids.length)return; box=kids[0]; }
+      var br=box.getBoundingClientRect(), cx=br.left+br.width/2, cy=br.top+Math.min(br.height/2,40);
+      if(cx<0||cy<0||cx>innerWidth||cy>innerHeight||+cs.opacity===0)return;
+      var hit=document.elementFromPoint(cx,cy); if(!hit||!(box.contains(hit)||el.contains(hit)))return;   // only popups actually showing on top
+      var h=box.querySelector('b,h1,h2,h3,h4,strong,.title'), title=((h&&h.innerText)||box.innerText||'').trim().split('\n')[0].slice(0,140);
+      var rec={}; box.querySelectorAll('[data-sku],[data-po],[data-ref],[data-dt],[data-sup],[data-id],[data-k]').forEach(function(x){ ['sku','po','ref','dt','sup','id','k'].forEach(function(k){ var v=x.dataset[k]; if(v){ rec[k]=rec[k]||[]; if(rec[k].indexOf(v)<0&&rec[k].length<8)rec[k].push(v); } }); });
+      if(!out.some(function(o){ return o.el===box||o.el.contains(box)||box.contains(o.el); }))out.push({el:box,z:z,title:title,rect:{x:br.left,y:br.top,w:br.width,h:br.height},records:rec}); });
+    out.sort(function(a,b){ return b.z-a.z; }); return out.slice(0,4); }
+  function bugContext(pops){ var tx=function(el){ return (el.innerText||'').trim().replace(/\s+/g,' ').replace(/\s*\d+\+?$/,''); };
+    var act=[]; document.querySelectorAll('.rl1.on, .rl2.on, .rl3.on, .rl4.on').forEach(function(el){ var t=tx(el); if(t&&act.indexOf(t)<0)act.push(t); });   // sidebar rail: Supply > Payments > Payments Report
+    if(!act.length)act=String(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean).slice(0,4);
+    var tabs=[]; document.querySelectorAll('.rtab.active, .d3tab.active, .sub-tab.active, .view-toggle.active, [aria-selected="true"]').forEach(function(el){ if(!bugVisible(el)||el.closest('#hzbug-root'))return; var t=tx(el); if(t&&t.length<40&&tabs.indexOf(t)<0&&tabs.length<8)tabs.push(t); });
+    var filt=[]; document.querySelectorAll('input, select, textarea').forEach(function(el){ if(filt.length>=40||el.closest('#hzbug-root')||!bugVisible(el))return; var t=(el.type||'').toLowerCase(); if(t==='password'||t==='hidden'||t==='file')return;
+      var v=(t==='checkbox'||t==='radio')?(el.checked?'on':''):(el.tagName==='SELECT'&&el.selectedIndex>=0?((el.options[el.selectedIndex]||{}).text||el.value):el.value); if(!v)return;
+      filt.push({field:(el.id||el.name||el.getAttribute('aria-label')||el.placeholder||el.className||el.tagName).toString().slice(0,60),value:String(v).slice(0,80)}); });
+    return { route:location.hash||'/', host:location.host, page_label:act.join(' > '), tabs:tabs, title:document.title,
+      popup:pops.length?pops[0].title:'', popups:pops.map(function(p){ return {title:p.title,records:p.records}; }),
+      records:pops.length?pops[0].records:{}, filters:filt, version:'__APP_VERSION__', user:(ME&&ME.email)||'',
+      browser:navigator.userAgent, viewport:innerWidth+'x'+innerHeight+' @'+(window.devicePixelRatio||1)+'x', tz:(Intl.DateTimeFormat().resolvedOptions().timeZone||''),
+      at:new Date().toISOString(), errors:(window.__hzBugLog||[]).slice() }; }
+  function bugLoadH2C(){ if(window.html2canvas)return Promise.resolve(window.html2canvas);
+    return new Promise(function(ok,no){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; s.onload=function(){ ok(window.html2canvas); }; s.onerror=function(){ no(new Error('could not load the screenshot tool')); }; document.head.appendChild(s); }); }
+  function bugToast(t){ var d=document.getElementById('hzbug-toast'); if(!t){ if(d)d.remove(); return; } if(!d){ d=document.createElement('div'); d.id='hzbug-toast'; d.setAttribute('data-html2canvas-ignore','1'); d.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100090;background:#0f172a;color:#fff;font-size:12.5px;padding:8px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3)'; document.body.appendChild(d); } d.textContent=t; }
+  function bugCapture(){ var pops=bugPopups(), ctx=bugContext(pops), sc=Math.min(window.devicePixelRatio||1,1.5);
+    bugToast('Taking a snapshot of the page…');
+    return bugLoadH2C().then(function(h2c){ return Promise.race([
+        h2c(document.body,{x:window.scrollX,y:window.scrollY,width:innerWidth,height:innerHeight,windowWidth:innerWidth,windowHeight:innerHeight,scale:sc,useCORS:true,logging:false,
+          backgroundColor:getComputedStyle(document.body).backgroundColor||'#fff',ignoreElements:function(el){ return el.id==='hzbug-root'||el.id==='hzbug-toast'; }}),
+        new Promise(function(_,no){ setTimeout(function(){ no(new Error('the snapshot took too long')); },25000); }) ]); })
+      .then(function(cv){ bugToast(''); return {canvas:cv,scale:sc,pops:pops,ctx:ctx}; }, function(e){ bugToast(''); return {canvas:null,err:e,pops:pops,ctx:ctx}; }); }
+  function bugEncode(cv){ var W=cv.width,H=cv.height,k=Math.min(1,1600/W), c=document.createElement('canvas'); c.width=Math.round(W*k); c.height=Math.round(H*k);
+    var g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(cv,0,0,c.width,c.height);
+    var q=0.82, d=c.toDataURL('image/jpeg',q); while(d.length>1.35*1024*1024*4/3&&q>0.4){ q-=0.12; d=c.toDataURL('image/jpeg',q); }
+    return {data:d,w:c.width,h:c.height}; }
+  function bugRoot(){ var r=document.getElementById('hzbug-root'); if(!r){ r=document.createElement('div'); r.id='hzbug-root'; r.setAttribute('data-html2canvas-ignore','1'); document.body.appendChild(r); }
+    r.style.cssText='position:fixed;inset:0;z-index:100080;background:rgba(15,23,42,.6);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto;font-size:13px;color:var(--ink)'; return r; }
+  // Step 1: crop + highlight on the snapshot. done(canvas) gets the cropped, highlighted result.
+  function bugEditor(cap,done){ var root=bugRoot(), src=cap.canvas, mode='crop', crop=null, marks=[];
+    var chips=cap.pops.map(function(p,i){ return '<button class="save-btn light hzb-pop" data-i="'+i+'" style="font-size:11.5px" title="crop to this popup">Crop to: '+esc(p.title.slice(0,40)||'popup '+(i+1))+'</button>'; }).join('');
+    root.innerHTML='<div style="background:var(--card);border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.35);width:min(1200px,96vw);overflow:hidden">'
+      +'<div style="padding:10px 14px;border-bottom:1px solid var(--line2);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>🐞 Report a bug</b><span class="mut" style="font-size:12px">1. Show us the problem</span>'
+      +'<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn hzb-mode" data-m="crop">✂ Crop</button><button class="save-btn light hzb-mode" data-m="mark">▭ Highlight</button><button class="save-btn light" id="hzb-undo">Undo</button></span></div>'
+      +'<div style="padding:8px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px"><span class="mut" id="hzb-hint">Drag a box around the problem, or</span>'+chips+'<button class="save-btn light" id="hzb-all" style="font-size:11.5px">Use whole screen</button></div>'
+      +'<div style="padding:0 14px 10px;text-align:center"><div id="hzb-stage" style="position:relative;display:inline-block;cursor:crosshair;user-select:none;max-width:100%"></div></div>'
+      +'<div style="padding:10px 14px;border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:flex-end"><button class="save-btn light" id="hzb-cancel">Cancel</button><button class="save-btn" id="hzb-next" style="background:var(--blue);color:#fff;border-color:var(--blue)">Next ›</button></div></div>';
+    var stage=root.querySelector('#hzb-stage'), view=document.createElement('canvas'); view.width=src.width; view.height=src.height;
+    view.style.cssText='display:block;max-width:100%;max-height:calc(100vh - 220px);border:1px solid var(--line);border-radius:6px'; stage.appendChild(view);
+    var box=document.createElement('div'); box.style.cssText='position:absolute;border:2px dashed #2563eb;background:rgba(37,99,235,.08);pointer-events:none;display:none'; stage.appendChild(box);
+    function paint(){ var g=view.getContext('2d'); g.drawImage(src,0,0); g.lineWidth=Math.max(3,src.width/400); g.strokeStyle='#ef4444';
+      marks.forEach(function(m){ g.strokeRect(m.x,m.y,m.w,m.h); });
+      if(crop){ g.fillStyle='rgba(15,23,42,.45)'; g.fillRect(0,0,src.width,crop.y); g.fillRect(0,crop.y+crop.h,src.width,src.height-crop.y-crop.h); g.fillRect(0,crop.y,crop.x,crop.h); g.fillRect(crop.x+crop.w,crop.y,src.width-crop.x-crop.w,crop.h); } }
+    function setMode(m){ mode=m; root.querySelectorAll('.hzb-mode').forEach(function(b){ b.className='save-btn hzb-mode'+(b.dataset.m===m?'':' light'); }); root.querySelector('#hzb-hint').textContent=m==='crop'?'Drag a box around the problem, or':'Drag to draw a red box on what is wrong.'; }
+    var k=function(){ return src.width/view.getBoundingClientRect().width; }, st=null;
+    function pt(e){ var r=view.getBoundingClientRect(); return {x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))}; }
+    view.addEventListener('mousedown',function(e){ st=pt(e); box.style.display='block'; box.style.borderColor=mode==='crop'?'#2563eb':'#ef4444'; box.style.left=st.x+'px'; box.style.top=st.y+'px'; box.style.width='0'; box.style.height='0'; e.preventDefault(); });
+    window.addEventListener('mousemove',function mv(e){ if(!document.body.contains(view)){ window.removeEventListener('mousemove',mv); return; } if(!st)return; var p=pt(e);
+      box.style.left=Math.min(st.x,p.x)+'px'; box.style.top=Math.min(st.y,p.y)+'px'; box.style.width=Math.abs(p.x-st.x)+'px'; box.style.height=Math.abs(p.y-st.y)+'px'; });
+    window.addEventListener('mouseup',function upf(e){ if(!document.body.contains(view)){ window.removeEventListener('mouseup',upf); return; } if(!st)return; var p=pt(e), f=k(), r={x:Math.min(st.x,p.x)*f,y:Math.min(st.y,p.y)*f,w:Math.abs(p.x-st.x)*f,h:Math.abs(p.y-st.y)*f}; st=null; box.style.display='none';
+      if(r.w<12||r.h<12)return; if(mode==='crop')crop=r; else marks.push(r); paint(); });
+    root.querySelectorAll('.hzb-mode').forEach(function(b){ b.onclick=function(){ setMode(b.dataset.m); }; });
+    root.querySelectorAll('.hzb-pop').forEach(function(b){ b.onclick=function(){ var p=cap.pops[+b.dataset.i].rect, s=cap.scale, pad=8*s; crop={x:Math.max(0,p.x*s-pad),y:Math.max(0,p.y*s-pad),w:Math.min(src.width,p.w*s+2*pad),h:Math.min(src.height,p.h*s+2*pad)}; paint(); }; });
+    root.querySelector('#hzb-all').onclick=function(){ crop=null; paint(); };
+    root.querySelector('#hzb-undo').onclick=function(){ if(marks.length)marks.pop(); else crop=null; paint(); };
+    root.querySelector('#hzb-cancel').onclick=function(){ done(null); };
+    root.querySelector('#hzb-next').onclick=function(){ var g0=document.createElement('canvas'); g0.width=src.width; g0.height=src.height; var g=g0.getContext('2d'); g.drawImage(src,0,0); g.lineWidth=Math.max(3,src.width/400); g.strokeStyle='#ef4444'; marks.forEach(function(m){ g.strokeRect(m.x,m.y,m.w,m.h); });
+      if(!crop){ done(g0); return; } var c=document.createElement('canvas'); c.width=Math.round(crop.w); c.height=Math.round(crop.h); c.getContext('2d').drawImage(g0,crop.x,crop.y,crop.w,crop.h,0,0,c.width,c.height); done(c); };
+    paint(); }
+  function bugImgFromBlob(blob,cb){ var fr=new FileReader(); fr.onload=function(){ var im=new Image(); im.onload=function(){ var c=document.createElement('canvas'); c.width=im.naturalWidth; c.height=im.naturalHeight; c.getContext('2d').drawImage(im,0,0); cb(c); }; im.src=fr.result; }; fr.readAsDataURL(blob); }
+  // Step 2: the form.
+  function bugForm(){ var root=bugRoot(), ctx=_bug.ctx||{}, errs=(ctx.errors||[]), apiErr=errs.filter(function(e){ return e.type==='api'; }).length;
+    var thumbs=_bug.imgs.map(function(im,i){ return '<div style="position:relative;display:inline-block;margin:0 6px 6px 0"><img src="'+im.data+'" style="height:84px;max-width:220px;border:1px solid var(--line);border-radius:6px;display:block"><button class="hzb-rm" data-i="'+i+'" title="remove" style="position:absolute;top:-7px;right:-7px;border:none;border-radius:50%;width:20px;height:20px;background:var(--neg);color:#fff;cursor:pointer;font-size:12px;line-height:1">×</button></div>'; }).join('');
+    var sev=_bug.sev||'annoying', inp='width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px;font-family:inherit;font-size:13px;text-align:left;background:var(--card);color:var(--ink)';
+    root.innerHTML='<div style="background:var(--card);border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.35);width:560px;max-width:96vw">'
+      +'<div style="padding:12px 16px;border-bottom:1px solid var(--line2);font-weight:700;display:flex;align-items:center">🐞 Report a bug <span class="mut" style="font-weight:400;font-size:12px;margin-left:8px">2. Tell us what happened</span><button id="hzb-x" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--faint);line-height:1">✕</button></div>'
+      +'<div style="padding:14px 16px">'
+        +'<div id="hzb-drop" style="border:1px dashed var(--line);border-radius:8px;padding:8px;margin-bottom:10px">'+(thumbs||'<div class="mut" style="font-size:12px;padding:10px 4px">No screenshot yet. Paste one (Cmd+V) or drop an image here.</div>')
+          +'<div style="font-size:12px"><a href="#" id="hzb-more" style="color:var(--blue);font-weight:600">'+(_bug.imgs.length?'+ Add another snapshot':'Take a snapshot')+'</a> <span class="mut">· or paste / drop an image (up to 3)</span></div></div>'
+        +'<label style="display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:3px">What went wrong?</label>'
+        +'<textarea id="hzb-body" rows="4" style="'+inp+'" placeholder="e.g. The run total shows 0.00 but the bills are already paid">'+esc(_bug.body||'')+'</textarea>'
+        +'<label style="display:block;font-size:11px;font-weight:700;color:var(--muted);margin:9px 0 3px">What did you expect? <span style="font-weight:400;color:var(--faint)">(optional)</span></label>'
+        +'<textarea id="hzb-exp" rows="2" style="'+inp+'">'+esc(_bug.exp||'')+'</textarea>'
+        +'<div style="display:flex;gap:14px;align-items:center;margin-top:10px;flex-wrap:wrap"><span style="font-size:11px;font-weight:700;color:var(--muted)">How bad?</span>'
+          +[['blocking','Blocking: I can’t do my job'],['annoying','Annoying'],['cosmetic','Cosmetic']].map(function(o){ return '<label style="font-size:12.5px;display:inline-flex;gap:4px;align-items:center;cursor:pointer"><input type="radio" name="hzb-sev" value="'+o[0]+'"'+(o[0]===sev?' checked':'')+'>'+o[1]+'</label>'; }).join('')+'</div>'
+        +'<details style="margin-top:12px;font-size:12px"><summary class="mut" style="cursor:pointer">Attached automatically: '+esc(ctx.page_label||ctx.route||'this page')+(ctx.popup?' · popup "'+esc(ctx.popup.slice(0,40))+'"':'')+' · '+esc(ctx.version||'')+' · '+errs.length+' recent error'+(errs.length===1?'':'s')+(apiErr?' ('+apiErr+' API)':'')+'</summary>'
+          +'<pre style="white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;background:var(--bg,#f6f7f9);border-radius:6px;padding:8px;font-size:11px;text-align:left">'+esc(JSON.stringify(ctx,null,1).slice(0,6000))+'</pre></details>'
+        +'<div id="hzb-msg" style="font-size:12px;margin-top:9px;min-height:16px"></div></div>'
+      +'<div style="padding:12px 16px;border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:flex-end"><button id="hzb-cancel" class="save-btn light">Cancel</button><button id="hzb-send" class="save-btn" style="background:var(--neg);color:#fff;border-color:var(--neg)">Send bug</button></div></div>';
+    var ta=root.querySelector('#hzb-body'); setTimeout(function(){ ta.focus(); },30);
+    function keep(){ _bug.body=ta.value; _bug.exp=root.querySelector('#hzb-exp').value; var r=root.querySelector('input[name="hzb-sev"]:checked'); _bug.sev=r?r.value:'annoying'; }
+    function close(){ document.removeEventListener('paste',onPaste); if(root.parentNode)root.parentNode.removeChild(root); _bug={imgs:[]}; }
+    function tryClose(){ keep(); if((_bug.body||_bug.imgs.length)&&!confirm('Discard this bug report?'))return; close(); }
+    function addCanvas(c){ if(_bug.imgs.length>=3){ alert('Up to 3 screenshots.'); return; } _bug.imgs.push(bugEncode(c)); bugForm(); }
+    function onPaste(e){ var it=[].slice.call((e.clipboardData||{}).items||[]).filter(function(x){ return /^image\//.test(x.type); })[0]; if(!it)return; e.preventDefault(); keep(); document.removeEventListener('paste',onPaste); bugImgFromBlob(it.getAsFile(),addCanvas); }
+    document.addEventListener('paste',onPaste);
+    var dz=root.querySelector('#hzb-drop'); dz.ondragover=function(e){ e.preventDefault(); dz.style.borderColor='var(--blue)'; }; dz.ondragleave=function(){ dz.style.borderColor=''; };
+    dz.ondrop=function(e){ e.preventDefault(); var f=[].slice.call(e.dataTransfer.files||[]).filter(function(x){ return /^image\//.test(x.type); })[0]; if(f){ keep(); document.removeEventListener('paste',onPaste); bugImgFromBlob(f,addCanvas); } };
+    root.querySelectorAll('.hzb-rm').forEach(function(b){ b.onclick=function(){ keep(); _bug.imgs.splice(+b.dataset.i,1); document.removeEventListener('paste',onPaste); bugForm(); }; });
+    root.querySelector('#hzb-more').onclick=function(e){ e.preventDefault(); keep(); if(_bug.imgs.length>=3){ alert('Up to 3 screenshots.'); return; } document.removeEventListener('paste',onPaste); root.style.display='none';
+      setTimeout(function(){ bugCapture().then(function(cap){ root.style.display='flex'; if(!cap.canvas){ bugForm(); var m=document.getElementById('hzb-msg'); if(m){ m.style.color='var(--neg)'; m.textContent='Snapshot failed ('+((cap.err&&cap.err.message)||'unknown')+'). Paste a screenshot instead.'; } return; }
+        bugEditor(cap,function(c){ if(c)_bug.imgs.push(bugEncode(c)); bugForm(); }); }); },60); };
+    root.querySelector('#hzb-x').onclick=tryClose; root.querySelector('#hzb-cancel').onclick=tryClose;
+    root.querySelector('#hzb-send').onclick=function(){ keep(); var msg=root.querySelector('#hzb-msg'), btn=this;
+      if(!_bug.body.trim()){ msg.style.color='var(--neg)'; msg.textContent='Please say what went wrong.'; ta.focus(); return; }
+      btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='Sending…';
+      fetch('/api/supply/bug',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:_bug.body,expected:_bug.exp,severity:_bug.sev,area:ctx.page_label||'',context:ctx,created_by:(ME&&ME.email)||'',images:_bug.imgs})})
+        .then(function(r){ return r.json(); }).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed');
+          document.removeEventListener('paste',onPaste);
+          root.querySelector('#hzb-drop').parentNode.innerHTML='<div style="padding:18px 4px;font-size:14px;color:var(--pos)">✓ Logged as <b>'+esc(j.ref)+'</b>. Thanks! Quote '+esc(j.ref)+' if you chase it.'+((j.warnings||[]).length?'<div class="mut" style="font-size:12px;margin-top:6px">'+esc(j.warnings.join('; '))+'</div>':'')+'</div>';
+          btn.style.display='none'; root.querySelector('#hzb-cancel').textContent='Close'; root.querySelector('#hzb-cancel').onclick=close; _bug={imgs:[]}; })
+        .catch(function(e){ msg.style.color='var(--neg)'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
+  function openBugReport(){ if(document.getElementById('hzbug-root'))return; _bug={imgs:[]};
+    bugCapture().then(function(cap){ _bug.ctx=cap.ctx; if(!cap.canvas){ bugForm(); var m=document.getElementById('hzb-msg'); if(m){ m.style.color='var(--neg)'; m.textContent='Snapshot failed ('+((cap.err&&cap.err.message)||'unknown')+'). Paste a screenshot instead (Cmd+Shift+4, then Cmd+V).'; } return; }
+      bugEditor(cap,function(c){ if(!c){ var r=document.getElementById('hzbug-root'); if(r)r.remove(); _bug={imgs:[]}; return; } _bug.imgs.push(bugEncode(c)); bugForm(); }); }); }
+  try{ window.HZ_BUG={ open:openBugReport }; }catch(e){}
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
     var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"></path></svg>'; b.setAttribute('aria-label','Suggestion box');
     var bell=document.getElementById('tl-bell'); if(bell&&bell.nextSibling)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
-    b.onclick=function(e){ e.stopPropagation(); openSuggestBox(); }; }
+    b.onclick=function(e){ e.stopPropagation(); openSuggestBox(); };
+    if(!document.getElementById('bug-btn')){ var bb=document.createElement('button'); bb.id='bug-btn'; bb.className='tl-bell'; bb.title='Report a bug: snaps this screen (popup included) for the fix'; bb.setAttribute('aria-label','Report a bug');   // v28.819
+      bb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6.5 9C4.6 8.8 3 7.2 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>';
+      if(b.nextSibling)row.insertBefore(bb,b.nextSibling); else row.appendChild(bb);
+      bb.onclick=function(e){ e.stopPropagation(); openBugReport(); }; } }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
     var navwrap=row.parentElement; if(navwrap&&!navwrap.id)navwrap.id='dab-navwrap';
     var btn=document.createElement('button'); btn.id='supply-btn'; btn.className='view-toggle supply-toggle'; btn.textContent='SUPPLY';

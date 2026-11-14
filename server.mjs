@@ -14214,6 +14214,9 @@ supplySectionHandler = async (req, res, next) => {
           to_char(status_at,'YYYY-MM-DD HH24:MI') status_at`;
         const _sugOrder = ` FROM planner.suggestions ORDER BY (status='new') DESC, created_at DESC`;
         // stakeholders column is migration 162 — read defensively so the page works pre-migration
+        // v28.818+1 (mig 447): bug reports share this table (kind='bug', BUG-nnnn refs, screenshots, captured context)
+        try { return res.json(await q(`SELECT ${_sugBase}, coalesce(stakeholders,'') stakeholders, kind, coalesce(severity,'') severity, coalesce(expected,'') expected,
+          jsonb_array_length(coalesce(screenshots,'[]'::jsonb)) shots, context${_sugOrder}`)); } catch (e) { /* pre-447: fall through */ }
         try { return res.json(await q(`SELECT ${_sugBase}, coalesce(stakeholders,'') stakeholders${_sugOrder}`)); }
         catch (e) { return res.json(await q(`SELECT ${_sugBase}, ''::text stakeholders${_sugOrder}`)); }
       }
@@ -16784,17 +16787,18 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
   try {
     // Detect a transition INTO 'complete' (so re-saving 'complete' doesn't re-notify), and grab who to email.
     const prev = (await pool.query(`SELECT ref, body, coalesce(created_by,'') created_by, status FROM planner.suggestions WHERE id=$1`, [req.params.id])).rows[0];
+    const _isBug = !!(prev && /^BUG-/.test(prev.ref || ''));   // v28.819: bugs get "fixed" wording
     await pool.query(`UPDATE planner.suggestions SET status=$2, status_by=$3, status_at=now() WHERE id=$1`, [req.params.id, status, by]);
     let emailed = false;
     if (prev && status === 'complete' && prev.status !== 'complete' && /@/.test(prev.created_by)) {
       // one email on complete → submitter (to) + ben/sarah/diviyaj + the suggestion's stakeholders (global + own), on CC.
       const _stake = Array.from(new Set([...(await suggestionStakeholders()), ...(await suggestionOwnStakeholders(req.params.id))]));
       const CC = Array.from(new Set(['sarah@dockandbay.com', 'ben@dockandbay.com', 'diviyaj@dockandbay.com', ..._stake])).filter(e => e.toLowerCase() !== prev.created_by.toLowerCase());
-      const html = `<p>Good news — a suggestion you submitted is going live.</p>`
-        + `<p><b>This feature is going live.</b></p>`
+      const html = (_isBug ? `<p>Good news: a bug you reported has been fixed.</p><p><b>The fix is going live.</b></p>` : `<p>Good news — a suggestion you submitted is going live.</p>`
+        + `<p><b>This feature is going live.</b></p>`)
         + `<p style="color:#475569"><b>${prev.ref}</b>: ${String(prev.body).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p>`
         + `<p style="color:#94a3b8;font-size:12px">Thanks for the idea — HORIZON Suggestion Box.</p>`;
-      const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html, kind: 'suggestion-complete', ref: prev.ref, by });
+      const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: _isBug ? `Your bug ${prev.ref} is fixed` : `Your suggestion ${prev.ref} is going live 🎉`, html, kind: 'suggestion-complete', ref: prev.ref, by });
       emailed = !!(r && (r.sent || r.sandbox));
     }
     // notify the suggestion-box stakeholders on ANY status change — the GLOBAL list plus THIS suggestion's own stakeholders (mig 162)
@@ -16820,8 +16824,77 @@ app.post('/api/supply/suggestion/:id/stakeholders', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
 });
 app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  try { let _shots = []; try { _shots = ((await pool.query(`SELECT screenshots FROM planner.suggestions WHERE id=$1`, [req.params.id])).rows[0] || {}).screenshots || []; } catch (_) {}
+    await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]);
+    for (const sh of _shots) await storageDelete(sh && sh.path);   // v28.819: a deleted bug's screenshots go too
+    res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// ── Bug reports (v28.819, Ben 14-Nov-26, migration 447) ─────────────────────────────────────────────────────
+// The top-bar bug button snaps the page (popup included), lets the person crop / highlight, and posts the bug with
+// up to 3 JPEG screenshots (inline base64, each <= 1.5 MB) plus the context the browser captured. Stored in
+// planner.suggestions (kind='bug', BUG-nnnn); screenshots go to private Storage under bugs/<ref>/. Ben quotes the
+// BUG ref in Claude Code; GET /api/supply/bug/:ref returns everything (screenshot links are short-lived signed URLs).
+const BUG_SEV = ['blocking', 'annoying', 'cosmetic'];
+const _bugTxt = (v, n) => String(v == null ? '' : v).replace(/\u0000/g, '').slice(0, n);
+app.post('/api/supply/bug', async (req, res) => {
+  const b = req.body || {};
+  const body = _bugTxt(b.body, 8000).trim(), expected = _bugTxt(b.expected, 4000).trim() || null;
+  const severity = BUG_SEV.includes(b.severity) ? b.severity : 'annoying', area = _bugTxt(b.area, 120).trim() || null;
+  const by = authUser(req) || _bugTxt(b.created_by, 200).trim() || null;
+  if (!body) return res.status(400).json({ error: 'Please say what went wrong.' });
+  const imgs = (Array.isArray(b.images) ? b.images : []).slice(0, 3);
+  let ctx = null; try { const t = JSON.stringify(b.context || {}); ctx = t.length > 120000 ? { truncated: true, raw: t.slice(0, 120000) } : JSON.parse(t); } catch (_) { ctx = null; }
+  try {
+    const r = await pool.query(`INSERT INTO planner.suggestions (ref, kind, body, expected, severity, area, created_by, context)
+      VALUES ('BUG-'||lpad(nextval('planner.bugs_ref_seq')::text,4,'0'), 'bug', $1, $2, $3, $4, $5, $6) RETURNING id, ref`, [body, expected, severity, area, by, ctx]);
+    const { id, ref } = r.rows[0], shots = [], warn = [];
+    for (let i = 0; i < imgs.length; i++) {
+      const m = /^data:image\/(jpeg|png);base64,(.+)$/.exec(String((imgs[i] || {}).data || ''));
+      if (!m) { warn.push('screenshot ' + (i + 1) + ' was not an image'); continue; }
+      const buf = Buffer.from(m[2], 'base64');
+      if (buf.length > 1.5 * 1024 * 1024) { warn.push('screenshot ' + (i + 1) + ' was over 1.5 MB'); continue; }
+      if (!STORAGE_ENABLED) { warn.push('screenshot storage is not configured'); break; }
+      try { const path = 'bugs/' + ref + '/' + (i + 1) + '.' + (m[1] === 'png' ? 'png' : 'jpg');
+        const up = await storageSignUpload(path);
+        const pr = await fetch(up.uploadUrl, { method: 'PUT', headers: { 'content-type': 'image/' + m[1], 'x-upsert': 'true' }, body: buf });
+        if (!pr.ok) throw new Error('upload ' + pr.status);
+        shots.push({ path, w: Number(imgs[i].w) || null, h: Number(imgs[i].h) || null, bytes: buf.length });
+      } catch (e) { warn.push('screenshot ' + (i + 1) + ' failed to upload: ' + e.message); }
+    }
+    if (shots.length) await pool.query(`UPDATE planner.suggestions SET screenshots=$2::jsonb WHERE id=$1`, [id, JSON.stringify(shots)]);
+    try {
+      const stake = await suggestionStakeholders();
+      if (stake.length) {
+        const page = ctx && (ctx.page_label || ctx.route) ? String(ctx.page_label || ctx.route) : '';
+        const html = `<p><b>Bug reported in HORIZON: ${_sugEsc(ref)}</b> (${_sugEsc(severity)})</p>`
+          + (page ? `<p style="color:#475569"><b>Page:</b> ${_sugEsc(page)}${ctx && ctx.popup ? ' &middot; <b>Popup:</b> ' + _sugEsc(ctx.popup) : ''}</p>` : '')
+          + `<p style="color:#475569"><b>What went wrong:</b> ${_sugEsc(body)}</p>`
+          + (expected ? `<p style="color:#475569"><b>Expected:</b> ${_sugEsc(expected)}</p>` : '')
+          + (shots.length ? `<p style="color:#475569">${shots.length} screenshot${shots.length > 1 ? 's' : ''} attached in HORIZON.</p>` : '')
+          + `<p>${PLANNER_URL}/#/config/suggestions</p>`
+          + `<p style="color:#94a3b8;font-size:12px">Reported by ${_sugEsc(by || '(unknown)')}.</p>`;
+        await sendResendEmail({ to: stake, subject: (shortUser(by) || 'Someone') + ' reported bug ' + ref + ' (' + severity + ')', html, kind: 'bug-new', ref, by, replyTo: by });
+      }
+    } catch (e) { /* best-effort */ }
+    res.json({ ok: true, id, ref, screenshots: shots.length, warnings: warn });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+async function _bugRow(ref) { return (await pool.query(`SELECT id, ref, kind, body, expected, severity, area, created_by, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at,
+  status, status_by, screenshots, context FROM planner.suggestions WHERE upper(ref)=upper($1)`, [String(ref || '')])).rows[0]; }
+// Everything about one bug (for Claude Code / the triage page): row + context + short-lived screenshot links.
+app.get('/api/supply/bug/:ref', async (req, res) => {
+  try { const r = await _bugRow(req.params.ref); if (!r) return res.status(404).json({ error: 'No such bug.' });
+    r.screenshot_urls = []; for (const sh of (r.screenshots || [])) { try { r.screenshot_urls.push(await storageSignDownload(sh.path, { expiresIn: 3600 })); } catch (_) { r.screenshot_urls.push(null); } }
+    res.set('Cache-Control', 'no-store').json(r); }
+  catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
+// One screenshot: 302 to a short-lived signed URL (so links in HORIZON never expire, the image itself does).
+app.get('/api/supply/bug/:ref/shot/:n', async (req, res) => {
+  try { const r = await _bugRow(req.params.ref), sh = r && (r.screenshots || [])[(Number(req.params.n) || 1) - 1];
+    if (!sh) return res.status(404).send('No such screenshot.');
+    res.set('Cache-Control', 'no-store').redirect(302, await storageSignDownload(sh.path, { expiresIn: 600 })); }
+  catch (e) { log500(e); res.status(500).send(clientErr(e)); }
 });
 // ════════════════════════════════════════════════════════════════════════════
 // PRODUCT module — product-development management (migration 128). Reads are open (GET); writes require the
