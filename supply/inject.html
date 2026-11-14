@@ -17231,11 +17231,12 @@ function hzPortalHelp(el){
     // While the real button is covered, float a twin exactly over it, above every backdrop.
     setInterval(function(){ var real=document.getElementById('bug-btn'), fl=document.getElementById('bug-btn-float');
       var r=real&&real.getBoundingClientRect(), cover=false;
-      if(r&&r.width&&!document.getElementById('hzbug-root')){ var el=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); cover=!!(el&&!el.closest('#bug-btn,#bug-btn-float')); }
+      if(r&&r.width&&!document.getElementById('hzbug-root')){ var el=(document.elementsFromPoint(r.left+r.width/2,r.top+r.height/2)||[]).filter(function(x){ return !x.closest('#bug-btn-float'); })[0]; cover=!!(el&&!el.closest('#bug-btn')); }   // look PAST the twin, or it hides itself every other tick (flashing)
       if(!cover){ if(fl)fl.style.display='none'; return; }
       if(!fl){ fl=document.createElement('button'); fl.id='bug-btn-float'; fl.setAttribute('data-html2canvas-ignore','1'); fl.title='Report a bug: snaps this popup too (Option/Alt+Shift+B)'; fl.setAttribute('aria-label','Report a bug'); fl.innerHTML=real.innerHTML; document.body.appendChild(fl); }
-      var cs=getComputedStyle(real); fl.style.cssText='position:fixed;z-index:2147483000;left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:var(--card,#fff);color:var(--neg,#dc2626);box-shadow:0 2px 10px rgba(0,0,0,.35)';
-      var sv=fl.querySelector('svg'); if(sv){ sv.style.width=cs.fontSize?Math.min(r.width,r.height)*0.6+'px':'18px'; sv.style.height=sv.style.width; } },400);
+      var cs=getComputedStyle(real); var st='position:fixed;z-index:2147483000;left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;border:none;border-radius:'+cs.borderRadius+';background:transparent;color:'+cs.color;   // looks like the normal icon, just above the dimming
+      if(fl.style.cssText!==st)fl.style.cssText=st;
+      var sv=fl.querySelector('svg'), rs=real.querySelector('svg'); if(sv&&rs){ var rr=rs.getBoundingClientRect(); sv.style.width=rr.width+'px'; sv.style.height=rr.height+'px'; } },400);
     ['pointerdown','mousedown','pointerup','mouseup','click','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(e){ if(!onBtn(e))return;
       e.stopPropagation(); e.stopImmediatePropagation(); if(ev!=='touchstart')e.preventDefault();
       if(ev==='pointerdown'||(ev==='mousedown'&&!window.PointerEvent))openBugReport(); },true); });

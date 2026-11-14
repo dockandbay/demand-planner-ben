@@ -1,3 +1,6 @@
+## v28.822 (14-Nov-26) 🐞 over popups: no flashing (Ben)
+- The twin 🐞 shown above a popup's dimming flashed (each check found the twin itself, read "not covered" and hid it). The check now looks past the twin; the twin looks like the normal icon (no white box).
+
 ## v28.821 (14-Nov-26) Favourites as a hover pop-down (Ben)
 - Top bar: the row of ★ favourite chips is now one **★ Favourites ▾** button (count badge). Hover opens the list (click toggles, for touch): click to go, drag to reorder, ✎ rename, × remove, and **☆ Add this page / ★ Remove this page** at the bottom (replaces the far-right star). Still 5 max, same storage (app_permissions.favourites).
 - No migration, env vars or cron routes.
