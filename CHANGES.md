@@ -1,3 +1,7 @@
+## v28.823 (14-Nov-26) Claude offers to raise bugs from chat (Ben)
+- Connector instructions: when the conversation shows HORIZON itself misbehaving (tool error or result contradicting HORIZON's data / rules, a write that did not take effect, two views disagreeing, the app erroring), Claude offers in one line to raise it with its analysis, and calls report_bug only after a yes. Data-entry mistakes get an offer to fix the record instead; feature requests go to the 💡 box.
+- No migration, env vars or cron routes.
+
 ## v28.822 (14-Nov-26) 🐞 over popups: no flashing (Ben)
 - The twin 🐞 shown above a popup's dimming flashed (each check found the twin itself, read "not covered" and hid it). The check now looks past the twin; the twin looks like the normal icon (no white box).
 
