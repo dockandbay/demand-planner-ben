@@ -1,3 +1,6 @@
+## v28.824 (14-Nov-26) Bug reports notify instantly (Ben)
+- **Migration 448_bug_notify.sql**: an insert trigger on planner.suggestions sends `NOTIFY hz_bug '<BUG-nnnn>'` for each new bug, and the read-only role planner_ro gets SELECT on planner.suggestions. Ben's Claude Code session LISTENs and picks bugs up the moment they are raised (replaces a 5-minute poll). No app code change, no env vars, no cron routes.
+
 ## v28.823 (14-Nov-26) Claude offers to raise bugs from chat (Ben)
 - Connector instructions: when the conversation shows HORIZON itself misbehaving (tool error or result contradicting HORIZON's data / rules, a write that did not take effect, two views disagreeing, the app erroring), Claude offers in one line to raise it with its analysis, and calls report_bug only after a yes. Data-entry mistakes get an offer to fix the record instead; feature requests go to the 💡 box.
 - No migration, env vars or cron routes.
