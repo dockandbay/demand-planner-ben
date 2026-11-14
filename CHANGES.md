@@ -1,3 +1,10 @@
+## v28.820 (14-Nov-26) Bugs from Claude chats + read-only staff can report (Ben)
+- **Claude connector `report_bug` tool**: anyone chatting with Claude (HORIZON connector) can say "raise this as a bug". Claude logs a BUG-nnnn as that person with its analysis, steps, records, the useful chat excerpt and (when it can) screenshots. Context `source: 'claude-connector'`; the bug email and CONFIG > Suggestions show Claude's analysis. Connector instructions updated.
+- **Add screenshots later**: `POST /api/supply/bug/:ref/shots` (reporter, any editor or admin; up to 6 in all). The connector replies with `/?bugshots=BUG-nnnn`, which opens a paste / drop / choose-files box in HORIZON.
+- **Fix**: posting a suggestion or bug needed SUPPLY edit on live (it fell under the /api/supply/* rule), so read-only staff got "Read-only access". Now any signed-in staff member (`staff`).
+- **Fix: 🐞 with a popup open** closed the popup (most popups dim the whole page, top bar included, so the click hit the backdrop). While a backdrop covers the button, a twin 🐞 floats exactly over it above every backdrop; presses on it are caught in the capture phase so no popup handler sees them. Shortcut Option/Alt+Shift+B snaps without clicking.
+- No migration (needs 447 from v28.819). No new env vars or cron routes.
+
 ## v28.819 (14-Nov-26) Report a bug: screenshot + context straight into the Suggestion Box (Ben)
 - New 🐞 top-bar button (and mobile menu item). One click snaps the page as it is, open popup included, with no browser prompt (html2canvas 1.4.1 from cdnjs, loaded on first use). The person crops by dragging or with one click on the open popup, draws red highlights, and can add up to 3 snapshots or paste / drop their own.
 - Each bug is saved in planner.suggestions with kind = bug and its own BUG-0001 numbering, a severity (blocking / annoying / cosmetic), what they expected, the screenshots (private Storage under bugs/<ref>/) and the context captured: page, tabs, open popup and the records in it, filters in use, version, user, browser, viewport, and the last 25 JS errors and failed API calls from that tab.

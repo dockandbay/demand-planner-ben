@@ -1506,6 +1506,7 @@ function requiredCap(method, p) {
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (method === 'POST' && /^\/api\/supply\/tpl\/xero-bill\/\d+$/.test(p)) return null;   // v28.301 (Ben): 3PL Xero bill = ACCOUNTS grant (or SUPPLY edit for the preview), checked in the handler
   if (method === 'POST' && (p === '/api/supply/payment-fx' || p === '/api/supply/payments/pay' || p === '/api/supply/payments/xero-post')) return null;   // v28.305 (Ben): marking a payment run paid and submitting it to Xero = ACCOUNTS grant or admin, checked in the handler
+  if (method === 'POST' && (p === '/api/supply/suggestion' || p === '/api/supply/bug' || /^\/api\/supply\/bug\/[^/]+\/shots$/.test(p))) return 'staff';   // v28.820: any staff member raises a suggestion / bug (was SUPPLY edit, so read-only people got "Read-only access"); adding screenshots re-checks reporter / editor in the handler
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   // v28.255 (deep dive P0 #1, #2): the default is now FAIL CLOSED (admin only). Families with their own check are listed explicitly.
   if (p === '/api/invoice-links/ensure') return null;         // v28.730: n8n, x-webhook-secret checked in the handler (the rest of /api/invoice-links/* stays admin)
@@ -16837,6 +16838,44 @@ app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
 // BUG ref in Claude Code; GET /api/supply/bug/:ref returns everything (screenshot links are short-lived signed URLs).
 const BUG_SEV = ['blocking', 'annoying', 'cosmetic'];
 const _bugTxt = (v, n) => String(v == null ? '' : v).replace(/\u0000/g, '').slice(0, n);
+const BUG_MAX_SHOTS = 6;   // v28.820: 3 from the form, more can be added later (chat screenshots via the connector link)
+// Upload screenshots to bugs/<ref>/<n>. Each image: {data:'data:image/jpeg|png;base64,...'} or {data:'<base64>', media_type:'image/png'}; <= 1.5 MB.
+async function _bugUpload(ref, imgs, start) {
+  const shots = [], warn = [];
+  for (let i = 0; i < imgs.length; i++) {
+    const im = imgs[i] || {}, raw = String(im.data || '');
+    let m = /^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/.exec(raw);
+    if (!m && raw && /^image\/(jpeg|jpg|png|webp)$/.test(String(im.media_type || ''))) m = [null, String(im.media_type).slice(6), raw.replace(/\s+/g, '')];
+    if (!m) { warn.push('screenshot ' + (i + 1) + ' was not an image'); continue; }
+    const ext = m[1] === 'png' ? 'png' : m[1] === 'webp' ? 'webp' : 'jpg', buf = Buffer.from(m[2], 'base64');
+    if (!buf.length) { warn.push('screenshot ' + (i + 1) + ' was empty'); continue; }
+    if (buf.length > 1.5 * 1024 * 1024) { warn.push('screenshot ' + (i + 1) + ' was over 1.5 MB'); continue; }
+    if (!STORAGE_ENABLED) { warn.push('screenshot storage is not configured'); break; }
+    try { const path = 'bugs/' + ref + '/' + (start + shots.length + 1) + '.' + ext;
+      const up = await storageSignUpload(path);
+      const pr = await fetch(up.uploadUrl, { method: 'PUT', headers: { 'content-type': 'image/' + (ext === 'jpg' ? 'jpeg' : ext), 'x-upsert': 'true' }, body: buf });
+      if (!pr.ok) throw new Error('upload ' + pr.status);
+      shots.push({ path, w: Number(im.w) || null, h: Number(im.h) || null, bytes: buf.length });
+    } catch (e) { warn.push('screenshot ' + (i + 1) + ' failed to upload: ' + e.message); }
+  }
+  return { shots, warn };
+}
+// v28.820: add screenshots to an existing bug (the link the Claude connector hands back, so people can attach chat screenshots).
+// The reporter, anyone with an edit right, or an admin; up to BUG_MAX_SHOTS in all.
+app.post('/api/supply/bug/:ref/shots', async (req, res) => {
+  try { const r = await _bugRow(req.params.ref); if (!r) return res.status(404).json({ error: 'No such bug.' });
+    const me = await permsFor(req), who = String(authUser(req) || '').toLowerCase();
+    if (me.live && !(me.is_admin || me.supply_edit || me.demand_edit || me.product_edit || (who && who === String(r.created_by || '').toLowerCase())))
+      return res.status(403).json({ error: 'Only the person who reported ' + r.ref + ' (or an editor) can add screenshots.' });
+    const have = (r.screenshots || []).length, room = BUG_MAX_SHOTS - have;
+    if (room <= 0) return res.status(400).json({ error: r.ref + ' already has ' + have + ' screenshots (the most).' });
+    const imgs = (Array.isArray((req.body || {}).images) ? req.body.images : []).slice(0, room);
+    if (!imgs.length) return res.status(400).json({ error: 'No screenshots sent.' });
+    const { shots, warn } = await _bugUpload(r.ref, imgs, have);
+    if (shots.length) await pool.query(`UPDATE planner.suggestions SET screenshots = coalesce(screenshots,'[]'::jsonb) || $2::jsonb WHERE id=$1`, [r.id, JSON.stringify(shots)]);
+    res.json({ ok: true, ref: r.ref, added: shots.length, total: have + shots.length, warnings: warn });
+  } catch (e) { log500(e); res.status(500).json({ error: clientErr(e) }); }
+});
 app.post('/api/supply/bug', async (req, res) => {
   const b = req.body || {};
   const body = _bugTxt(b.body, 8000).trim(), expected = _bugTxt(b.expected, 4000).trim() || null;
@@ -16848,20 +16887,7 @@ app.post('/api/supply/bug', async (req, res) => {
   try {
     const r = await pool.query(`INSERT INTO planner.suggestions (ref, kind, body, expected, severity, area, created_by, context)
       VALUES ('BUG-'||lpad(nextval('planner.bugs_ref_seq')::text,4,'0'), 'bug', $1, $2, $3, $4, $5, $6) RETURNING id, ref`, [body, expected, severity, area, by, ctx]);
-    const { id, ref } = r.rows[0], shots = [], warn = [];
-    for (let i = 0; i < imgs.length; i++) {
-      const m = /^data:image\/(jpeg|png);base64,(.+)$/.exec(String((imgs[i] || {}).data || ''));
-      if (!m) { warn.push('screenshot ' + (i + 1) + ' was not an image'); continue; }
-      const buf = Buffer.from(m[2], 'base64');
-      if (buf.length > 1.5 * 1024 * 1024) { warn.push('screenshot ' + (i + 1) + ' was over 1.5 MB'); continue; }
-      if (!STORAGE_ENABLED) { warn.push('screenshot storage is not configured'); break; }
-      try { const path = 'bugs/' + ref + '/' + (i + 1) + '.' + (m[1] === 'png' ? 'png' : 'jpg');
-        const up = await storageSignUpload(path);
-        const pr = await fetch(up.uploadUrl, { method: 'PUT', headers: { 'content-type': 'image/' + m[1], 'x-upsert': 'true' }, body: buf });
-        if (!pr.ok) throw new Error('upload ' + pr.status);
-        shots.push({ path, w: Number(imgs[i].w) || null, h: Number(imgs[i].h) || null, bytes: buf.length });
-      } catch (e) { warn.push('screenshot ' + (i + 1) + ' failed to upload: ' + e.message); }
-    }
+    const { id, ref } = r.rows[0], { shots, warn } = await _bugUpload(ref, imgs, 0);
     if (shots.length) await pool.query(`UPDATE planner.suggestions SET screenshots=$2::jsonb WHERE id=$1`, [id, JSON.stringify(shots)]);
     try {
       const stake = await suggestionStakeholders();
@@ -16871,6 +16897,8 @@ app.post('/api/supply/bug', async (req, res) => {
           + (page ? `<p style="color:#475569"><b>Page:</b> ${_sugEsc(page)}${ctx && ctx.popup ? ' &middot; <b>Popup:</b> ' + _sugEsc(ctx.popup) : ''}</p>` : '')
           + `<p style="color:#475569"><b>What went wrong:</b> ${_sugEsc(body)}</p>`
           + (expected ? `<p style="color:#475569"><b>Expected:</b> ${_sugEsc(expected)}</p>` : '')
+          + (ctx && ctx.analysis ? `<p style="color:#475569"><b>Claude's analysis:</b> ${_sugEsc(String(ctx.analysis).slice(0, 1500))}</p>` : '')
+          + (ctx && ctx.source === 'claude-connector' ? `<p style="color:#94a3b8;font-size:12px">Raised from a Claude chat through the HORIZON connector.</p>` : '')
           + (shots.length ? `<p style="color:#475569">${shots.length} screenshot${shots.length > 1 ? 's' : ''} attached in HORIZON.</p>` : '')
           + `<p>${PLANNER_URL}/#/config/suggestions</p>`
           + `<p style="color:#94a3b8;font-size:12px">Reported by ${_sugEsc(by || '(unknown)')}.</p>`;
@@ -32557,7 +32585,7 @@ function mcpToolList() {
   return AI_TOOLS.concat(MCP_EXTRA_TOOLS).map(t => ({ name: t.name, title: t.title || MCP_TITLES[t.name] || t.name, description: t.description, inputSchema: t.input_schema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }))
     .concat(MCP_WRITE_TOOLS.map(t => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.input_schema,   // v28.525: write tools (Claude asks the person before each call)
-      annotations: { readOnlyHint: false, destructiveHint: t.name === 'set_po_lines', idempotentHint: !/^add_/.test(t.name), openWorldHint: false } })));
+      annotations: { readOnlyHint: false, destructiveHint: t.name === 'set_po_lines', idempotentHint: !/^(add_|report_)/.test(t.name), openWorldHint: false } })));
 }
 async function mcpPoStatus(po) {
   po = String(po || '').trim().toUpperCase(); if (!po) return { error: 'no PO given' };
@@ -32634,6 +32662,21 @@ const MCP_WRITE_TOOLS = [
     input_schema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'] } },
   { name: 'update_sample_request', title: 'Update a sample request', description: 'Change a PRODUCT sample request: ' + MCP_REQ_FIELDS.join(', ') + ' (stage one of ' + PROD_STAGES.join(', ') + '; approval_method samples or photo; dev_start yyyy-mm-dd). Find the request id with query_horizon on planner.product_dev_requests. Needs PRODUCT edit.' + MCP_WRITE_NOTE,
     input_schema: { type: 'object', properties: { id: { type: 'integer' }, fields: { type: 'object' } }, required: ['id', 'fields'] } },
+  { name: 'report_bug', title: 'Report a HORIZON bug', description: 'Raise a HORIZON bug in the Suggestion Box (BUG-nnnn) on the user\'s behalf, as them, when they ask you to (e.g. "raise this as a bug"). '
+      + 'Include your own analysis from the chat: what went wrong, what they expected, steps to reproduce, the records involved (SKUs, POs, shipments, suppliers) and what you found in HORIZON\'s data that explains it. '
+      + 'Screenshots: if you can pass the image bytes, send them in images (base64, up to 3, each under 1.5 MB); otherwise give the user the add_screenshots_url from the reply so they can paste or drop the chat screenshots into HORIZON. '
+      + 'Do not include passwords, API keys or personal customer details. Any staff member can report; the bug team is emailed. Logged.',
+    input_schema: { type: 'object', properties: {
+      summary: { type: 'string', description: 'What went wrong, in the user\'s words where possible (required)' },
+      expected: { type: 'string', description: 'What they expected to happen' },
+      severity: { type: 'string', enum: ['blocking', 'annoying', 'cosmetic'], description: 'blocking = stops their work; default annoying' },
+      page: { type: 'string', description: 'Where in HORIZON, e.g. "SUPPLY > Payments > Payments Report" or the URL' },
+      steps: { type: 'string', description: 'Steps to reproduce' },
+      analysis: { type: 'string', description: 'Your analysis: evidence from HORIZON data, likely cause, numbers checked' },
+      chat_excerpt: { type: 'string', description: 'The relevant part of the conversation / explanations, condensed (max ~6,000 chars)' },
+      records: { type: 'array', items: { type: 'string' }, description: 'SKUs, POs, shipment refs, suppliers, bill numbers involved' },
+      images: { type: 'array', items: { type: 'object', properties: { data: { type: 'string', description: 'base64 (or a data:image/...;base64 URL)' }, media_type: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp'] } }, required: ['data'] }, description: 'optional screenshots, up to 3' } },
+      required: ['summary'] } },
   { name: 'set_sample_feedback', title: 'Set sample feedback', description: 'Set (replace) the Dock & Bay feedback on one sample version (planner.product_dev_samples id). New feedback also goes on the product timeline, which the supplier sees. Needs PRODUCT edit.' + MCP_WRITE_NOTE,
     input_schema: { type: 'object', properties: { sample_id: { type: 'integer' }, feedback: { type: 'string' } }, required: ['sample_id', 'feedback'] } },
 ];
@@ -32646,7 +32689,8 @@ async function mcpRoute(a, path, body) {
   const cap = requiredCap('POST', p);
   if (cap) { const me = await permsFor(req); if (me.lookupFailed) return { error: 'permission check failed, try again' };
     const ok = cap === 'supply' ? (me.supply_edit || me.is_admin) : cap === 'product' ? (me.product_edit || me.is_admin) : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin)
-      : cap === 'edit' ? (me.supply_edit || me.demand_edit || me.product_edit || me.is_admin) : cap === 'admin' ? !!me.is_admin : false;   // 'demand' never reaches here
+      : cap === 'edit' ? (me.supply_edit || me.demand_edit || me.product_edit || me.is_admin) : cap === 'admin' ? !!me.is_admin
+      : cap === 'staff' ? /@dockandbay\.com$/i.test(String(a.email || '')) : false;   // 'demand' never reaches here; v28.820 'staff' (report_bug)
     if (!ok) return { error: a.email + ' has no ' + (cap === 'product' ? 'PRODUCT' : cap === 'supply' ? 'SUPPLY' : cap.toUpperCase()) + ' edit rights in HORIZON, so this change was not made. Ask an admin (CONFIG > Permissions).' }; }
   const stack = (app.router && app.router.stack) || [];
   const layer = stack.find(l => l && l.route && l.route.methods && l.route.methods.post && l.match(path));
@@ -32720,6 +32764,16 @@ async function mcpWrite(name, args, a) {
     return Object.assign({ ref: it.ref }, await mcpRoute(a, '/api/product/note', { ref: it.ref, body: text })); }
   if (name === 'update_sample_request') { const id = Number(args.id); if (!id || !(await pool.query(`SELECT 1 FROM planner.product_dev_requests WHERE id=$1`, [id])).rowCount) return { error: 'sample request not found: ' + (args.id || '') };
     const pk = mcpPick(args.fields, MCP_REQ_FIELDS); if (pk.error) return pk; return Object.assign({ id }, await mcpRoute(a, '/api/product/request/' + id, pk.body)); }
+  if (name === 'report_bug') {   // v28.820 (Ben 14-Nov-26): "allow horizon related bug analysis to be raised via mcp"
+    const summary = _bugTxt(args.summary, 8000).trim(); if (!summary) return { error: 'summary required: say what went wrong' };
+    const recs = (Array.isArray(args.records) ? args.records : []).map(x => _bugTxt(x, 80).trim()).filter(Boolean).slice(0, 40);
+    const context = { source: 'claude-connector', reporter: a.email, page_label: _bugTxt(args.page, 200).trim() || null, steps: _bugTxt(args.steps, 4000).trim() || null,
+      analysis: _bugTxt(args.analysis, 12000).trim() || null, chat: _bugTxt(args.chat_excerpt, 8000).trim() || null, records: recs.map(k => ({ k })), version: APP_VERSION, at: new Date().toISOString() };
+    const r = await mcpRoute(a, '/api/supply/bug', { body: summary, expected: _bugTxt(args.expected, 4000), severity: args.severity, area: context.page_label || 'Claude chat', context,
+      images: (Array.isArray(args.images) ? args.images : []).slice(0, 3) });
+    if (r.error) return r;
+    return { ok: true, ref: r.ref, screenshots: r.screenshots || 0, warnings: r.warnings || [], add_screenshots_url: PLANNER_URL + '/?bugshots=' + encodeURIComponent(r.ref),
+      note: 'Tell the user their bug reference ' + r.ref + '. If they have screenshots in this chat that were not attached, ask them to open add_screenshots_url and paste or drop them there (up to ' + BUG_MAX_SHOTS + ' in all). They are emailed when it is fixed.' }; }
   if (name === 'set_sample_feedback') { const id = Number(args.sample_id); if (!id || !(await pool.query(`SELECT 1 FROM planner.product_dev_samples WHERE id=$1`, [id])).rowCount) return { error: 'sample not found: ' + (args.sample_id || '') };
     return Object.assign({ sample_id: id }, await mcpRoute(a, '/api/product/sample/' + id + '/feedback', { admin_feedback: String(args.feedback || '') })); }
   return { error: 'unknown tool ' + name };
@@ -32736,7 +32790,8 @@ async function mcpCallTool(name, args, a) {
 }
 const MCP_INSTRUCTIONS = () => 'HORIZON is Dock & Bay\'s demand and supply planning tool (stock, forecasts, buy plan, purchase orders, shipments, suppliers, samples, wholesale client orders). '
   + 'Reads cover everything except where noted. WRITES (v28.525) are limited to purchase orders, shipments and PRODUCT (never the demand plan, never creating or deleting records, never pushing to Fulfil / Cin7 / Xero): they run as the connected person with their HORIZON edit rights and are logged. Before any write, state exactly what will change (record, field, old value -> new value) and get the user\'s clear yes in the chat; read the current value first. Notes on shipments and products are visible to the supplier; PO notes are team-only unless the user asks to tell the supplier. Dates: show them as dd-mmm-yy (e.g. 24-Oct-26); send them to write tools as yyyy-mm-dd.\n\n' + AI_SYSTEM.slice(Math.max(0, AI_SYSTEM.indexOf('You have LIVE ACCESS')))
-  + '\n- po_status(po): one purchase order with dates, payments, shipment and lines.\n- client_orders(query): wholesale client orders with shipments and tracking codes.';
+  + '\n- po_status(po): one purchase order with dates, payments, shipment and lines.\n- client_orders(query): wholesale client orders with shipments and tracking codes.'
+  + '\n- report_bug(summary, ...): raise a HORIZON bug (BUG-nnnn) as the user when they ask ("raise this as a bug", "log a bug"). Before calling, confirm the summary and severity with them, then include your analysis from the chat (evidence from HORIZON data, likely cause, steps, records, the useful part of the conversation). It is the one write any staff member may make. Give them the BUG ref, and if their chat screenshots were not attached, the add_screenshots_url to paste or drop them into.';
 
 // ── /mcp: JSON-RPC 2.0 over HTTP POST (stateless; no SSE stream, so GET is 405) ──
 async function mcpBearer(req) {

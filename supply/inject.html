@@ -9817,6 +9817,7 @@ function hzPortalHelp(el){
           var SEVC={blocking:'var(--neg)',annoying:'var(--amber)',cosmetic:'var(--muted)'};
           function bugCell(r){ if(r.kind!=='bug')return ''; var c=r.context||{}, h='';
             if(r.expected)h+='<div style="margin-top:4px"><span class="mut">Expected:</span> '+esc(r.expected)+'</div>';
+            if(c.source==='claude-connector')h+='<div class="mut tiny" style="margin-top:4px">Raised from a Claude chat</div>'+(c.analysis?'<details style="margin-top:3px"><summary class="tiny" style="cursor:pointer;color:var(--blue)">Claude’s analysis</summary><div class="tiny" style="white-space:pre-wrap;margin-top:3px">'+esc(String(c.analysis).slice(0,4000))+'</div></details>':'');   // v28.820
             if(c.page_label||c.route)h+='<div class="mut tiny" style="margin-top:4px">'+esc(c.page_label||c.route)+(c.popup?' · popup "'+esc(String(c.popup).slice(0,60))+'"':'')+' · '+esc(c.version||'')+((c.errors||[]).length?' · <span style="color:var(--neg)">'+(c.errors||[]).length+' error'+((c.errors||[]).length>1?'s':'')+'</span>':'')+'</div>';
             var n=Number(r.shots)||0; if(n){ h+='<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">'; for(var i=1;i<=n;i++)h+='<a href="/api/supply/bug/'+encodeURIComponent(r.ref)+'/shot/'+i+'" target="_blank" rel="noopener" title="open screenshot '+i+'"><img src="/api/supply/bug/'+encodeURIComponent(r.ref)+'/shot/'+i+'" loading="lazy" style="height:64px;max-width:180px;border:1px solid var(--line);border-radius:5px;display:block"></a>'; h+='</div>'; }
             h+='<div class="tiny" style="margin-top:4px"><a href="/api/supply/bug/'+encodeURIComponent(r.ref)+'" target="_blank" rel="noopener" style="color:var(--blue)">All captured details ↗</a></div>';
@@ -17175,12 +17176,59 @@ function hzPortalHelp(el){
   function openBugReport(){ if(document.getElementById('hzbug-root'))return; _bug={imgs:[]};
     bugCapture().then(function(cap){ _bug.ctx=cap.ctx; if(!cap.canvas){ bugForm(); var m=document.getElementById('hzb-msg'); if(m){ m.style.color='var(--neg)'; m.textContent='Snapshot failed ('+((cap.err&&cap.err.message)||'unknown')+'). Paste a screenshot instead (Cmd+Shift+4, then Cmd+V).'; } return; }
       bugEditor(cap,function(c){ if(!c){ var r=document.getElementById('hzbug-root'); if(r)r.remove(); _bug={imgs:[]}; return; } _bug.imgs.push(bugEncode(c)); bugForm(); }); }); }
-  try{ window.HZ_BUG={ open:openBugReport }; }catch(e){}
+  // v28.820: add screenshots to an existing bug. Opened by the link the Claude connector hands back (/?bugshots=BUG-nnnn),
+  // so people can paste / drop / choose the screenshots from their Claude chat.
+  function bugAddShots(ref){ if(document.getElementById('hzbug-root'))return; var root=bugRoot(), imgs=[];
+    function close(){ document.removeEventListener('paste',onPaste); if(root.parentNode)root.parentNode.removeChild(root); }
+    function add(c){ if(imgs.length>=3){ alert('Up to 3 at a time.'); return; } imgs.push(bugEncode(c)); draw(); }
+    function onPaste(e){ var it=[].slice.call((e.clipboardData||{}).items||[]).filter(function(x){ return /^image\//.test(x.type); })[0]; if(!it)return; e.preventDefault(); bugImgFromBlob(it.getAsFile(),add); }
+    function files(list){ [].slice.call(list||[]).filter(function(x){ return /^image\//.test(x.type); }).slice(0,3-imgs.length).forEach(function(f){ bugImgFromBlob(f,add); }); }
+    function draw(){ var thumbs=imgs.map(function(im,i){ return '<div style="position:relative;display:inline-block;margin:0 6px 6px 0"><img src="'+im.data+'" style="height:84px;max-width:220px;border:1px solid var(--line);border-radius:6px;display:block"><button class="hzb-rm" data-i="'+i+'" title="remove" style="position:absolute;top:-7px;right:-7px;border:none;border-radius:50%;width:20px;height:20px;background:var(--neg);color:#fff;cursor:pointer;font-size:12px;line-height:1">×</button></div>'; }).join('');
+      root.innerHTML='<div style="background:var(--card);border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.35);width:520px;max-width:96vw">'
+        +'<div style="padding:12px 16px;border-bottom:1px solid var(--line2);font-weight:700;display:flex;align-items:center">🐞 Add screenshots to '+esc(ref)+'<button id="hzb-x" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--faint);line-height:1">✕</button></div>'
+        +'<div style="padding:14px 16px"><div id="hzb-drop" style="border:1px dashed var(--line);border-radius:8px;padding:10px;min-height:70px">'+(thumbs||'<div class="mut" style="font-size:12.5px;padding:8px 4px">Paste a screenshot (Cmd+V), drop images here, or <a href="#" id="hzb-pick" style="color:var(--blue);font-weight:600">choose files</a>. In Claude, right-click a screenshot and Copy image, then paste here.</div>')
+          +(thumbs?'<div style="font-size:12px"><a href="#" id="hzb-pick" style="color:var(--blue);font-weight:600">+ Choose more</a> <span class="mut">· or paste / drop (up to 3 at a time)</span></div>':'')+'</div>'
+        +'<input type="file" id="hzb-file" accept="image/*" multiple style="display:none"><div id="hzb-msg" style="font-size:12px;margin-top:9px;min-height:16px"></div></div>'
+        +'<div style="padding:12px 16px;border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:flex-end"><button id="hzb-cancel" class="save-btn light">Cancel</button><button id="hzb-send" class="save-btn" style="background:var(--neg);color:#fff;border-color:var(--neg)"'+(imgs.length?'':' disabled')+'>Add to '+esc(ref)+'</button></div></div>';
+      var fi=root.querySelector('#hzb-file'); fi.onchange=function(){ files(fi.files); };
+      root.querySelector('#hzb-pick').onclick=function(e){ e.preventDefault(); fi.click(); };
+      var dz=root.querySelector('#hzb-drop'); dz.ondragover=function(e){ e.preventDefault(); dz.style.borderColor='var(--blue)'; }; dz.ondragleave=function(){ dz.style.borderColor=''; }; dz.ondrop=function(e){ e.preventDefault(); files(e.dataTransfer.files); };
+      root.querySelectorAll('.hzb-rm').forEach(function(b){ b.onclick=function(){ imgs.splice(+b.dataset.i,1); draw(); }; });
+      root.querySelector('#hzb-x').onclick=close; root.querySelector('#hzb-cancel').onclick=close;
+      root.querySelector('#hzb-send').onclick=function(){ var msg=root.querySelector('#hzb-msg'), btn=this; btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent='Uploading…';
+        fetch('/api/supply/bug/'+encodeURIComponent(ref)+'/shots',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({images:imgs})}).then(function(r){ return r.json(); })
+          .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed'); document.removeEventListener('paste',onPaste);
+            dz.parentNode.innerHTML='<div style="padding:18px 4px;font-size:14px;color:var(--pos)">✓ Added '+j.added+' screenshot'+(j.added===1?'':'s')+' to <b>'+esc(j.ref)+'</b> ('+j.total+' in all). Thanks!'+((j.warnings||[]).length?'<div class="mut" style="font-size:12px;margin-top:6px">'+esc(j.warnings.join('; '))+'</div>':'')+'</div>';
+            btn.style.display='none'; root.querySelector('#hzb-cancel').textContent='Close'; })
+          .catch(function(e){ msg.style.color='var(--neg)'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
+    document.addEventListener('paste',onPaste); draw(); }
+  try{ window.HZ_BUG={ open:openBugReport, addShots:bugAddShots }; }catch(e){}
+  // v28.820 (Ben 14-Nov-26): clicking 🐞 while a popup was open closed the popup first (its "click outside" handler), so the snapshot missed it.
+  // Fix: catch the press on the window in the CAPTURE phase, stop it reaching any popup handler, and snap straight away.
+  // Popups whose backdrop covers the top bar: Option/Alt+Shift+B snaps from the keyboard (no click at all).
+  (function(){ if(window.__hzBugGuard)return; window.__hzBugGuard=1;
+    function onBtn(e){ return e.target&&e.target.closest&&e.target.closest('#bug-btn,#bug-btn-float'); }
+    // Most popups dim the WHOLE page with a backdrop (top bar included), so a click on 🐞 lands on the backdrop and closes the popup.
+    // While the real button is covered, float a twin exactly over it, above every backdrop.
+    setInterval(function(){ var real=document.getElementById('bug-btn'), fl=document.getElementById('bug-btn-float');
+      var r=real&&real.getBoundingClientRect(), cover=false;
+      if(r&&r.width&&!document.getElementById('hzbug-root')){ var el=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2); cover=!!(el&&!el.closest('#bug-btn,#bug-btn-float')); }
+      if(!cover){ if(fl)fl.style.display='none'; return; }
+      if(!fl){ fl=document.createElement('button'); fl.id='bug-btn-float'; fl.setAttribute('data-html2canvas-ignore','1'); fl.title='Report a bug: snaps this popup too (Option/Alt+Shift+B)'; fl.setAttribute('aria-label','Report a bug'); fl.innerHTML=real.innerHTML; document.body.appendChild(fl); }
+      var cs=getComputedStyle(real); fl.style.cssText='position:fixed;z-index:2147483000;left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:var(--card,#fff);color:var(--neg,#dc2626);box-shadow:0 2px 10px rgba(0,0,0,.35)';
+      var sv=fl.querySelector('svg'); if(sv){ sv.style.width=cs.fontSize?Math.min(r.width,r.height)*0.6+'px':'18px'; sv.style.height=sv.style.width; } },400);
+    ['pointerdown','mousedown','pointerup','mouseup','click','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(e){ if(!onBtn(e))return;
+      e.stopPropagation(); e.stopImmediatePropagation(); if(ev!=='touchstart')e.preventDefault();
+      if(ev==='pointerdown'||(ev==='mousedown'&&!window.PointerEvent))openBugReport(); },true); });
+    window.addEventListener('keydown',function(e){ if(e.altKey&&e.shiftKey&&!e.metaKey&&!e.ctrlKey&&e.code==='KeyB'){ e.preventDefault(); e.stopPropagation(); openBugReport(); } },true); })();
+  (function(){ var m=/[?&#]bugshots=(BUG-\d+)/i.exec(location.search+location.hash); if(!m)return; var ref=m[1].toUpperCase();
+    try{ var u=new URL(location.href); u.searchParams.delete('bugshots'); history.replaceState(null,'',u.pathname+u.search+u.hash.replace(/[?&]?bugshots=BUG-\d+/i,'')); }catch(e){}
+    var n=0, t=setInterval(function(){ if(document.body&&document.getElementById('view-tabs-row')||++n>40){ clearInterval(t); bugAddShots(ref); } },500); })();
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
     var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"></path></svg>'; b.setAttribute('aria-label','Suggestion box');
     var bell=document.getElementById('tl-bell'); if(bell&&bell.nextSibling)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
     b.onclick=function(e){ e.stopPropagation(); openSuggestBox(); };
-    if(!document.getElementById('bug-btn')){ var bb=document.createElement('button'); bb.id='bug-btn'; bb.className='tl-bell'; bb.title='Report a bug: snaps this screen (popup included) for the fix'; bb.setAttribute('aria-label','Report a bug');   // v28.819
+    if(!document.getElementById('bug-btn')){ var bb=document.createElement('button'); bb.id='bug-btn'; bb.className='tl-bell'; bb.title='Report a bug: snaps this screen (popup included) for the fix. Shortcut: Option/Alt+Shift+B'; bb.setAttribute('aria-label','Report a bug');   // v28.819
       bb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6.5 9C4.6 8.8 3 7.2 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>';
       if(b.nextSibling)row.insertBefore(bb,b.nextSibling); else row.appendChild(bb);
       bb.onclick=function(e){ e.stopPropagation(); openBugReport(); }; } }
