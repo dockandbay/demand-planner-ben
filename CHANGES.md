@@ -1,3 +1,7 @@
+## v28.821 (14-Nov-26) Favourites as a hover pop-down (Ben)
+- Top bar: the row of ★ favourite chips is now one **★ Favourites ▾** button (count badge). Hover opens the list (click toggles, for touch): click to go, drag to reorder, ✎ rename, × remove, and **☆ Add this page / ★ Remove this page** at the bottom (replaces the far-right star). Still 5 max, same storage (app_permissions.favourites).
+- No migration, env vars or cron routes.
+
 ## v28.820 (14-Nov-26) Bugs from Claude chats + read-only staff can report (Ben)
 - **Claude connector `report_bug` tool**: anyone chatting with Claude (HORIZON connector) can say "raise this as a bug". Claude logs a BUG-nnnn as that person with its analysis, steps, records, the useful chat excerpt and (when it can) screenshots. Context `source: 'claude-connector'`; the bug email and CONFIG > Suggestions show Claude's analysis. Connector instructions updated.
 - **Add screenshots later**: `POST /api/supply/bug/:ref/shots` (reporter, any editor or admin; up to 6 in all). The connector replies with `/?bugshots=BUG-nnnn`, which opens a paste / drop / choose-files box in HORIZON.

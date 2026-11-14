@@ -101,9 +101,29 @@ html body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink)
 #app #view-tabs-row #config-btn{font-size:17px}
 #app #view-tabs-row #sa-drawer-btn{height:28px;padding:0 11px;margin:0 4px 0 6px;border:0;border-radius:var(--r-sm);background:var(--blue);color:#fff;font-weight:800;font-size:11px;letter-spacing:.06em;cursor:pointer;flex:0 0 auto;line-height:1}
 #app #view-tabs-row #sa-drawer-btn:hover{background:var(--blue-ink)}
-#app #view-tabs-row #hz-fav-chips{display:flex;flex-wrap:wrap;align-content:center;gap:1px 3px;margin-right:6px;max-width:320px;max-height:40px;overflow:hidden}   /* v27.635: smaller chips, wrap onto 2 rows to save top-bar space */
-#app #view-tabs-row .hz-fav-chip{cursor:pointer;font-size:10px;font-weight:600;color:var(--nav-dim);white-space:nowrap;padding:2px 6px;border-radius:var(--r-sm);letter-spacing:.01em;line-height:1.3;transition:color .15s,background .15s}
-#app #view-tabs-row .hz-fav-chip:hover{color:#fff;background:rgba(255,255,255,.09)}
+#app #view-tabs-row #hz-fav-chips{position:relative;display:flex;align-items:center;margin-right:6px}   /* v28.821: one button + hover pop-down (was wrapped chips) */
+#app #view-tabs-row .hz-fav-trig{cursor:pointer;background:none;border:none;font:inherit;font-size:11.5px;font-weight:600;color:var(--nav-dim);white-space:nowrap;padding:4px 8px;border-radius:var(--r-sm);transition:color .15s,background .15s}
+#app #view-tabs-row #hz-fav-chips:hover .hz-fav-trig,#app #view-tabs-row #hz-fav-chips.open .hz-fav-trig{color:#fff;background:rgba(255,255,255,.09)}
+#app #view-tabs-row .hz-fav-n{display:inline-block;min-width:14px;padding:0 4px;border-radius:7px;background:rgba(251,191,36,.22);color:#fbbf24;font-size:10px;line-height:14px;text-align:center}
+#app #view-tabs-row .hz-fav-menu{display:none;position:absolute;top:100%;left:0;padding-top:6px;z-index:100050}
+#app #view-tabs-row #hz-fav-chips:hover .hz-fav-menu,#app #view-tabs-row #hz-fav-chips.open .hz-fav-menu{display:block}
+#app #view-tabs-row .hz-fav-box{min-width:230px;max-width:320px;background:var(--card,#fff);color:var(--ink,#0f172a);border:1px solid var(--line,#e5e7eb);border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,.22);padding:5px;font-size:12.5px;text-align:left}
+#app #view-tabs-row .hz-fav-it{display:flex;align-items:center;gap:4px;border-radius:6px;padding:0 4px 0 0}
+#app #view-tabs-row .hz-fav-it:hover{background:var(--blue-soft,#eff6ff)}
+#app #view-tabs-row .hz-fav-it.drag{opacity:.4}
+#app #view-tabs-row .hz-fav-it.over{box-shadow:inset 0 2px 0 var(--blue,#2563eb)}
+#app #view-tabs-row .hz-fav-go{flex:1;cursor:pointer;padding:7px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#app #view-tabs-row .hz-fav-go::first-letter{color:#f59e0b}
+#app #view-tabs-row .hz-fav-ed,#app #view-tabs-row .hz-fav-rm{visibility:hidden;background:none;border:none;cursor:pointer;color:var(--muted,#64748b);font-size:13px;padding:3px 5px;border-radius:5px;line-height:1}
+#app #view-tabs-row .hz-fav-it:hover .hz-fav-ed,#app #view-tabs-row .hz-fav-it:hover .hz-fav-rm{visibility:visible}
+#app #view-tabs-row .hz-fav-rm:hover{color:var(--neg,#dc2626)}
+#app #view-tabs-row .hz-fav-ed:hover{color:var(--blue,#2563eb)}
+#app #view-tabs-row .hz-fav-sep{height:1px;background:var(--line2,#eef0f3);margin:4px 2px}
+#app #view-tabs-row .hz-fav-add{cursor:pointer;padding:7px 8px;border-radius:6px;color:var(--blue,#2563eb);font-weight:600}
+#app #view-tabs-row .hz-fav-add:hover{background:var(--blue-soft,#eff6ff)}
+#app #view-tabs-row .hz-fav-add.dis{cursor:not-allowed;color:var(--faint,#94a3b8)}
+#app #view-tabs-row .hz-fav-add span{font-weight:400;font-size:11px}
+#app #view-tabs-row .hz-fav-empty{padding:9px 8px;color:var(--muted,#64748b);font-size:12px;white-space:normal}
 
 /* ── Level-2 sub-tabs: white row, underline in navy, count pills ──────────────────────────────────────── */
 #app .hz-l2,

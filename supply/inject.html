@@ -16996,14 +16996,33 @@ function hzPortalHelp(el){
       var act=document.getElementById('act-btn'); if(act)row.insertBefore(chips,act); else row.appendChild(chips); }
     var star=document.getElementById('hz-fav-star'); if(!star){ star=document.createElement('button'); star.id='hz-fav-star'; star.className='hz-ico'; star.onclick=function(e){ e.stopPropagation(); if(!star.disabled)_favToggle(); }; row.appendChild(star); }
     renderFaves(); }
+  // v28.821 (Ben 14-Nov-26): favourites are ONE "★ Favourites ▾" button with a hover pop-down (was a row of chips in the top bar).
+  // Hover opens (click toggles, for touch); click an item to go; drag to reorder; ✎ rename, × remove; the last row adds / removes this page.
   function renderFaves(){ var chips=document.getElementById('hz-fav-chips'), star=document.getElementById('hz-fav-star'); if(!chips||!star)return;
-    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename or remove"">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
-    chips.querySelectorAll('.hz-fav-chip').forEach(function(c){ c.onclick=function(){ _favGo(c.dataset.slug); }; c.ondblclick=function(e){ e.stopPropagation(); _favRename(c.dataset.slug); }; });
-    var s=_favSlug(); if(!s){ star.style.display='none'; return; } star.style.display='';
-    var isFav=_favIdx(s)>=0, atMax=HZ_FAVES.length>=5;
-    if(isFav){ star.disabled=false; star.textContent='★'; star.style.color='#fbbf24'; star.style.opacity='1'; star.style.cursor='pointer'; star.title='Remove this page from favourites'; }
-    else if(atMax){ star.disabled=true; star.textContent='☆'; star.style.color='#9ca3af'; star.style.opacity='.5'; star.style.cursor='not-allowed'; star.title='You can only have 5 favourites — un-favourite an existing one to add more'; }
-    else { star.disabled=false; star.textContent='☆'; star.style.color='#e5e7eb'; star.style.opacity='1'; star.style.cursor='pointer'; star.title='Add this page to favourites'; } }
+    star.style.display='none';   // the add / remove star now lives in the pop-down
+    var s=_favSlug(), isFav=!!s&&_favIdx(s)>=0, atMax=HZ_FAVES.length>=5;
+    var items=HZ_FAVES.map(function(f,i){ return '<div class="hz-fav-it" draggable="true" data-i="'+i+'" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+'"><span class="hz-fav-go">★ '+esc(f.label||f.slug)+'</span>'
+      +'<button class="hz-fav-ed" data-slug="'+esc(f.slug)+'" title="Rename">✎</button><button class="hz-fav-rm" data-slug="'+esc(f.slug)+'" title="Remove">×</button></div>'; }).join('')
+      ||'<div class="hz-fav-empty">No favourites yet. Open a page you use a lot, then add it here.</div>';
+    var add=!s?'':isFav?'<div class="hz-fav-add" data-act="rm">★ Remove this page</div>':atMax?'<div class="hz-fav-add dis" title="You can have 5 favourites. Remove one to add this page.">☆ Add this page <span>(5 max)</span></div>':'<div class="hz-fav-add" data-act="add">☆ Add this page</div>';
+    var wasOpen=chips.classList.contains('open');
+    chips.innerHTML='<button class="hz-fav-trig" type="button" aria-label="Your favourite pages">★ Favourites'+(HZ_FAVES.length?' <span class="hz-fav-n">'+HZ_FAVES.length+'</span>':'')+' ▾</button>'
+      +'<div class="hz-fav-menu"><div class="hz-fav-box">'+items+(add?'<div class="hz-fav-sep"></div>'+add:'')+'</div></div>';
+    if(wasOpen)chips.classList.add('open');
+    function shut(){ chips.classList.remove('open'); document.removeEventListener('mousedown',outside,true); }
+    function outside(e){ if(!chips.contains(e.target))shut(); }
+    chips.querySelector('.hz-fav-trig').onclick=function(e){ e.stopPropagation(); if(chips.classList.toggle('open'))document.addEventListener('mousedown',outside,true); else shut(); };
+    chips.onmouseleave=function(){ shut(); };
+    chips.querySelectorAll('.hz-fav-go').forEach(function(g){ g.onclick=function(){ var sl=g.parentNode.dataset.slug; shut(); _favGo(sl); }; });
+    chips.querySelectorAll('.hz-fav-ed').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); _favRename(x.dataset.slug); }; });
+    chips.querySelectorAll('.hz-fav-rm').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); var i=_favIdx(x.dataset.slug); if(i<0)return; HZ_FAVES.splice(i,1); _favSave(); renderFaves(); }; });
+    var ad=chips.querySelector('.hz-fav-add:not(.dis)'); if(ad)ad.onclick=function(e){ e.stopPropagation(); _favToggle(); };
+    var drag=null; chips.querySelectorAll('.hz-fav-it').forEach(function(it){
+      it.ondragstart=function(e){ drag=+it.dataset.i; it.classList.add('drag'); try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',it.dataset.slug); }catch(_){} };
+      it.ondragend=function(){ it.classList.remove('drag'); drag=null; chips.querySelectorAll('.hz-fav-it.over').forEach(function(o){ o.classList.remove('over'); }); };
+      it.ondragover=function(e){ if(drag==null)return; e.preventDefault(); it.classList.add('over'); };
+      it.ondragleave=function(){ it.classList.remove('over'); };
+      it.ondrop=function(e){ e.preventDefault(); var to=+it.dataset.i; if(drag==null||to===drag)return; var m=HZ_FAVES.splice(drag,1)[0]; HZ_FAVES.splice(to,0,m); drag=null; _favSave(); renderFaves(); }; }); }
   window.addEventListener('hashchange',function(){ try{ensureFaves();}catch(e){} });   // update the star for the new view + re-insert if a view wiped the top bar
   // ── Suggestion Box ─────────────────────────────────────────────────────────
   // 💡 top-bar button (next to the bell) opens a submit modal; anyone can drop a suggestion. It's stored with the
